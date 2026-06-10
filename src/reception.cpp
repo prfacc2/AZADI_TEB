@@ -33,8 +33,14 @@
 #define ID_F_CLOSE    644
 
 // ============================================================== TAB PAGE ===
+enum TabKind {
+    TK_RECEPTION = 0,   // the patient reception + billing form
+    TK_PORTAL    = 1,   // پیام پرتابل — portal/admin message page (post-login)
+    TK_EMPTY     = 2    // a fresh blank tab (new-tab button)
+};
 struct TabPage {
     HWND page;                // container window (child of reception OR detached)
+    int  kind;                // TabKind
     std::wstring title;
     // form controls
     HWND eFirst,eLast,eNid,eFather,eBirth,cGender,eMobile,ePhone,eAddr;
@@ -46,8 +52,8 @@ struct TabPage {
     bool detached;
     bool autoPrice;          // guard: ignore EN_CHANGE from our own auto-fill
     std::wstring lastMsg; COLORREF msgCol;
-    TabPage():page(0),total(0),mainShare(0),patientShare(0),baseDiff(0),
-        orgShare(0),paid(0),detached(false),autoPrice(false),msgCol(0){}
+    TabPage():page(0),kind(TK_RECEPTION),total(0),mainShare(0),patientShare(0),
+        baseDiff(0),orgShare(0),paid(0),detached(false),autoPrice(false),msgCol(0){}
 };
 
 struct RecData {
@@ -137,17 +143,19 @@ static void rcMetrics(int W, int& cardL, int& cardR, int& billL, int& billR,
 //  Vertical metrics adapt to available height so the form never overflows on
 //  small / low-res monitors (responsive requirement).
 static void rcVMetrics(int H, int& y0, int& step, int& rh){
-    y0 = S(70); step = S(64); rh = S(34);      // y0 leaves room for card header
+    // y0 must clear: card top (S16) + header (≈S46) + separator (S52) and then
+    // leave S44 above the first row for its section caption. So start ~S118.
+    y0 = S(118); step = S(62); rh = S(34);
     int need = y0 + 8*step + S(120);
     if(H > 0 && need > H){
-        step = (H - S(180)) / 8;
-        if(step < S(46)) step = S(46);
-        y0 = S(62);
+        step = (H - y0 - S(120)) / 8;
+        if(step < S(48)) step = S(48);
         rh = step - S(28); if(rh > S(34)) rh = S(34); if(rh < S(24)) rh = S(24);
     }
 }
 static void tabPageLayout(HWND h, TabPage* t){
     if(!t) return;
+    if(t->kind!=TK_RECEPTION) return;   // painted pages have no controls
     RECT rc; GetClientRect(h,&rc);
     int W=rc.right, H=rc.bottom;
     if(W<=0 || H<=0) return;
@@ -248,6 +256,57 @@ static void resetForm(TabPage* t){
     SetFocus(t->eFirst);
 }
 
+// ----- painted page for portal-message / empty tabs (no controls) ----------
+//  A clean centred "glass" hero card with a vector icon, a title and a body
+//  line. The portal page is the placeholder for future messages pushed by the
+//  clinic management panel; the empty page invites the user to start a task.
+static void drawTabPlaceholder(HDC dc, const RECT& rc, int kind){
+    // soft page gradient
+    gpGradRoundRect(dc,(RECT&)rc,0,g_theme.bg,g_theme.bg2,CLR_INVALID);
+
+    int cw = S(560); if(cw > rc.right-S(80)) cw = rc.right-S(80);
+    int chh= S(300); if(chh> rc.bottom-S(80)) chh= rc.bottom-S(80);
+    int cx = rc.right/2, cy = rc.bottom/2;
+    RECT card={cx-cw/2, cy-chh/2, cx+cw/2, cy+chh/2};
+
+    gpShadow(dc,card,S(22),S(26),60);
+    gpFillAlpha(dc,card,S(22),g_theme.surfaceTop,235);
+    gpRoundRect(dc,card,S(22),CLR_INVALID,g_theme.border,255);
+
+    // accent badge with icon
+    int br=S(40), bx=cx, by=card.top+S(64);
+    RECT badge={bx-br,by-br,bx+br,by+br};
+    gpGradRoundRect(dc,badge,br,g_theme.accent2,g_theme.accent,CLR_INVALID);
+    RECT bi={badge.left+S(18),badge.top+S(18),badge.right-S(18),badge.bottom-S(18)};
+    drawIcon(dc, kind==TK_PORTAL?ICO_BELL:ICO_TAB, bi, RGB(255,255,255), S(3));
+
+    SetBkMode(dc,TRANSPARENT);
+    const wchar_t* title = kind==TK_PORTAL
+        ? L"پیام پرتابل"
+        : L"تب جدید";
+    const wchar_t* body  = kind==TK_PORTAL
+        ? L"در حال حاضر پیامی از مدیریت درمانگاه دریافت نشده است."
+        : L"برای پذیرش بیمار، روی «پذیرش جدید» کلیک کنید.";
+    const wchar_t* body2 = kind==TK_PORTAL
+        ? L"اعلان‌ها و پیام‌های مدیریتی در آینده اینجا نمایش داده می‌شوند."
+        : L"این تب برای کارهای آینده آماده است.";
+
+    SelectObject(dc,g_fTitle);
+    SetTextColor(dc,g_theme.text);
+    RECT tr={card.left+S(20), by+br+S(14), card.right-S(20), by+br+S(14)+S(40)};
+    DrawTextW(dc,title,-1,&tr,DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+
+    SelectObject(dc,g_fUI);
+    SetTextColor(dc,g_theme.textDim);
+    RECT br1={card.left+S(28), tr.bottom+S(8), card.right-S(28), tr.bottom+S(8)+S(28)};
+    DrawTextW(dc,body,-1,&br1,DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+
+    SelectObject(dc,g_fSmall);
+    SetTextColor(dc,g_theme.textDim);
+    RECT br2={card.left+S(28), br1.bottom+S(2), card.right-S(28), br1.bottom+S(2)+S(24)};
+    DrawTextW(dc,body2,-1,&br2,DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+}
+
 // ----------------------------------------------------------- tab page proc -
 static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
     TabPage* t=(TabPage*)GetWindowLongPtrW(h,GWLP_USERDATA);
@@ -257,6 +316,9 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         t=(TabPage*)cs->lpCreateParams;
         SetWindowLongPtrW(h,GWLP_USERDATA,(LONG_PTR)t);
         t->page=h;
+        // Portal-message and empty tabs are pure painted pages with no form
+        // controls — they own no edit boxes, combos or buttons.
+        if(t->kind!=TK_RECEPTION) return 0;
         DWORD es=WS_CHILD|WS_VISIBLE|WS_TABSTOP|ES_AUTOHSCROLL;
         DWORD cbs=WS_CHILD|WS_VISIBLE|WS_TABSTOP|CBS_DROPDOWNLIST;
         t->eFirst =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)(ID_F_FIRST+0),g_hInst,0);
@@ -356,9 +418,13 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 swprintf(mb,160,L"پذیرش با شماره نوبت %d ثبت شد — %s %s",
                     q, r.firstName.c_str(), r.lastName.c_str());
                 t->lastMsg=toFaDigits(mb); t->msgCol=g_theme.success;
-                if(MessageBoxW(h,L"پذیرش ثبت شد. قبض چاپ شود؟",
-                    L"ثبت موفق",MB_YESNO|MB_ICONQUESTION)==IDYES)
+                if(getSetting(L"auto_print",L"0")==L"1"){
+                    // auto-print enabled in settings: print silently
                     printReceipt(r,2,h);
+                } else if(MessageBoxW(h,L"پذیرش ثبت شد. قبض چاپ شود؟",
+                    L"ثبت موفق",MB_YESNO|MB_ICONQUESTION)==IDYES){
+                    printReceipt(r,2,h);
+                }
                 // reset patient fields for next reception (same tab)
                 std::wstring keep = t->lastMsg; COLORREF kc = t->msgCol;
                 resetForm(t);
@@ -393,6 +459,15 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         FillRect(dc,&rc,g_brBg);
         SetBkMode(dc,TRANSPARENT);
 
+        // -------- Portal-message / empty tabs: a centred glass card ----------
+        if(t && t->kind!=TK_RECEPTION){
+            drawTabPlaceholder(dc,rc,t->kind);
+            BitBlt(dc0,0,0,rc.right,rc.bottom,dc,0,0,SRCCOPY);
+            SelectObject(dc,obm); DeleteObject(bmp); DeleteDC(dc);
+            EndPaint(h,&ps);
+            return 0;
+        }
+
         int cardL,cardR,billL,billR,colW,xr,xl; bool stacked;
         rcMetrics(rc.right,cardL,cardR,billL,billR,colW,xr,xl,stacked);
         int y0,step,rh2; rcVMetrics(rc.bottom,y0,step,rh2);
@@ -402,14 +477,17 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         // ============ FORM CARD (left, wide) ============
         RECT fcard={cardL,S(16),cardR,rc.bottom-S(16)};
         fillRoundRect(dc,fcard,S(16),g_theme.surface,g_theme.border);
-        // card header bar (vector icon + title — no emoji font dependency)
-        SetTextColor(dc,g_theme.text);
-        SelectObject(dc,g_fTitle);
-        RECT ht={formLeft,fcard.top+S(14),formRight-S(28),fcard.top+S(46)};
-        DrawTextW(dc,L"مشخصات و پذیرش بیمار",-1,&ht,
-            DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
-        { RECT hi={formRight-S(26),fcard.top+S(16),formRight-S(2),fcard.top+S(40)};
-          drawIcon(dc,ICO_USER,hi,g_theme.accent,S(2)); }
+        // card header bar (vector icon + title — no emoji font dependency).
+        // The icon sits flush at the right edge; the title's RIGHT edge stops a
+        // clear gap to the LEFT of the icon so they never overlap (RTL layout).
+        { int icoW=S(24), gap=S(10);
+          RECT hi={formRight-icoW,fcard.top+S(16),formRight,fcard.top+S(40)};
+          drawIcon(dc,ICO_USER,hi,g_theme.accent,S(2));
+          SetTextColor(dc,g_theme.text);
+          SelectObject(dc,g_fTitle);
+          RECT ht={formLeft,fcard.top+S(14),formRight-icoW-gap,fcard.top+S(46)};
+          DrawTextW(dc,L"مشخصات و پذیرش بیمار",-1,&ht,
+              DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX); }
         // header separator
         { HPEN pn=CreatePen(PS_SOLID,1,g_theme.border);
           HGDIOBJ op=SelectObject(dc,pn);
@@ -425,11 +503,13 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         SelectObject(dc,g_fUIB);
         for(int i=0;i<4;i++){
             int sy=y0+secs[i].row*step-S(44);
-            SetTextColor(dc,g_theme.accent);
-            RECT sr={formLeft,sy,formRight-S(24),sy+S(20)};
-            DrawTextW(dc,secs[i].s,-1,&sr,DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
-            RECT si={formRight-S(22),sy+S(1),formRight-S(2),sy+S(19)};
+            // icon flush-right, caption text stops well to its LEFT (no overlap)
+            int icoW=S(18), gap=S(8);
+            RECT si={formRight-icoW,sy+S(1),formRight,sy+S(19)};
             drawIcon(dc,secs[i].icon,si,g_theme.accent,S(2));
+            SetTextColor(dc,g_theme.accent);
+            RECT sr={formLeft,sy,formRight-icoW-gap,sy+S(20)};
+            DrawTextW(dc,secs[i].s,-1,&sr,DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
         }
 
         // --- framed input wells behind every field (modern flat look) ---
@@ -458,7 +538,7 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         LBL Ls[16]={
             {L"نام",xr,y0-S(20),colW},{L"نام خانوادگی",xl,y0-S(20),colW},
             {L"کد ملی",xr,y0+step-S(20),colW},{L"نام پدر",xl,y0+step-S(20),colW},
-            {L"تاریخ تولد (فقط عدد وارد کنید)",xr,y0+2*step-S(20),colW},{L"جنسیت",xl,y0+2*step-S(20),colW},
+            {L"تاریخ تولد (مثال: ۱۳۴۰ ۵ ۲۰)",xr,y0+2*step-S(20),colW},{L"جنسیت",xl,y0+2*step-S(20),colW},
             {L"تلفن همراه",xr,y0+3*step-S(20),colW},{L"تلفن ثابت",xl,y0+3*step-S(20),colW},
             {L"آدرس",formLeft,y0+4*step-S(20),fw},{NULL,0,0,0},
             {L"نوع بیمار",xr,y0+5*step-S(20),colW},{L"نوع نوبت",xl,y0+5*step-S(20),colW},
@@ -477,10 +557,11 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             +L"   \u2014   شیفت "+shiftName(g_session.shift);
         SetTextColor(dc,g_theme.accent);
         SelectObject(dc,g_fSmall);
-        RECT dnr={formLeft,y0+8*step+S(62),formRight-S(20),y0+8*step+S(84)};
-        DrawTextW(dc,dn.c_str(),-1,&dnr,DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
-        { RECT di={formRight-S(18),y0+8*step+S(62),formRight-S(2),y0+8*step+S(78)};
-          drawIcon(dc,ICO_CAL,di,g_theme.accent,S(2)); }
+        { int icoW=S(16), gap=S(8);
+          RECT di={formRight-icoW,y0+8*step+S(62),formRight,y0+8*step+S(78)};
+          drawIcon(dc,ICO_CAL,di,g_theme.accent,S(2));
+          RECT dnr={formLeft,y0+8*step+S(62),formRight-icoW-gap,y0+8*step+S(84)};
+          DrawTextW(dc,dn.c_str(),-1,&dnr,DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX); }
         // status message
         if(t && !t->lastMsg.empty()){
             SetTextColor(dc,t->msgCol);
@@ -495,14 +576,15 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             recalc(t);
             RECT card={billL,S(16),billR,rc.bottom-S(16)};
             fillRoundRect(dc,card,S(16),g_theme.surface,g_theme.border);
-            // header
-            SetTextColor(dc,g_theme.text);
-            SelectObject(dc,g_fTitle);
-            RECT bt={card.left+S(16),card.top+S(14),card.right-S(44),card.top+S(46)};
-            DrawTextW(dc,L"صدور قبض",-1,&bt,
-                DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
-            { RECT bi={card.right-S(42),card.top+S(16),card.right-S(18),card.top+S(40)};
-              drawIcon(dc,ICO_RECEIPT,bi,g_theme.accent,S(2)); }
+            // header (icon flush-right, title to its left — no overlap)
+            { int icoW=S(24), gap=S(10);
+              RECT bi={card.right-S(16)-icoW,card.top+S(16),card.right-S(16),card.top+S(40)};
+              drawIcon(dc,ICO_RECEIPT,bi,g_theme.accent,S(2));
+              SetTextColor(dc,g_theme.text);
+              SelectObject(dc,g_fTitle);
+              RECT bt={card.left+S(16),card.top+S(14),card.right-S(16)-icoW-gap,card.top+S(46)};
+              DrawTextW(dc,L"صدور قبض",-1,&bt,
+                  DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX); }
             { HPEN pn=CreatePen(PS_SOLID,1,g_theme.border);
               HGDIOBJ op=SelectObject(dc,pn);
               MoveToEx(dc,card.left+S(16),card.top+S(52),0);
@@ -651,7 +733,7 @@ static void recLayoutTabs(HWND h){
         } else ShowWindow(t->page,SW_HIDE);
     }
 }
-static void addTab(HWND h){
+static void addTabKind(HWND h, int kind){
     if(!s_rd) return;
     static bool reg=false;
     if(!reg){
@@ -662,8 +744,11 @@ static void addTab(HWND h){
         RegisterClassW(&wc); reg=true;
     }
     TabPage* t=new TabPage();
+    t->kind=kind;
     std::wstring dept=g_session.user.dept;
-    t->title = dept.empty() ? L"پذیرش" : (L"پذیرش "+dept);
+    if(kind==TK_PORTAL)      t->title=L"پیام پرتابل";
+    else if(kind==TK_EMPTY)  t->title=L"تب جدید";
+    else                     t->title=L"پذیرش بیمار";
     RECT rc; GetClientRect(h,&rc);
     HWND pg=CreateWindowExW(0,TABPG_CLASS,L"",
         WS_CHILD|WS_CLIPCHILDREN,
@@ -674,8 +759,10 @@ static void addTab(HWND h){
     s_rd->active=(int)s_rd->tabs.size()-1;
     recLayoutTabs(h);
     InvalidateRect(h,NULL,TRUE);
-    SetFocus(t->eFirst);
+    if(t->kind==TK_RECEPTION && t->eFirst) SetFocus(t->eFirst);
+    else SetFocus(h);
 }
+static void addTab(HWND h){ addTabKind(h, TK_RECEPTION); }
 static void closeTab(TabPage* t){
     if(!s_rd) return;
     HWND h=recWnd();
@@ -733,7 +820,7 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
     case WM_CREATE:
         s_rd = new RecData();
         s_rd->bNewPat = createFlatButton(h,ID_RC_NEWPAT,L"پذیرش جدید",ICO_PLUS,BS_PRIMARY,0,0,10,10);
-        s_rd->bNewTab = createFlatButton(h,ID_RC_NEWTAB,L"تب جدید",ICO_DETACH,BS_OUTLINE,0,0,10,10);
+        s_rd->bNewTab = createFlatButton(h,ID_RC_NEWTAB,L"تب جدید",ICO_TAB,BS_OUTLINE,0,0,10,10);
         s_rd->bCalc = createFlatButton(h,ID_RC_CALC,L"ماشین حساب",ICO_CALC,BS_OUTLINE,0,0,10,10);
         return 0;
     case WM_NCDESTROY:
@@ -751,23 +838,30 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
         break;
     case WM_SIZE: {
         if(!s_rd) return 0;
+        RECT rc; GetClientRect(h,&rc);
         int bh=S(38), y=(infoBarH()-bh)/2;
-        // action buttons on the LEFT side of the info bar (RTL UI)
-        MoveWindow(s_rd->bNewPat, S(8),   y, S(150), bh, TRUE);
-        MoveWindow(s_rd->bNewTab, S(166), y, S(120), bh, TRUE);
-        MoveWindow(s_rd->bCalc,   S(294), y, S(140), bh, TRUE);
+        // LAYER 2 action buttons anchored to the RIGHT edge (RTL):
+        // پذیرش جدید (right-most) → تب جدید → ماشین حساب
+        int x = rc.right - S(14);
+        int wNew=S(150), wTab=S(120), wCalc=S(140), g=S(8);
+        MoveWindow(s_rd->bNewPat, x-wNew,                 y, wNew,  bh, TRUE);
+        MoveWindow(s_rd->bNewTab, x-wNew-g-wTab,          y, wTab,  bh, TRUE);
+        MoveWindow(s_rd->bCalc,   x-wNew-g-wTab-g-wCalc,  y, wCalc, bh, TRUE);
         recLayoutTabs(h);
         return 0; }
     case WM_COMMAND: {
         int id=LOWORD(w);
         if(id==ID_RC_CALC) openCalculator(g_hFrame);
-        else if(id==ID_RC_NEWTAB) addTab(h);
+        else if(id==ID_RC_NEWTAB) addTabKind(h, TK_EMPTY);   // new-tab → empty
         else if(id==ID_RC_NEWPAT){
-            // "پذیرش جدید" — reuse the ACTIVE tab (no new tab needed).
-            if(s_rd && s_rd->active>=0 && s_rd->active<(int)s_rd->tabs.size())
+            // "پذیرش جدید" — reuse the ACTIVE tab ONLY if it is already a
+            // reception form; otherwise open a fresh reception tab (so the
+            // portal/empty pages are never overwritten unexpectedly).
+            if(s_rd && s_rd->active>=0 && s_rd->active<(int)s_rd->tabs.size()
+               && s_rd->tabs[s_rd->active]->kind==TK_RECEPTION)
                 resetForm(s_rd->tabs[s_rd->active]);
             else
-                addTab(h);   // none open yet → open one
+                addTab(h);   // open a new reception tab
         }
         return 0; }
     case WM_MOUSEMOVE: {
@@ -836,21 +930,16 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
 
         SetBkMode(dc,TRANSPARENT);
         // ---- info bar texts (anchored to the RIGHT edge, RTL) ----
+        // NO username is shown here (privacy). The logged-in person's full name
+        // and role already live in the frame's Layer-1 header. Here we only show
+        // a friendly section title + the live shift, so the action buttons on
+        // the right (Layer-2) have room.
         SYSTEMTIME st=iranNow();
         SelectObject(dc,g_fUIB);
         SetTextColor(dc,g_theme.text);
-        std::wstring info =
-            L"کاربر جاری: " + g_session.user.username;
-        RECT ir={rc.right-S(420),0,rc.right-S(12),infoBarH()};
+        std::wstring info = L"میز پذیرش بیمار";
+        RECT ir={rc.right-S(420),0,rc.right-S(14),infoBarH()};
         DrawTextW(dc,info.c_str(),-1,&ir,
-            DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
-        SelectObject(dc,g_fUI);
-        SetTextColor(dc,g_theme.textDim);
-        std::wstring info2 =
-            L"نوع دسترسی: پذیرش   |   " + toFaDigits(jalaliDateShort(st)) +
-            L"  " + toFaDigits(iranTimeStr(st,false));
-        RECT ir2={rc.right-S(900),0,rc.right-S(430),infoBarH()};
-        DrawTextW(dc,info2.c_str(),-1,&ir2,
             DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
 
         // ---- tabs ----
@@ -916,7 +1005,12 @@ HWND createReceptionScreen(HWND frame){
     HWND h=CreateWindowExW(0,RC_CLASS,L"",
         WS_CHILD|WS_VISIBLE|WS_CLIPCHILDREN,
         rc.left,rc.top,rc.right-rc.left,rc.bottom-rc.top,frame,NULL,g_hInst,NULL);
-    // open first tab automatically
-    addTab(h);
+    // On login the user lands on the "پیام پرتابل" (portal message) tab — the
+    // placeholder for future messages from the clinic management panel. A
+    // ready-to-use reception tab is opened beside it, but the portal tab stays
+    // active so it is what the user sees first.
+    addTabKind(h, TK_PORTAL);
+    addTabKind(h, TK_RECEPTION);
+    if(s_rd){ s_rd->active=0; recLayoutTabs(h); }   // focus the portal tab
     return h;
 }

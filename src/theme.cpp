@@ -12,37 +12,52 @@ void applyTheme(bool dark){
     if(dark){
         // ---- Modern "midnight teal" dark palette (deep, low eye-strain) ----
         g_theme.bg          = RGB(13, 17, 23);    // near-black slate
-        g_theme.surface     = RGB(22, 27, 34);    // card
+        g_theme.bg2         = RGB(17, 23, 33);
+        g_theme.surface     = RGB(24, 30, 39);    // card
+        g_theme.surfaceTop  = RGB(31, 39, 50);    // card gradient top
         g_theme.surface2    = RGB(17, 22, 29);    // bars
-        g_theme.border      = RGB(48, 54, 66);    // clearly visible separators
-        g_theme.text        = RGB(230, 237, 243);
-        g_theme.textDim     = RGB(139, 152, 168);
-        g_theme.accent      = RGB(56, 170, 255);  // bright sky-blue (high contrast on dark)
+        g_theme.border      = RGB(50, 58, 72);    // clearly visible separators
+        g_theme.text        = RGB(232, 239, 246);
+        g_theme.textDim     = RGB(146, 159, 176);
+        g_theme.accent      = RGB(56, 170, 255);  // bright sky-blue
+        g_theme.accent2     = RGB(30, 120, 220);  // gradient end
         g_theme.accentHover = RGB(96, 190, 255);
         g_theme.accentText  = RGB(255, 255, 255);
         g_theme.danger      = RGB(240, 100, 100);
         g_theme.dangerHover = RGB(250, 128, 128);
         g_theme.success     = RGB(74, 210, 148);
-        g_theme.inputBg     = RGB(28, 35, 45);    // distinctly lighter than card
+        g_theme.warn        = RGB(245, 184, 84);
+        g_theme.inputBg     = RGB(30, 38, 49);    // distinctly lighter than card
         g_theme.inputText   = RGB(236, 242, 248);
-        g_theme.hover       = RGB(33, 41, 53);
+        g_theme.hover       = RGB(35, 44, 57);
+        g_theme.headerTop   = RGB(22, 30, 42);
+        g_theme.headerBot   = RGB(15, 20, 28);
     } else {
-        // ---- Clean modern light palette (soft blue-gray, indigo accent) ----
-        g_theme.bg          = RGB(240, 243, 248); // page
-        g_theme.surface     = RGB(255, 255, 255); // card
-        g_theme.surface2    = RGB(249, 251, 253); // bars
-        g_theme.border      = RGB(223, 229, 238);
-        g_theme.text        = RGB(24, 32, 46);
-        g_theme.textDim     = RGB(110, 122, 142);
-        g_theme.accent      = RGB(37, 99, 235);   // indigo-blue
-        g_theme.accentHover = RGB(59, 120, 246);
+        // ---- Refined light palette: NOT flat white. A soft cool-grey page,
+        //      warm-tinted cards with a gentle top-light gradient, a richer
+        //      indigo→sky accent, and an amber highlight so the UI has depth
+        //      and contrast instead of one washed-out white sheet. ----
+        g_theme.bg          = RGB(232, 238, 247); // page (cool soft grey-blue)
+        g_theme.bg2         = RGB(221, 230, 243); // subtle gradient bottom
+        g_theme.surface     = RGB(255, 255, 255); // card body
+        g_theme.surfaceTop  = RGB(250, 252, 255); // card gradient top (airy)
+        g_theme.surface2    = RGB(243, 247, 252); // bars
+        g_theme.border      = RGB(214, 223, 236);
+        g_theme.text        = RGB(28, 38, 56);
+        g_theme.textDim     = RGB(108, 122, 145);
+        g_theme.accent      = RGB(33, 102, 232);  // indigo-blue
+        g_theme.accent2     = RGB(46, 150, 240);  // sky end for gradients
+        g_theme.accentHover = RGB(54, 124, 246);
         g_theme.accentText  = RGB(255, 255, 255);
-        g_theme.danger      = RGB(220, 53, 69);
-        g_theme.dangerHover = RGB(235, 80, 95);
-        g_theme.success     = RGB(22, 163, 110);
-        g_theme.inputBg     = RGB(248, 250, 253);
-        g_theme.inputText   = RGB(20, 28, 42);
-        g_theme.hover       = RGB(237, 242, 250);
+        g_theme.danger      = RGB(222, 60, 76);
+        g_theme.dangerHover = RGB(236, 86, 100);
+        g_theme.success     = RGB(20, 160, 108);
+        g_theme.warn        = RGB(220, 150, 30);
+        g_theme.inputBg     = RGB(245, 248, 253); // tinted, not pure white
+        g_theme.inputText   = RGB(22, 30, 46);
+        g_theme.hover       = RGB(233, 240, 251);
+        g_theme.headerTop   = RGB(255, 255, 255);
+        g_theme.headerBot   = RGB(240, 245, 251);
     }
     if(g_brBg)       DeleteObject(g_brBg);
     if(g_brSurface)  DeleteObject(g_brSurface);
@@ -232,6 +247,34 @@ void drawIcon(HDC dc, int icon, RECT rc, COLORREF col, int thick){
         POINT a={cx, cy-r+1};
         MoveToEx(dc,a.x-r/3,a.y,0); LineTo(dc,a.x,a.y); LineTo(dc,a.x,a.y+r/3);
         break; }
+    case ICO_GEAR: {
+        int ri=(r*52)/100, ro=(r*92)/100;
+        for(int i=0;i<8;i++){
+            double a=i*3.14159/4;
+            int x1=cx+(int)(ri*cos(a)+0.5), y1=cy+(int)(ri*sin(a)+0.5);
+            int x2=cx+(int)(ro*cos(a)+0.5), y2=cy+(int)(ro*sin(a)+0.5);
+            MoveToEx(dc,x1,y1,0); LineTo(dc,x2,y2);
+        }
+        Ellipse(dc,cx-ri,cy-ri,cx+ri,cy+ri);
+        Ellipse(dc,cx-r/4,cy-r/4,cx+r/4,cy+r/4);
+        break; }
+    case ICO_BELL: {
+        Arc(dc,cx-r+2,cy-r+2,cx+r-2,cy+r,  cx-r+2,cy+r/3, cx+r-2,cy+r/3);
+        MoveToEx(dc,cx-r+2,cy+r/3,0); LineTo(dc,cx-r+2,cy-r/3);
+        MoveToEx(dc,cx+r-2,cy+r/3,0); LineTo(dc,cx+r-2,cy-r/3);
+        Arc(dc,cx-r+2,cy-r,cx+r-2,cy+r/2, cx+r-2,cy-r/3, cx-r+2,cy-r/3);
+        MoveToEx(dc,cx-r/2,cy+r/3,0); LineTo(dc,cx+r/2,cy+r/3);
+        MoveToEx(dc,cx-r/5,cy+r/2,0); LineTo(dc,cx+r/5,cy+r/2);
+        break; }
+    case ICO_TAB: {
+        MoveToEx(dc,cx-r+2,cy+r-2,0);
+        LineTo(dc,cx-r+2,cy-r/3); LineTo(dc,cx-r/4,cy-r/3);
+        LineTo(dc,cx,cy-r+2); LineTo(dc,cx+r/4,cy-r/3);
+        LineTo(dc,cx+r-2,cy-r/3); LineTo(dc,cx+r-2,cy+r-2);
+        break; }
+    case ICO_CHEVRON: {
+        MoveToEx(dc,cx-r/2,cy-r/2,0); LineTo(dc,cx+r/3,cy); LineTo(dc,cx-r/2,cy+r/2);
+        break; }
     }
     SelectObject(dc, op); SelectObject(dc, ob);
     DeleteObject(pen);
@@ -326,7 +369,21 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
         }
         RECT rr = rc;
         if(dn){ rr.top+=1; rr.bottom+=1; }
-        fillRoundRect(dc, rr, S(st==BS_CARD?14:9), fill, bord);
+        int rad = S(st==BS_CARD?16:10);
+        // v1.3.0: anti-aliased GDI+ fills with a soft gradient on solid styles
+        if(st==BS_PRIMARY){
+            COLORREF a = dn ? g_theme.accent : (hv?g_theme.accentHover:g_theme.accent);
+            COLORREF b = dn ? g_theme.accent2: (hv?g_theme.accent:g_theme.accent2);
+            gpGradRoundRect(dc, rr, rad, a, b, CLR_INVALID);
+        } else if(st==BS_DANGER){
+            COLORREF a = (dn||hv)?g_theme.dangerHover:g_theme.danger;
+            gpGradRoundRect(dc, rr, rad, a, g_theme.danger, CLR_INVALID);
+        } else if(st==BS_CARD){
+            gpGradRoundRect(dc, rr, rad, g_theme.surfaceTop,
+                hv?g_theme.hover:g_theme.surface, bord);
+        } else {
+            gpRoundRect(dc, rr, rad, fill, bord);
+        }
 
         SetBkMode(dc, TRANSPARENT);
         SetTextColor(dc, txt);

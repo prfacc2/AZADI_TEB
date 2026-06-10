@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.2.0"
+#define APP_VERSION_W   L"1.3.0"
 #define APP_NAME_W      L"\u0622\u0632\u0627\u062f\u06cc \u0637\u0628"   // آزادی طب
 #define APP_CLASS_W     L"AzadiTebFrame"
 
@@ -40,20 +40,26 @@ inline int S(int v){ return (int)(v * g_scale + 0.5); }
 // ------------------------------------------------------------------ theme --
 struct Theme {
     COLORREF bg;          // window background
+    COLORREF bg2;         // secondary page tint (subtle gradient bottom)
     COLORREF surface;     // card background
     COLORREF surface2;    // secondary surface (bars)
+    COLORREF surfaceTop;  // card gradient top (lighter)
     COLORREF border;      // borders / separators
     COLORREF text;        // primary text
     COLORREF textDim;     // secondary text
     COLORREF accent;      // primary accent
+    COLORREF accent2;     // accent gradient end (for buttons/header)
     COLORREF accentHover;
     COLORREF accentText;  // text on accent
     COLORREF danger;
     COLORREF dangerHover;
     COLORREF success;
+    COLORREF warn;        // amber for highlights / chips
     COLORREF inputBg;
     COLORREF inputText;
     COLORREF hover;       // ghost-button hover
+    COLORREF headerTop;   // top header bar gradient top
+    COLORREF headerBot;   // top header bar gradient bottom
 };
 extern Theme   g_theme;
 extern HBRUSH  g_brBg, g_brSurface, g_brSurface2, g_brInput;
@@ -66,7 +72,8 @@ enum IconId {
     ICO_NONE=0, ICO_X, ICO_CALC, ICO_PRINT, ICO_UPDATE, ICO_MOON, ICO_SUN,
     ICO_USER, ICO_SHIELD, ICO_PLUS, ICO_LOGOUT, ICO_DETACH, ICO_CROSS_MED,
     ICO_CHECK, ICO_TRASH, ICO_SAVE, ICO_BACK,
-    ICO_ID, ICO_PHONE, ICO_CAL, ICO_PIN, ICO_RECEIPT, ICO_CLOCK, ICO_REFRESH
+    ICO_ID, ICO_PHONE, ICO_CAL, ICO_PIN, ICO_RECEIPT, ICO_CLOCK, ICO_REFRESH,
+    ICO_GEAR, ICO_BELL, ICO_TAB, ICO_CHEVRON
 };
 enum BtnStyle { BS_GHOST=0, BS_PRIMARY=1, BS_DANGER=2, BS_OUTLINE=3, BS_CARD=4 };
 void  registerFlatButton();
@@ -76,6 +83,29 @@ HWND  createFlatButton(HWND parent, int id, const wchar_t* text,
 void  setFlatButtonIcon(HWND btn, int icon);   // in-place icon swap (v1.1.0)
 void  drawIcon(HDC dc, int icon, RECT rc, COLORREF col, int thick);
 void  fillRoundRect(HDC dc, RECT rc, int rad, COLORREF fill, COLORREF border);
+
+// ---------------------------------------------------------------- GDI+ -----
+//  v1.3.0: a thin GDI+ helper layer gives us the "richer colours, lighting,
+//  smooth layers" the UI redesign needs — anti-aliased rounded cards, vertical
+//  gradients, soft drop-shadows, translucent overlays and a real background
+//  image — all without leaving the single static EXE (gdiplus ships with
+//  every Windows since XP).  All helpers degrade gracefully if GDI+ is absent.
+void gdipStartup();
+void gdipShutdown();
+//  Anti-aliased filled rounded rectangle (optionally with a 1px border).
+void gpRoundRect(HDC dc, RECT rc, int rad, COLORREF fill, COLORREF border, int alpha=255);
+//  Vertical 2-stop gradient rounded rectangle.
+void gpGradRoundRect(HDC dc, RECT rc, int rad, COLORREF top, COLORREF bottom, COLORREF border);
+//  Soft drop shadow behind a rounded rect (blurred, layered look).
+void gpShadow(HDC dc, RECT rc, int rad, int spread, int alpha);
+//  Solid translucent rounded fill (for glass overlays / dim layers).
+void gpFillAlpha(HDC dc, RECT rc, int rad, COLORREF fill, int alpha);
+//  Draw the embedded background image (id 103 light / 104 dark) cover-fitted
+//  into rc, then a translucent scrim of `scrim` colour at `scrimA` alpha so
+//  foreground text stays perfectly legible.  Returns false if no image.
+bool gpDrawBackground(HDC dc, RECT rc, bool dark, COLORREF scrim, int scrimA);
+//  Crisp anti-aliased line / circle helpers used by the new header clock etc.
+void gpLine(HDC dc, int x1,int y1,int x2,int y2, COLORREF col, float w, int alpha=255);
 
 // ------------------------------------------------------------------- time --
 SYSTEMTIME   iranNow();                                  // UTC+3:30 (fixed; no DST since 2022)
@@ -182,6 +212,15 @@ bool showShiftDialog(HWND parent, int& shift);
 
 // ------------------------------------------------------------- calculator --
 void openCalculator(HWND owner);
+
+// ------------------------------------------------------------- settings ----
+//  v1.3.0: a slide-over "settings" panel styled like a social-network profile
+//  page (avatar, identity card, then grouped option rows). Opened from the
+//  gear button in the top header. Hosts: theme switch, check-for-update,
+//  density, auto-print toggle, server URL, about.
+void openSettingsPanel(HWND frameOwner);
+bool settingsPanelVisible();
+void closeSettingsPanel();
 
 // ----------------------------------------------------------------- update --
 void checkRemoteUpdate(HWND owner);      // remote-update over HTTP(S)

@@ -169,9 +169,21 @@ static const wchar_t* WDAY[7] = {   // SYSTEMTIME wDayOfWeek: 0=Sunday
     L"\u0634\u0646\u0628\u0647" };                    // شنبه
 std::wstring jalaliDateStr(const SYSTEMTIME& st){
     int jy,jm,jd; gregToJalali(st.wYear,st.wMonth,st.wDay,jy,jm,jd);
-    wchar_t buf[128];
-    swprintf(buf,128,L"%s %d %s %d", WDAY[st.wDayOfWeek], jd, JMONTH[jm-1], jy);
-    return toFaDigits(buf);
+    // Build the date using Persian digits and wrap each numeric run with the
+    // Right-to-Left Mark (U+200F). Without these marks the BiDi engine that
+    // backs DT_RTLREADING reorders the two separate number groups (day + year)
+    // around the Persian month/weekday words, producing garbled output. RLM
+    // forces every digit run to keep its logical RTL position so the date
+    // always renders as:  «weekday  day  month  year».
+    const wchar_t RLM = 0x200F;
+    std::wstring day  = toFaDigits(std::to_wstring(jd));
+    std::wstring year = toFaDigits(std::to_wstring(jy));
+    std::wstring out;
+    out += WDAY[st.wDayOfWeek];  out += L' ';
+    out += RLM; out += day;  out += RLM; out += L' ';
+    out += JMONTH[jm-1];         out += L' ';
+    out += RLM; out += year; out += RLM;
+    return out;
 }
 std::wstring jalaliDateShort(const SYSTEMTIME& st){
     int jy,jm,jd; gregToJalali(st.wYear,st.wMonth,st.wDay,jy,jm,jd);

@@ -14,13 +14,14 @@ Session   g_session;
 HFONT g_fUI=0, g_fUIB=0, g_fSmall=0, g_fTitle=0, g_fBig=0, g_fHuge=0, g_fMono=0;
 
 // frame children
-static HWND s_bExit=0, s_bTheme=0, s_bUpdate=0;
+static HWND s_bExit=0, s_bTheme=0, s_bUpdate=0, s_bSettings=0;
 static HWND s_screen=0;
 static ScreenId s_curScreen = SC_HOME;
 
-#define ID_FR_EXIT   101
-#define ID_FR_THEME  102
-#define ID_FR_UPDATE 103
+#define ID_FR_EXIT     101
+#define ID_FR_THEME    102
+#define ID_FR_UPDATE   103
+#define ID_FR_SETTINGS 104
 #define TIMER_CLOCK  1
 
 // ------------------------------------------------------------------ fonts --
@@ -48,8 +49,10 @@ static void buildFonts(){
 }
 
 // ------------------------------------------------------------- frame rects -
-static int topBarH(){ return S(56); }
-static int botBarH(){ return S(64); }
+//  v1.3.0 — taller header (LAYER 1) so the centered live clock + Jalali date
+//  fit comfortably; thinner bottom status bar (clock moved up to the header).
+static int topBarH(){ return S(72); }
+static int botBarH(){ return S(40); }
 RECT frameContentRect(){
     RECT rc; GetClientRect(g_hFrame,&rc);
     rc.top += topBarH(); rc.bottom -= botBarH();
@@ -87,11 +90,11 @@ static LRESULT CALLBACK homeProc(HWND h, UINT m, WPARAM w, LPARAM l){
         return 0;
     case WM_SIZE: {
         int W=LOWORD(l), H=HIWORD(l);
-        int cw=S(280), chh=S(170), gap=S(28);
-        // vertical stack: logo(88) + 14 + title(44) + sub(28) + 36 + cards(170)
-        int stackH = S(88)+S(14)+S(44)+S(28)+S(36)+chh;
+        int cw=S(290), chh=S(170), gap=S(28);
+        // vertical stack: logo(96) + 16 + title(46) + sub(28) + 40 + cards(170)
+        int stackH = S(96)+S(16)+S(46)+S(28)+S(40)+chh;
         int yTop = (H-stackH)/2; if(yTop<S(10)) yTop=S(10);
-        int yCards = yTop + S(88)+S(14)+S(44)+S(28)+S(36);
+        int yCards = yTop + S(96)+S(16)+S(46)+S(28)+S(40);
         int totW = 2*cw+gap;
         int x=(W-totW)/2;
         // RTL: reception card on the right
@@ -130,47 +133,68 @@ static LRESULT CALLBACK homeProc(HWND h, UINT m, WPARAM w, LPARAM l){
         }
         return 0; }
     case WM_ERASEBKGND: return 1;
+    case WM_APP_THEME: InvalidateRect(h,NULL,TRUE); return 0;
     case WM_PAINT: {
         PAINTSTRUCT ps; HDC dc0=BeginPaint(h,&ps);
         RECT rc; GetClientRect(h,&rc);
         HDC dc=CreateCompatibleDC(dc0);
         HBITMAP bmp=CreateCompatibleBitmap(dc0,rc.right,rc.bottom);
         HGDIOBJ obm=SelectObject(dc,bmp);
-        FillRect(dc,&rc,g_brBg);
+
+        // v1.3.0: real background image with a soft legibility scrim so the
+        // welcome screen feels like a designed product, not a blank panel.
+        if(!gpDrawBackground(dc, rc, g_dark, g_theme.bg, g_dark?70:40)){
+            // fallback: gentle vertical gradient
+            RECT full={0,0,rc.right,rc.bottom};
+            gpGradRoundRect(dc,full,0,g_theme.bg,g_theme.bg2,CLR_INVALID);
+        }
         SetBkMode(dc,TRANSPARENT);
 
         // ---- same vertical stack math as WM_SIZE ----
-        // stack: logo(88) + 14 + title(44) + sub(28) + 36 + cards(170)
         int chh=S(170);
-        int stackH = S(88)+S(14)+S(44)+S(28)+S(36)+chh;
+        int stackH = S(96)+S(16)+S(46)+S(28)+S(40)+chh;
         int yTop = (rc.bottom-stackH)/2; if(yTop<S(10)) yTop=S(10);
 
-        // logo circle (88px tall, centered horizontally)
-        int r = S(44);
-        int cy = yTop + r;                 // logo center
+        // glass hero panel behind the centered content (open, layered look)
+        int heroW=S(720); if(heroW>rc.right-S(40)) heroW=rc.right-S(40);
+        RECT hero={rc.right/2-heroW/2, yTop-S(28),
+                   rc.right/2+heroW/2, yTop+stackH-chh+S(8)};
+        gpShadow(dc,hero,S(22),S(14),60);
+        // Hero "glass": a gentle theme-aware gradient (light surface in light
+        // mode, deep slate in dark mode) so the title text always has strong
+        // contrast against the busy background image.
+        COLORREF heroTop = g_dark?RGB(26,33,46):RGB(255,255,255);
+        COLORREF heroBot = g_dark?RGB(18,24,34):RGB(244,248,253);
+        gpGradRoundRect(dc,hero,S(22), heroTop, heroBot, g_theme.border);
+
+        // logo circle (gradient) centered horizontally
+        int r = S(48);
+        int cy = yTop + r;
         RECT lc={rc.right/2-r, cy-r, rc.right/2+r, cy+r};
-        fillRoundRect(dc,lc,4*r,g_theme.accent,CLR_INVALID);
-        RECT li={lc.left+S(22),lc.top+S(22),lc.right-S(22),lc.bottom-S(22)};
+        gpShadow(dc,lc,r,S(8),70);
+        gpGradRoundRect(dc,lc,r,g_theme.accent2,g_theme.accent,CLR_INVALID);
+        RECT li={lc.left+S(24),lc.top+S(24),lc.right-S(24),lc.bottom-S(24)};
         drawIcon(dc,ICO_CROSS_MED,li,RGB(255,255,255),S(2)+1);
 
-        // title (44px band, starts 14px under logo)
-        int yTitle = yTop + S(88) + S(14);
+        // title
+        int yTitle = yTop + S(96) + S(16);
         SetTextColor(dc,g_theme.text);
         SelectObject(dc,g_fBig);
-        RECT tr={0,yTitle,rc.right,yTitle+S(44)};
+        RECT tr={0,yTitle,rc.right,yTitle+S(46)};
         DrawTextW(dc,L"سامانه پذیرش و مدیریت درمانگاه آزادی طب",-1,&tr,
             DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
 
-        // subtitle (28px band, right under title)
-        int ySub = yTitle + S(44);
+        // subtitle
+        int ySub = yTitle + S(46);
         SelectObject(dc,g_fUI);
         SetTextColor(dc,g_theme.textDim);
         RECT sr={0,ySub,rc.right,ySub+S(28)};
         DrawTextW(dc,L"نوع کاربری خود را انتخاب کنید",-1,&sr,
             DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
 
-        // hint
+        // hint (version)
         SelectObject(dc,g_fSmall);
+        SetTextColor(dc,g_theme.textDim);
         RECT hr={0,rc.bottom-S(34),rc.right,rc.bottom-S(8)};
         std::wstring hint = std::wstring(L"نسخه ")+toFaDigits(APP_VERSION_W);
         DrawTextW(dc,hint.c_str(),-1,&hr,
@@ -201,15 +225,15 @@ HWND createHomeScreen(HWND frame){
 // =============================================================== FRAME =====
 static void frameLayout(HWND h){
     RECT rc; GetClientRect(h,&rc);
-    int bh=S(36), pad=S(12);
+    int bh=S(38), pad=S(14);
     int y=(topBarH()-bh)/2;
-    // --- RIGHT side (RTL primary): EXIT button is the right-most control.
-    //     App name/title is painted to the LEFT of it (see WM_PAINT).
+    // --- RIGHT side (RTL primary): EXIT is the right-most control; the app
+    //     identity (logo + name + fullname + access) is painted to its LEFT.
     MoveWindow(s_bExit,  rc.right-pad-bh, y, bh, bh, TRUE);
-    // --- LEFT side: utility buttons (dark-theme + remote-update) grouped
-    //     away from the exit button, on the opposite edge.
-    MoveWindow(s_bTheme,  pad,          y, bh, bh, TRUE);
-    MoveWindow(s_bUpdate, pad+bh+S(8),  y, bh, bh, TRUE);
+    // --- LEFT side: utility cluster — settings (gear), theme, update.
+    MoveWindow(s_bSettings, pad,             y, bh, bh, TRUE);
+    MoveWindow(s_bTheme,    pad+(bh+S(8)),   y, bh, bh, TRUE);
+    MoveWindow(s_bUpdate,   pad+2*(bh+S(8)), y, bh, bh, TRUE);
     if(s_screen){
         RECT cr=frameContentRect();
         MoveWindow(s_screen,cr.left,cr.top,cr.right-cr.left,cr.bottom-cr.top,TRUE);
@@ -220,17 +244,24 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
     switch(m){
     case WM_CREATE:
         g_hFrame = h;
-        s_bExit   = createFlatButton(h, ID_FR_EXIT,  L"", ICO_X,      BS_GHOST,0,0,10,10);
-        s_bTheme  = createFlatButton(h, ID_FR_THEME, L"", g_dark?ICO_SUN:ICO_MOON, BS_GHOST,0,0,10,10);
-        s_bUpdate = createFlatButton(h, ID_FR_UPDATE,L"", ICO_UPDATE, BS_GHOST,0,0,10,10);
+        s_bExit     = createFlatButton(h, ID_FR_EXIT,    L"", ICO_X,      BS_GHOST,0,0,10,10);
+        s_bSettings = createFlatButton(h, ID_FR_SETTINGS,L"", ICO_GEAR,   BS_GHOST,0,0,10,10);
+        s_bTheme    = createFlatButton(h, ID_FR_THEME,   L"", g_dark?ICO_SUN:ICO_MOON, BS_GHOST,0,0,10,10);
+        s_bUpdate   = createFlatButton(h, ID_FR_UPDATE,  L"", ICO_UPDATE, BS_GHOST,0,0,10,10);
         SetTimer(h, TIMER_CLOCK, g_lowSpec?1000:500, NULL);
         return 0;
     case WM_SIZE: frameLayout(h); return 0;
+    case WM_APP_THEME:
+        // theme may have been switched from inside the settings panel — keep the
+        // header's theme button glyph in sync and repaint the whole frame.
+        setFlatButtonIcon(s_bTheme, g_dark?ICO_SUN:ICO_MOON);
+        InvalidateRect(h,NULL,TRUE);
+        return 0;
     case WM_TIMER:
         if(w==TIMER_CLOCK){
-            // repaint only the clock zone (bottom-right)
+            // repaint only the centered clock/date zone in the top header
             RECT rc; GetClientRect(h,&rc);
-            RECT cz={rc.right-S(380), rc.bottom-botBarH(), rc.right, rc.bottom};
+            RECT cz={rc.right/2-S(260), 0, rc.right/2+S(260), topBarH()};
             InvalidateRect(h,&cz,FALSE);
         }
         return 0;
@@ -258,6 +289,7 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
             broadcastThemeChange();
         }
         else if(id==ID_FR_UPDATE) checkRemoteUpdate(h);
+        else if(id==ID_FR_SETTINGS) openSettingsPanel(h);
         return 0; }
     case WM_KEYDOWN: {
         // hidden admin: Ctrl + P + N held together (home screen only)
@@ -289,64 +321,95 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         HBITMAP bmp=CreateCompatibleBitmap(dc0,rc.right,rc.bottom);
         HGDIOBJ obm=SelectObject(dc,bmp);
 
-        // top bar
+        // ===================== LAYER 1 — top header bar =====================
+        // Soft vertical gradient so the header reads as a distinct, polished
+        // surface (not a flat strip).
         RECT tb={0,0,rc.right,topBarH()};
-        FillRect(dc,&tb,g_brSurface2);
-        // bottom bar
+        gpGradRoundRect(dc,tb,0,g_theme.headerTop,g_theme.headerBot,CLR_INVALID);
+        // bottom status bar
         RECT bb={0,rc.bottom-botBarH(),rc.right,rc.bottom};
         FillRect(dc,&bb,g_brSurface2);
-        // middle bg
+        // middle bg (gentle gradient page)
         RECT mid={0,topBarH(),rc.right,rc.bottom-botBarH()};
-        FillRect(dc,&mid,g_brBg);
-        // separators
-        HPEN pen=CreatePen(PS_SOLID,1,g_theme.border);
-        HGDIOBJ op=SelectObject(dc,pen);
-        MoveToEx(dc,0,topBarH()-1,0); LineTo(dc,rc.right,topBarH()-1);
-        MoveToEx(dc,0,rc.bottom-botBarH(),0); LineTo(dc,rc.right,rc.bottom-botBarH());
-        SelectObject(dc,op); DeleteObject(pen);
+        gpGradRoundRect(dc,mid,0,g_theme.bg,g_theme.bg2,CLR_INVALID);
+        // crisp separators
+        gpLine(dc,0,topBarH()-1,rc.right,topBarH()-1,g_theme.border,1.0f);
+        gpLine(dc,0,rc.bottom-botBarH(),rc.right,rc.bottom-botBarH(),g_theme.border,1.0f);
+        // a thin accent underline under the header for that "designed" feel
+        gpLine(dc,0,topBarH()-1,rc.right,topBarH()-1,g_theme.accent,2.0f,40);
 
         SetBkMode(dc,TRANSPARENT);
+
         // ---- app identity on the RIGHT (next to the exit button) ----
-        // small accent logo badge + app name + (optional) current user.
-        int exitW = S(36)+S(12);                 // exit button + its padding
-        int logoR = S(13);
-        int logoCx = rc.right - exitW - S(14) - logoR;
+        // logo badge + app name; below it the LOGGED-IN PERSON'S NAME and the
+        // access type. We intentionally show the full name + role, NEVER the
+        // raw login username (privacy requirement).
+        int exitW = S(38)+S(14);
+        int logoR = S(16);
+        int logoCx = rc.right - exitW - S(16) - logoR;
         int logoCy = topBarH()/2;
         RECT lc={logoCx-logoR,logoCy-logoR,logoCx+logoR,logoCy+logoR};
-        fillRoundRect(dc,lc,4*logoR,g_theme.accent,CLR_INVALID);
-        RECT li={lc.left+S(6),lc.top+S(6),lc.right-S(6),lc.bottom-S(6)};
+        gpGradRoundRect(dc,lc,logoR,g_theme.accent2,g_theme.accent,CLR_INVALID);
+        RECT li={lc.left+S(7),lc.top+S(7),lc.right-S(7),lc.bottom-S(7)};
         drawIcon(dc,ICO_CROSS_MED,li,RGB(255,255,255),S(2));
-        SelectObject(dc,g_fUIB);
-        SetTextColor(dc,g_theme.text);
-        std::wstring caption = std::wstring(APP_NAME_W) +
-            (g_session.user.username.empty() ? L"" :
-             L"  \u2014  " + g_session.user.fullname);
-        RECT nr={S(120), 0, logoCx-logoR-S(12), topBarH()};
-        DrawTextW(dc,caption.c_str(),-1,&nr,
-            DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
 
-        // ===== bottom-right: live Iran clock (top) + date (below) =====
+        int idRight = logoCx-logoR-S(12);
+        bool loggedIn = !g_session.user.username.empty();
+        if(loggedIn){
+            // two stacked lines: app name (top) + person/role (bottom)
+            SelectObject(dc,g_fUIB);
+            SetTextColor(dc,g_theme.text);
+            RECT nr={S(160),S(8),idRight,S(8)+S(24)};
+            DrawTextW(dc,APP_NAME_W,-1,&nr,
+                DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+            SelectObject(dc,g_fSmall);
+            SetTextColor(dc,g_theme.textDim);
+            const wchar_t* role =
+                g_session.user.role==2 ? L"مدیر سامانه" :
+                g_session.user.role==1 ? L"مدیریت درمانگاه" : L"پذیرش درمانگاه";
+            std::wstring sub = g_session.user.fullname + L"  •  " + role +
+                (g_session.user.dept.empty()?L"":(L"  •  "+g_session.user.dept));
+            RECT sr={S(160),S(8)+S(24),idRight,topBarH()-S(8)};
+            DrawTextW(dc,sub.c_str(),-1,&sr,
+                DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+        } else {
+            SelectObject(dc,g_fTitle);
+            SetTextColor(dc,g_theme.text);
+            RECT nr={S(160),0,idRight,topBarH()};
+            DrawTextW(dc,APP_NAME_W,-1,&nr,
+                DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+        }
+
+        // ===== CENTER of LAYER 1: live clock (bold, top) + Jalali date =====
         SYSTEMTIME st=iranNow();
+        // clock — big & bold, perfectly centered
         SetTextColor(dc,g_theme.accent);
         SelectObject(dc,g_fMono);
-        RECT ck={rc.right-S(370),rc.bottom-botBarH()+S(2),rc.right-S(16),rc.bottom-S(28)};
+        RECT ck={rc.right/2-S(220),S(6),rc.right/2+S(220),S(6)+S(34)};
         DrawTextW(dc,toFaDigits(iranTimeStr(st,true)).c_str(),-1,&ck,
-            DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX);
+            DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX);
+        // date — centered just below the clock
         SetTextColor(dc,g_theme.textDim);
         SelectObject(dc,g_fSmall);
-        RECT dr={rc.right-S(370),rc.bottom-S(28),rc.right-S(16),rc.bottom-S(4)};
+        RECT dr={rc.right/2-S(260),S(6)+S(34),rc.right/2+S(260),topBarH()-S(4)};
         DrawTextW(dc,jalaliDateStr(st).c_str(),-1,&dr,
-            DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+            DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
 
-        // bottom-left: shift indicator
+        // ===== bottom status bar: shift indicator (left) =====
         SetTextColor(dc,g_theme.textDim);
         SelectObject(dc,g_fSmall);
-        RECT shf={S(16),rc.bottom-botBarH(),S(460),rc.bottom};
+        RECT shf={S(16),rc.bottom-botBarH(),S(560),rc.bottom};
         std::wstring sf = L"شیفت جاری: " + shiftName(detectShift());
-        if(!g_session.user.username.empty() && s_curScreen==SC_RECEPTION)
+        if(loggedIn && s_curScreen==SC_RECEPTION)
             sf += L"   |   شیفت ورود: " + shiftName(g_session.shift);
         DrawTextW(dc,sf.c_str(),-1,&shf,
             DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+        // bottom-right: small product tag
+        SetTextColor(dc,g_theme.textDim);
+        RECT pr={rc.right-S(360),rc.bottom-botBarH(),rc.right-S(16),rc.bottom};
+        std::wstring tag=std::wstring(APP_NAME_W)+L"  نسخه "+toFaDigits(APP_VERSION_W);
+        DrawTextW(dc,tag.c_str(),-1,&pr,
+            DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
 
         BitBlt(dc0,0,0,rc.right,rc.bottom,dc,0,0,SRCCOPY);
         SelectObject(dc,obm); DeleteObject(bmp); DeleteDC(dc);
@@ -411,14 +474,56 @@ static std::wstring digitsOnly(const std::wstring& s){
     }
     return o;
 }
-static std::wstring formatJalaliMask(const std::wstring& digits){
-    std::wstring d = digits;
-    if(d.size()>8) d = d.substr(0,8);
-    std::wstring out;
-    for(size_t i=0;i<d.size();i++){
-        if(i==4 || i==6) out += L'/';
-        out += d[i];
+// Split a raw string into year / month / day tokens. The user may type the
+// date in a relaxed way: digits packed (13400520), or separated by spaces /
+// slashes / dashes and WITHOUT zero-padding, e.g. "1340 5 20". Each token is
+// terminated by any non-digit (space, /, -). When packed with no separators we
+// fall back to the classic YYYY MM DD split (4 + 2 + 2).
+static void splitJalaliTokens(const std::wstring& raw,
+                              std::wstring& y, std::wstring& mo, std::wstring& d,
+                              bool& hadSep){
+    y.clear(); mo.clear(); d.clear(); hadSep=false;
+    // Are there any explicit separators?
+    for(wchar_t c : raw)
+        if(c==L' '||c==L'/'||c==L'-'||c==L'.'){ hadSep=true; break; }
+
+    if(hadSep){
+        std::wstring* parts[3]={&y,&mo,&d}; int idx=0;
+        bool inTok=false;
+        for(wchar_t c : raw){
+            std::wstring dig;
+            if(c>=L'0'&&c<=L'9') dig=std::wstring(1,c);
+            else if(c>=0x06F0&&c<=0x06F9) dig=std::wstring(1,(wchar_t)(L'0'+(c-0x06F0)));
+            else if(c>=0x0660&&c<=0x0669) dig=std::wstring(1,(wchar_t)(L'0'+(c-0x0660)));
+            if(!dig.empty()){
+                if(idx<3) *parts[idx]+=dig;
+                inTok=true;
+            } else { // separator
+                if(inTok && idx<2) idx++;
+                inTok=false;
+            }
+        }
+    } else {
+        std::wstring all = digitsOnly(raw);
+        if(all.size()>8) all=all.substr(0,8);
+        if(all.size()<=4){ y=all; }
+        else if(all.size()<=6){ y=all.substr(0,4); mo=all.substr(4); }
+        else { y=all.substr(0,4); mo=all.substr(4,2); d=all.substr(6); }
     }
+    // clamp month ≤ 12 and day ≤ 31 (only once a full field is present)
+    if(mo.size()>=2){ int v=_wtoi(mo.c_str()); if(v>12)v=12; if(v<1)v=1;
+                      wchar_t b[4]; swprintf(b,4,L"%d",v); mo=b; }
+    if(d.size()>=2){  int v=_wtoi(d.c_str());  if(v>31)v=31; if(v<1)v=1;
+                      wchar_t b[4]; swprintf(b,4,L"%d",v); d=b; }
+}
+// Build the displayed value. Non-padded segments are shown as typed; slashes
+// are inserted between whichever segments already have content.
+static std::wstring formatJalaliMask(const std::wstring& raw){
+    std::wstring y,mo,d; bool sep;
+    splitJalaliTokens(raw,y,mo,d,sep);
+    std::wstring out = y;
+    if(!mo.empty() || sep) out += L"/" + mo;
+    if(!d.empty()  || (sep && !mo.empty())) out += L"/" + d;
     return out;
 }
 static LRESULT CALLBACK dateEditProc(HWND h, UINT m, WPARAM w, LPARAM l){
@@ -428,28 +533,33 @@ static LRESULT CALLBACK dateEditProc(HWND h, UINT m, WPARAM w, LPARAM l){
     }
     if(m==WM_CHAR){
         if(w==VK_RETURN || w==VK_TAB) return 0;            // no beep
+        wchar_t buf[64]; GetWindowTextW(h,buf,64);
+        std::wstring cur(buf);
         if(w==VK_BACK){
-            wchar_t buf[32]; GetWindowTextW(h,buf,32);
-            std::wstring d = digitsOnly(buf);
-            if(!d.empty()) d.pop_back();
-            std::wstring formatted = formatJalaliMask(d);
+            if(!cur.empty()) cur.pop_back();
+            // re-normalise after deletion
+            std::wstring formatted = formatJalaliMask(cur);
             SetWindowTextW(h, formatted.c_str());
             SendMessageW(h, EM_SETSEL, formatted.size(), formatted.size());
             return 0;
         }
-        if(w<L'0' || w>L'9'){
-            // allow fa/ar digit chars too, otherwise ignore
-            if(!((w>=0x06F0&&w<=0x06F9)||(w>=0x0660&&w<=0x0669))) return 0;
+        // Accept a SPACE or slash as an explicit field separator (relaxed entry
+        // like "1340 5 20"). Map it to a single slash in the working buffer.
+        if(w==L' ' || w==L'/' || w==L'-' || w==L'.'){
+            if(cur.empty()) return 0;
+            // avoid double separators
+            if(cur.back()!=L'/') cur += L'/';
+            SetWindowTextW(h, cur.c_str());
+            SendMessageW(h, EM_SETSEL, cur.size(), cur.size());
+            return 0;
         }
-        wchar_t buf[32]; GetWindowTextW(h,buf,32);
-        std::wstring d = digitsOnly(buf);
-        if(d.size()>=8) return 0;                           // full
-        // append the new digit (normalised to ASCII)
+        // only digits beyond this point (latin / fa / ar)
         wchar_t ch = (wchar_t)w;
         if(ch>=0x06F0&&ch<=0x06F9) ch=(wchar_t)(L'0'+(ch-0x06F0));
         else if(ch>=0x0660&&ch<=0x0669) ch=(wchar_t)(L'0'+(ch-0x0660));
-        d += ch;
-        std::wstring formatted = formatJalaliMask(d);
+        if(ch<L'0' || ch>L'9') return 0;
+        cur += ch;
+        std::wstring formatted = formatJalaliMask(cur);
         SetWindowTextW(h, formatted.c_str());
         SendMessageW(h, EM_SETSEL, formatted.size(), formatted.size());
         return 0;
@@ -482,6 +592,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
     InitCommonControlsEx(&icc);
 
     installVazirFont();              // embedded Vazirmatn + per-user install
+    gdipStartup();                   // v1.3.0: GDI+ rendering layer
 
     // responsive scale: based on monitor size + DPI
     HDC sdc=GetDC(NULL);
@@ -492,7 +603,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
     g_scale = dpi/96.0;
     double fit = sh/900.0;           // design height 900
     if(fit < g_scale) g_scale = fit; // shrink on small displays
-    if(g_scale < 0.70) g_scale = 0.70;
+    // UI density (set in the settings panel) — "compact" trims ~12% so more
+    // fits on smaller screens; applied at launch.
+    if(getSetting(L"density",L"normal")==L"compact") g_scale *= 0.88;
+    if(g_scale < 0.62) g_scale = 0.62;
     if(g_scale > 2.00) g_scale = 2.00;
 
     applyTheme(getSetting(L"theme",L"light")==L"dark");
@@ -525,6 +639,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
             g_session.loginAt=iranNow();
             if(!wcscmp(dbg,L"reception")) switchScreen(SC_RECEPTION);
             else if(!wcscmp(dbg,L"manage"))    switchScreen(SC_MANAGE);
+            else if(!wcscmp(dbg,L"settings")){ switchScreen(SC_RECEPTION);
+                                               openSettingsPanel(f); }
         }
     }
 #endif
@@ -550,6 +666,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
+    gdipShutdown();
     logLine(L"=== Azadi-Teb exit ===");
     return 0;
 }
