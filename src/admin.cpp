@@ -74,8 +74,9 @@ static LRESULT CALLBACK adminProc(HWND h, UINT m, WPARAM w, LPARAM l){
         SendMessageW(d->cRole,CB_ADDSTRING,0,(LPARAM)L"مدیریت");
         SendMessageW(d->cRole,CB_SETCURSEL,0,0);
         d->bCreate=createFlatButton(h,ID_AD_CREATE,L"ساخت کاربر",ICO_PLUS,BS_PRIMARY,0,0,10,10);
-        // user table
-        d->list=CreateWindowExW(0,WC_LISTVIEWW,L"",
+        // user table (LAYOUTRTL only on the ListView itself is safe:
+        // the control paints itself, no custom BitBlt involved)
+        d->list=CreateWindowExW(WS_EX_LAYOUTRTL|WS_EX_RTLREADING,WC_LISTVIEWW,L"",
             WS_CHILD|WS_VISIBLE|WS_TABSTOP|LVS_REPORT|LVS_SINGLESEL|LVS_SHOWSELALWAYS,
             0,0,10,10,h,(HMENU)ID_AD_LIST,g_hInst,0);
         ListView_SetExtendedListViewStyle(d->list,
@@ -210,7 +211,7 @@ HWND createAdminScreen(HWND frame){
         RegisterClassW(&wc); reg=true;
     }
     RECT rc=frameContentRect();
-    return CreateWindowExW(WS_EX_LAYOUTRTL,AD_CLASS,L"",
+    return CreateWindowExW(0,AD_CLASS,L"",
         WS_CHILD|WS_VISIBLE|WS_CLIPCHILDREN,
         rc.left,rc.top,rc.right-rc.left,rc.bottom-rc.top,frame,NULL,g_hInst,NULL);
 }

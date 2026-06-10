@@ -1,11 +1,13 @@
 // ============================================================================
 //  dialogs.cpp — Win11-style centered login card + shift selection dialog
+//  v1.0.1: dialogs are now OWNED POPUP windows (not children) so modal
+//  EnableWindow() on the frame no longer disables the dialog itself.
+//  No WS_EX_LAYOUTRTL anywhere (avoids GDI mirroring bugs) — RTL is manual.
 // ============================================================================
 #include "app.h"
 #include <stdio.h>
 
 // =============================================================== LOGIN =====
-//  Modal overlay: dim layer over frame, rounded card in center (Win11 look).
 #define LGN_CLASS L"AzLogin"
 #define ID_LG_USER  201
 #define ID_LG_PASS  202
@@ -16,7 +18,7 @@ struct LoginData {
     int role; User* out; bool* ok;
     HWND eUser, ePass, bOk, bCancel;
     std::wstring errMsg;
-    int shake;                         // error shake animation offset
+    int shake;
 };
 
 static const wchar_t* roleTitle(int r){
@@ -27,15 +29,21 @@ static const wchar_t* roleTitle(int r){
     }
 }
 
-static void loginLayout(HWND h, LoginData* d){
+// card geometry (shared by layout + paint)
+static void loginCard(HWND h, RECT& card){
     RECT rc; GetClientRect(h,&rc);
-    int cw=S(420), chh=S(430);
+    int cw=S(420), chh=S(460);
     int cx=(rc.right-cw)/2, cy=(rc.bottom-chh)/2;
-    int ew=cw-S(80), ex=cx+S(40);
-    MoveWindow(d->eUser, ex, cy+S(150), ew, S(40), TRUE);
-    MoveWindow(d->ePass, ex, cy+S(235), ew, S(40), TRUE);
-    MoveWindow(d->bOk,    ex, cy+S(320), ew, S(46), TRUE);
-    MoveWindow(d->bCancel,ex, cy+S(374), ew, S(38), TRUE);
+    card.left=cx; card.top=cy; card.right=cx+cw; card.bottom=cy+chh;
+}
+static void loginLayout(HWND h, LoginData* d){
+    RECT c; loginCard(h,c);
+    int cw=c.right-c.left;
+    int ew=cw-S(96), ex=c.left+S(48);
+    MoveWindow(d->eUser, ex, c.top+S(168), ew, S(30), TRUE);
+    MoveWindow(d->ePass, ex, c.top+S(252), ew, S(30), TRUE);
+    MoveWindow(d->bOk,    c.left+S(40), c.top+S(346), cw-S(80), S(46), TRUE);
+    MoveWindow(d->bCancel,c.left+S(40), c.top+S(400), cw-S(80), S(38), TRUE);
 }
 
 static LRESULT CALLBACK loginProc(HWND h, UINT m, WPARAM w, LPARAM l){
@@ -45,7 +53,7 @@ static LRESULT CALLBACK loginProc(HWND h, UINT m, WPARAM w, LPARAM l){
         CREATESTRUCTW* cs=(CREATESTRUCTW*)l;
         d=(LoginData*)cs->lpCreateParams;
         SetWindowLongPtrW(h,GWLP_USERDATA,(LONG_PTR)d);
-        DWORD es = WS_CHILD|WS_VISIBLE|ES_AUTOHSCROLL;
+        DWORD es = WS_CHILD|WS_VISIBLE|WS_TABSTOP|ES_AUTOHSCROLL;
         d->eUser = CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)ID_LG_USER,g_hInst,0);
         d->ePass = CreateWindowExW(0,L"EDIT",L"",es|ES_PASSWORD,0,0,10,10,h,(HMENU)ID_LG_PASS,g_hInst,0);
         SendMessageW(d->eUser,WM_SETFONT,(WPARAM)g_fUI,TRUE);
@@ -53,7 +61,6 @@ static LRESULT CALLBACK loginProc(HWND h, UINT m, WPARAM w, LPARAM l){
         d->bOk     = createFlatButton(h,ID_LG_OK,L"ورود",ICO_CHECK,BS_PRIMARY,0,0,10,10);
         d->bCancel = createFlatButton(h,ID_LG_CANCEL,L"انصراف",0,BS_OUTLINE,0,0,10,10);
         loginLayout(h,d);
-        SetFocus(d->eUser);
         return 0; }
     case WM_SIZE: if(d) loginLayout(h,d); return 0;
     case WM_CTLCOLOREDIT: {
@@ -67,7 +74,7 @@ static LRESULT CALLBACK loginProc(HWND h, UINT m, WPARAM w, LPARAM l){
         return (LRESULT)g_brSurface; }
     case WM_COMMAND: {
         int id=LOWORD(w);
-        if(id==ID_LG_OK || (id==ID_LG_PASS && HIWORD(w)==0)){
+        if(id==ID_LG_OK){
             wchar_t ub[128], pb[128];
             GetWindowTextW(d->eUser,ub,128);
             GetWindowTextW(d->ePass,pb,128);
@@ -90,9 +97,8 @@ static LRESULT CALLBACK loginProc(HWND h, UINT m, WPARAM w, LPARAM l){
             InvalidateRect(h,NULL,TRUE);
         }
         return 0;
-    case WM_KEYDOWN:
-        if(w==VK_ESCAPE){ *d->ok=false; DestroyWindow(h); return 0; }
-        break;
+    case WM_CLOSE:
+        if(d){ *d->ok=false; } DestroyWindow(h); return 0;
     case WM_ERASEBKGND: return 1;
     case WM_PAINT: {
         PAINTSTRUCT ps; HDC dc0=BeginPaint(h,&ps);
@@ -101,42 +107,49 @@ static LRESULT CALLBACK loginProc(HWND h, UINT m, WPARAM w, LPARAM l){
         HBITMAP bmp=CreateCompatibleBitmap(dc0,rc.right,rc.bottom);
         HGDIOBJ obm=SelectObject(dc,bmp);
         // dim layer
-        HBRUSH dim=CreateSolidBrush(g_dark?RGB(8,10,14):RGB(160,170,184));
+        HBRUSH dim=CreateSolidBrush(g_dark?RGB(8,10,14):RGB(150,160,176));
         FillRect(dc,&rc,dim); DeleteObject(dim);
 
-        int cw=S(420), chh=S(430);
-        int sh = d ? (d->shake%2 ? S(6) : -S(6)) * (d->shake>0?1:0) : 0;
-        int cx=(rc.right-cw)/2 + sh, cy=(rc.bottom-chh)/2;
-        RECT card={cx,cy,cx+cw,cy+chh};
-        // shadow
-        RECT shd=card; OffsetRect(&shd,0,S(6));
-        fillRoundRect(dc,shd,S(18),g_dark?RGB(5,7,10):RGB(196,204,216),CLR_INVALID);
-        fillRoundRect(dc,card,S(18),g_theme.surface,g_theme.border);
+        RECT c; loginCard(h,c);
+        int sh = (d && d->shake>0) ? ((d->shake%2)? S(6):-S(6)) : 0;
+        OffsetRect(&c, sh, 0);
+        int cx=c.left, cy=c.top, cw=c.right-c.left;
+        // shadow + card
+        RECT shd=c; OffsetRect(&shd,0,S(6));
+        fillRoundRect(dc,shd,S(18),g_dark?RGB(5,7,10):RGB(120,130,146),CLR_INVALID);
+        fillRoundRect(dc,c,S(18),g_theme.surface,g_theme.border);
 
         SetBkMode(dc,TRANSPARENT);
         // icon circle
         int ir=S(28);
-        RECT ic={cx+cw/2-ir,cy+S(28),cx+cw/2+ir,cy+S(28)+2*ir};
-        fillRoundRect(dc,ic,4*ir, d->role==2?g_theme.danger:g_theme.accent, CLR_INVALID);
+        RECT ic={cx+cw/2-ir,cy+S(26),cx+cw/2+ir,cy+S(26)+2*ir};
+        fillRoundRect(dc,ic,4*ir, (d&&d->role==2)?g_theme.danger:g_theme.accent, CLR_INVALID);
         RECT ii={ic.left+S(14),ic.top+S(14),ic.right-S(14),ic.bottom-S(14)};
-        drawIcon(dc, d->role==2?ICO_SHIELD:ICO_USER, ii, RGB(255,255,255), S(2)+1);
+        drawIcon(dc, (d&&d->role==2)?ICO_SHIELD:ICO_USER, ii, RGB(255,255,255), S(2)+1);
 
         SetTextColor(dc,g_theme.text);
         SelectObject(dc,g_fTitle);
-        RECT tr={cx,cy+S(92),cx+cw,cy+S(124)};
-        DrawTextW(dc,roleTitle(d->role),-1,&tr,
+        RECT tr={cx,cy+S(94),cx+cw,cy+S(128)};
+        DrawTextW(dc,roleTitle(d?d->role:0),-1,&tr,
             DT_CENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
 
+        // labels + input boxes (frames around the EDIT controls)
         SelectObject(dc,g_fSmall);
         SetTextColor(dc,g_theme.textDim);
-        RECT lu={cx+S(40),cy+S(126),cx+cw-S(40),cy+S(148)};
+        RECT lu={cx+S(48),cy+S(136),cx+cw-S(48),cy+S(158)};
         DrawTextW(dc,L"نام کاربری",-1,&lu,DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
-        RECT lp={cx+S(40),cy+S(211),cx+cw-S(40),cy+S(233)};
+        RECT lp={cx+S(48),cy+S(220),cx+cw-S(48),cy+S(242)};
         DrawTextW(dc,L"رمز عبور",-1,&lp,DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+
+        RECT bu={cx+S(40),cy+S(160),cx+cw-S(40),cy+S(206)};
+        fillRoundRect(dc,bu,S(8),g_theme.inputBg,g_theme.border);
+        RECT bp={cx+S(40),cy+S(244),cx+cw-S(40),cy+S(290)};
+        fillRoundRect(dc,bp,S(8),g_theme.inputBg,g_theme.border);
 
         if(d && !d->errMsg.empty()){
             SetTextColor(dc,g_theme.danger);
-            RECT er={cx+S(40),cy+S(283),cx+cw-S(40),cy+S(312)};
+            SelectObject(dc,g_fUI);
+            RECT er={cx+S(40),cy+S(300),cx+cw-S(40),cy+S(338)};
             DrawTextW(dc,d->errMsg.c_str(),-1,&er,
                 DT_CENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
         }
@@ -145,67 +158,77 @@ static LRESULT CALLBACK loginProc(HWND h, UINT m, WPARAM w, LPARAM l){
         EndPaint(h,&ps);
         return 0; }
     case WM_DESTROY:
-        PostQuitMessage(0);   // breaks the modal loop below (filtered)
+        PostQuitMessage(0);   // consumed inside runModal
         return 0;
     }
     return DefWindowProcW(h,m,w,l);
 }
 
-static bool s_lgnReg=false;
-static void regLogin(){
-    if(s_lgnReg) return;
+static void regClass(const wchar_t* name, WNDPROC proc){
     WNDCLASSW wc={0};
-    wc.lpfnWndProc=loginProc; wc.hInstance=g_hInst;
+    wc.lpfnWndProc=proc; wc.hInstance=g_hInst;
     wc.hCursor=LoadCursor(NULL,IDC_ARROW);
-    wc.lpszClassName=LGN_CLASS;
+    wc.lpszClassName=name;
     RegisterClassW(&wc);
-    s_lgnReg=true;
 }
 
-//  Runs a nested message loop until the overlay closes.
-static void runModal(HWND overlay, HWND parent){
+//  Nested message loop until the popup closes. The popup is an OWNED
+//  top-level window, so disabling the frame doesn't disable it.
+static void runModal(HWND overlay, HWND parent, HWND firstFocus,
+                     int idUserEdit, int idOkBtn){
     EnableWindow(parent, FALSE);
+    SetForegroundWindow(overlay);
+    if(firstFocus) SetFocus(firstFocus);
     MSG msg;
     while(IsWindow(overlay) && GetMessageW(&msg,NULL,0,0)){
         if(msg.message==WM_QUIT) break;
-        // Tab navigation inside overlay
-        if(msg.message==WM_KEYDOWN && msg.wParam==VK_TAB){
+        if(msg.message==WM_KEYDOWN && msg.wParam==VK_TAB &&
+           GetAncestor(msg.hwnd,GA_ROOT)==overlay){
             HWND f=GetFocus();
-            HWND nxt=GetNextDlgTabItem(overlay,f,(GetKeyState(VK_SHIFT)&0x8000)?TRUE:FALSE);
-            if(nxt){ SetFocus(nxt); continue; }
+            HWND nxt=GetNextDlgTabItem(overlay,f,
+                (GetKeyState(VK_SHIFT)&0x8000)?TRUE:FALSE);
+            if(nxt && nxt!=f){ SetFocus(nxt); SendMessageW(nxt,EM_SETSEL,0,-1); }
+            continue;
         }
-        if(msg.message==WM_KEYDOWN && msg.wParam==VK_RETURN){
+        if(msg.message==WM_KEYDOWN && msg.wParam==VK_RETURN &&
+           GetAncestor(msg.hwnd,GA_ROOT)==overlay){
             HWND f=GetFocus();
-            wchar_t cls[32]; GetClassNameW(f,cls,32);
+            wchar_t cls[32]={0}; if(f) GetClassNameW(f,cls,32);
             if(!wcscmp(cls,L"EDIT")){
-                // move focus or submit
-                SendMessageW(overlay, WM_COMMAND, MAKEWPARAM(GetDlgCtrlID(f)==ID_LG_USER?0:ID_LG_OK,0),0);
-                if(GetDlgCtrlID(f)==ID_LG_USER){
-                    SetFocus(GetNextDlgTabItem(overlay,f,FALSE));
+                if(idUserEdit && GetDlgCtrlID(f)==idUserEdit){
+                    HWND nxt=GetNextDlgTabItem(overlay,f,FALSE);
+                    if(nxt){ SetFocus(nxt); SendMessageW(nxt,EM_SETSEL,0,-1); }
+                } else if(idOkBtn){
+                    SendMessageW(overlay,WM_COMMAND,MAKEWPARAM(idOkBtn,0),0);
                 }
                 continue;
             }
+            if(idOkBtn){ SendMessageW(overlay,WM_COMMAND,MAKEWPARAM(idOkBtn,0),0); continue; }
         }
-        if(msg.message==WM_KEYDOWN && msg.wParam==VK_ESCAPE){
-            SendMessageW(overlay, WM_KEYDOWN, VK_ESCAPE, 0);
+        if(msg.message==WM_KEYDOWN && msg.wParam==VK_ESCAPE &&
+           GetAncestor(msg.hwnd,GA_ROOT)==overlay){
+            SendMessageW(overlay,WM_CLOSE,0,0);
             continue;
         }
         TranslateMessage(&msg); DispatchMessageW(&msg);
     }
     EnableWindow(parent, TRUE);
     SetForegroundWindow(parent);
+    SetFocus(parent);
 }
 
 bool showLoginDialog(HWND parent, int role, User& out){
-    regLogin();
+    static bool reg=false;
+    if(!reg){ regClass(LGN_CLASS, loginProc); reg=true; }
     bool ok=false;
     LoginData d; d.role=role; d.out=&out; d.ok=&ok; d.shake=0;
-    RECT rc; GetClientRect(parent,&rc);
-    HWND ov = CreateWindowExW(0,LGN_CLASS,L"",WS_CHILD|WS_VISIBLE|WS_CLIPCHILDREN,
-        0,0,rc.right,rc.bottom,parent,NULL,g_hInst,&d);
-    SetWindowPos(ov,HWND_TOP,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE);
-    SetFocus(d.eUser);
-    runModal(ov, parent);
+    d.eUser=d.ePass=d.bOk=d.bCancel=NULL;
+    RECT fr; GetWindowRect(parent,&fr);
+    HWND ov = CreateWindowExW(0,LGN_CLASS,L"",
+        WS_POPUP|WS_VISIBLE,
+        fr.left,fr.top,fr.right-fr.left,fr.bottom-fr.top,
+        parent,NULL,g_hInst,&d);
+    runModal(ov, parent, d.eUser, ID_LG_USER, ID_LG_OK);
     return ok;
 }
 
@@ -224,6 +247,12 @@ struct ShiftData {
     int sel;
     HWND bAuto, b0, b1, b2, bOk, bCancel;
 };
+static void shiftCard(HWND h, RECT& card){
+    RECT rc; GetClientRect(h,&rc);
+    int cw=S(470), chh=S(430);
+    card.left=(rc.right-cw)/2; card.top=(rc.bottom-chh)/2;
+    card.right=card.left+cw; card.bottom=card.top+chh;
+}
 static void shiftRefresh(ShiftData* d){
     int as = detectShift();
     if(d->autoMode) d->sel = as;
@@ -242,16 +271,15 @@ static void shiftRefresh(ShiftData* d){
         : L"\u2610  حالت خودکار (برای انتخاب دستی، تیک را بردارید)");
 }
 static void shiftLayout(HWND h, ShiftData* d){
-    RECT rc; GetClientRect(h,&rc);
-    int cw=S(460), chh=S(420);
-    int cx=(rc.right-cw)/2, cy=(rc.bottom-chh)/2;
-    int ew=cw-S(60), ex=cx+S(30);
-    MoveWindow(d->bAuto, ex, cy+S(96),  ew, S(44), TRUE);
-    MoveWindow(d->b0,    ex, cy+S(156), ew, S(48), TRUE);
-    MoveWindow(d->b1,    ex, cy+S(212), ew, S(48), TRUE);
-    MoveWindow(d->b2,    ex, cy+S(268), ew, S(48), TRUE);
-    MoveWindow(d->bOk,   ex, cy+S(338), ew/2-S(6), S(46), TRUE);
-    MoveWindow(d->bCancel, ex+ew/2+S(6), cy+S(338), ew/2-S(6), S(46), TRUE);
+    RECT c; shiftCard(h,c);
+    int cw=c.right-c.left;
+    int ew=cw-S(60), ex=c.left+S(30);
+    MoveWindow(d->bAuto, ex, c.top+S(100), ew, S(44), TRUE);
+    MoveWindow(d->b0,    ex, c.top+S(160), ew, S(48), TRUE);
+    MoveWindow(d->b1,    ex, c.top+S(216), ew, S(48), TRUE);
+    MoveWindow(d->b2,    ex, c.top+S(272), ew, S(48), TRUE);
+    MoveWindow(d->bOk,   ex, c.top+S(344), ew/2-S(6), S(46), TRUE);
+    MoveWindow(d->bCancel, ex+ew/2+S(6), c.top+S(344), ew/2-S(6), S(46), TRUE);
 }
 static LRESULT CALLBACK shiftProc(HWND h, UINT m, WPARAM w, LPARAM l){
     ShiftData* d=(ShiftData*)GetWindowLongPtrW(h,GWLP_USERDATA);
@@ -268,16 +296,18 @@ static LRESULT CALLBACK shiftProc(HWND h, UINT m, WPARAM w, LPARAM l){
         d->bCancel= createFlatButton(h,ID_SH_CANCEL,L"انصراف",0,BS_OUTLINE,0,0,10,10);
         shiftRefresh(d);
         shiftLayout(h,d);
-        SetTimer(h, 9, 30000, NULL);  // re-detect every 30s while open
+        SetTimer(h, 9, 30000, NULL);
         return 0; }
-    case WM_TIMER: if(w==9 && d && d->autoMode){ shiftRefresh(d); InvalidateRect(h,NULL,TRUE);} return 0;
+    case WM_TIMER:
+        if(w==9 && d && d->autoMode){ shiftRefresh(d); InvalidateRect(h,NULL,TRUE);}
+        return 0;
     case WM_SIZE: if(d) shiftLayout(h,d); return 0;
     case WM_COMMAND: {
         int id=LOWORD(w);
         switch(id){
         case ID_SH_AUTO:
             d->autoMode = !d->autoMode;
-            setSetting(L"shift_auto", d->autoMode?L"1":L"0");   // remember!
+            setSetting(L"shift_auto", d->autoMode?L"1":L"0");
             shiftRefresh(d); InvalidateRect(h,NULL,TRUE);
             break;
         case ID_SH_S0: case ID_SH_S1: case ID_SH_S2:
@@ -295,6 +325,8 @@ static LRESULT CALLBACK shiftProc(HWND h, UINT m, WPARAM w, LPARAM l){
     case WM_CTLCOLORSTATIC: {
         HDC dc=(HDC)w; SetBkColor(dc,g_theme.surface);
         return (LRESULT)g_brSurface; }
+    case WM_CLOSE:
+        if(d){ *d->ok=false; } KillTimer(h,9); DestroyWindow(h); return 0;
     case WM_ERASEBKGND: return 1;
     case WM_PAINT: {
         PAINTSTRUCT ps; HDC dc0=BeginPaint(h,&ps);
@@ -302,18 +334,16 @@ static LRESULT CALLBACK shiftProc(HWND h, UINT m, WPARAM w, LPARAM l){
         HDC dc=CreateCompatibleDC(dc0);
         HBITMAP bmp=CreateCompatibleBitmap(dc0,rc.right,rc.bottom);
         HGDIOBJ obm=SelectObject(dc,bmp);
-        HBRUSH dim=CreateSolidBrush(g_dark?RGB(8,10,14):RGB(160,170,184));
+        HBRUSH dim=CreateSolidBrush(g_dark?RGB(8,10,14):RGB(150,160,176));
         FillRect(dc,&rc,dim); DeleteObject(dim);
-        int cw=S(460), chh=S(420);
-        int cx=(rc.right-cw)/2, cy=(rc.bottom-chh)/2;
-        RECT card={cx,cy,cx+cw,cy+chh};
-        RECT shd=card; OffsetRect(&shd,0,S(6));
-        fillRoundRect(dc,shd,S(18),g_dark?RGB(5,7,10):RGB(196,204,216),CLR_INVALID);
-        fillRoundRect(dc,card,S(18),g_theme.surface,g_theme.border);
+        RECT c; shiftCard(h,c);
+        RECT shd=c; OffsetRect(&shd,0,S(6));
+        fillRoundRect(dc,shd,S(18),g_dark?RGB(5,7,10):RGB(120,130,146),CLR_INVALID);
+        fillRoundRect(dc,c,S(18),g_theme.surface,g_theme.border);
         SetBkMode(dc,TRANSPARENT);
         SetTextColor(dc,g_theme.text);
         SelectObject(dc,g_fTitle);
-        RECT tr={cx,cy+S(24),cx+cw,cy+S(58)};
+        RECT tr={c.left,c.top+S(24),c.right,c.top+S(58)};
         DrawTextW(dc,L"انتخاب شیفت کاری",-1,&tr,
             DT_CENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
         SelectObject(dc,g_fSmall);
@@ -321,7 +351,7 @@ static LRESULT CALLBACK shiftProc(HWND h, UINT m, WPARAM w, LPARAM l){
         SYSTEMTIME st=iranNow();
         std::wstring sub = L"ساعت ایران: " + toFaDigits(iranTimeStr(st,false))
             + L"  —  شیفت تشخیص داده‌شده: " + shiftName(detectShift());
-        RECT sr={cx,cy+S(60),cx+cw,cy+S(88)};
+        RECT sr={c.left,c.top+S(62),c.right,c.top+S(90)};
         DrawTextW(dc,sub.c_str(),-1,&sr,
             DT_CENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
         BitBlt(dc0,0,0,rc.right,rc.bottom,dc,0,0,SRCCOPY);
@@ -334,21 +364,17 @@ static LRESULT CALLBACK shiftProc(HWND h, UINT m, WPARAM w, LPARAM l){
 }
 bool showShiftDialog(HWND parent, int& shift){
     static bool reg=false;
-    if(!reg){
-        WNDCLASSW wc={0};
-        wc.lpfnWndProc=shiftProc; wc.hInstance=g_hInst;
-        wc.hCursor=LoadCursor(NULL,IDC_ARROW);
-        wc.lpszClassName=SH_CLASS;
-        RegisterClassW(&wc); reg=true;
-    }
+    if(!reg){ regClass(SH_CLASS, shiftProc); reg=true; }
     bool ok=false;
     ShiftData d; d.shift=&shift; d.ok=&ok;
-    d.autoMode = getSetting(L"shift_auto", L"1") == L"1";   // remembered
+    d.autoMode = getSetting(L"shift_auto", L"1") == L"1";
     d.sel = detectShift();
-    RECT rc; GetClientRect(parent,&rc);
-    HWND ov=CreateWindowExW(0,SH_CLASS,L"",WS_CHILD|WS_VISIBLE|WS_CLIPCHILDREN,
-        0,0,rc.right,rc.bottom,parent,NULL,g_hInst,&d);
-    SetWindowPos(ov,HWND_TOP,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE);
-    runModal(ov,parent);
+    d.bAuto=d.b0=d.b1=d.b2=d.bOk=d.bCancel=NULL;
+    RECT fr; GetWindowRect(parent,&fr);
+    HWND ov=CreateWindowExW(0,SH_CLASS,L"",
+        WS_POPUP|WS_VISIBLE,
+        fr.left,fr.top,fr.right-fr.left,fr.bottom-fr.top,
+        parent,NULL,g_hInst,&d);
+    runModal(ov,parent,NULL,0,ID_SH_OK);
     return ok;
 }

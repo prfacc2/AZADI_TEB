@@ -88,11 +88,15 @@ static LRESULT CALLBACK homeProc(HWND h, UINT m, WPARAM w, LPARAM l){
     case WM_SIZE: {
         int W=LOWORD(l), H=HIWORD(l);
         int cw=S(280), chh=S(170), gap=S(28);
+        // vertical stack: logo(88) + 14 + title(44) + sub(28) + 36 + cards(170)
+        int stackH = S(88)+S(14)+S(44)+S(28)+S(36)+chh;
+        int yTop = (H-stackH)/2; if(yTop<S(10)) yTop=S(10);
+        int yCards = yTop + S(88)+S(14)+S(44)+S(28)+S(36);
         int totW = 2*cw+gap;
-        int x=(W-totW)/2, y=H/2 - chh/2 + S(20);
+        int x=(W-totW)/2;
         // RTL: reception card on the right
-        MoveWindow(GetDlgItem(h,ID_HM_RECEPTION), x+cw+gap, y, cw, chh, TRUE);
-        MoveWindow(GetDlgItem(h,ID_HM_MANAGE),    x,        y, cw, chh, TRUE);
+        MoveWindow(GetDlgItem(h,ID_HM_RECEPTION), x+cw+gap, yCards, cw, chh, TRUE);
+        MoveWindow(GetDlgItem(h,ID_HM_MANAGE),    x,        yCards, cw, chh, TRUE);
         return 0; }
     case WM_COMMAND: {
         int id=LOWORD(w);
@@ -125,24 +129,35 @@ static LRESULT CALLBACK homeProc(HWND h, UINT m, WPARAM w, LPARAM l){
         FillRect(dc,&rc,g_brBg);
         SetBkMode(dc,TRANSPARENT);
 
-        // logo circle + name
-        int cy = rc.bottom/2 - S(150);
+        // ---- same vertical stack math as WM_SIZE ----
+        // stack: logo(88) + 14 + title(44) + sub(28) + 36 + cards(170)
+        int chh=S(170);
+        int stackH = S(88)+S(14)+S(44)+S(28)+S(36)+chh;
+        int yTop = (rc.bottom-stackH)/2; if(yTop<S(10)) yTop=S(10);
+
+        // logo circle (88px tall, centered horizontally)
         int r = S(44);
+        int cy = yTop + r;                 // logo center
         RECT lc={rc.right/2-r, cy-r, rc.right/2+r, cy+r};
         fillRoundRect(dc,lc,4*r,g_theme.accent,CLR_INVALID);
         RECT li={lc.left+S(22),lc.top+S(22),lc.right-S(22),lc.bottom-S(22)};
         drawIcon(dc,ICO_CROSS_MED,li,RGB(255,255,255),S(2)+1);
 
+        // title (44px band, starts 14px under logo)
+        int yTitle = yTop + S(88) + S(14);
         SetTextColor(dc,g_theme.text);
         SelectObject(dc,g_fBig);
-        RECT tr={0,cy+r+S(14),rc.right,cy+r+S(64)};
+        RECT tr={0,yTitle,rc.right,yTitle+S(44)};
         DrawTextW(dc,L"سامانه پذیرش و مدیریت درمانگاه آزادی طب",-1,&tr,
-            DT_CENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+            DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+
+        // subtitle (28px band, right under title)
+        int ySub = yTitle + S(44);
         SelectObject(dc,g_fUI);
         SetTextColor(dc,g_theme.textDim);
-        RECT sr={0,cy+r+S(66),rc.right,cy+r+S(96)};
+        RECT sr={0,ySub,rc.right,ySub+S(28)};
         DrawTextW(dc,L"نوع کاربری خود را انتخاب کنید",-1,&sr,
-            DT_CENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+            DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
 
         // hint
         SelectObject(dc,g_fSmall);

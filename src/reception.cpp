@@ -86,25 +86,30 @@ static void recalc(TabPage* t){
 }
 
 // ------------------------------------------------------------- tab layout --
+// Manual RTL, plain (non-mirrored) coordinates:
+//   • billing card pinned to the RIGHT edge of the page
+//   • form occupies the remaining LEFT area
+//   • "right column" (first field of each row) sits at the form's right side
+static void rcMetrics(int W, int pad, int& bw, int& formLeft, int& formRight,
+                      int& fw, int& colW, int& xr, int& xl, bool& stacked){
+    bw = S(330);                               // billing card width
+    formLeft  = pad;
+    formRight = W - pad - bw - pad;            // form ends before billing card
+    fw = formRight - formLeft;
+    stacked = fw < S(300);
+    if(stacked){ bw = 0; formRight = W - pad; fw = formRight - formLeft; }
+    colW = (fw - S(20))/2;
+    xr = formRight - colW;                     // right column (RTL first)
+    xl = formLeft;                             // left column
+}
 static void tabPageLayout(HWND h, TabPage* t){
     RECT rc; GetClientRect(h,&rc);
     int W=rc.right, H=rc.bottom;
     int pad=S(18);
-    // billing card on the right (this window is WS_EX_LAYOUTRTL so x mirrors;
-    // we lay out in logical coords: x=0 is RIGHT edge visually)
-    int bw = S(330);                       // billing width
-    int fx = bw + 2*pad;                   // form starts after billing
-    int fw = W - fx - pad;
-    if(fw < S(300)){ fw = W - 2*pad; fx = pad; bw = 0; }  // tiny screens stack
-    int colW = (fw - S(20))/2;
+    int bw,formLeft,formRight,fw,colW,xr,xl; bool stacked;
+    rcMetrics(W,pad,bw,formLeft,formRight,fw,colW,xr,xl,stacked);
     int rh=S(36), step=S(62), y0=S(46);
 
-    // two columns of fields
-    HWND L[6]={t->eFirst,t->eNid,t->eBirth,t->eMobile,t->eAddr,0};
-    HWND R[6]={t->eLast,t->eFather,t->cGender,t->ePhone,0,0};
-    // order (right column first per RTL): we place R fields at x=fx (right),
-    // L fields at fx+colW+20.
-    int xr=fx, xl=fx+colW+S(20);
     MoveWindow(t->eFirst, xr, y0,          colW, rh, TRUE);
     MoveWindow(t->eLast,  xl, y0,          colW, rh, TRUE);
     MoveWindow(t->eNid,   xr, y0+step,     colW, rh, TRUE);
@@ -113,25 +118,29 @@ static void tabPageLayout(HWND h, TabPage* t){
     MoveWindow(t->cGender,xl, y0+2*step,   colW, S(200), TRUE);
     MoveWindow(t->eMobile,xr, y0+3*step,   colW, rh, TRUE);
     MoveWindow(t->ePhone, xl, y0+3*step,   colW, rh, TRUE);
-    MoveWindow(t->eAddr,  xr, y0+4*step,   fw,   rh, TRUE);
+    MoveWindow(t->eAddr,  formLeft, y0+4*step, fw, rh, TRUE);
     MoveWindow(t->cPType, xr, y0+5*step,   colW, S(200), TRUE);
     MoveWindow(t->cNType, xl, y0+5*step,   colW, S(200), TRUE);
     MoveWindow(t->cIns,   xr, y0+6*step,   colW, S(220), TRUE);
     MoveWindow(t->cSupp,  xl, y0+6*step,   colW, S(220), TRUE);
     MoveWindow(t->ePrice, xr, y0+7*step,   colW, rh, TRUE);
     MoveWindow(t->eDiscount,xl,y0+7*step,  colW, rh, TRUE);
-    MoveWindow(t->bSubmit,xr, y0+8*step+S(4), fw, S(48), TRUE);
+    MoveWindow(t->bSubmit,formLeft, y0+8*step+S(4), fw, S(48), TRUE);
 
-    // billing panel buttons (bottom of billing card)
-    if(bw){
-        int bx=pad, byy=H-S(206);
-        int bbw=bw-S(24);
-        MoveWindow(t->bPrtIns, bx+S(12), byy,        bbw, S(40), TRUE);
-        MoveWindow(t->bPrtRx,  bx+S(12), byy+S(48),  bbw, S(40), TRUE);
-        MoveWindow(t->bPrtLast,bx+S(12), byy+S(96),  bbw, S(40), TRUE);
-        MoveWindow(t->bClose,  bx+S(12), byy+S(150), bbw, S(40), TRUE);
+    // billing panel buttons (bottom of billing card, right edge)
+    if(!stacked){
+        int cardL = W - pad - bw;
+        int bx = cardL + S(12), byy = H - S(206);
+        int bbw = bw - S(24);
+        MoveWindow(t->bPrtIns, bx, byy,        bbw, S(40), TRUE);
+        MoveWindow(t->bPrtRx,  bx, byy+S(48),  bbw, S(40), TRUE);
+        MoveWindow(t->bPrtLast,bx, byy+S(96),  bbw, S(40), TRUE);
+        MoveWindow(t->bClose,  bx, byy+S(150), bbw, S(40), TRUE);
         ShowWindow(t->bPrtIns,SW_SHOW); ShowWindow(t->bPrtRx,SW_SHOW);
         ShowWindow(t->bPrtLast,SW_SHOW); ShowWindow(t->bClose,SW_SHOW);
+    } else {
+        ShowWindow(t->bPrtIns,SW_HIDE); ShowWindow(t->bPrtRx,SW_HIDE);
+        ShowWindow(t->bPrtLast,SW_HIDE); ShowWindow(t->bClose,SW_HIDE);
     }
 }
 
@@ -303,12 +312,9 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         SetBkMode(dc,TRANSPARENT);
 
         int pad=S(18);
-        int bw=S(330);
-        int fx=bw+2*pad, fw=rc.right-fx-pad;
-        bool stacked = fw < S(300);
-        if(stacked){ fw=rc.right-2*pad; fx=pad; }
-        int colW=(fw-S(20))/2, step=S(62), y0=S(46);
-        int xr=fx, xl=fx+colW+S(20);
+        int bw,formLeft,formRight,fw,colW,xr,xl; bool stacked;
+        rcMetrics(rc.right,pad,bw,formLeft,formRight,fw,colW,xr,xl,stacked);
+        int step=S(62), y0=S(46);
 
         // field labels (above each control)
         SelectObject(dc,g_fSmall);
@@ -319,7 +325,7 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             {L"کد ملی",xr,y0+step-S(24),colW},{L"نام پدر",xl,y0+step-S(24),colW},
             {L"تاریخ تولد (مثلاً ۱۳۷۰/۰۱/۰۱)",xr,y0+2*step-S(24),colW},{L"جنسیت",xl,y0+2*step-S(24),colW},
             {L"تلفن همراه",xr,y0+3*step-S(24),colW},{L"تلفن ثابت",xl,y0+3*step-S(24),colW},
-            {L"آدرس",xr,y0+4*step-S(24),fw},{NULL,0,0,0},
+            {L"آدرس",formLeft,y0+4*step-S(24),fw},{NULL,0,0,0},
             {L"نوع بیمار",xr,y0+5*step-S(24),colW},{L"نوع نوبت",xl,y0+5*step-S(24),colW},
             {L"بیمه اصلی",xr,y0+6*step-S(24),colW},{L"بیمه مکمل",xl,y0+6*step-S(24),colW},
             {L"مبلغ خدمت (ریال)",xr,y0+7*step-S(24),colW},{L"تخفیف (ریال)",xl,y0+7*step-S(24),colW},
@@ -335,21 +341,21 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             +L"   ساعت: "+toFaDigits(iranTimeStr(st,false))
             +L"   شیفت: "+shiftName(g_session.shift);
         SetTextColor(dc,g_theme.accent);
-        RECT dnr={fx,y0+8*step+S(58),fx+fw,y0+8*step+S(84)};
+        RECT dnr={formLeft,y0+8*step+S(58),formRight,y0+8*step+S(84)};
         DrawTextW(dc,dn.c_str(),-1,&dnr,DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
         // status message
         if(t && !t->lastMsg.empty()){
             SetTextColor(dc,t->msgCol);
             SelectObject(dc,g_fUIB);
-            RECT mr2={fx,y0+8*step+S(86),fx+fw,y0+8*step+S(140)};
+            RECT mr2={formLeft,y0+8*step+S(86),formRight,y0+8*step+S(140)};
             DrawTextW(dc,t->lastMsg.c_str(),-1,&mr2,
                 DT_RIGHT|DT_WORDBREAK|DT_RTLREADING|DT_NOPREFIX);
         }
 
-        // ============ billing card (right side visually) ============
+        // ============ billing card (pinned to the right edge) ============
         if(!stacked && t){
             recalc(t);
-            RECT card={pad,S(16),pad+bw,rc.bottom-S(16)};
+            RECT card={rc.right-pad-bw,S(16),rc.right-pad,rc.bottom-S(16)};
             fillRoundRect(dc,card,S(14),g_theme.surface,g_theme.border);
             SetTextColor(dc,g_theme.text);
             SelectObject(dc,g_fUIB);
@@ -463,7 +469,7 @@ static void detachTab(TabPage* t){
     }
     int W=S(1040),H=S(700);
     RECT scr; SystemParametersInfoW(SPI_GETWORKAREA,0,&scr,0);
-    HWND win=CreateWindowExW(WS_EX_LAYOUTRTL,DET_CLASS,
+    HWND win=CreateWindowExW(0,DET_CLASS,
         (t->title+L" — "+APP_NAME_W).c_str(),
         WS_OVERLAPPEDWINDOW|WS_VISIBLE,
         (scr.right-W)/2,(scr.bottom-H)/2,W,H,NULL,NULL,g_hInst,NULL);
@@ -504,7 +510,7 @@ static void addTab(HWND h){
     std::wstring dept=g_session.user.dept;
     t->title = dept.empty() ? L"پذیرش" : (L"پذیرش "+dept);
     RECT rc; GetClientRect(h,&rc);
-    CreateWindowExW(WS_EX_LAYOUTRTL,TABPG_CLASS,L"",
+    CreateWindowExW(0,TABPG_CLASS,L"",
         WS_CHILD|WS_CLIPCHILDREN,
         0,infoBarH()+tabBarH(),rc.right,rc.bottom-infoBarH()-tabBarH(),
         h,NULL,g_hInst,t);
@@ -535,24 +541,22 @@ static void closeTab(TabPage* t){
     if(h){ recLayoutTabs(h); InvalidateRect(h,NULL,TRUE); }
 }
 
-// tab geometry helpers (visual coords; reception window is RTL-mirrored,
-// but we draw the strip manually in client coords where x=0 is left)
-static RECT tabRect(int i){
-    // tabs flow from the right edge (RTL) — but since window has
-    // WS_EX_LAYOUTRTL, logical x=0 *is* the right edge visually.
+// tab geometry helpers — plain coords, tabs flow RIGHT → LEFT (RTL)
+static RECT tabRect(HWND h, int i){
+    RECT rc; GetClientRect(h,&rc);
     RECT r;
-    r.left = S(8) + i*(tabW()+S(6));
-    r.top = infoBarH()+S(4);
-    r.right = r.left + tabW();
-    r.bottom = infoBarH()+tabBarH()-S(2);
+    r.right = rc.right - S(8) - i*(tabW()+S(6));
+    r.left  = r.right - tabW();
+    r.top   = infoBarH()+S(4);
+    r.bottom= infoBarH()+tabBarH()-S(2);
     return r;
 }
-static int hitTab(POINT pt, int* part){
+static int hitTab(HWND h, POINT pt, int* part){
     // part: 0=body 1=close 2=detach
     if(!s_rd) return -1;
     int vis=0;
     for(size_t i=0;i<s_rd->tabs.size();i++){
-        RECT r=tabRect((int)i);
+        RECT r=tabRect(h,(int)i);
         if(PtInRect(&r,pt)){
             RECT cl={r.left+S(6),r.top+S(7),r.left+S(26),r.bottom-S(7)};
             RECT dt={r.left+S(28),r.top+S(7),r.left+S(48),r.bottom-S(7)};
@@ -589,11 +593,10 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
         }
         break;
     case WM_SIZE: {
-        int W=LOWORD(l);
         int bh=S(38), y=(infoBarH()-bh)/2;
-        // logical x=0 is visually right (RTL layout)
-        MoveWindow(s_rd->bNewTab, W-S(316), y, S(150), bh, TRUE);
-        MoveWindow(s_rd->bCalc,   W-S(158), y, S(150), bh, TRUE);
+        // action buttons on the LEFT side of the info bar (RTL UI)
+        MoveWindow(s_rd->bCalc,   S(8),   y, S(150), bh, TRUE);
+        MoveWindow(s_rd->bNewTab, S(166), y, S(150), bh, TRUE);
         recLayoutTabs(h);
         return 0; }
     case WM_COMMAND: {
@@ -603,7 +606,7 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
         return 0; }
     case WM_MOUSEMOVE: {
         POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
-        int part=0, hit=hitTab(pt,&part);
+        int part=0, hit=hitTab(h,pt,&part);
         int hc = (part==1)?hit:-1, hd=(part==2)?hit:-1;
         if(hit!=s_rd->hotTab || hc!=s_rd->hotClose || hd!=s_rd->hotDetach){
             s_rd->hotTab=hit; s_rd->hotClose=hc; s_rd->hotDetach=hd;
@@ -621,7 +624,7 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
         return 0;
     case WM_LBUTTONDOWN: {
         POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
-        int part=0, hit=hitTab(pt,&part);
+        int part=0, hit=hitTab(h,pt,&part);
         if(hit>=0){
             TabPage* t=s_rd->tabs[hit];
             if(part==1) closeTab(t);
@@ -664,29 +667,29 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
         SelectObject(dc,op); DeleteObject(pen);
 
         SetBkMode(dc,TRANSPARENT);
-        // ---- info bar texts (RTL window: x=0 visually right) ----
+        // ---- info bar texts (anchored to the RIGHT edge, RTL) ----
         SYSTEMTIME st=iranNow();
         SelectObject(dc,g_fUIB);
         SetTextColor(dc,g_theme.text);
         std::wstring info =
             L"کاربر جاری: " + g_session.user.username;
-        RECT ir={S(12),0,S(560),infoBarH()};
+        RECT ir={rc.right-S(420),0,rc.right-S(12),infoBarH()};
         DrawTextW(dc,info.c_str(),-1,&ir,
-            DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+            DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
         SelectObject(dc,g_fUI);
         SetTextColor(dc,g_theme.textDim);
         std::wstring info2 =
             L"نوع دسترسی: پذیرش   |   " + toFaDigits(jalaliDateShort(st)) +
             L"  " + toFaDigits(iranTimeStr(st,false));
-        RECT ir2={S(330),0,S(900),infoBarH()};
+        RECT ir2={rc.right-S(900),0,rc.right-S(430),infoBarH()};
         DrawTextW(dc,info2.c_str(),-1,&ir2,
-            DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+            DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
 
         // ---- tabs ----
         if(s_rd){
             for(size_t i=0;i<s_rd->tabs.size();i++){
                 TabPage* t=s_rd->tabs[i];
-                RECT r=tabRect((int)i);
+                RECT r=tabRect(h,(int)i);
                 bool act = ((int)i==s_rd->active) && !t->detached;
                 bool hov = ((int)i==s_rd->hotTab);
                 COLORREF fill = act?g_theme.bg : hov?g_theme.hover:g_theme.surface;
@@ -742,7 +745,7 @@ HWND createReceptionScreen(HWND frame){
         RegisterClassW(&wc); reg=true;
     }
     RECT rc=frameContentRect();
-    HWND h=CreateWindowExW(WS_EX_LAYOUTRTL,RC_CLASS,L"",
+    HWND h=CreateWindowExW(0,RC_CLASS,L"",
         WS_CHILD|WS_VISIBLE|WS_CLIPCHILDREN,
         rc.left,rc.top,rc.right-rc.left,rc.bottom-rc.top,frame,NULL,g_hInst,NULL);
     // open first tab automatically
