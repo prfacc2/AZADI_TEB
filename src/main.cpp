@@ -99,24 +99,34 @@ static LRESULT CALLBACK homeProc(HWND h, UINT m, WPARAM w, LPARAM l){
         MoveWindow(GetDlgItem(h,ID_HM_MANAGE),    x,        yCards, cw, chh, TRUE);
         return 0; }
     case WM_COMMAND: {
+        static bool s_busy=false;            // re-entry guard for modal dialogs
+        if(s_busy) return 0;
         int id=LOWORD(w);
         if(id==ID_HM_RECEPTION){
+            s_busy=true;
             User u;
             if(showLoginDialog(g_hFrame, 0, u)){
                 int shift=detectShift();
                 if(showShiftDialog(g_hFrame, shift)){
                     g_session.user=u; g_session.shift=shift;
                     g_session.loginAt=iranNow();
+                    s_busy=false;
                     switchScreen(SC_RECEPTION);
+                    return 0;
                 }
             }
+            s_busy=false;
         } else if(id==ID_HM_MANAGE){
+            s_busy=true;
             User u;
             if(showLoginDialog(g_hFrame, 1, u)){
                 g_session.user=u; g_session.shift=detectShift();
                 g_session.loginAt=iranNow();
+                s_busy=false;
                 switchScreen(SC_MANAGE);
+                return 0;
             }
+            s_busy=false;
         }
         return 0; }
     case WM_ERASEBKGND: return 1;
@@ -239,21 +249,24 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         }
         else if(id==ID_FR_THEME){
             applyTheme(!g_dark);
-            DestroyWindow(s_bTheme);
-            s_bTheme = createFlatButton(h, ID_FR_THEME, L"",
-                g_dark?ICO_SUN:ICO_MOON, BS_GHOST,0,0,10,10);
-            frameLayout(h);
+            // v1.1.0: swap icon in place — never destroy the button that
+            // generated this very command (use-after-free crash).
+            setFlatButtonIcon(s_bTheme, g_dark?ICO_SUN:ICO_MOON);
             broadcastThemeChange();
         }
         else if(id==ID_FR_UPDATE) checkRemoteUpdate(h);
         return 0; }
     case WM_KEYDOWN: {
         // hidden admin: Ctrl + P + N held together (home screen only)
-        if(s_curScreen==SC_HOME &&
+        static bool s_dlgOpen = false;          // re-entry guard
+        if(s_curScreen==SC_HOME && !s_dlgOpen &&
            (GetKeyState(VK_CONTROL)&0x8000) &&
            (GetKeyState('P')&0x8000) && (GetKeyState('N')&0x8000)){
+            s_dlgOpen = true;
             User u;
-            if(showLoginDialog(h, 2, u)){
+            bool ok = showLoginDialog(h, 2, u);
+            s_dlgOpen = false;
+            if(ok){
                 g_session.user=u; g_session.shift=detectShift();
                 g_session.loginAt=iranNow();
                 switchScreen(SC_ADMIN);

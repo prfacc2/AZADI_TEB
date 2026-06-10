@@ -53,12 +53,23 @@ void applyTheme(bool dark){
     setSetting(L"theme", dark ? L"dark" : L"light");
 }
 static BOOL CALLBACK invProc(HWND h, LPARAM){
+    SendMessageW(h, WM_APP_THEME, 0, 0);     // let controls re-color themselves
     InvalidateRect(h, NULL, TRUE);
     EnumChildWindows(h, invProc, 0);
     return TRUE;
 }
+static BOOL CALLBACK topProc(HWND h, LPARAM){
+    // also refresh OUR other top-level windows (calculator, detached tabs)
+    DWORD pid=0; GetWindowThreadProcessId(h,&pid);
+    if(pid==GetCurrentProcessId()){
+        SendMessageW(h, WM_APP_THEME, 0, 0);
+        InvalidateRect(h,NULL,TRUE);
+        EnumChildWindows(h, invProc, 0);
+    }
+    return TRUE;
+}
 void broadcastThemeChange(){
-    if(g_hFrame){ InvalidateRect(g_hFrame,NULL,TRUE); EnumChildWindows(g_hFrame, invProc, 0); }
+    EnumWindows(topProc, 0);
 }
 
 // =================================================================== draw ==
@@ -218,9 +229,14 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
             d->down=false; InvalidateRect(h,NULL,TRUE); ReleaseCapture();
             RECT rc; GetClientRect(h,&rc);
             POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
-            if(PtInRect(&rc,pt))
-                SendMessageW(GetParent(h), WM_COMMAND,
+            if(PtInRect(&rc,pt)){
+                // v1.1.0: POST (not send) the click. Some handlers destroy
+                // this very button (close-tab, switch-screen, theme-toggle);
+                // with SendMessage we'd return into freed window state.
+                PostMessageW(GetParent(h), WM_COMMAND,
                     MAKEWPARAM(GetDlgCtrlID(h), BN_CLICKED), (LPARAM)h);
+                return 0;
+            }
         }
         break; }
     case WM_ERASEBKGND: return 1;
@@ -327,9 +343,16 @@ HWND createFlatButton(HWND parent,int id,const wchar_t* text,int icon,int style,
     HWND b = CreateWindowExW(0, L"AzFlatBtn", text, WS_CHILD|WS_VISIBLE,
         x,y,w,h, parent,(HMENU)(UINT_PTR)id, g_hInst,
         (LPVOID)(UINT_PTR)MAKELONG(icon,style));
-    if(sub){
+    if(sub && b){
         BtnData* d=(BtnData*)GetWindowLongPtrW(b,GWLP_USERDATA);
         if(d) d->sub = sub;
     }
     return b;
+}
+//  v1.1.0: change a flat button's icon in place (e.g. moon↔sun on theme
+//  toggle) instead of destroying & recreating it mid-click.
+void setFlatButtonIcon(HWND btn, int icon){
+    if(!btn || !IsWindow(btn)) return;
+    BtnData* d=(BtnData*)GetWindowLongPtrW(btn,GWLP_USERDATA);
+    if(d){ d->icon = icon; InvalidateRect(btn,NULL,TRUE); }
 }

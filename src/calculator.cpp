@@ -181,25 +181,29 @@ static LRESULT CALLBACK calcProc(HWND h, UINT m, WPARAM w, LPARAM l){
     case WM_DESTROY: delete s; break;
     case WM_ERASEBKGND: return 1;
     case WM_MOUSEMOVE: {
+        if(!s) break;
         POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
         int hit = cellHit(h,pt);
         if(hit != s->hot){ s->hot=hit; InvalidateRect(h,NULL,FALSE); }
         TRACKMOUSEEVENT t={sizeof(t),TME_LEAVE,h,0}; TrackMouseEvent(&t);
         break; }
     case WM_MOUSELEAVE:
-        if(s->hot!=-1){ s->hot=-1; InvalidateRect(h,NULL,FALSE);} break;
+        if(s && s->hot!=-1){ s->hot=-1; InvalidateRect(h,NULL,FALSE);} break;
     case WM_LBUTTONDOWN: {
+        if(!s) break;
         POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
         s->press = cellHit(h,pt);
         if(s->press>=0) InvalidateRect(h,NULL,FALSE);
         break; }
     case WM_LBUTTONUP: {
+        if(!s) break;
         POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
         int hit = cellHit(h,pt);
-        if(hit>=0 && hit==s->press) calcKey(h, s, KEYS[hit]);
+        if(hit>=0 && hit<20 && hit==s->press) calcKey(h, s, KEYS[hit]);
         s->press=-1; InvalidateRect(h,NULL,FALSE);
         break; }
     case WM_KEYDOWN: {
+        if(!s) break;
         switch(w){
         case VK_ESCAPE: DestroyWindow(h); return 0;
         case VK_RETURN: calcKey(h,s,L"="); return 0;
@@ -217,6 +221,7 @@ static LRESULT CALLBACK calcProc(HWND h, UINT m, WPARAM w, LPARAM l){
             { calcKey(h,s,std::wstring(1,(wchar_t)(L'0'+w-VK_NUMPAD0))); return 0; }
         break; }
     case WM_CHAR: {
+        if(!s) break;
         wchar_t c=(wchar_t)w;
         if(c==L'+'||c==L'-'||c==L'*'||c==L'/') calcKey(h,s,std::wstring(1,c));
         else if(c==L'.'||c==L',') calcKey(h,s,L".");
@@ -224,6 +229,7 @@ static LRESULT CALLBACK calcProc(HWND h, UINT m, WPARAM w, LPARAM l){
         else if(c==L'=') calcKey(h,s,L"=");
         return 0; }
     case WM_PAINT: {
+        if(!s){ PAINTSTRUCT ps; BeginPaint(h,&ps); EndPaint(h,&ps); return 0; }
         PAINTSTRUCT ps; HDC dc0=BeginPaint(h,&ps);
         RECT rc; GetClientRect(h,&rc);
         HDC dc=CreateCompatibleDC(dc0);

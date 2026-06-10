@@ -3,6 +3,11 @@
 //  v1.0.1: dialogs are now OWNED POPUP windows (not children) so modal
 //  EnableWindow() on the frame no longer disables the dialog itself.
 //  No WS_EX_LAYOUTRTL anywhere (avoids GDI mirroring bugs) — RTL is manual.
+//  v1.1.0 CRITICAL FIX: dialogs no longer call PostQuitMessage(0) in
+//  WM_DESTROY. The old code queued a WM_QUIT that runModal never consumed
+//  (its IsWindow() check exits the loop first), so the stray WM_QUIT leaked
+//  into the MAIN message loop and silently terminated the whole app right
+//  after every login / cancel — the "instant crash" bug.
 // ============================================================================
 #include "app.h"
 #include <stdio.h>
@@ -73,6 +78,7 @@ static LRESULT CALLBACK loginProc(HWND h, UINT m, WPARAM w, LPARAM l){
         SetBkColor(dc,g_theme.surface);
         return (LRESULT)g_brSurface; }
     case WM_COMMAND: {
+        if(!d) return 0;
         int id=LOWORD(w);
         if(id==ID_LG_OK){
             wchar_t ub[128], pb[128];
@@ -157,9 +163,7 @@ static LRESULT CALLBACK loginProc(HWND h, UINT m, WPARAM w, LPARAM l){
         SelectObject(dc,obm); DeleteObject(bmp); DeleteDC(dc);
         EndPaint(h,&ps);
         return 0; }
-    case WM_DESTROY:
-        PostQuitMessage(0);   // consumed inside runModal
-        return 0;
+    // NOTE: no PostQuitMessage here — runModal exits via IsWindow() check.
     }
     return DefWindowProcW(h,m,w,l);
 }
@@ -176,12 +180,17 @@ static void regClass(const wchar_t* name, WNDPROC proc){
 //  top-level window, so disabling the frame doesn't disable it.
 static void runModal(HWND overlay, HWND parent, HWND firstFocus,
                      int idUserEdit, int idOkBtn){
+    if(!overlay || !IsWindow(overlay)) return;   // creation failed — never
+                                                 // leave the frame disabled
     EnableWindow(parent, FALSE);
     SetForegroundWindow(overlay);
     if(firstFocus) SetFocus(firstFocus);
     MSG msg;
     while(IsWindow(overlay) && GetMessageW(&msg,NULL,0,0)){
-        if(msg.message==WM_QUIT) break;
+        if(msg.message==WM_QUIT){               // never ours — re-post and bail
+            PostQuitMessage((int)msg.wParam);
+            break;
+        }
         if(msg.message==WM_KEYDOWN && msg.wParam==VK_TAB &&
            GetAncestor(msg.hwnd,GA_ROOT)==overlay){
             HWND f=GetFocus();
@@ -228,6 +237,7 @@ bool showLoginDialog(HWND parent, int role, User& out){
         WS_POPUP|WS_VISIBLE,
         fr.left,fr.top,fr.right-fr.left,fr.bottom-fr.top,
         parent,NULL,g_hInst,&d);
+    if(!ov) return false;
     runModal(ov, parent, d.eUser, ID_LG_USER, ID_LG_OK);
     return ok;
 }
@@ -303,6 +313,7 @@ static LRESULT CALLBACK shiftProc(HWND h, UINT m, WPARAM w, LPARAM l){
         return 0;
     case WM_SIZE: if(d) shiftLayout(h,d); return 0;
     case WM_COMMAND: {
+        if(!d) return 0;
         int id=LOWORD(w);
         switch(id){
         case ID_SH_AUTO:
@@ -358,7 +369,7 @@ static LRESULT CALLBACK shiftProc(HWND h, UINT m, WPARAM w, LPARAM l){
         SelectObject(dc,obm); DeleteObject(bmp); DeleteDC(dc);
         EndPaint(h,&ps);
         return 0; }
-    case WM_DESTROY: PostQuitMessage(0); return 0;
+    // NOTE: no PostQuitMessage here — runModal exits via IsWindow() check.
     }
     return DefWindowProcW(h,m,w,l);
 }
@@ -375,6 +386,7 @@ bool showShiftDialog(HWND parent, int& shift){
         WS_POPUP|WS_VISIBLE,
         fr.left,fr.top,fr.right-fr.left,fr.bottom-fr.top,
         parent,NULL,g_hInst,&d);
+    if(!ov) return false;
     runModal(ov,parent,NULL,0,ID_SH_OK);
     return ok;
 }

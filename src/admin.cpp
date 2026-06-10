@@ -103,6 +103,14 @@ static LRESULT CALLBACK adminProc(HWND h, UINT m, WPARAM w, LPARAM l){
         return 0; }
     case WM_NCDESTROY: delete d; break;
     case WM_SIZE: if(d) adLayout(h,d); return 0;
+    case WM_APP_THEME:        // v1.1.0: re-color ListView on theme switch
+        if(d && d->list){
+            ListView_SetBkColor(d->list,g_theme.surface);
+            ListView_SetTextBkColor(d->list,g_theme.surface);
+            ListView_SetTextColor(d->list,g_theme.text);
+            InvalidateRect(d->list,NULL,TRUE);
+        }
+        return 0;
     case WM_CTLCOLOREDIT: {
         HDC dc=(HDC)w;
         SetTextColor(dc,g_theme.inputText); SetBkColor(dc,g_theme.inputBg);
@@ -112,6 +120,7 @@ static LRESULT CALLBACK adminProc(HWND h, UINT m, WPARAM w, LPARAM l){
         SetTextColor(dc,g_theme.inputText); SetBkColor(dc,g_theme.inputBg);
         return (LRESULT)g_brInput; }
     case WM_COMMAND: {
+        if(!d) return 0;
         int id=LOWORD(w);
         if(id==ID_AD_CREATE){
             wchar_t fb[128],ub[128],pb[128],db[128];

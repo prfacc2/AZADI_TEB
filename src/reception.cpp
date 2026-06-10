@@ -64,6 +64,7 @@ static int tabW()    { return S(210); }
 
 // ---------------------------------------------------------------- billing --
 static void recalc(TabPage* t){
+    if(!t || !t->ePrice || !t->eDiscount) return;
     wchar_t buf[64];
     GetWindowTextW(t->ePrice,buf,64);
     long long price = parseMoney(buf);
@@ -72,8 +73,8 @@ static void recalc(TabPage* t){
 
     int insIdx  = (int)SendMessageW(t->cIns, CB_GETCURSEL,0,0);
     int suppIdx = (int)SendMessageW(t->cSupp,CB_GETCURSEL,0,0);
-    if(insIdx<0) insIdx=0;
-    if(suppIdx<0) suppIdx=0;
+    if(insIdx<0  || insIdx>=N_INSURANCES) insIdx=0;
+    if(suppIdx<0 || suppIdx>=N_SUPP)      suppIdx=0;
 
     t->total      = price;
     t->mainShare  = price * INSURANCES[insIdx].pct / 100;
@@ -102,13 +103,27 @@ static void rcMetrics(int W, int pad, int& bw, int& formLeft, int& formRight,
     xr = formRight - colW;                     // right column (RTL first)
     xl = formLeft;                             // left column
 }
+//  v1.1.0: vertical metrics adapt to available height so the form never
+//  overflows on small / low-res monitors (responsive requirement).
+static void rcVMetrics(int H, int& y0, int& step, int& rh){
+    y0 = S(46); step = S(62); rh = S(36);
+    int need = y0 + 8*step + S(120);           // rows + submit + messages
+    if(H > 0 && need > H){
+        step = (H - S(150)) / 8;
+        if(step < S(44)) step = S(44);
+        y0 = S(40);
+        rh = step - S(26); if(rh > S(36)) rh = S(36); if(rh < S(24)) rh = S(24);
+    }
+}
 static void tabPageLayout(HWND h, TabPage* t){
+    if(!t) return;
     RECT rc; GetClientRect(h,&rc);
     int W=rc.right, H=rc.bottom;
+    if(W<=0 || H<=0) return;
     int pad=S(18);
     int bw,formLeft,formRight,fw,colW,xr,xl; bool stacked;
     rcMetrics(W,pad,bw,formLeft,formRight,fw,colW,xr,xl,stacked);
-    int rh=S(36), step=S(62), y0=S(46);
+    int y0,step,rh; rcVMetrics(H,y0,step,rh);
 
     MoveWindow(t->eFirst, xr, y0,          colW, rh, TRUE);
     MoveWindow(t->eLast,  xl, y0,          colW, rh, TRUE);
@@ -162,8 +177,8 @@ static void collect(TabPage* t, ReceptionRecord& r){
     int ni=(int)SendMessageW(t->cNType,CB_GETCURSEL,0,0);
     if(ni==1) r.patientType += L" — اورژانس";
     else if(ni==2) r.patientType += L" — پرسنلی";
-    int ii=(int)SendMessageW(t->cIns,CB_GETCURSEL,0,0);  if(ii<0)ii=0;
-    int si=(int)SendMessageW(t->cSupp,CB_GETCURSEL,0,0); if(si<0)si=0;
+    int ii=(int)SendMessageW(t->cIns,CB_GETCURSEL,0,0);  if(ii<0||ii>=N_INSURANCES)ii=0;
+    int si=(int)SendMessageW(t->cSupp,CB_GETCURSEL,0,0); if(si<0||si>=N_SUPP)si=0;
     r.insIdx=ii; r.suppIdx=si;
     r.insurance=INSURANCES[ii].name; r.suppInsurance=SUPP_INSURANCES[si].name;
     recalc(t);
@@ -250,6 +265,7 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         SetTextColor(dc,g_theme.inputText); SetBkColor(dc,g_theme.inputBg);
         return (LRESULT)g_brInput; }
     case WM_COMMAND: {
+        if(!t) return 0;
         int id=LOWORD(w), code=HIWORD(w);
         if((id==ID_F_INS||id==ID_F_SUPP) && code==CBN_SELCHANGE){
             recalc(t); InvalidateRect(h,NULL,FALSE);
@@ -305,6 +321,7 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
     case WM_PAINT: {
         PAINTSTRUCT ps; HDC dc0=BeginPaint(h,&ps);
         RECT rc; GetClientRect(h,&rc);
+        if(rc.right<=0 || rc.bottom<=0){ EndPaint(h,&ps); return 0; }
         HDC dc=CreateCompatibleDC(dc0);
         HBITMAP bmp=CreateCompatibleBitmap(dc0,rc.right,rc.bottom);
         HGDIOBJ obm=SelectObject(dc,bmp);
@@ -314,7 +331,7 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         int pad=S(18);
         int bw,formLeft,formRight,fw,colW,xr,xl; bool stacked;
         rcMetrics(rc.right,pad,bw,formLeft,formRight,fw,colW,xr,xl,stacked);
-        int step=S(62), y0=S(46);
+        int y0,step,rh2; rcVMetrics(rc.bottom,y0,step,rh2);
 
         // field labels (above each control)
         SelectObject(dc,g_fSmall);
@@ -430,27 +447,34 @@ static LRESULT CALLBACK detachedProc(HWND h, UINT m, WPARAM w, LPARAM l){
         if(page) MoveWindow(page,0,0,LOWORD(l),HIWORD(l),TRUE);
         return 0; }
     case WM_CLOSE: {
-        // re-attach page back into the tab strip
+        // re-attach page back into the tab strip (if reception still exists)
         HWND page=(HWND)GetWindowLongPtrW(h,GWLP_USERDATA);
         TabPage* t = page?(TabPage*)GetWindowLongPtrW(page,GWLP_USERDATA):NULL;
-        if(t && s_rd){
+        HWND rec = FindWindowExW(g_hFrame,NULL,RC_CLASS,NULL);
+        if(t && s_rd && rec && IsWindow(rec)){
             t->detached=false;
-            HWND recWnd=GetParent(t->bSubmit); // page itself
-            SetParent(page, FindWindowExW(g_hFrame,NULL,RC_CLASS,NULL));
-            HWND rec=FindWindowExW(g_hFrame,NULL,RC_CLASS,NULL);
-            if(rec){
-                RECT rc; GetClientRect(rec,&rc);
-                MoveWindow(page,0,infoBarH()+tabBarH(),
-                    rc.right,rc.bottom-infoBarH()-tabBarH(),TRUE);
-                // activate it
-                for(size_t i=0;i<s_rd->tabs.size();i++)
-                    if(s_rd->tabs[i]==t) s_rd->active=(int)i;
-                for(auto* tp : s_rd->tabs)
-                    ShowWindow(tp->page, (tp==t && !tp->detached)?SW_SHOW:
-                        tp->detached?SW_SHOW:SW_HIDE);
-                InvalidateRect(rec,NULL,TRUE);
-            }
-            (void)recWnd;
+            SetWindowLongPtrW(h,GWLP_USERDATA,0);   // detach link BEFORE reparent
+            SetParent(page, rec);
+            RECT rc; GetClientRect(rec,&rc);
+            MoveWindow(page,0,infoBarH()+tabBarH(),
+                rc.right,rc.bottom-infoBarH()-tabBarH(),TRUE);
+            for(size_t i=0;i<s_rd->tabs.size();i++)
+                if(s_rd->tabs[i]==t) s_rd->active=(int)i;
+            for(auto* tp : s_rd->tabs)
+                ShowWindow(tp->page,
+                    (tp->detached || tp==t) ? SW_SHOW : SW_HIDE);
+            InvalidateRect(rec,NULL,TRUE);
+        } else if(t && s_rd){
+            // reception screen gone — remove tab entirely (page dies with us)
+            SetWindowLongPtrW(h,GWLP_USERDATA,0);
+            for(size_t i=0;i<s_rd->tabs.size();i++)
+                if(s_rd->tabs[i]==t){
+                    s_rd->tabs.erase(s_rd->tabs.begin()+i);
+                    delete t;
+                    if(s_rd->active>=(int)s_rd->tabs.size())
+                        s_rd->active=(int)s_rd->tabs.size()-1;
+                    break;
+                }
         }
         DestroyWindow(h);
         return 0; }
@@ -498,6 +522,7 @@ static void recLayoutTabs(HWND h){
     }
 }
 static void addTab(HWND h){
+    if(!s_rd) return;
     static bool reg=false;
     if(!reg){
         WNDCLASSW wc={0};
@@ -510,10 +535,11 @@ static void addTab(HWND h){
     std::wstring dept=g_session.user.dept;
     t->title = dept.empty() ? L"پذیرش" : (L"پذیرش "+dept);
     RECT rc; GetClientRect(h,&rc);
-    CreateWindowExW(0,TABPG_CLASS,L"",
+    HWND pg=CreateWindowExW(0,TABPG_CLASS,L"",
         WS_CHILD|WS_CLIPCHILDREN,
         0,infoBarH()+tabBarH(),rc.right,rc.bottom-infoBarH()-tabBarH(),
         h,NULL,g_hInst,t);
+    if(!pg){ delete t; return; }
     s_rd->tabs.push_back(t);
     s_rd->active=(int)s_rd->tabs.size()-1;
     recLayoutTabs(h);
@@ -593,6 +619,7 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
         }
         break;
     case WM_SIZE: {
+        if(!s_rd) return 0;
         int bh=S(38), y=(infoBarH()-bh)/2;
         // action buttons on the LEFT side of the info bar (RTL UI)
         MoveWindow(s_rd->bCalc,   S(8),   y, S(150), bh, TRUE);
@@ -605,6 +632,7 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
         else if(id==ID_RC_NEWTAB) addTab(h);
         return 0; }
     case WM_MOUSEMOVE: {
+        if(!s_rd) return 0;
         POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
         int part=0, hit=hitTab(h,pt,&part);
         int hc = (part==1)?hit:-1, hd=(part==2)?hit:-1;
@@ -623,9 +651,10 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
         }
         return 0;
     case WM_LBUTTONDOWN: {
+        if(!s_rd) return 0;
         POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
         int part=0, hit=hitTab(h,pt,&part);
-        if(hit>=0){
+        if(hit>=0 && hit<(int)s_rd->tabs.size()){
             TabPage* t=s_rd->tabs[hit];
             if(part==1) closeTab(t);
             else if(part==2 && !t->detached) detachTab(t);

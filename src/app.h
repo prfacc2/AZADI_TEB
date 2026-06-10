@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.0.1"
+#define APP_VERSION_W   L"1.1.0"
 #define APP_NAME_W      L"\u0622\u0632\u0627\u062f\u06cc \u0637\u0628"   // آزادی طب
 #define APP_CLASS_W     L"AzadiTebFrame"
 
@@ -59,6 +59,7 @@ extern Theme   g_theme;
 extern HBRUSH  g_brBg, g_brSurface, g_brSurface2, g_brInput;
 void applyTheme(bool dark);             // rebuild colors + brushes
 void broadcastThemeChange();            // invalidate everything
+#define WM_APP_THEME (WM_APP+11)        // sent to every window on theme switch
 
 // ------------------------------------------------------------- flat button -
 enum IconId {
@@ -71,6 +72,7 @@ void  registerFlatButton();
 HWND  createFlatButton(HWND parent, int id, const wchar_t* text,
                        int icon, int style,
                        int x,int y,int w,int h, const wchar_t* sub=NULL);
+void  setFlatButtonIcon(HWND btn, int icon);   // in-place icon swap (v1.1.0)
 void  drawIcon(HDC dc, int icon, RECT rc, COLORREF col, int thick);
 void  fillRoundRect(HDC dc, RECT rc, int rad, COLORREF fill, COLORREF border);
 
