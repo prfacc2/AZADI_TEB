@@ -1,0 +1,202 @@
+// ============================================================================
+//  util.cpp — time (Iran/Jalali), settings, files, money helpers, logging
+// ============================================================================
+#include "app.h"
+#include <shlwapi.h>
+#include <stdio.h>
+
+// ----------------------------------------------------------------- exe dir -
+std::wstring exeDir(){
+    wchar_t buf[MAX_PATH]; GetModuleFileNameW(NULL, buf, MAX_PATH);
+    wchar_t* p = wcsrchr(buf, L'\\'); if(p) *p = 0;
+    return buf;
+}
+static std::wstring ensureDir(const std::wstring& d){
+    CreateDirectoryW(d.c_str(), NULL); return d;
+}
+std::wstring dataDir(){ return ensureDir(exeDir()+L"\\data"); }
+std::wstring logsDir(){ return ensureDir(exeDir()+L"\\logs"); }
+
+// --------------------------------------------------------------- utf8 file -
+bool writeFileUtf8(const std::wstring& path, const std::wstring& text, bool append){
+    HANDLE h = CreateFileW(path.c_str(), append?FILE_APPEND_DATA:GENERIC_WRITE,
+        FILE_SHARE_READ, NULL, append?OPEN_ALWAYS:CREATE_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL, NULL);
+    if(h==INVALID_HANDLE_VALUE) return false;
+    int n = WideCharToMultiByte(CP_UTF8,0,text.c_str(),(int)text.size(),NULL,0,NULL,NULL);
+    std::vector<char> buf(n);
+    WideCharToMultiByte(CP_UTF8,0,text.c_str(),(int)text.size(),buf.data(),n,NULL,NULL);
+    DWORD wr; WriteFile(h, buf.data(), n, &wr, NULL);
+    CloseHandle(h); return true;
+}
+std::wstring readFileUtf8(const std::wstring& path){
+    HANDLE h = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ|FILE_SHARE_WRITE,
+        NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if(h==INVALID_HANDLE_VALUE) return L"";
+    DWORD sz = GetFileSize(h, NULL);
+    std::vector<char> buf(sz+1, 0);
+    DWORD rd; ReadFile(h, buf.data(), sz, &rd, NULL); CloseHandle(h);
+    const char* s = buf.data(); int len=(int)rd;
+    if(len>=3 && (unsigned char)s[0]==0xEF){ s+=3; len-=3; }   // BOM
+    int n = MultiByteToWideChar(CP_UTF8,0,s,len,NULL,0);
+    std::wstring out(n, 0);
+    MultiByteToWideChar(CP_UTF8,0,s,len,&out[0],n);
+    return out;
+}
+
+// ---------------------------------------------------------------- logging --
+void logLine(const std::wstring& s){
+    SYSTEMTIME st = iranNow();
+    wchar_t pre[64];
+    swprintf(pre,64,L"[%04d-%02d-%02d %02d:%02d:%02d] ",
+        st.wYear,st.wMonth,st.wDay,st.wHour,st.wMinute,st.wSecond);
+    writeFileUtf8(logsDir()+L"\\app.log", std::wstring(pre)+s+L"\r\n", true);
+}
+
+// --------------------------------------------------------------- settings --
+//  simple key=value store: data\settings.ini
+static std::wstring settingsPath(){ return dataDir()+L"\\settings.ini"; }
+std::wstring getSetting(const std::wstring& key, const std::wstring& def){
+    std::wstring all = readFileUtf8(settingsPath());
+    size_t pos = 0;
+    while(pos < all.size()){
+        size_t e = all.find(L'\n', pos);
+        if(e==std::wstring::npos) e = all.size();
+        std::wstring line = trim(all.substr(pos, e-pos));
+        size_t eq = line.find(L'=');
+        if(eq!=std::wstring::npos && trim(line.substr(0,eq))==key)
+            return trim(line.substr(eq+1));
+        pos = e+1;
+    }
+    return def;
+}
+void setSetting(const std::wstring& key, const std::wstring& val){
+    std::wstring all = readFileUtf8(settingsPath());
+    std::wstring out; bool done=false; size_t pos=0;
+    while(pos < all.size()){
+        size_t e = all.find(L'\n', pos);
+        if(e==std::wstring::npos) e = all.size();
+        std::wstring line = trim(all.substr(pos, e-pos));
+        size_t eq = line.find(L'=');
+        if(!line.empty()){
+            if(eq!=std::wstring::npos && trim(line.substr(0,eq))==key){
+                out += key+L"="+val+L"\r\n"; done=true;
+            } else out += line+L"\r\n";
+        }
+        pos = e+1;
+    }
+    if(!done) out += key+L"="+val+L"\r\n";
+    writeFileUtf8(settingsPath(), out, false);
+}
+
+// ------------------------------------------------------------------- trim --
+std::wstring trim(const std::wstring& s){
+    size_t a = s.find_first_not_of(L" \t\r\n");
+    if(a==std::wstring::npos) return L"";
+    size_t b = s.find_last_not_of(L" \t\r\n");
+    return s.substr(a, b-a+1);
+}
+
+// ------------------------------------------------------------------ money --
+std::wstring formatMoney(long long v){
+    bool neg = v<0; if(neg) v=-v;
+    wchar_t raw[32]; swprintf(raw,32,L"%lld",v);
+    std::wstring s(raw), out;
+    int c=0;
+    for(int i=(int)s.size()-1;i>=0;i--){
+        out.insert(out.begin(), s[i]);
+        if(++c%3==0 && i>0) out.insert(out.begin(), L',');
+    }
+    if(neg) out.insert(out.begin(), L'-');
+    return out;
+}
+long long parseMoney(const std::wstring& s){
+    long long v=0; bool neg=false;
+    for(wchar_t c : s){
+        if(c==L'-') neg=true;
+        else if(c>=L'0'&&c<=L'9') v = v*10 + (c-L'0');
+        else if(c>=0x06F0&&c<=0x06F9) v = v*10 + (c-0x06F0);   // ۰..۹
+        else if(c>=0x0660&&c<=0x0669) v = v*10 + (c-0x0660);   // ٠..٩
+    }
+    return neg?-v:v;
+}
+std::wstring toFaDigits(const std::wstring& s){
+    std::wstring out = s;
+    for(auto& c : out) if(c>=L'0'&&c<=L'9') c = (wchar_t)(0x06F0 + (c-L'0'));
+    return out;
+}
+
+// -------------------------------------------------------------- Iran time --
+//  Iran abolished DST in 2022 → fixed UTC+3:30 all year.
+SYSTEMTIME iranNow(){
+    FILETIME ft; GetSystemTimeAsFileTime(&ft);          // UTC
+    ULARGE_INTEGER u; u.LowPart=ft.dwLowDateTime; u.HighPart=ft.dwHighDateTime;
+    u.QuadPart += 12600LL * 10000000LL;                  // +3h30m
+    ft.dwLowDateTime=u.LowPart; ft.dwHighDateTime=u.HighPart;
+    SYSTEMTIME st; FileTimeToSystemTime(&ft,&st);
+    return st;
+}
+int iranMinutesOfDay(){
+    SYSTEMTIME st = iranNow();
+    return st.wHour*60 + st.wMinute;
+}
+
+// ----------------------------------------------------- Gregorian → Jalali --
+void gregToJalali(int gy,int gm,int gd,int&jy,int&jm,int&jd){
+    static const int gdm[] = {0,31,59,90,120,151,181,212,243,273,304,334};
+    int gy2 = (gm>2) ? gy+1 : gy;
+    long days = 355666L + 365L*gy + (gy2+3)/4 - (gy2+99)/100
+              + (gy2+399)/400 + gd + gdm[gm-1];
+    jy = -1595 + 33*(int)(days/12053); days %= 12053;
+    jy += 4*(int)(days/1461);          days %= 1461;
+    if(days > 365){ jy += (int)((days-1)/365); days = (days-1)%365; }
+    if(days < 186){ jm = 1+(int)(days/31); jd = 1+(int)(days%31); }
+    else          { jm = 7+(int)((days-186)/30); jd = 1+(int)((days-186)%30); }
+}
+static const wchar_t* JMONTH[12] = {
+    L"\u0641\u0631\u0648\u0631\u062f\u06cc\u0646", L"\u0627\u0631\u062f\u06cc\u0628\u0647\u0634\u062a",
+    L"\u062e\u0631\u062f\u0627\u062f", L"\u062a\u06cc\u0631",
+    L"\u0645\u0631\u062f\u0627\u062f", L"\u0634\u0647\u0631\u06cc\u0648\u0631",
+    L"\u0645\u0647\u0631", L"\u0622\u0628\u0627\u0646", L"\u0622\u0630\u0631",
+    L"\u062f\u06cc", L"\u0628\u0647\u0645\u0646", L"\u0627\u0633\u0641\u0646\u062f" };
+static const wchar_t* WDAY[7] = {   // SYSTEMTIME wDayOfWeek: 0=Sunday
+    L"\u06cc\u06a9\u0634\u0646\u0628\u0647",          // یکشنبه
+    L"\u062f\u0648\u0634\u0646\u0628\u0647",          // دوشنبه
+    L"\u0633\u0647\u200c\u0634\u0646\u0628\u0647",    // سه‌شنبه
+    L"\u0686\u0647\u0627\u0631\u0634\u0646\u0628\u0647", // چهارشنبه
+    L"\u067e\u0646\u062c\u0634\u0646\u0628\u0647",    // پنجشنبه
+    L"\u062c\u0645\u0639\u0647",                      // جمعه
+    L"\u0634\u0646\u0628\u0647" };                    // شنبه
+std::wstring jalaliDateStr(const SYSTEMTIME& st){
+    int jy,jm,jd; gregToJalali(st.wYear,st.wMonth,st.wDay,jy,jm,jd);
+    wchar_t buf[128];
+    swprintf(buf,128,L"%s %d %s %d", WDAY[st.wDayOfWeek], jd, JMONTH[jm-1], jy);
+    return toFaDigits(buf);
+}
+std::wstring jalaliDateShort(const SYSTEMTIME& st){
+    int jy,jm,jd; gregToJalali(st.wYear,st.wMonth,st.wDay,jy,jm,jd);
+    wchar_t buf[32]; swprintf(buf,32,L"%04d/%02d/%02d",jy,jm,jd);
+    return buf;
+}
+std::wstring iranTimeStr(const SYSTEMTIME& st, bool seconds){
+    wchar_t buf[16];
+    if(seconds) swprintf(buf,16,L"%02d:%02d:%02d",st.wHour,st.wMinute,st.wSecond);
+    else        swprintf(buf,16,L"%02d:%02d",st.wHour,st.wMinute);
+    return buf;
+}
+
+// ------------------------------------------------------------------ shift --
+//  06:00–14:30 صبح | 14:30–22:30 عصر | 22:30–06:00 شب
+int detectShift(){
+    int m = iranMinutesOfDay();
+    if(m >= 6*60 && m < 14*60+30)  return 0;
+    if(m >= 14*60+30 && m < 22*60+30) return 1;
+    return 2;
+}
+std::wstring shiftName(int s){
+    switch(s){
+        case 0: return L"\u0635\u0628\u062d";                                  // صبح
+        case 1: return L"\u0628\u0639\u062f \u0627\u0632 \u0638\u0647\u0631"; // بعد از ظهر
+        default:return L"\u0634\u0628";                                       // شب
+    }
+}
