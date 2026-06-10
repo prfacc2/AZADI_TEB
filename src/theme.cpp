@@ -10,37 +10,39 @@ HBRUSH  g_brBg=0, g_brSurface=0, g_brSurface2=0, g_brInput=0;
 void applyTheme(bool dark){
     g_dark = dark;
     if(dark){
-        g_theme.bg          = RGB(15, 19, 26);
-        g_theme.surface     = RGB(24, 30, 40);
-        g_theme.surface2    = RGB(20, 25, 34);
-        g_theme.border      = RGB(48, 58, 74);
-        g_theme.text        = RGB(232, 238, 246);
-        g_theme.textDim     = RGB(146, 158, 176);
-        g_theme.accent      = RGB(46, 160, 235);
-        g_theme.accentHover = RGB(78, 178, 245);
+        // ---- Modern "midnight teal" dark palette (deep, low eye-strain) ----
+        g_theme.bg          = RGB(13, 17, 23);    // near-black slate
+        g_theme.surface     = RGB(22, 27, 34);    // card
+        g_theme.surface2    = RGB(17, 22, 29);    // bars
+        g_theme.border      = RGB(48, 54, 66);    // clearly visible separators
+        g_theme.text        = RGB(230, 237, 243);
+        g_theme.textDim     = RGB(139, 152, 168);
+        g_theme.accent      = RGB(56, 170, 255);  // bright sky-blue (high contrast on dark)
+        g_theme.accentHover = RGB(96, 190, 255);
         g_theme.accentText  = RGB(255, 255, 255);
-        g_theme.danger      = RGB(226, 84, 84);
-        g_theme.dangerHover = RGB(240, 110, 110);
-        g_theme.success     = RGB(64, 190, 130);
-        g_theme.inputBg     = RGB(31, 38, 50);
-        g_theme.inputText   = RGB(235, 240, 248);
-        g_theme.hover       = RGB(34, 42, 56);
+        g_theme.danger      = RGB(240, 100, 100);
+        g_theme.dangerHover = RGB(250, 128, 128);
+        g_theme.success     = RGB(74, 210, 148);
+        g_theme.inputBg     = RGB(28, 35, 45);    // distinctly lighter than card
+        g_theme.inputText   = RGB(236, 242, 248);
+        g_theme.hover       = RGB(33, 41, 53);
     } else {
-        g_theme.bg          = RGB(242, 245, 249);
-        g_theme.surface     = RGB(255, 255, 255);
-        g_theme.surface2    = RGB(248, 250, 253);
-        g_theme.border      = RGB(218, 225, 234);
-        g_theme.text        = RGB(28, 36, 48);
-        g_theme.textDim     = RGB(108, 120, 138);
-        g_theme.accent      = RGB(18, 118, 210);
-        g_theme.accentHover = RGB(36, 138, 228);
+        // ---- Clean modern light palette (soft blue-gray, indigo accent) ----
+        g_theme.bg          = RGB(240, 243, 248); // page
+        g_theme.surface     = RGB(255, 255, 255); // card
+        g_theme.surface2    = RGB(249, 251, 253); // bars
+        g_theme.border      = RGB(223, 229, 238);
+        g_theme.text        = RGB(24, 32, 46);
+        g_theme.textDim     = RGB(110, 122, 142);
+        g_theme.accent      = RGB(37, 99, 235);   // indigo-blue
+        g_theme.accentHover = RGB(59, 120, 246);
         g_theme.accentText  = RGB(255, 255, 255);
-        g_theme.danger      = RGB(206, 56, 56);
-        g_theme.dangerHover = RGB(224, 80, 80);
-        g_theme.success     = RGB(22, 152, 96);
-        g_theme.inputBg     = RGB(247, 249, 252);
-        g_theme.inputText   = RGB(24, 32, 44);
-        g_theme.hover       = RGB(232, 238, 246);
+        g_theme.danger      = RGB(220, 53, 69);
+        g_theme.dangerHover = RGB(235, 80, 95);
+        g_theme.success     = RGB(22, 163, 110);
+        g_theme.inputBg     = RGB(248, 250, 253);
+        g_theme.inputText   = RGB(20, 28, 42);
+        g_theme.hover       = RGB(237, 242, 250);
     }
     if(g_brBg)       DeleteObject(g_brBg);
     if(g_brSurface)  DeleteObject(g_brSurface);
@@ -184,6 +186,51 @@ void drawIcon(HDC dc, int icon, RECT rc, COLORREF col, int thick){
     case ICO_BACK: {
         MoveToEx(dc,cx-r+3,cy,0); LineTo(dc,cx+r-2,cy);
         MoveToEx(dc,cx-r/4,cy-r/2,0); LineTo(dc,cx-r+3,cy); LineTo(dc,cx-r/4,cy+r/2);
+        break; }
+    case ICO_ID: {   // ID card
+        Rectangle(dc,cx-r+1,cy-r/2,cx+r-1,cy+r/2);
+        Ellipse(dc,cx-r/2,cy-r/4,cx-r/8,cy+r/8);             // photo head
+        MoveToEx(dc,cx,cy-r/5,0);  LineTo(dc,cx+r-r/3,cy-r/5);
+        MoveToEx(dc,cx,cy+r/8,0);  LineTo(dc,cx+r-r/3,cy+r/8);
+        break; }
+    case ICO_PHONE: {  // phone handset
+        int a=(r*70)/100;
+        MoveToEx(dc,cx-a,cy-a,0);
+        LineTo(dc,cx-a/3,cy-a/3); LineTo(dc,cx,cy);
+        LineTo(dc,cx+a/3,cy+a/3); LineTo(dc,cx+a,cy+a);
+        MoveToEx(dc,cx-a,cy-a,0); LineTo(dc,cx-a/2,cy-a-2);
+        MoveToEx(dc,cx+a,cy+a,0); LineTo(dc,cx+a+2,cy+a/2);
+        break; }
+    case ICO_CAL: {   // calendar
+        Rectangle(dc,cx-r+1,cy-r+3,cx+r-1,cy+r-1);
+        MoveToEx(dc,cx-r+1,cy-r/3,0); LineTo(dc,cx+r-1,cy-r/3);
+        MoveToEx(dc,cx-r/2,cy-r+3,0); LineTo(dc,cx-r/2,cy-r-1);
+        MoveToEx(dc,cx+r/2,cy-r+3,0); LineTo(dc,cx+r/2,cy-r-1);
+        break; }
+    case ICO_PIN: {   // location pin
+        Ellipse(dc,cx-r/2,cy-r+1,cx+r/2,cy);
+        MoveToEx(dc,cx-r/2,cy-r/3,0); LineTo(dc,cx,cy+r-1); LineTo(dc,cx+r/2,cy-r/3);
+        SetPixel(dc,cx,cy-r/2,col);
+        break; }
+    case ICO_RECEIPT: {  // receipt / invoice
+        int w=(r*65)/100;
+        MoveToEx(dc,cx-w,cy-r+2,0); LineTo(dc,cx+w,cy-r+2);
+        LineTo(dc,cx+w,cy+r-2); LineTo(dc,cx+w-w/2,cy+r-r/3);
+        LineTo(dc,cx,cy+r-2); LineTo(dc,cx-w+w/2,cy+r-r/3);
+        LineTo(dc,cx-w,cy+r-2); LineTo(dc,cx-w,cy-r+2);
+        MoveToEx(dc,cx-w/2,cy-r/3,0); LineTo(dc,cx+w/2,cy-r/3);
+        MoveToEx(dc,cx-w/2,cy+r/8,0); LineTo(dc,cx+w/2,cy+r/8);
+        break; }
+    case ICO_CLOCK: {
+        Ellipse(dc,cx-r+1,cy-r+1,cx+r-1,cy+r-1);
+        MoveToEx(dc,cx,cy,0); LineTo(dc,cx,cy-r/2);
+        MoveToEx(dc,cx,cy,0); LineTo(dc,cx+r/3,cy);
+        break; }
+    case ICO_REFRESH: {
+        Arc(dc,cx-r+2,cy-r+2,cx+r-2,cy+r-2, cx-r,cy, cx,cy-r);
+        Arc(dc,cx-r+2,cy-r+2,cx+r-2,cy+r-2, cx+r,cy, cx,cy+r);
+        POINT a={cx, cy-r+1};
+        MoveToEx(dc,a.x-r/3,a.y,0); LineTo(dc,a.x,a.y); LineTo(dc,a.x,a.y+r/3);
         break; }
     }
     SelectObject(dc, op); SelectObject(dc, ob);

@@ -32,6 +32,26 @@ const InsuranceDef SUPP_INSURANCES[] = {
 };
 const int N_SUPP = sizeof(SUPP_INSURANCES)/sizeof(SUPP_INSURANCES[0]);
 
+// ------------------------------------------------------------- tariffs -----
+//  Base service tariff per visit type (Rial). Editable; can later be loaded
+//  from data\tariffs.ini for server-side configuration.
+const long long VISIT_TARIFF[3] = {
+    2'500'000,   // عادی   (ویزیت عمومی)
+    3'500'000,   // سرپایی (خدمت سرپایی)
+    8'000'000,   // بستری  (خدمت بستری پایه)
+};
+long long applyApptTariff(long long base, int apptType){
+    switch(apptType){
+        case 1: return base * 150 / 100;   // اورژانس: +۵۰٪
+        case 2: return base *  50 / 100;   // پرسنلی: نصف تعرفه
+        default:return base;               // عادی
+    }
+}
+long long defaultServicePrice(int patientType, int apptType){
+    int p = (patientType>=0 && patientType<3) ? patientType : 0;
+    return applyApptTariff(VISIT_TARIFF[p], apptType);
+}
+
 // ------------------------------------------------------------ persistence --
 static std::wstring recPath(){
     SYSTEMTIME st = iranNow();

@@ -201,12 +201,15 @@ HWND createHomeScreen(HWND frame){
 // =============================================================== FRAME =====
 static void frameLayout(HWND h){
     RECT rc; GetClientRect(h,&rc);
-    int bh=S(36), pad=S(10);
+    int bh=S(36), pad=S(12);
     int y=(topBarH()-bh)/2;
-    // exit: top-right
-    MoveWindow(s_bExit, rc.right-pad-bh, y, bh, bh, TRUE);
-    MoveWindow(s_bTheme, rc.right-pad-2*bh-S(8), y, bh, bh, TRUE);
-    MoveWindow(s_bUpdate, rc.right-pad-3*bh-S(16), y, bh, bh, TRUE);
+    // --- RIGHT side (RTL primary): EXIT button is the right-most control.
+    //     App name/title is painted to the LEFT of it (see WM_PAINT).
+    MoveWindow(s_bExit,  rc.right-pad-bh, y, bh, bh, TRUE);
+    // --- LEFT side: utility buttons (dark-theme + remote-update) grouped
+    //     away from the exit button, on the opposite edge.
+    MoveWindow(s_bTheme,  pad,          y, bh, bh, TRUE);
+    MoveWindow(s_bUpdate, pad+bh+S(8),  y, bh, bh, TRUE);
     if(s_screen){
         RECT cr=frameContentRect();
         MoveWindow(s_screen,cr.left,cr.top,cr.right-cr.left,cr.bottom-cr.top,TRUE);
@@ -303,15 +306,24 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         SelectObject(dc,op); DeleteObject(pen);
 
         SetBkMode(dc,TRANSPARENT);
-        // app name (top-left)
+        // ---- app identity on the RIGHT (next to the exit button) ----
+        // small accent logo badge + app name + (optional) current user.
+        int exitW = S(36)+S(12);                 // exit button + its padding
+        int logoR = S(13);
+        int logoCx = rc.right - exitW - S(14) - logoR;
+        int logoCy = topBarH()/2;
+        RECT lc={logoCx-logoR,logoCy-logoR,logoCx+logoR,logoCy+logoR};
+        fillRoundRect(dc,lc,4*logoR,g_theme.accent,CLR_INVALID);
+        RECT li={lc.left+S(6),lc.top+S(6),lc.right-S(6),lc.bottom-S(6)};
+        drawIcon(dc,ICO_CROSS_MED,li,RGB(255,255,255),S(2));
         SelectObject(dc,g_fUIB);
         SetTextColor(dc,g_theme.text);
-        RECT nr={S(16),0,S(460),topBarH()};
         std::wstring caption = std::wstring(APP_NAME_W) +
             (g_session.user.username.empty() ? L"" :
              L"  \u2014  " + g_session.user.fullname);
+        RECT nr={S(120), 0, logoCx-logoR-S(12), topBarH()};
         DrawTextW(dc,caption.c_str(),-1,&nr,
-            DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+            DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
 
         // ===== bottom-right: live Iran clock (top) + date (below) =====
         SYSTEMTIME st=iranNow();
@@ -348,27 +360,106 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
     return DefWindowProcW(h,m,w,l);
 }
 
-// ============================================== Enter => next field ========
+// ============================== Enter / Tab => next field ===================
+//  Secretaries navigate the form almost entirely with Enter and Tab, so BOTH
+//  keys must hop to the next control (Shift+Tab => previous). Works inside
+//  the reception page (a plain child window, not a dialog) by walking the
+//  control list with GetNextDlgTabItem on the page itself.
 static WNDPROC s_oldEdit = NULL;
+static void hopField(HWND h, bool prev){
+    HWND parent = GetParent(h);
+    HWND nxt = GetNextDlgTabItem(parent, h, prev);
+    if(!nxt || nxt==h){
+        HWND top = GetAncestor(h, GA_ROOT);
+        nxt = GetNextDlgTabItem(top, h, prev);
+    }
+    if(nxt && nxt!=h){
+        SetFocus(nxt);
+        wchar_t cls[32]={0}; GetClassNameW(nxt,cls,32);
+        if(!wcscmp(cls,L"EDIT")) SendMessageW(nxt, EM_SETSEL, 0, -1);
+    }
+}
 static LRESULT CALLBACK enterEditProc(HWND h, UINT m, WPARAM w, LPARAM l){
     if(m==WM_KEYDOWN && w==VK_RETURN){
-        HWND top = GetAncestor(h, GA_ROOT);
-        HWND parent = GetParent(h);
-        HWND nxt = GetNextDlgTabItem(parent, h, FALSE);
-        if(!nxt || nxt==h){
-            // search in grandparent (nested panels)
-            nxt = GetNextDlgTabItem(top, h, FALSE);
-        }
-        if(nxt && nxt!=h){ SetFocus(nxt); SendMessageW(nxt, EM_SETSEL, 0, -1); }
+        hopField(h, false);
         return 0;
     }
-    if(m==WM_CHAR && w==VK_RETURN) return 0;  // kill the beep
+    if(m==WM_KEYDOWN && w==VK_TAB){
+        hopField(h, (GetKeyState(VK_SHIFT)&0x8000)!=0);
+        return 0;
+    }
+    if(m==WM_CHAR && (w==VK_RETURN || w==VK_TAB)) return 0;  // kill the beep
     return CallWindowProcW(s_oldEdit, h, m, w, l);
 }
 void enableEnterNavigation(HWND ctl){
     WNDPROC old = (WNDPROC)SetWindowLongPtrW(ctl, GWLP_WNDPROC,
         (LONG_PTR)enterEditProc);
     if(!s_oldEdit) s_oldEdit = old;
+}
+
+// ===================== smart Jalali date mask (YYYY/MM/DD) ==================
+//  The user just clicks the field and types 8 digits; the program inserts the
+//  slashes itself and splits them into year / month / day. Backspace removes
+//  the previous digit (skipping the auto slashes). Enter/Tab still navigate.
+static WNDPROC s_oldDate = NULL;
+static std::wstring digitsOnly(const std::wstring& s){
+    std::wstring o;
+    for(wchar_t c : s){
+        if(c>=L'0'&&c<=L'9') o += c;
+        else if(c>=0x06F0&&c<=0x06F9) o += (wchar_t)(L'0'+(c-0x06F0)); // fa→en
+        else if(c>=0x0660&&c<=0x0669) o += (wchar_t)(L'0'+(c-0x0660)); // ar→en
+    }
+    return o;
+}
+static std::wstring formatJalaliMask(const std::wstring& digits){
+    std::wstring d = digits;
+    if(d.size()>8) d = d.substr(0,8);
+    std::wstring out;
+    for(size_t i=0;i<d.size();i++){
+        if(i==4 || i==6) out += L'/';
+        out += d[i];
+    }
+    return out;
+}
+static LRESULT CALLBACK dateEditProc(HWND h, UINT m, WPARAM w, LPARAM l){
+    if(m==WM_KEYDOWN && (w==VK_RETURN || w==VK_TAB)){
+        hopField(h, w==VK_TAB && (GetKeyState(VK_SHIFT)&0x8000)!=0);
+        return 0;
+    }
+    if(m==WM_CHAR){
+        if(w==VK_RETURN || w==VK_TAB) return 0;            // no beep
+        if(w==VK_BACK){
+            wchar_t buf[32]; GetWindowTextW(h,buf,32);
+            std::wstring d = digitsOnly(buf);
+            if(!d.empty()) d.pop_back();
+            std::wstring formatted = formatJalaliMask(d);
+            SetWindowTextW(h, formatted.c_str());
+            SendMessageW(h, EM_SETSEL, formatted.size(), formatted.size());
+            return 0;
+        }
+        if(w<L'0' || w>L'9'){
+            // allow fa/ar digit chars too, otherwise ignore
+            if(!((w>=0x06F0&&w<=0x06F9)||(w>=0x0660&&w<=0x0669))) return 0;
+        }
+        wchar_t buf[32]; GetWindowTextW(h,buf,32);
+        std::wstring d = digitsOnly(buf);
+        if(d.size()>=8) return 0;                           // full
+        // append the new digit (normalised to ASCII)
+        wchar_t ch = (wchar_t)w;
+        if(ch>=0x06F0&&ch<=0x06F9) ch=(wchar_t)(L'0'+(ch-0x06F0));
+        else if(ch>=0x0660&&ch<=0x0669) ch=(wchar_t)(L'0'+(ch-0x0660));
+        d += ch;
+        std::wstring formatted = formatJalaliMask(d);
+        SetWindowTextW(h, formatted.c_str());
+        SendMessageW(h, EM_SETSEL, formatted.size(), formatted.size());
+        return 0;
+    }
+    return CallWindowProcW(s_oldDate, h, m, w, l);
+}
+void enableDateMask(HWND ctl){
+    WNDPROC old = (WNDPROC)SetWindowLongPtrW(ctl, GWLP_WNDPROC,
+        (LONG_PTR)dateEditProc);
+    if(!s_oldDate) s_oldDate = old;
 }
 
 // ================================================================ MAIN =====
@@ -423,6 +514,20 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
     UpdateWindow(f);
     switchScreen(SC_HOME);
     SetFocus(f);
+#ifdef AZ_DEBUG_BUILD
+    { // TEMP: headless screenshot verification — jump straight into a screen
+        wchar_t dbg[32]={0};
+        GetEnvironmentVariableW(L"AZ_DEBUG_SCREEN", dbg, 32);
+        if(dbg[0]){
+            User u; u.username=L"reza"; u.fullname=L"رضا منشی";
+            u.dept=L"پذیرش"; u.role=0;
+            g_session.user=u; g_session.shift=detectShift();
+            g_session.loginAt=iranNow();
+            if(!wcscmp(dbg,L"reception")) switchScreen(SC_RECEPTION);
+            else if(!wcscmp(dbg,L"manage"))    switchScreen(SC_MANAGE);
+        }
+    }
+#endif
 
     MSG msg;
     while(GetMessageW(&msg,NULL,0,0)){

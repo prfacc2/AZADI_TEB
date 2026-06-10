@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.1.0"
+#define APP_VERSION_W   L"1.2.0"
 #define APP_NAME_W      L"\u0622\u0632\u0627\u062f\u06cc \u0637\u0628"   // آزادی طب
 #define APP_CLASS_W     L"AzadiTebFrame"
 
@@ -65,7 +65,8 @@ void broadcastThemeChange();            // invalidate everything
 enum IconId {
     ICO_NONE=0, ICO_X, ICO_CALC, ICO_PRINT, ICO_UPDATE, ICO_MOON, ICO_SUN,
     ICO_USER, ICO_SHIELD, ICO_PLUS, ICO_LOGOUT, ICO_DETACH, ICO_CROSS_MED,
-    ICO_CHECK, ICO_TRASH, ICO_SAVE, ICO_BACK
+    ICO_CHECK, ICO_TRASH, ICO_SAVE, ICO_BACK,
+    ICO_ID, ICO_PHONE, ICO_CAL, ICO_PIN, ICO_RECEIPT, ICO_CLOCK, ICO_REFRESH
 };
 enum BtnStyle { BS_GHOST=0, BS_PRIMARY=1, BS_DANGER=2, BS_OUTLINE=3, BS_CARD=4 };
 void  registerFlatButton();
@@ -124,6 +125,15 @@ struct InsuranceDef { const wchar_t* name; int pct; };
 extern const InsuranceDef INSURANCES[];     extern const int N_INSURANCES;
 extern const InsuranceDef SUPP_INSURANCES[];extern const int N_SUPP;
 
+// -------------------------------------------------------------- tariffs ----
+//  Default service tariffs (Rial) so the program computes the bill itself.
+//  Indexed by patient-visit type: 0=عادی 1=سرپایی 2=بستری.
+extern const long long VISIT_TARIFF[3];
+//  Surcharge multipliers for appointment type: 0=عادی 1=اورژانس 2=پرسنلی
+long long applyApptTariff(long long base, int apptType);
+//  Returns the default service price for a given patient + appointment type.
+long long defaultServicePrice(int patientType, int apptType);
+
 // -------------------------------------------------------------- reception --
 struct ReceptionRecord {
     std::wstring firstName, lastName, nationalId, fatherName, birthDate,
@@ -176,5 +186,9 @@ void openCalculator(HWND owner);
 // ----------------------------------------------------------------- update --
 void checkRemoteUpdate(HWND owner);      // remote-update over HTTP(S)
 
-// edit subclass: Enter => next field
+// edit subclass: Enter / Tab => next field
 void enableEnterNavigation(HWND ctl);
+
+// edit subclass: smart Jalali date mask — user types digits only, slashes are
+// inserted automatically as YYYY/MM/DD (also keeps Enter/Tab navigation).
+void enableDateMask(HWND ctl);

@@ -1,2 +1,4 @@
 obj/
 *.log
+build/data/
+build/logs/
