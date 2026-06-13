@@ -50,6 +50,7 @@ struct DesignerState {
     HWND eName;          // backup name
     bool showTplList;    // restore list open
     std::vector<std::wstring> backups;
+    std::vector<Design> undo;   // undo stack (Ctrl+Z restores the last snapshot)
 };
 static HWND s_des=NULL;
 static DesignerState* s_ds=NULL;
@@ -153,11 +154,25 @@ static void doBackup(HWND h){
         L"پشتیبان طرح",MB_OK|MB_ICONINFORMATION);
     InvalidateRect(h,NULL,FALSE);
 }
+// snapshot the current design onto the undo stack (call BEFORE a mutation)
+static void dsPushUndo(){
+    if(!s_ds) return;
+    s_ds->undo.push_back(s_ds->d);
+    if(s_ds->undo.size()>50) s_ds->undo.erase(s_ds->undo.begin());  // cap
+}
+// pop the last snapshot (Ctrl+Z)
+static void dsUndo(HWND h){
+    if(!s_ds || s_ds->undo.empty()) return;
+    s_ds->d = s_ds->undo.back();
+    s_ds->undo.pop_back();
+    s_ds->sel=-1; dsSyncEditors(h); InvalidateRect(h,NULL,FALSE);
+}
 static void doRestore(HWND h, const std::wstring& name){
     Design d; std::wstring all=readFileUtf8(backupSlotPath(s_ds->section,name));
     if(all.empty() || !parseDesign(all,d)){
         MessageBoxW(h,L"بازیابی طرح ناموفق بود.",L"بازیابی",MB_OK|MB_ICONWARNING); return;
     }
+    dsPushUndo();
     s_ds->d=d; s_ds->sel=-1; s_ds->showTplList=false;
     dsSyncEditors(h); InvalidateRect(h,NULL,FALSE);
 }
@@ -564,6 +579,7 @@ static void dsReadEditors(){
 
 // -------- helpers: add item, pick color/logo --------------------------------
 static void dsAdd(HWND h, int kind, bool bindable){
+    dsPushUndo();   // snapshot before inserting a new item
     double pw,ph; paperMM(s_ds->d.paper,pw,ph);
     DItem it; it.kind=kind; it.x=pw/2-25; it.y=20; it.w=50; it.h=8;
     if(kind==IT_LINE_H){ it.x=10; it.w=pw-20; it.h=0; it.lineW=0.3; it.color=RGB(60,60,60); }
@@ -738,13 +754,13 @@ static LRESULT CALLBACK desProc(HWND h, UINT m, WPARAM w, LPARAM l){
             case PD_RESTORE: s_ds->backups=loadBackupNames(s_ds->section);
                 s_ds->showTplList=!s_ds->showTplList; dsLayoutEditors(h);
                 InvalidateRect(h,NULL,FALSE); break;
-            case PD_TPL_PREV: s_ds->tplIdx=(s_ds->tplIdx+N_TEMPLATES-1)%N_TEMPLATES;
+            case PD_TPL_PREV: dsPushUndo(); s_ds->tplIdx=(s_ds->tplIdx+N_TEMPLATES-1)%N_TEMPLATES;
                 s_ds->d=templateByIndex(s_ds->section,s_ds->tplIdx); s_ds->sel=-1;
                 dsSyncEditors(h); InvalidateRect(h,NULL,FALSE); break;
-            case PD_TPL_NEXT: s_ds->tplIdx=(s_ds->tplIdx+1)%N_TEMPLATES;
+            case PD_TPL_NEXT: dsPushUndo(); s_ds->tplIdx=(s_ds->tplIdx+1)%N_TEMPLATES;
                 s_ds->d=templateByIndex(s_ds->section,s_ds->tplIdx); s_ds->sel=-1;
                 dsSyncEditors(h); InvalidateRect(h,NULL,FALSE); break;
-            case PD_PAPER: s_ds->d.paper=!s_ds->d.paper; InvalidateRect(h,NULL,FALSE); break;
+            case PD_PAPER: dsPushUndo(); s_ds->d.paper=!s_ds->d.paper; InvalidateRect(h,NULL,FALSE); break;
             case PD_ZOOMIN: s_ds->zoom*=1.15; if(s_ds->zoom>8)s_ds->zoom=8;
                 dsLayoutEditors(h); InvalidateRect(h,NULL,FALSE); break;
             case PD_ZOOMOUT:s_ds->zoom/=1.15; if(s_ds->zoom<0.8)s_ds->zoom=0.8;
@@ -758,6 +774,7 @@ static LRESULT CALLBACK desProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 if(i<(int)s_ds->backups.size()) doRestore(h,s_ds->backups[i]); return 0; }
             if(r>=PD_FIELD_BASE && r<PD_FIELD_BASE+N_FIELDS){
                 if(s_ds->sel>=0 && s_ds->d.items[s_ds->sel].kind==IT_LABEL){
+                    dsPushUndo();
                     s_ds->d.items[s_ds->sel].field=FIELDS[r-PD_FIELD_BASE].token;
                     InvalidateRect(h,NULL,FALSE);
                 }
@@ -771,12 +788,12 @@ static LRESULT CALLBACK desProc(HWND h, UINT m, WPARAM w, LPARAM l){
             case PD_ADD_BORDER:dsAdd(h,IT_BORDER,false); break;
             case PD_ADD_LOGO:  dsAdd(h,IT_LOGO,false); break;
             case PD_DEL_ITEM:
-                if(s_ds->sel>=0){ s_ds->d.items.erase(s_ds->d.items.begin()+s_ds->sel);
+                if(s_ds->sel>=0){ dsPushUndo(); s_ds->d.items.erase(s_ds->d.items.begin()+s_ds->sel);
                     s_ds->sel=-1; dsSyncEditors(h); InvalidateRect(h,NULL,FALSE);} break;
-            case PD_P_BOLD: if(s_ds->sel>=0){ DItem&it=s_ds->d.items[s_ds->sel]; it.bold=!it.bold; InvalidateRect(h,NULL,FALSE);} break;
-            case PD_P_ITALIC: if(s_ds->sel>=0){ DItem&it=s_ds->d.items[s_ds->sel]; it.italic=!it.italic; InvalidateRect(h,NULL,FALSE);} break;
-            case PD_P_UNDER: if(s_ds->sel>=0){ DItem&it=s_ds->d.items[s_ds->sel]; it.underline=!it.underline; InvalidateRect(h,NULL,FALSE);} break;
-            case PD_P_STRIKE: if(s_ds->sel>=0){ DItem&it=s_ds->d.items[s_ds->sel]; it.strike=!it.strike; InvalidateRect(h,NULL,FALSE);} break;
+            case PD_P_BOLD: if(s_ds->sel>=0){ dsPushUndo(); DItem&it=s_ds->d.items[s_ds->sel]; it.bold=!it.bold; InvalidateRect(h,NULL,FALSE);} break;
+            case PD_P_ITALIC: if(s_ds->sel>=0){ dsPushUndo(); DItem&it=s_ds->d.items[s_ds->sel]; it.italic=!it.italic; InvalidateRect(h,NULL,FALSE);} break;
+            case PD_P_UNDER: if(s_ds->sel>=0){ dsPushUndo(); DItem&it=s_ds->d.items[s_ds->sel]; it.underline=!it.underline; InvalidateRect(h,NULL,FALSE);} break;
+            case PD_P_STRIKE: if(s_ds->sel>=0){ dsPushUndo(); DItem&it=s_ds->d.items[s_ds->sel]; it.strike=!it.strike; InvalidateRect(h,NULL,FALSE);} break;
             case PD_P_FSMINUS: if(s_ds->sel>=0){ DItem&it=s_ds->d.items[s_ds->sel];
                 if(it.kind==IT_LABEL){ if(it.fontSize>5) it.fontSize--; }
                 else { it.lineW-=0.1; if(it.lineW<0.1)it.lineW=0.1; }
@@ -792,7 +809,7 @@ static LRESULT CALLBACK desProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 if(dsPickColor(h,c)){ it.bgColor=c; InvalidateRect(h,NULL,FALSE);} } break;
             case PD_P_BGCLEAR: if(s_ds->sel>=0){ s_ds->d.items[s_ds->sel].bgColor=CLR_INVALID;
                 InvalidateRect(h,NULL,FALSE);} break;
-            case PD_P_ALIGN: if(s_ds->sel>=0){ DItem&it=s_ds->d.items[s_ds->sel];
+            case PD_P_ALIGN: if(s_ds->sel>=0){ dsPushUndo(); DItem&it=s_ds->d.items[s_ds->sel];
                 it.align=(it.align+1)%3; InvalidateRect(h,NULL,FALSE);} break;
             case PD_RESETVIEW: s_ds->panX=0; s_ds->panY=0;
                 s_ds->zoom=s_ds->d.paper?2.0:1.4; dsLayoutEditors(h);
@@ -822,6 +839,7 @@ static LRESULT CALLBACK desProc(HWND h, UINT m, WPARAM w, LPARAM l){
             DItem& it=s_ds->d.items[hit];
             s_ds->dragDX=dsMMx(page,zoom,pt.x)-it.x;
             s_ds->dragDY=dsMMy(page,zoom,pt.y)-it.y;
+            dsPushUndo();   // snapshot before the drag moves the item
             s_ds->dragging=true; SetCapture(h);
         } else {
             // empty canvas → start panning (grab-drag the page)
@@ -849,11 +867,21 @@ static LRESULT CALLBACK desProc(HWND h, UINT m, WPARAM w, LPARAM l){
         if(s_ds->panning){ s_ds->panning=false; ReleaseCapture(); }
         return 0;
     case WM_MOUSEWHEEL:{
-        // zoom-to-cursor: keep the mm point under the cursor fixed while zooming
         POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
         ScreenToClient(h,&pt);
         RECT cv=dsCanvasRect(h);
         if(!PtInRect(&cv,pt)) return 0;
+        int delta0=GET_WHEEL_DELTA_WPARAM(w);
+        bool ctrl=(GetKeyState(VK_CONTROL)&0x8000)!=0;
+        bool shift=(GetKeyState(VK_SHIFT)&0x8000)!=0;
+        if(!ctrl){
+            // plain wheel → scroll the page up/down (Shift = horizontal)
+            int step=(delta0>0)? S(60) : -S(60);
+            if(shift) s_ds->panX += step; else s_ds->panY += step;
+            InvalidateRect(h,NULL,FALSE);
+            return 0;
+        }
+        // Ctrl+wheel → zoom-to-cursor (keep the mm point under the cursor fixed)
         RECT page; double zoom; dsPageMetrics(h,page,zoom);
         double mmx=dsMMx(page,zoom,pt.x), mmy=dsMMy(page,zoom,pt.y);
         int delta=GET_WHEEL_DELTA_WPARAM(w);
@@ -883,9 +911,15 @@ static LRESULT CALLBACK desProc(HWND h, UINT m, WPARAM w, LPARAM l){
         SetBkColor(dc,g_theme.inputBg); return (LRESULT)g_brInput; }
     case WM_KEYDOWN:
         if(w==VK_ESCAPE){ dsClose(); return 0; }
+        // Ctrl+Z → undo the last design change
+        if(w=='Z' && (GetKeyState(VK_CONTROL)&0x8000)){ dsUndo(h); return 0; }
         if(w==VK_DELETE && s_ds->sel>=0){
+            dsPushUndo();
             s_ds->d.items.erase(s_ds->d.items.begin()+s_ds->sel);
             s_ds->sel=-1; dsSyncEditors(h); InvalidateRect(h,NULL,FALSE); return 0; }
+        // PageUp / PageDown → scroll the page vertically
+        if(w==VK_PRIOR){ s_ds->panY += S(80); InvalidateRect(h,NULL,FALSE); return 0; }
+        if(w==VK_NEXT ){ s_ds->panY -= S(80); InvalidateRect(h,NULL,FALSE); return 0; }
         break;
     case WM_DESTROY:
         if(s_ds){ delete s_ds; s_ds=NULL; } s_des=NULL;
