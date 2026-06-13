@@ -1041,8 +1041,40 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             }
         }
         else if(id==ID_F_DOCSEARCH){
-            t->lastMsg=L"جستجوی پزشک معالج در دست توسعه است.";
-            t->msgCol=g_theme.textDim; InvalidateRect(h,NULL,FALSE);
+            // جستجوی پزشک معالج: ابتدا با نام، سپس انتخاب از فهرست پزشکان
+            wchar_t nb[128]; GetWindowTextW(t->eDocName,nb,128);
+            std::wstring q=trim(nb);
+            auto docs=loadDoctors();
+            HMENU mnu=CreatePopupMenu();
+            std::vector<int> map;
+            for(int i=0;i<(int)docs.size();i++){
+                if(q.empty() || docs[i].name.find(q)!=std::wstring::npos
+                             || docs[i].specialty.find(q)!=std::wstring::npos){
+                    std::wstring s=docs[i].name+L" — "+docs[i].specialty;
+                    AppendMenuW(mnu,MF_STRING,(UINT)(map.size()+1),s.c_str());
+                    map.push_back(i);
+                }
+            }
+            if(map.empty()){
+                t->lastMsg=L"پزشکی با این مشخصات یافت نشد.";
+                t->msgCol=g_theme.danger; InvalidateRect(h,NULL,FALSE);
+                DestroyMenu(mnu);
+            } else {
+                RECT br; GetWindowRect(t->bDocSearch,&br);
+                int cmd=TrackPopupMenu(mnu,TPM_RETURNCMD|TPM_RIGHTBUTTON,
+                    br.left,br.bottom,0,h,NULL);
+                DestroyMenu(mnu);
+                if(cmd>0 && cmd<=(int)map.size()){
+                    const DoctorDef& d=docs[map[cmd-1]];
+                    SetWindowTextW(t->eDocName,d.name.c_str());
+                    // generate a stable 5-digit نظام پزشکی from the name hash
+                    unsigned hsh=0; for(wchar_t c:d.name) hsh=hsh*131+(unsigned)c;
+                    wchar_t code[16]; swprintf(code,16,L"%05u",10000+(hsh%89999));
+                    SetWindowTextW(t->eDocCode,toFaDigits(code).c_str());
+                    t->lastMsg=L"پزشک معالج انتخاب شد: "+d.name;
+                    t->msgCol=g_theme.success; InvalidateRect(h,NULL,FALSE);
+                }
+            }
         }
         return 0; }
     case WM_KEYDOWN:

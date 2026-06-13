@@ -215,7 +215,10 @@ static void paintPanel(HWND h, HDC dc0){
         guest?g_theme.textDim:g_theme.accent2,
         guest?g_theme.border:g_theme.accent,CLR_INVALID);
     std::wstring fn = guest ? L"" : g_session.user.fullname;
-    if(!fn.empty()){
+    std::wstring photo = guest ? L"" : getSetting(L"photo_"+g_session.user.username,L"");
+    if(!photo.empty() && gpDrawImageFileCircle(dc,photo,av)){
+        // photo drawn into the circle — nothing else to do
+    } else if(!fn.empty()){
         std::wstring ini=fn.substr(0,1);
         SelectObject(dc,g_fHuge); SetTextColor(dc,RGB(255,255,255));
         DrawTextW(dc,ini.c_str(),-1,&av,DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX);

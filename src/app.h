@@ -120,6 +120,7 @@ bool gpDrawBackground(HDC dc, RECT rc, bool dark, COLORREF scrim, int scrimA);
 //  recoloured to `tint`. Used for the print-action buttons. Returns false if
 //  GDI+ / resource unavailable so callers fall back to the vector drawIcon().
 bool gpDrawTintedImageRes(HDC dc, int resId, RECT rc, COLORREF tint);
+bool gpDrawImageFileCircle(HDC dc, const std::wstring& path, RECT rc);
 //  RCDATA ids of the print-action raster icons (see app.rc):
 #define IMG_IC_PRINTER 201
 #define IMG_IC_RECEIPT 202

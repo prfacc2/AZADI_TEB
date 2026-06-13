@@ -69,9 +69,10 @@ struct ApptUI {
     bool patientOn;                  // patient block enabled?
     bool foreign;                    // foreign-national / newborn
     bool kindInPerson;               // true=حضوری false=غیرحضوری
+    int  editSrc;                    // source index being edited (-1 = new)
     std::wstring statusMsg; COLORREF statusCol;
     ApptUI():page(0),sel(-1),hot(-1),scroll(0),patientOn(false),foreign(false),
-        kindInPerson(true),statusCol(0){}
+        kindInPerson(true),editSrc(-1),statusCol(0){}
 };
 
 // ============================================================== metrics =====
@@ -216,6 +217,22 @@ static void submitAppointment(ApptUI* u){
         u->statusCol = g_theme.danger;
         InvalidateRect(u->page, NULL, FALSE); return;
     }
+    if(u->editSrc >= 0){
+        // editing an existing appointment — preserve its slot, update fields
+        std::vector<Appointment> all = loadAppointments(true);
+        if(u->editSrc < (int)all.size()){
+            a.apptTime = all[u->editSrc].apptTime;
+            a.day      = all[u->editSrc].day;
+            a.shift    = all[u->editSrc].shift;
+            a.cancelled= all[u->editSrc].cancelled;
+        }
+        updateAppointment(u->editSrc, a);
+        u->statusMsg = L"تغییرات نوبت ذخیره شد."; u->statusCol = g_theme.success;
+        u->editSrc = -1;
+        resetPatient(u);
+        refreshGrid(u);
+        return;
+    }
     int q = saveAppointment(a);   // assigns queue no / time / day
     wchar_t mb[200];
     swprintf(mb,200,L"نوبت با شماره %d برای %s %s ثبت شد.",
@@ -223,6 +240,152 @@ static void submitAppointment(ApptUI* u){
     u->statusMsg = toFaDigits(mb); u->statusCol = g_theme.success;
     resetPatient(u);
     refreshGrid(u);
+}
+
+// ---- load an existing row into the form for editing ------------------------
+static void loadForEdit(ApptUI* u, int rowIdx){
+    if(rowIdx<0 || rowIdx>=(int)u->rows.size()) return;
+    const Appointment& a = u->rows[rowIdx];
+    u->editSrc = (rowIdx<(int)u->srcIndex.size())?u->srcIndex[rowIdx]:-1;
+    setPatientEnabled(u, true);
+    SetWindowTextW(u->pNid,   a.nationalId.c_str());
+    SetWindowTextW(u->pFirst, a.firstName.c_str());
+    SetWindowTextW(u->pLast,  a.lastName.c_str());
+    SetWindowTextW(u->pMobile,a.mobile.c_str());
+    SetWindowTextW(u->aDate,  a.apptDate.c_str());
+    // pick the doctor in the combo if present
+    int n=(int)SendMessageW(u->aDoctor,CB_GETCOUNT,0,0);
+    for(int i=0;i<n;i++){
+        wchar_t b[256]; SendMessageW(u->aDoctor,CB_GETLBTEXT,i,(LPARAM)b);
+        if(a.doctor==b || std::wstring(b).find(a.doctor)!=std::wstring::npos){
+            SendMessageW(u->aDoctor,CB_SETCURSEL,i,0); onDoctorChanged(u); break;
+        }
+    }
+    u->kindInPerson = (a.kind!=L"غیرحضوری");
+    u->statusMsg = L"حالت ویرایش — تغییرات را اعمال و «رزرو/ذخیره» را بزنید.";
+    u->statusCol = g_theme.warn;
+    SetFocus(u->pNid);
+    InvalidateRect(u->page,NULL,FALSE);
+}
+
+// ---- transfer (reschedule) the selected appointment to a new date ----------
+static void transferAppointment(ApptUI* u, HWND h){
+    if(u->sel<0 || u->sel>=(int)u->rows.size()) return;
+    int src = (u->sel<(int)u->srcIndex.size())?u->srcIndex[u->sel]:-1;
+    if(src<0){
+        MessageBoxW(h,L"این نوبت قابل انتقال نیست.",L"انتقال نوبت",
+            MB_OK|MB_ICONWARNING); return;
+    }
+    // ask for a new date: take it from the «تاریخ نوبت» field; if empty use today
+    wchar_t db[64]; GetWindowTextW(u->aDate,db,64);
+    std::wstring nd = trim(db);
+    if(nd.empty()) nd = jalaliDateShort(iranNow());
+    std::wstring msg = L"نوبت «"+u->rows[u->sel].firstName+L" "+
+        u->rows[u->sel].lastName+L"» به تاریخ "+toFaDigits(nd)+L" منتقل شود؟";
+    if(MessageBoxW(h,msg.c_str(),L"انتقال نوبت",MB_YESNO|MB_ICONQUESTION)!=IDYES)
+        return;
+    std::vector<Appointment> all = loadAppointments(true);
+    if(src<(int)all.size()){
+        Appointment a=all[src];
+        a.apptDate = nd;
+        // recompute weekday note: keep existing day label (date driven manually)
+        updateAppointment(src,a);
+        // notify the patient via cartable
+        pushMessageT(g_session.user.username,a.nationalId,
+            L"نوبت شما به تاریخ "+toFaDigits(nd)+L" منتقل شد.",KMSG_NORMAL);
+        u->statusMsg=L"نوبت با موفقیت منتقل شد."; u->statusCol=g_theme.success;
+        refreshGrid(u);
+    }
+}
+
+// ---- tiny modal text prompt (themed) ---------------------------------------
+struct PromptState { std::wstring text; bool ok; HWND edit; };
+static LRESULT CALLBACK promptProc(HWND h,UINT m,WPARAM w,LPARAM l){
+    PromptState* p=(PromptState*)GetWindowLongPtrW(h,GWLP_USERDATA);
+    switch(m){
+    case WM_CREATE: {
+        CREATESTRUCTW* cs=(CREATESTRUCTW*)l;
+        SetWindowLongPtrW(h,GWLP_USERDATA,(LONG_PTR)cs->lpCreateParams);
+        return 0; }
+    case WM_COMMAND: {
+        int id=LOWORD(w);
+        if(id==IDOK){
+            wchar_t b[256]; GetWindowTextW(p->edit,b,256);
+            p->text=trim(b); p->ok=true; DestroyWindow(h);
+        } else if(id==IDCANCEL){ p->ok=false; DestroyWindow(h); }
+        return 0; }
+    case WM_CTLCOLOREDIT: {
+        HDC dc=(HDC)w; SetTextColor(dc,g_theme.inputText);
+        SetBkColor(dc,g_theme.inputBg); return (LRESULT)g_brInput; }
+    case WM_CTLCOLORSTATIC: {
+        HDC dc=(HDC)w; SetTextColor(dc,g_theme.text);
+        SetBkColor(dc,g_theme.surface); return (LRESULT)g_brSurface; }
+    case WM_CLOSE: if(p){p->ok=false;} DestroyWindow(h); return 0;
+    }
+    return DefWindowProcW(h,m,w,l);
+}
+static bool apPrompt(HWND owner,const wchar_t* title,const wchar_t* label,
+                     std::wstring& out){
+    static bool reg=false;
+    if(!reg){ WNDCLASSW wc={0}; wc.lpfnWndProc=promptProc; wc.hInstance=g_hInst;
+        wc.hCursor=LoadCursor(NULL,IDC_ARROW);
+        wc.hbrBackground=g_brSurface; wc.lpszClassName=L"AzApPrompt";
+        RegisterClassW(&wc); reg=true; }
+    PromptState ps; ps.ok=false;
+    RECT rc; GetWindowRect(owner,&rc);
+    int W=S(380),H=S(180);
+    int x=rc.left+((rc.right-rc.left)-W)/2, y=rc.top+((rc.bottom-rc.top)-H)/2;
+    HWND dlg=CreateWindowExW(WS_EX_DLGMODALFRAME|WS_EX_TOPMOST,L"AzApPrompt",title,
+        WS_POPUP|WS_CAPTION|WS_SYSMENU,x,y,W,H,owner,NULL,g_hInst,&ps);
+    if(!dlg) return false;
+    CreateWindowW(L"STATIC",label,WS_CHILD|WS_VISIBLE|SS_RIGHT,
+        S(14),S(14),W-S(28),S(22),dlg,NULL,g_hInst,NULL);
+    ps.edit=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",L"",
+        WS_CHILD|WS_VISIBLE|ES_AUTOHSCROLL|ES_RIGHT,
+        S(14),S(42),W-S(28),S(28),dlg,NULL,g_hInst,NULL);
+    SendMessageW(ps.edit,WM_SETFONT,(WPARAM)g_fUI,TRUE);
+    HWND ok=createFlatButton(dlg,IDOK,L"تأیید",ICO_NONE,BS_PRIMARY,
+        W-S(200),S(86),S(86),S(34));
+    HWND ca=createFlatButton(dlg,IDCANCEL,L"انصراف",ICO_NONE,BS_OUTLINE,
+        W-S(104),S(86),S(86),S(34));
+    (void)ok;(void)ca;
+    EnableWindow(owner,FALSE);
+    ShowWindow(dlg,SW_SHOW); SetFocus(ps.edit);
+    MSG msg;
+    while(IsWindow(dlg) && GetMessageW(&msg,NULL,0,0)){
+        if(msg.message==WM_KEYDOWN && msg.hwnd && (msg.hwnd==ps.edit||GetParent(msg.hwnd)==dlg)){
+            if(msg.wParam==VK_RETURN){ SendMessageW(dlg,WM_COMMAND,IDOK,0); continue; }
+            if(msg.wParam==VK_ESCAPE){ SendMessageW(dlg,WM_COMMAND,IDCANCEL,0); continue; }
+        }
+        if(!IsDialogMessageW(dlg,&msg)){
+            TranslateMessage(&msg); DispatchMessageW(&msg);
+        }
+    }
+    EnableWindow(owner,TRUE); SetForegroundWindow(owner);
+    if(ps.ok) out=ps.text;
+    return ps.ok;
+}
+
+// ---- F3/F4/F5 service helpers ----------------------------------------------
+static void svcAddCustom(ApptUI* u, HWND h){    // F4 — افزودن خدمت
+    std::wstring s;
+    if(apPrompt(h,L"افزودن خدمت",L"نام خدمت جدید:",s) && !s.empty()){
+        int idx=(int)SendMessageW(u->aService,CB_ADDSTRING,0,(LPARAM)s.c_str());
+        SendMessageW(u->aService,CB_SETCURSEL,idx,0);
+        u->statusMsg=L"خدمت افزوده شد."; u->statusCol=g_theme.success;
+        InvalidateRect(u->page,NULL,FALSE);
+    }
+}
+static void svcRefresh(ApptUI* u){              // F5 — بازخوانی خدمات پزشک
+    onDoctorChanged(u);
+    u->statusMsg=L"فهرست خدمات پزشک بازخوانی شد."; u->statusCol=g_theme.accent;
+    InvalidateRect(u->page,NULL,FALSE);
+}
+static void svcClear(ApptUI* u){                // F3 — پاک‌سازی انتخاب خدمت
+    SendMessageW(u->aService,CB_SETCURSEL,(WPARAM)-1,0);
+    SetWindowTextW(u->aService,L"");
+    u->statusMsg=L"انتخاب خدمت پاک شد."; u->statusCol=g_theme.textDim;
+    InvalidateRect(u->page,NULL,FALSE);
 }
 
 // ---------------------------------------------------------------- search ----
@@ -259,7 +422,64 @@ static void doSearch(ApptUI* u){
     InvalidateRect(u->page,NULL,FALSE);
 }
 
-// ============================================================== layout ======
+// ---------------------------------------------------- print one slip --------
+//  Real GDI print of an appointment slip on the default (or chosen) printer.
+static bool printApptSlip(HWND owner, const Appointment& a){
+    // Use the configured reception printer if set, otherwise the system default.
+    std::wstring printer = getSetting(L"printer_name",L"");
+    HDC dc=NULL;
+    if(!printer.empty())
+        dc=CreateDCW(L"WINSPOOL",printer.c_str(),NULL,NULL);
+    if(!dc){
+        PRINTDLGW pd={sizeof(pd)};
+        pd.hwndOwner=owner; pd.Flags=PD_RETURNDC|PD_NOPAGENUMS|PD_NOSELECTION;
+        if(!PrintDlgW(&pd) || !pd.hDC){
+            return false;
+        }
+        dc=pd.hDC;
+    }
+    DOCINFOW di={sizeof(di)}; di.lpszDocName=L"آزادی طب — قبض نوبت";
+    if(StartDocW(dc,&di)<=0){ DeleteDC(dc); return false; }
+    StartPage(dc);
+    int dpiY=GetDeviceCaps(dc,LOGPIXELSY);
+    int W=GetDeviceCaps(dc,HORZRES);
+    int m=dpiY/2;
+    SetBkMode(dc,TRANSPARENT);
+    SetTextAlign(dc,TA_RIGHT|TA_RTLREADING);
+    HFONT fT=CreateFontW(-(dpiY*20/72),0,0,0,FW_BOLD,0,0,0,DEFAULT_CHARSET,
+        0,0,CLEARTYPE_QUALITY,0,L"Vazirmatn");
+    HFONT fB=CreateFontW(-(dpiY*13/72),0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,
+        0,0,CLEARTYPE_QUALITY,0,L"Vazirmatn");
+    HGDIOBJ of=SelectObject(dc,fT);
+    int y=m;
+    RECT rt={m,y,W-m,y+dpiY};
+    DrawTextW(dc,L"آزادی طب — قبض نوبت",-1,&rt,
+        DT_CENTER|DT_RTLREADING|DT_NOPREFIX|DT_SINGLELINE);
+    y+=dpiY;
+    SelectObject(dc,fB);
+    auto line=[&](const std::wstring& label,const std::wstring& val){
+        RECT r={m,y,W-m,y+dpiY*9/16};
+        std::wstring s=label+L": "+val;
+        DrawTextW(dc,s.c_str(),-1,&r,DT_RIGHT|DT_RTLREADING|DT_NOPREFIX|DT_SINGLELINE);
+        y+=dpiY*9/16;
+    };
+    wchar_t qn[24]; swprintf(qn,24,L"%d",a.queueNo);
+    line(L"شماره نوبت",toFaDigits(qn));
+    line(L"نام بیمار",a.firstName+L" "+a.lastName);
+    line(L"کد ملی",toFaDigits(a.nationalId));
+    line(L"پزشک",a.doctor);
+    if(!a.service.empty()) line(L"خدمت",a.service);
+    line(L"تاریخ نوبت",toFaDigits(a.apptDate)+L"  ("+a.day+L")");
+    line(L"ساعت",toFaDigits(a.apptTime));
+    if(!a.shift.empty()) line(L"شیفت",a.shift);
+    line(L"نوع",a.kind);
+    line(L"پذیرش‌کننده",a.user);
+    SelectObject(dc,of); DeleteObject(fT); DeleteObject(fB);
+    EndPage(dc); EndDoc(dc); DeleteDC(dc);
+    return true;
+}
+
+// =============================================== layout ======
 //  RIGHT panel width ~ 46% of the page; LEFT panel (grid) takes the rest.
 static int apRightW(HWND h){
     RECT rc; GetClientRect(h,&rc);
@@ -720,8 +940,14 @@ static LRESULT CALLBACK apProc(HWND h, UINT m, WPARAM w, LPARAM l){
                         if(src>=0){ cancelAppointment(src); refreshGrid(u); }
                     }
                 }
+            } else if(col==1){   // ویرایش
+                loadForEdit(u,hit);
             } else if(col==2){   // چاپ
-                MessageBoxW(h,L"چاپ نوبت در دست توسعه است.",L"چاپ",MB_OK|MB_ICONINFORMATION);
+                if(printApptSlip(h,u->rows[hit])){
+                    u->statusMsg=L"قبض نوبت به چاپگر ارسال شد."; u->statusCol=g_theme.success;
+                } else {
+                    u->statusMsg=L"چاپ انجام نشد (چاپگر را بررسی کنید)."; u->statusCol=g_theme.danger;
+                }
             }
             InvalidateRect(h,NULL,FALSE);
         }
@@ -743,9 +969,9 @@ static LRESULT CALLBACK apProc(HWND h, UINT m, WPARAM w, LPARAM l){
             u->statusMsg=L"کد ملی بیمار را وارد و Enter بزنید.";
             u->statusCol=g_theme.accent; InvalidateRect(h,NULL,FALSE);
         }
-        else if(id==AP_A_SVC_F5||id==AP_A_SVC_F4||id==AP_A_SVC_F3){
-            MessageBoxW(h,L"این قابلیت خدمت در دست توسعه است.",L"خدمت",MB_OK|MB_ICONINFORMATION);
-        }
+        else if(id==AP_A_SVC_F5) svcRefresh(u);   // F5: بازخوانی خدمات پزشک
+        else if(id==AP_A_SVC_F4) svcAddCustom(u,h);// F4: افزودن خدمت
+        else if(id==AP_A_SVC_F3) svcClear(u);      // F3: پاک‌سازی انتخاب
         else if(id==AP_P_FOREIGN && code==BN_CLICKED){
             bool f=(SendMessageW(u->pForeign,BM_GETCHECK,0,0)==BST_CHECKED);
             if(f) setPatientEnabled(u,true);   // allow manual entry immediately
@@ -765,10 +991,15 @@ static LRESULT CALLBACK apProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 InvalidateRect(h,NULL,FALSE);
             }
         }
-        else if(id==AP_T_TRANSFER){
-            MessageBoxW(h,L"انتقال نوبت در دست توسعه است.",L"انتقال نوبت",MB_OK|MB_ICONINFORMATION);
+        else if(id==AP_T_TRANSFER) transferAppointment(u,h);
+        else if(id==AP_T_PRINT){
+            if(u->sel>=0 && u->sel<(int)u->rows.size()){
+                if(printApptSlip(h,u->rows[u->sel])){
+                    u->statusMsg=L"قبض نوبت به چاپگر ارسال شد."; u->statusCol=g_theme.success;
+                } else { u->statusMsg=L"چاپ انجام نشد."; u->statusCol=g_theme.danger; }
+                InvalidateRect(h,NULL,FALSE);
+            } else refreshGrid(u);
         }
-        else if(id==AP_T_PRINT) refreshGrid(u);
         else if(id==AP_T_SAVELAYOUT){
             setSetting(L"appt_layout_saved",L"1");
             u->statusMsg=L"چیدمان ذخیره شد."; u->statusCol=g_theme.success;

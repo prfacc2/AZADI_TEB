@@ -219,3 +219,35 @@ bool gpDrawTintedImageRes(HDC dc, int resId, RECT rc, COLORREF tint){
     g.DrawImage(img, RectF(dx,dy,dw,dh), 0,0,iw,ih, UnitPixel, &ia);
     return true;
 }
+
+//  v1.6.0: draw a profile photo from a file, cropped/scaled into a CIRCLE that
+//  fits the given rect. Used for user avatars (settings panel / reception info
+//  panel). Returns false if GDI+ is off or the file can't be loaded, so callers
+//  fall back to the initials/guest icon.
+bool gpDrawImageFileCircle(HDC dc, const std::wstring& path, RECT rc){
+    if(!s_gdipOK || path.empty()) return false;
+    Image img(path.c_str());
+    if(img.GetLastStatus()!=Ok) return false;
+    REAL iw=(REAL)img.GetWidth(), ih=(REAL)img.GetHeight();
+    if(iw<=0||ih<=0) return false;
+    int W=rc.right-rc.left, H=rc.bottom-rc.top;
+    if(W<=0||H<=0) return false;
+
+    Graphics g(dc);
+    g.SetInterpolationMode(InterpolationModeHighQualityBicubic);
+    g.SetPixelOffsetMode(PixelOffsetModeHalf);
+    g.SetSmoothingMode(SmoothingModeAntiAlias);
+
+    // circular clip
+    GraphicsPath clip;
+    clip.AddEllipse(rc.left, rc.top, W-1, H-1);
+    g.SetClip(&clip);
+
+    // cover-fit (fill the circle, crop overflow)
+    REAL scale = (W/iw > H/ih) ? W/iw : H/ih;
+    REAL dw=iw*scale, dh=ih*scale;
+    REAL dx=rc.left+(W-dw)/2, dy=rc.top+(H-dh)/2;
+    g.DrawImage(&img, RectF(dx,dy,dw,dh), 0,0,iw,ih, UnitPixel);
+    g.ResetClip();
+    return true;
+}
