@@ -14,13 +14,14 @@ Session   g_session;
 HFONT g_fUI=0, g_fUIB=0, g_fSmall=0, g_fTitle=0, g_fBig=0, g_fHuge=0, g_fMono=0;
 
 // frame children
-static HWND s_bExit=0, s_bTheme=0, s_bUpdate=0, s_bSettings=0;
+//  v1.4.0: the header now carries ONLY the exit button (right) and the gear
+//  settings button (left). Theme-toggle and check-for-update were removed from
+//  the header and moved INTO the settings panel per the redesign brief.
+static HWND s_bExit=0, s_bSettings=0;
 static HWND s_screen=0;
 static ScreenId s_curScreen = SC_HOME;
 
 #define ID_FR_EXIT     101
-#define ID_FR_THEME    102
-#define ID_FR_UPDATE   103
 #define ID_FR_SETTINGS 104
 #define TIMER_CLOCK  1
 
@@ -82,19 +83,28 @@ void switchScreen(ScreenId id){
 
 static LRESULT CALLBACK homeProc(HWND h, UINT m, WPARAM w, LPARAM l){
     switch(m){
-    case WM_CREATE:
-        createFlatButton(h, ID_HM_RECEPTION, L"پذیرش درمانگاه", ICO_CROSS_MED,
+    case WM_CREATE: {
+        HWND r=createFlatButton(h, ID_HM_RECEPTION, L"پذیرش درمانگاه", ICO_CROSS_MED,
             BS_CARD, 0,0,10,10, L"ثبت پذیرش بیمار و صدور قبض");
-        createFlatButton(h, ID_HM_MANAGE, L"پنل مدیریت درمانگاه", ICO_SHIELD,
+        HWND mg=createFlatButton(h, ID_HM_MANAGE, L"پنل مدیریت درمانگاه", ICO_SHIELD,
             BS_CARD, 0,0,10,10, L"گزارش‌ها و مدیریت سامانه");
+        setFlatButtonBg(r,  g_theme.bg2);
+        setFlatButtonBg(mg, g_theme.bg2);
+        return 0; }
+    case WM_APP_THEME:
+        setFlatButtonBg(GetDlgItem(h,ID_HM_RECEPTION), g_theme.bg2);
+        setFlatButtonBg(GetDlgItem(h,ID_HM_MANAGE),    g_theme.bg2);
+        InvalidateRect(h,NULL,TRUE);
         return 0;
     case WM_SIZE: {
         int W=LOWORD(l), H=HIWORD(l);
-        int cw=S(290), chh=S(170), gap=S(28);
-        // vertical stack: logo(96) + 16 + title(46) + sub(28) + 40 + cards(170)
-        int stackH = S(96)+S(16)+S(46)+S(28)+S(40)+chh;
+        int cw=S(290), chh=S(170), gap=S(32);
+        // v1.4.0: more breathing room. Vertical stack:
+        //   logo(96) + 18 + title(46) + sub(28) + BIG gap(72) + cards(170)
+        int gapTitleCards = S(72);
+        int stackH = S(96)+S(18)+S(46)+S(28)+gapTitleCards+chh;
         int yTop = (H-stackH)/2; if(yTop<S(10)) yTop=S(10);
-        int yCards = yTop + S(96)+S(16)+S(46)+S(28)+S(40);
+        int yCards = yTop + S(96)+S(18)+S(46)+S(28)+gapTitleCards;
         int totW = 2*cw+gap;
         int x=(W-totW)/2;
         // RTL: reception card on the right
@@ -113,6 +123,7 @@ static LRESULT CALLBACK homeProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 if(showShiftDialog(g_hFrame, shift)){
                     g_session.user=u; g_session.shift=shift;
                     g_session.loginAt=iranNow();
+                    setUserOnline(u.username,true);
                     s_busy=false;
                     switchScreen(SC_RECEPTION);
                     return 0;
@@ -125,6 +136,7 @@ static LRESULT CALLBACK homeProc(HWND h, UINT m, WPARAM w, LPARAM l){
             if(showLoginDialog(g_hFrame, 1, u)){
                 g_session.user=u; g_session.shift=detectShift();
                 g_session.loginAt=iranNow();
+                setUserOnline(u.username,true);
                 s_busy=false;
                 switchScreen(SC_MANAGE);
                 return 0;
@@ -133,7 +145,6 @@ static LRESULT CALLBACK homeProc(HWND h, UINT m, WPARAM w, LPARAM l){
         }
         return 0; }
     case WM_ERASEBKGND: return 1;
-    case WM_APP_THEME: InvalidateRect(h,NULL,TRUE); return 0;
     case WM_PAINT: {
         PAINTSTRUCT ps; HDC dc0=BeginPaint(h,&ps);
         RECT rc; GetClientRect(h,&rc);
@@ -152,13 +163,14 @@ static LRESULT CALLBACK homeProc(HWND h, UINT m, WPARAM w, LPARAM l){
 
         // ---- same vertical stack math as WM_SIZE ----
         int chh=S(170);
-        int stackH = S(96)+S(16)+S(46)+S(28)+S(40)+chh;
+        int gapTitleCards = S(72);
+        int stackH = S(96)+S(18)+S(46)+S(28)+gapTitleCards+chh;
         int yTop = (rc.bottom-stackH)/2; if(yTop<S(10)) yTop=S(10);
 
         // glass hero panel behind the centered content (open, layered look)
-        int heroW=S(720); if(heroW>rc.right-S(40)) heroW=rc.right-S(40);
+        int heroW=S(760); if(heroW>rc.right-S(40)) heroW=rc.right-S(40);
         RECT hero={rc.right/2-heroW/2, yTop-S(28),
-                   rc.right/2+heroW/2, yTop+stackH-chh+S(8)};
+                   rc.right/2+heroW/2, yTop+S(96)+S(18)+S(46)+S(28)+S(20)};
         gpShadow(dc,hero,S(22),S(14),60);
         // Hero "glass": a gentle theme-aware gradient (light surface in light
         // mode, deep slate in dark mode) so the title text always has strong
@@ -176,12 +188,13 @@ static LRESULT CALLBACK homeProc(HWND h, UINT m, WPARAM w, LPARAM l){
         RECT li={lc.left+S(24),lc.top+S(24),lc.right-S(24),lc.bottom-S(24)};
         drawIcon(dc,ICO_CROSS_MED,li,RGB(255,255,255),S(2)+1);
 
-        // title
-        int yTitle = yTop + S(96) + S(16);
+        // title — v1.4.0: brand name "آزادی طب" removed from the centre per
+        // the brief; the centred title is now the system tagline only.
+        int yTitle = yTop + S(96) + S(18);
         SetTextColor(dc,g_theme.text);
         SelectObject(dc,g_fBig);
         RECT tr={0,yTitle,rc.right,yTitle+S(46)};
-        DrawTextW(dc,L"سامانه پذیرش و مدیریت درمانگاه آزادی طب",-1,&tr,
+        DrawTextW(dc,L"سامانه پذیرش و مدیریت درمانگاه",-1,&tr,
             DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
 
         // subtitle
@@ -230,10 +243,11 @@ static void frameLayout(HWND h){
     // --- RIGHT side (RTL primary): EXIT is the right-most control; the app
     //     identity (logo + name + fullname + access) is painted to its LEFT.
     MoveWindow(s_bExit,  rc.right-pad-bh, y, bh, bh, TRUE);
-    // --- LEFT side: utility cluster — settings (gear), theme, update.
-    MoveWindow(s_bSettings, pad,             y, bh, bh, TRUE);
-    MoveWindow(s_bTheme,    pad+(bh+S(8)),   y, bh, bh, TRUE);
-    MoveWindow(s_bUpdate,   pad+2*(bh+S(8)), y, bh, bh, TRUE);
+    // --- LEFT side: only the settings (gear) button now.
+    MoveWindow(s_bSettings, pad, y, bh, bh, TRUE);
+    // keep the header buttons' rounded corners blended into the header gradient
+    setFlatButtonBg(s_bExit,     g_theme.headerTop);
+    setFlatButtonBg(s_bSettings, g_theme.headerTop);
     if(s_screen){
         RECT cr=frameContentRect();
         MoveWindow(s_screen,cr.left,cr.top,cr.right-cr.left,cr.bottom-cr.top,TRUE);
@@ -246,15 +260,16 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         g_hFrame = h;
         s_bExit     = createFlatButton(h, ID_FR_EXIT,    L"", ICO_X,      BS_GHOST,0,0,10,10);
         s_bSettings = createFlatButton(h, ID_FR_SETTINGS,L"", ICO_GEAR,   BS_GHOST,0,0,10,10);
-        s_bTheme    = createFlatButton(h, ID_FR_THEME,   L"", g_dark?ICO_SUN:ICO_MOON, BS_GHOST,0,0,10,10);
-        s_bUpdate   = createFlatButton(h, ID_FR_UPDATE,  L"", ICO_UPDATE, BS_GHOST,0,0,10,10);
+        setFlatButtonBg(s_bExit,     g_theme.headerTop);
+        setFlatButtonBg(s_bSettings, g_theme.headerTop);
         SetTimer(h, TIMER_CLOCK, g_lowSpec?1000:500, NULL);
         return 0;
     case WM_SIZE: frameLayout(h); return 0;
     case WM_APP_THEME:
-        // theme may have been switched from inside the settings panel — keep the
-        // header's theme button glyph in sync and repaint the whole frame.
-        setFlatButtonIcon(s_bTheme, g_dark?ICO_SUN:ICO_MOON);
+        // theme may have been switched from inside the settings panel — refresh
+        // the header buttons' corner-blend colour and repaint the whole frame.
+        setFlatButtonBg(s_bExit,     g_theme.headerTop);
+        setFlatButtonBg(s_bSettings, g_theme.headerTop);
         InvalidateRect(h,NULL,TRUE);
         return 0;
     case WM_TIMER:
@@ -276,19 +291,12 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 if(MessageBoxW(h,L"از حساب کاربری خارج می‌شوید؟",L"خروج از حساب",
                     MB_YESNO|MB_ICONQUESTION)==IDYES){
                     logLine(L"logout: "+g_session.user.username);
+                    setUserOnline(g_session.user.username,false);
                     g_session = Session();
                     switchScreen(SC_HOME);
                 }
             }
         }
-        else if(id==ID_FR_THEME){
-            applyTheme(!g_dark);
-            // v1.1.0: swap icon in place — never destroy the button that
-            // generated this very command (use-after-free crash).
-            setFlatButtonIcon(s_bTheme, g_dark?ICO_SUN:ICO_MOON);
-            broadcastThemeChange();
-        }
-        else if(id==ID_FR_UPDATE) checkRemoteUpdate(h);
         else if(id==ID_FR_SETTINGS) openSettingsPanel(h);
         return 0; }
     case WM_KEYDOWN: {
@@ -304,6 +312,7 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
             if(ok){
                 g_session.user=u; g_session.shift=detectShift();
                 g_session.loginAt=iranNow();
+                setUserOnline(u.username,true);
                 switchScreen(SC_ADMIN);
             }
             return 0;
@@ -417,6 +426,8 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         return 0; }
     case WM_DESTROY:
         KillTimer(h,TIMER_CLOCK);
+        if(!g_session.user.username.empty())
+            setUserOnline(g_session.user.username,false);
         PostQuitMessage(0);
         return 0;
     }
@@ -535,6 +546,25 @@ static LRESULT CALLBACK dateEditProc(HWND h, UINT m, WPARAM w, LPARAM l){
         if(w==VK_RETURN || w==VK_TAB) return 0;            // no beep
         wchar_t buf[64]; GetWindowTextW(h,buf,64);
         std::wstring cur(buf);
+        // v1.4.0 fix: when the user is EDITING an existing value (caret not at
+        // the end, or a range is selected — e.g. clicked into the middle of a
+        // pre-filled birth date), do NOT rebuild-from-end. Let the default edit
+        // control handle the keystroke so the field is no longer "locked" or
+        // erased. We only apply the auto-slash mask when typing at the very end
+        // with no selection (fresh sequential entry).
+        DWORD selA=0, selB=0;
+        SendMessageW(h, EM_GETSEL, (WPARAM)&selA, (LPARAM)&selB);
+        bool atEnd   = (selA==selB) && (selA==(DWORD)cur.size());
+        bool hasRange= (selA!=selB);
+        if(w!=VK_BACK && (hasRange || !atEnd)){
+            // pass digits/separators through to normal editing; block letters
+            wchar_t ch=(wchar_t)w;
+            if(ch>=0x06F0&&ch<=0x06F9) ch=(wchar_t)(L'0'+(ch-0x06F0));
+            else if(ch>=0x0660&&ch<=0x0669) ch=(wchar_t)(L'0'+(ch-0x0660));
+            if((ch>=L'0'&&ch<=L'9')||ch==L'/')
+                return CallWindowProcW(s_oldDate,h,m,(WPARAM)ch,l);
+            return 0;   // ignore other chars while mid-edit
+        }
         if(w==VK_BACK){
             if(!cur.empty()) cur.pop_back();
             // re-normalise after deletion

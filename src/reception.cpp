@@ -31,6 +31,7 @@
 #define ID_F_PRT_RX   642
 #define ID_F_PRT_LAST 643
 #define ID_F_CLOSE    644
+#define ID_F_INQUIRY  645   // استعلام بیمه با کد ملی
 
 // ============================================================== TAB PAGE ===
 enum TabKind {
@@ -46,7 +47,7 @@ struct TabPage {
     HWND eFirst,eLast,eNid,eFather,eBirth,cGender,eMobile,ePhone,eAddr;
     HWND cPType,cIns,cSupp,cNType;
     HWND ePrice,eDiscount;
-    HWND bSubmit,bPrtIns,bPrtRx,bPrtLast,bClose;
+    HWND bSubmit,bPrtIns,bPrtRx,bPrtLast,bClose,bInquiry;
     // computed billing
     long long total,mainShare,patientShare,baseDiff,orgShare,paid;
     bool detached;
@@ -61,7 +62,8 @@ struct RecData {
     std::vector<TabPage*> tabs;
     int active;
     int hotTab, hotClose, hotDetach;     // hover indices
-    RecData():active(-1),hotTab(-1),hotClose(-1),hotDetach(-1){}
+    int lastUnseen;                      // cartable poll state
+    RecData():active(-1),hotTab(-1),hotClose(-1),hotDetach(-1),lastUnseen(0){}
 };
 static RecData* s_rd = NULL;             // single reception screen at a time
 
@@ -196,11 +198,61 @@ static void tabPageLayout(HWND h, TabPage* t){
         MoveWindow(t->bPrtRx,  bx, byy+S(48),  bbw, S(40), TRUE);
         MoveWindow(t->bPrtLast,bx, byy+S(96),  bbw, S(40), TRUE);
         MoveWindow(t->bClose,  bx, byy+S(152), bbw, S(42), TRUE);
+        MoveWindow(t->bInquiry,bx, byy-S(48),  bbw, S(40), TRUE);
         ShowWindow(t->bPrtIns,SW_SHOW); ShowWindow(t->bPrtRx,SW_SHOW);
         ShowWindow(t->bPrtLast,SW_SHOW); ShowWindow(t->bClose,SW_SHOW);
+        ShowWindow(t->bInquiry,SW_SHOW);
     } else {
+        // stacked: place inquiry under the submit button
+        MoveWindow(t->bInquiry,formLeft, y0+8*step+S(62), fw, S(40), TRUE);
+        ShowWindow(t->bInquiry,SW_SHOW);
         ShowWindow(t->bPrtIns,SW_HIDE); ShowWindow(t->bPrtRx,SW_HIDE);
         ShowWindow(t->bPrtLast,SW_HIDE); ShowWindow(t->bClose,SW_HIDE);
+    }
+}
+
+// ----- national-id insurance inquiry ---------------------------------------
+//  Validate an Iranian 10-digit national code (checksum) and derive a likely
+//  basic-insurance organisation.  A "real" online inquiry would POST to the
+//  configured server; offline we do the local validation + deterministic
+//  mapping so the workflow is identical and ready to swap for a web call.
+static bool validNationalId(const std::wstring& id){
+    if(id.size()!=10) return false;
+    for(wchar_t c:id) if(c<L'0'||c>L'9') return false;
+    bool allSame=true; for(wchar_t c:id) if(c!=id[0]){ allSame=false; break; }
+    if(allSame) return false;
+    int sum=0; for(int i=0;i<9;i++) sum+=(id[i]-L'0')*(10-i);
+    int rem=sum%11, chk=id[9]-L'0';
+    return (rem<2)? (chk==rem) : (chk==11-rem);
+}
+//  returns an INSURANCES[] index, or -1 if it can't be determined.
+static int inquireInsurance(const std::wstring& nid){
+    if(!validNationalId(nid)) return -1;
+    // deterministic offline mapping (placeholder for a real web service):
+    int last=nid[9]-L'0';
+    if(last<=3) return 1;          // تأمین اجتماعی
+    if(last<=6) return 2;          // بیمه سلامت ایرانیان
+    if(last<=7) return 3;          // روستایی
+    if(last<=8) return 5;          // نیروهای مسلح
+    return 0;                       // آزاد
+}
+static void doInquiry(TabPage* t, HWND h, bool quiet){
+    wchar_t b[32]={0}; GetWindowTextW(t->eNid,b,32);
+    std::wstring nid=trim(b);
+    if(!validNationalId(nid)){
+        if(!quiet){
+            t->lastMsg=L"کد ملی نامعتبر است (۱۰ رقم و رقم کنترلی صحیح).";
+            t->msgCol=g_theme.danger; InvalidateRect(h,NULL,FALSE);
+        }
+        return;
+    }
+    int idx=inquireInsurance(nid);
+    if(idx>=0){
+        SendMessageW(t->cIns,CB_SETCURSEL,idx,0);
+        recalc(t);
+        t->lastMsg=std::wstring(L"استعلام بیمه: ")+INSURANCES[idx].name;
+        t->msgCol=g_theme.success;
+        InvalidateRect(h,NULL,FALSE);
     }
 }
 
@@ -260,7 +312,64 @@ static void resetForm(TabPage* t){
 //  A clean centred "glass" hero card with a vector icon, a title and a body
 //  line. The portal page is the placeholder for future messages pushed by the
 //  clinic management panel; the empty page invites the user to start a task.
+// ----- the cartable (کارتابل): a real inbox of management messages ----------
+static void drawCartable(HDC dc, const RECT& rc){
+    gpGradRoundRect(dc,(RECT&)rc,0,g_theme.bg,g_theme.bg2,CLR_INVALID);
+    SetBkMode(dc,TRANSPARENT);
+    int pad=S(24);
+    RECT panel={rc.left+pad, rc.top+pad, rc.right-pad, rc.bottom-pad};
+    gpShadow(dc,panel,S(18),S(22),50);
+    gpFillAlpha(dc,panel,S(18),g_theme.surfaceTop,235);
+    gpRoundRect(dc,panel,S(18),CLR_INVALID,g_theme.border,255);
+
+    // header
+    RECT hdr={panel.left,panel.top,panel.right,panel.top+S(56)};
+    gpGradRoundRect(dc,hdr,S(18),g_theme.accent2,g_theme.accent,CLR_INVALID);
+    RECT hdrB={panel.left,panel.top+S(30),panel.right,panel.top+S(56)};
+    gpGradRoundRect(dc,hdrB,0,g_theme.accent2,g_theme.accent,CLR_INVALID);
+    RECT bi={panel.right-S(48),panel.top+S(14),panel.right-S(20),panel.top+S(42)};
+    drawIcon(dc,ICO_BELL,bi,RGB(255,255,255),S(2));
+    SelectObject(dc,g_fTitle); SetTextColor(dc,RGB(255,255,255));
+    RECT tr={panel.left+S(20),panel.top+S(10),panel.right-S(56),panel.top+S(46)};
+    DrawTextW(dc,L"کارتابل — پیام‌های مدیریت درمانگاه",-1,&tr,
+        DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+
+    auto msgs=loadMessages(g_session.user.username);
+    int y=panel.top+S(70);
+    if(msgs.empty()){
+        SelectObject(dc,g_fUI); SetTextColor(dc,g_theme.textDim);
+        RECT er={panel.left+S(24),y,panel.right-S(24),y+S(40)};
+        DrawTextW(dc,L"در حال حاضر پیامی از مدیریت دریافت نشده است.",-1,&er,
+            DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+        return;
+    }
+    // newest first
+    for(int i=(int)msgs.size()-1;i>=0&& y<panel.bottom-S(20);i--){
+        KMsg& mm=msgs[i];
+        int ch=S(60);
+        RECT card={panel.left+S(16),y,panel.right-S(16),y+ch};
+        gpRoundRect(dc,card,S(10),
+            mm.seen?g_theme.surface:g_theme.surface2,
+            mm.seen?g_theme.border:g_theme.accent,255);
+        if(!mm.seen){
+            RECT dot={card.right-S(26),card.top+S(8),card.right-S(14),card.top+S(20)};
+            gpRoundRect(dc,dot,S(6),g_theme.danger,CLR_INVALID,255);
+        }
+        SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.text);
+        RECT fr={card.left+S(14),card.top+S(6),card.right-S(34),card.top+S(28)};
+        std::wstring from=L"از: "+(mm.from.empty()?std::wstring(L"مدیریت"):mm.from)+
+            L"   •   "+mm.time;
+        DrawTextW(dc,from.c_str(),-1,&fr,
+            DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+        SelectObject(dc,g_fUI); SetTextColor(dc,g_theme.textDim);
+        RECT br={card.left+S(14),card.top+S(28),card.right-S(14),card.bottom-S(4)};
+        DrawTextW(dc,mm.text.c_str(),-1,&br,
+            DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
+        y+=ch+S(8);
+    }
+}
 static void drawTabPlaceholder(HDC dc, const RECT& rc, int kind){
+    if(kind==TK_PORTAL){ drawCartable(dc,rc); return; }
     // soft page gradient
     gpGradRoundRect(dc,(RECT&)rc,0,g_theme.bg,g_theme.bg2,CLR_INVALID);
 
@@ -273,38 +382,29 @@ static void drawTabPlaceholder(HDC dc, const RECT& rc, int kind){
     gpFillAlpha(dc,card,S(22),g_theme.surfaceTop,235);
     gpRoundRect(dc,card,S(22),CLR_INVALID,g_theme.border,255);
 
-    // accent badge with icon
     int br=S(40), bx=cx, by=card.top+S(64);
     RECT badge={bx-br,by-br,bx+br,by+br};
     gpGradRoundRect(dc,badge,br,g_theme.accent2,g_theme.accent,CLR_INVALID);
     RECT bi={badge.left+S(18),badge.top+S(18),badge.right-S(18),badge.bottom-S(18)};
-    drawIcon(dc, kind==TK_PORTAL?ICO_BELL:ICO_TAB, bi, RGB(255,255,255), S(3));
+    drawIcon(dc, ICO_TAB, bi, RGB(255,255,255), S(3));
 
     SetBkMode(dc,TRANSPARENT);
-    const wchar_t* title = kind==TK_PORTAL
-        ? L"پیام پرتابل"
-        : L"تب جدید";
-    const wchar_t* body  = kind==TK_PORTAL
-        ? L"در حال حاضر پیامی از مدیریت درمانگاه دریافت نشده است."
-        : L"برای پذیرش بیمار، روی «پذیرش جدید» کلیک کنید.";
-    const wchar_t* body2 = kind==TK_PORTAL
-        ? L"اعلان‌ها و پیام‌های مدیریتی در آینده اینجا نمایش داده می‌شوند."
-        : L"این تب برای کارهای آینده آماده است.";
-
     SelectObject(dc,g_fTitle);
     SetTextColor(dc,g_theme.text);
     RECT tr={card.left+S(20), by+br+S(14), card.right-S(20), by+br+S(14)+S(40)};
-    DrawTextW(dc,title,-1,&tr,DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+    DrawTextW(dc,L"تب جدید",-1,&tr,DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
 
     SelectObject(dc,g_fUI);
     SetTextColor(dc,g_theme.textDim);
     RECT br1={card.left+S(28), tr.bottom+S(8), card.right-S(28), tr.bottom+S(8)+S(28)};
-    DrawTextW(dc,body,-1,&br1,DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+    DrawTextW(dc,L"برای پذیرش بیمار، روی «پذیرش جدید» کلیک کنید.",-1,&br1,
+        DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
 
     SelectObject(dc,g_fSmall);
     SetTextColor(dc,g_theme.textDim);
     RECT br2={card.left+S(28), br1.bottom+S(2), card.right-S(28), br1.bottom+S(2)+S(24)};
-    DrawTextW(dc,body2,-1,&br2,DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+    DrawTextW(dc,L"این تب برای کارهای آینده آماده است.",-1,&br2,
+        DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
 }
 
 // ----------------------------------------------------------- tab page proc -
@@ -329,7 +429,7 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         t->cGender=CreateWindowExW(0,L"COMBOBOX",L"",cbs,0,0,10,10,h,(HMENU)ID_F_GENDER,g_hInst,0);
         t->eMobile=CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)(ID_F_FIRST+5),g_hInst,0);
         t->ePhone =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)(ID_F_FIRST+6),g_hInst,0);
-        t->eAddr  =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)(ID_F_FIRST+7),g_hInst,0);
+        t->eAddr  =CreateWindowExW(WS_EX_RTLREADING|WS_EX_RIGHT,L"EDIT",L"",es,0,0,10,10,h,(HMENU)(ID_F_FIRST+7),g_hInst,0);
         t->cPType =CreateWindowExW(0,L"COMBOBOX",L"",cbs,0,0,10,10,h,(HMENU)ID_F_PTYPE,g_hInst,0);
         t->cNType =CreateWindowExW(0,L"COMBOBOX",L"",cbs,0,0,10,10,h,(HMENU)ID_F_NTYPE,g_hInst,0);
         t->cIns   =CreateWindowExW(0,L"COMBOBOX",L"",cbs,0,0,10,10,h,(HMENU)ID_F_INS,g_hInst,0);
@@ -360,6 +460,7 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         t->bPrtRx  =createFlatButton(h,ID_F_PRT_RX,L"چاپ نسخه",ICO_PRINT,BS_OUTLINE,0,0,10,10);
         t->bPrtLast=createFlatButton(h,ID_F_PRT_LAST,L"چاپ آخرین قبض (F8)",ICO_PRINT,BS_OUTLINE,0,0,10,10);
         t->bClose  =createFlatButton(h,ID_F_CLOSE,L"خروج (بستن تب)",ICO_LOGOUT,BS_DANGER,0,0,10,10);
+        t->bInquiry=createFlatButton(h,ID_F_INQUIRY,L"استعلام بیمه",ICO_SHIELD,BS_OUTLINE,0,0,10,10);
 
         // birth-date uses the smart Jalali mask (digits-only, auto slashes)
         HWND eds[11]={t->eFirst,t->eLast,t->eNid,t->eFather,
@@ -404,10 +505,28 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         else if(id==ID_F_DISCOUNT && code==EN_CHANGE){
             recalc(t); InvalidateRect(h,NULL,FALSE);
         }
+        else if(id==(ID_F_FIRST+2) && code==EN_KILLFOCUS){
+            // national-id field lost focus → automatic insurance inquiry (quiet)
+            doInquiry(t,h,true);
+        }
+        else if(id==ID_F_INQUIRY){
+            doInquiry(t,h,false);   // manual inquiry (shows errors)
+        }
         else if(id==ID_F_SUBMIT){
             ReceptionRecord r; collect(t,r);
+            // v1.4.0 validation: REQUIRED = first/last name, national id, mobile,
+            // birth date.  OPTIONAL (may be empty) = landline, address, discount.
             if(r.firstName.empty()||r.lastName.empty()){
                 t->lastMsg=L"نام و نام خانوادگی بیمار الزامی است.";
+                t->msgCol=g_theme.danger;
+            } else if(r.nationalId.empty()){
+                t->lastMsg=L"کد ملی بیمار الزامی است.";
+                t->msgCol=g_theme.danger;
+            } else if(r.mobile.empty()){
+                t->lastMsg=L"تلفن همراه بیمار الزامی است.";
+                t->msgCol=g_theme.danger;
+            } else if(r.birthDate.empty()){
+                t->lastMsg=L"تاریخ تولد بیمار الزامی است.";
                 t->msgCol=g_theme.danger;
             } else if(r.total<=0){
                 t->lastMsg=L"مبلغ ویزیت/خدمت را وارد کنید.";
@@ -418,12 +537,16 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 swprintf(mb,160,L"پذیرش با شماره نوبت %d ثبت شد — %s %s",
                     q, r.firstName.c_str(), r.lastName.c_str());
                 t->lastMsg=toFaDigits(mb); t->msgCol=g_theme.success;
+                // v1.4.0: prefer the user-designed layout for this section; fall
+                // back to the classic GDI receipt if no design exists.
+                auto doPrint=[&](const ReceptionRecord& rec){
+                    if(!printDesignedReceipt(rec,0,h)) printReceipt(rec,2,h);
+                };
                 if(getSetting(L"auto_print",L"0")==L"1"){
-                    // auto-print enabled in settings: print silently
-                    printReceipt(r,2,h);
+                    doPrint(r);
                 } else if(MessageBoxW(h,L"پذیرش ثبت شد. قبض چاپ شود؟",
                     L"ثبت موفق",MB_YESNO|MB_ICONQUESTION)==IDYES){
-                    printReceipt(r,2,h);
+                    doPrint(r);
                 }
                 // reset patient fields for next reception (same tab)
                 std::wstring keep = t->lastMsg; COLORREF kc = t->msgCol;
@@ -746,7 +869,7 @@ static void addTabKind(HWND h, int kind){
     TabPage* t=new TabPage();
     t->kind=kind;
     std::wstring dept=g_session.user.dept;
-    if(kind==TK_PORTAL)      t->title=L"پیام پرتابل";
+    if(kind==TK_PORTAL)      t->title=L"کارتابل";
     else if(kind==TK_EMPTY)  t->title=L"تب جدید";
     else                     t->title=L"پذیرش بیمار";
     RECT rc; GetClientRect(h,&rc);
@@ -822,8 +945,26 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
         s_rd->bNewPat = createFlatButton(h,ID_RC_NEWPAT,L"پذیرش جدید",ICO_PLUS,BS_PRIMARY,0,0,10,10);
         s_rd->bNewTab = createFlatButton(h,ID_RC_NEWTAB,L"تب جدید",ICO_TAB,BS_OUTLINE,0,0,10,10);
         s_rd->bCalc = createFlatButton(h,ID_RC_CALC,L"ماشین حساب",ICO_CALC,BS_OUTLINE,0,0,10,10);
+        s_rd->lastUnseen = unseenMessageCount(g_session.user.username);
+        SetTimer(h, 77, 5000, NULL);   // poll the cartable for new messages
+        return 0;
+    case WM_TIMER:
+        if(w==77 && s_rd){
+            int n=unseenMessageCount(g_session.user.username);
+            if(n>s_rd->lastUnseen){
+                // new message → Windows notification sound + repaint cartable
+                if(getSetting(L"notify",L"1")==L"1")
+                    MessageBeep(MB_ICONASTERISK);
+                InvalidateRect(h,NULL,FALSE);
+                // repaint the cartable page itself if visible
+                for(auto* tp : s_rd->tabs)
+                    if(tp->kind==TK_PORTAL && tp->page) InvalidateRect(tp->page,NULL,FALSE);
+            }
+            s_rd->lastUnseen=n;
+        }
         return 0;
     case WM_NCDESTROY:
+        KillTimer(h,77);
         if(s_rd){
             for(auto* t : s_rd->tabs){
                 if(t->detached){
@@ -889,12 +1030,21 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
         int part=0, hit=hitTab(h,pt,&part);
         if(hit>=0 && hit<(int)s_rd->tabs.size()){
             TabPage* t=s_rd->tabs[hit];
-            if(part==1) closeTab(t);
-            else if(part==2 && !t->detached) detachTab(t);
+            // the cartable (پرتابل/کارتابل) tab is permanent — never closes
+            if(part==1 && t->kind==TK_PORTAL){
+                s_rd->active=hit; markMessagesSeen(g_session.user.username);
+                recLayoutTabs(h); InvalidateRect(h,NULL,FALSE);
+            }
+            else if(part==1) closeTab(t);
+            else if(part==2 && !t->detached && t->kind!=TK_PORTAL) detachTab(t);
             else if(!t->detached){
                 s_rd->active=hit; recLayoutTabs(h);
-                RECT bar={0,infoBarH(),S(2000),infoBarH()+tabBarH()};
-                InvalidateRect(h,&bar,FALSE);
+                if(t->kind==TK_PORTAL){
+                    markMessagesSeen(g_session.user.username);
+                    if(s_rd) s_rd->lastUnseen=0;
+                    if(t->page) InvalidateRect(t->page,NULL,FALSE);
+                }
+                InvalidateRect(h,NULL,FALSE);
             } else {
                 // focus the detached window
                 HWND det=GetParent(t->page);
@@ -959,6 +1109,19 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 std::wstring shown=t->title + (t->detached?L" (جدا شده)":L"");
                 DrawTextW(dc,shown.c_str(),-1,&tr2,
                     DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
+                // unseen badge on the cartable tab
+                if(t->kind==TK_PORTAL){
+                    int n=unseenMessageCount(g_session.user.username);
+                    if(n>0){
+                        RECT bd={r.left+S(6),r.top+S(8),r.left+S(28),r.bottom-S(8)};
+                        fillRoundRect(dc,bd,S(9),g_theme.danger,CLR_INVALID);
+                        SetTextColor(dc,RGB(255,255,255)); SelectObject(dc,g_fSmall);
+                        wchar_t nb[8]; swprintf(nb,8,L"%d",n);
+                        DrawTextW(dc,toFaDigits(nb).c_str(),-1,&bd,
+                            DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX);
+                    }
+                    continue;   // cartable: no close/detach controls
+                }
                 // close ×
                 RECT cl={r.left+S(6),r.top+S(7),r.left+S(26),r.bottom-S(7)};
                 if((int)i==s_rd->hotClose)

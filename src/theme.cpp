@@ -285,6 +285,7 @@ struct BtnData {
     std::wstring text, sub;
     int icon, style;
     bool hover, down;
+    COLORREF bg;     // explicit colour behind rounded corners (CLR_INVALID = ask parent)
 };
 static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
     BtnData* d = (BtnData*)GetWindowLongPtrW(h, GWLP_USERDATA);
@@ -295,6 +296,7 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
         d->icon  = LOWORD((UINT_PTR)cs->lpCreateParams);
         d->style = HIWORD((UINT_PTR)cs->lpCreateParams);
         d->hover = d->down = false;
+        d->bg    = CLR_INVALID;
         if(cs->lpszName) d->text = cs->lpszName;
         SetWindowLongPtrW(h, GWLP_USERDATA, (LONG_PTR)d);
         return TRUE; }
@@ -338,11 +340,19 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
         HBITMAP bmp = CreateCompatibleBitmap(dc0, rc.right, rc.bottom);
         HGDIOBJ obm = SelectObject(dc, bmp);
 
-        // parent background behind rounded corners
-        HWND par = GetParent(h);
-        HBRUSH pb = (HBRUSH)SendMessageW(par, WM_CTLCOLORSTATIC,(WPARAM)dc,(LPARAM)h);
-        if(!pb) pb = g_brBg;
-        FillRect(dc,&rc,pb);
+        // Background behind the rounded corners. v1.4.0: when the host told us
+        // the exact colour it sits on (header gradient, surface2 bar, card,…)
+        // we paint THAT solid colour so the antialiased corners blend perfectly
+        // — this is the definitive fix for the "white corners in dark mode" bug.
+        if(d && d->bg!=CLR_INVALID){
+            HBRUSH eb=CreateSolidBrush(d->bg);
+            FillRect(dc,&rc,eb); DeleteObject(eb);
+        } else {
+            HWND par = GetParent(h);
+            HBRUSH pb = (HBRUSH)SendMessageW(par, WM_CTLCOLORSTATIC,(WPARAM)dc,(LPARAM)h);
+            if(!pb) pb = g_brBg;
+            FillRect(dc,&rc,pb);
+        }
 
         COLORREF fill, txt, bord = CLR_INVALID;
         int st = d ? d->style : BS_GHOST;
@@ -459,4 +469,9 @@ void setFlatButtonIcon(HWND btn, int icon){
     if(!btn || !IsWindow(btn)) return;
     BtnData* d=(BtnData*)GetWindowLongPtrW(btn,GWLP_USERDATA);
     if(d){ d->icon = icon; InvalidateRect(btn,NULL,TRUE); }
+}
+void setFlatButtonBg(HWND btn, COLORREF bg){
+    if(!btn || !IsWindow(btn)) return;
+    BtnData* d=(BtnData*)GetWindowLongPtrW(btn,GWLP_USERDATA);
+    if(d){ d->bg = bg; InvalidateRect(btn,NULL,TRUE); }
 }
