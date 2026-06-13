@@ -8,11 +8,18 @@
 103 RCDATA "../assets/bg_light.jpg"
 104 RCDATA "../assets/bg_dark.jpg"
 
+// v1.4.1: real (raster) print-action icons — white-on-alpha PNGs that are
+// tinted to the theme accent at draw time (gpDrawTintedImageRes).
+201 RCDATA "../assets/icons/ic_printer.png"
+202 RCDATA "../assets/icons/ic_receipt.png"
+203 RCDATA "../assets/icons/ic_shield.png"
+204 RCDATA "../assets/icons/ic_last.png"
+
 1 24 "app.manifest"
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,3,0,0
- PRODUCTVERSION 1,3,0,0
+ FILEVERSION 1,5,0,0
+ PRODUCTVERSION 1,5,0,0
  FILEFLAGSMASK 0x3fL
  FILEFLAGS 0x0L
  FILEOS 0x40004L
@@ -25,11 +32,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "Azadi-Teb"
             VALUE "FileDescription", "Azadi-Teb Clinic Reception & Management System"
-            VALUE "FileVersion", "1.3.0.0"
+            VALUE "FileVersion", "1.5.0.0"
             VALUE "InternalName", "AzadiTeb"
             VALUE "OriginalFilename", "AzadiTeb.exe"
             VALUE "ProductName", "Azadi-Teb"
-            VALUE "ProductVersion", "1.3.0"
+            VALUE "ProductVersion", "1.5.0"
         END
     END
     BLOCK "VarFileInfo"

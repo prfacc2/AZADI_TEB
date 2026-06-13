@@ -27,6 +27,7 @@ enum {
     PD_P_BOLD, PD_P_ITALIC, PD_P_UNDER, PD_P_STRIKE,
     PD_P_FSMINUS, PD_P_FSPLUS, PD_P_COLOR, PD_P_LINECOLOR,
     PD_P_LSTYLE, PD_P_LOGOPICK,
+    PD_P_BGCOLOR, PD_P_BGCLEAR, PD_P_ALIGN, PD_RESETVIEW,
     // field bind chips start here
     PD_FIELD_BASE=400,
     // template list (restore) start here
@@ -41,8 +42,10 @@ struct DesignerState {
     int  tplIdx;         // current template index in dropdown
     double zoom;         // canvas zoom (px per mm)
     int  hot;
+    double panX, panY;   // canvas pan offset (px) applied to the page origin
     // drag
     bool dragging; double dragDX, dragDY;
+    bool panning;  int panStartX, panStartY; double panStartPX, panStartPY;
     HWND eX, eY, eW, eH, eText, eFont, eFontSize; // property editors
     HWND eName;          // backup name
     bool showTplList;    // restore list open
@@ -72,10 +75,8 @@ static void dsPageMetrics(HWND h, RECT& page, double& zoom){
     double pw,ph; paperMM(s_ds->d.paper,pw,ph);
     zoom=s_ds->zoom;
     int Wpx=(int)(pw*zoom), Hpx=(int)(ph*zoom);
-    int x=cv.left+((cv.right-cv.left)-Wpx)/2;
-    int y=cv.top +((cv.bottom-cv.top)-Hpx)/2;
-    if(x<cv.left+S(6)) x=cv.left+S(6);
-    if(y<cv.top+S(6))  y=cv.top+S(6);
+    int x=cv.left+((cv.right-cv.left)-Wpx)/2 + (int)s_ds->panX;
+    int y=cv.top +((cv.bottom-cv.top)-Hpx)/2 + (int)s_ds->panY;
     page.left=x; page.top=y; page.right=x+Wpx; page.bottom=y+Hpx;
 }
 //  mm → canvas pixel
@@ -210,6 +211,7 @@ static void dsPaintToolbar(HDC dc, HWND h){
     put(PD_PAPER,s_ds->d.paper?L"A5":L"A4",0,S(50),false);
     put(PD_ZOOMOUT,L"−",0,S(34),false);
     put(PD_ZOOMIN,L"+",0,S(34),false);
+    put(PD_RESETVIEW,L"نمای اصلی",0,S(80),false);
 }
 
 static void dsPaintCanvas(HDC dc, HWND h){
@@ -248,6 +250,12 @@ static void dsPaintCanvas(HDC dc, HWND h){
                     if(it.field==FIELDS[k].token){ s+=FIELDS[k].label; break; }
             }
             if(s.empty()) s=L"…";
+            // background fill
+            if(it.bgColor!=CLR_INVALID){
+                RECT bg={ir.left,ir.top,dsX(page,zoom,it.x+it.w),
+                         ir.top+(int)(it.fontSize*zoom*0.55)+S(4)};
+                HBRUSH bb=CreateSolidBrush(it.bgColor); FillRect(dc,&bg,bb); DeleteObject(bb);
+            }
             int lf=-(int)(it.fontSize*zoom*0.42); if(lf>-8) lf=-8;
             HFONT f=CreateFontW(lf,0,0,0,it.bold?FW_BOLD:FW_NORMAL,
                 it.italic?1:0,it.underline?1:0,it.strike?1:0,DEFAULT_CHARSET,
@@ -256,9 +264,10 @@ static void dsPaintCanvas(HDC dc, HWND h){
             HGDIOBJ of=SelectObject(dc,f);
             // bound text drawn in BLUE so user knows it is a field
             SetTextColor(dc, it.field.empty()? it.color : RGB(20,90,200));
-            RECT tr={ir.left,ir.top,ir.right,ir.bottom+S(40)};
+            RECT tr={ir.left,ir.top,dsX(page,zoom,it.x+it.w),ir.bottom+S(40)};
+            UINT al=(it.align==1)?DT_CENTER:(it.align==2)?DT_LEFT:DT_RIGHT;
             DrawTextW(dc,s.c_str(),-1,&tr,
-                DT_RIGHT|DT_TOP|DT_WORDBREAK|DT_RTLREADING|DT_NOPREFIX);
+                al|DT_TOP|DT_WORDBREAK|DT_RTLREADING|DT_NOPREFIX);
             SelectObject(dc,of); DeleteObject(f);
         } else if(it.kind==IT_LINE_H){
             int st=it.lineStyle==1?PS_DASH:it.lineStyle==2?PS_DOT:PS_SOLID;
@@ -438,6 +447,23 @@ static void dsPaintRail(HDC dc, HWND h){
           HBRUSH b=CreateSolidBrush(it.color); FillRect(dc,&sw,b); DeleteObject(b);
           FrameRect(dc,&sw,(HBRUSH)GetStockObject(GRAY_BRUSH)); }
         y+=S(34);
+        // background fill color + clear
+        RECT bgr={x1-S(120),y,x1,y+S(28)}; dsToolBtn(dc,bgr,PD_P_BGCOLOR,L"رنگ زمینه",0,false);
+        { RECT sw={bgr.left-S(34),y+S(4),bgr.left-S(6),y+S(24)};
+          if(it.bgColor==CLR_INVALID){ FillRect(dc,&sw,(HBRUSH)GetStockObject(WHITE_BRUSH));
+            SetTextColor(dc,RGB(150,150,150)); SelectObject(dc,g_fSmall);
+            DrawTextW(dc,L"بدون",-1,&sw,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX); }
+          else { HBRUSH b=CreateSolidBrush(it.bgColor); FillRect(dc,&sw,b); DeleteObject(b); }
+          FrameRect(dc,&sw,(HBRUSH)GetStockObject(GRAY_BRUSH)); }
+        RECT bgc={x0,y,x0+S(60),y+S(28)}; dsToolBtn(dc,bgc,PD_P_BGCLEAR,L"حذف زمینه",0,false);
+        y+=S(34);
+        // alignment
+        const wchar_t* al[3]={L"چپ‌چین",L"وسط‌چین",L"راست‌چین"};
+        // align stored 0=right,1=center,2=left → show label matching value
+        const wchar_t* alLbl = (it.align==0)?L"راست‌چین":(it.align==1)?L"وسط‌چین":L"چپ‌چین";
+        RECT ar={x0,y,x1,y+S(28)}; dsToolBtn(dc,ar,PD_P_ALIGN,alLbl,0,false);
+        (void)al;
+        y+=S(34);
     } else {
         // line/border: color + thickness + style
         RECT cr={x1-S(120),y,x1,y+S(28)}; dsToolBtn(dc,cr,PD_P_LINECOLOR,L"رنگ خط",0,false);
@@ -572,6 +598,7 @@ static int dsHitToolbar(HWND h, POINT pt){
     if(chk(S(50))) return PD_PAPER;
     if(chk(S(34))) return PD_ZOOMOUT;
     if(chk(S(34))) return PD_ZOOMIN;
+    if(chk(S(80))) return PD_RESETVIEW;
     return 0;
 }
 static int dsHitRail(HWND h, POINT pt){
@@ -629,6 +656,11 @@ static int dsHitRail(HWND h, POINT pt){
         y+=S(34);
         RECT cr={x1-S(120),y,x1,y+S(28)}; if(PtInRect(&cr,pt)) return PD_P_COLOR;
         y+=S(34);
+        RECT bgr={x1-S(120),y,x1,y+S(28)}; if(PtInRect(&bgr,pt)) return PD_P_BGCOLOR;
+        RECT bgc={x0,y,x0+S(60),y+S(28)}; if(PtInRect(&bgc,pt)) return PD_P_BGCLEAR;
+        y+=S(34);
+        RECT ar={x0,y,x1,y+S(28)}; if(PtInRect(&ar,pt)) return PD_P_ALIGN;
+        y+=S(34);
     } else {
         RECT cr={x1-S(120),y,x1,y+S(28)}; if(PtInRect(&cr,pt)) return PD_P_LINECOLOR;
         RECT lm={x0,y,x0+S(28),y+S(28)}; if(PtInRect(&lm,pt)) return PD_P_FSMINUS;
@@ -665,6 +697,12 @@ static LRESULT CALLBACK desProc(HWND h, UINT m, WPARAM w, LPARAM l){
     case WM_SIZE: if(s_ds){ dsLayoutEditors(h);} InvalidateRect(h,NULL,FALSE); return 0;
     case WM_MOUSEMOVE:{
         POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
+        if(s_ds->panning){
+            s_ds->panX = s_ds->panStartPX + (pt.x - s_ds->panStartX);
+            s_ds->panY = s_ds->panStartPY + (pt.y - s_ds->panStartY);
+            InvalidateRect(h,NULL,FALSE);
+            return 0;
+        }
         if(s_ds->dragging && s_ds->sel>=0){
             RECT page; double zoom; dsPageMetrics(h,page,zoom);
             double mx=dsMMx(page,zoom,pt.x)-s_ds->dragDX;
@@ -691,6 +729,9 @@ static LRESULT CALLBACK desProc(HWND h, UINT m, WPARAM w, LPARAM l){
             switch(t){
             case PD_CLOSE: dsClose(); return 0;
             case PD_SAVE: dsReadEditors(); saveDesignFile(s_ds->section,s_ds->d);
+                logSettingsChange(std::wstring(L"تغییر طرح چاپ بخش «")+
+                    ((s_ds->section>=0&&s_ds->section<N_PRINT_SECTIONS)?
+                        PRINT_SECTIONS[s_ds->section]:L"؟")+L"»");
                 MessageBoxW(h,L"طرح این بخش ذخیره شد و در چاپ استفاده می‌شود.",
                     L"ذخیره طرح",MB_OK|MB_ICONINFORMATION); break;
             case PD_BACKUP: dsReadEditors(); doBackup(h); break;
@@ -746,6 +787,16 @@ static LRESULT CALLBACK desProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 InvalidateRect(h,NULL,FALSE);} break;
             case PD_P_COLOR: if(s_ds->sel>=0){ DItem&it=s_ds->d.items[s_ds->sel];
                 COLORREF c=it.color; if(dsPickColor(h,c)){ it.color=c; InvalidateRect(h,NULL,FALSE);} } break;
+            case PD_P_BGCOLOR: if(s_ds->sel>=0){ DItem&it=s_ds->d.items[s_ds->sel];
+                COLORREF c=(it.bgColor==CLR_INVALID)?RGB(255,255,255):it.bgColor;
+                if(dsPickColor(h,c)){ it.bgColor=c; InvalidateRect(h,NULL,FALSE);} } break;
+            case PD_P_BGCLEAR: if(s_ds->sel>=0){ s_ds->d.items[s_ds->sel].bgColor=CLR_INVALID;
+                InvalidateRect(h,NULL,FALSE);} break;
+            case PD_P_ALIGN: if(s_ds->sel>=0){ DItem&it=s_ds->d.items[s_ds->sel];
+                it.align=(it.align+1)%3; InvalidateRect(h,NULL,FALSE);} break;
+            case PD_RESETVIEW: s_ds->panX=0; s_ds->panY=0;
+                s_ds->zoom=s_ds->d.paper?2.0:1.4; dsLayoutEditors(h);
+                InvalidateRect(h,NULL,FALSE); break;
             case PD_P_LINECOLOR: if(s_ds->sel>=0){ DItem&it=s_ds->d.items[s_ds->sel];
                 COLORREF c=(it.kind==IT_BORDER)?it.borderColor:it.color;
                 if(dsPickColor(h,c)){ if(it.kind==IT_BORDER) it.borderColor=c; else it.color=c;
@@ -773,11 +824,56 @@ static LRESULT CALLBACK desProc(HWND h, UINT m, WPARAM w, LPARAM l){
             s_ds->dragDY=dsMMy(page,zoom,pt.y)-it.y;
             s_ds->dragging=true; SetCapture(h);
         } else {
+            // empty canvas → start panning (grab-drag the page)
             s_ds->sel=-1; dsSyncEditors(h);
+            RECT cv=dsCanvasRect(h);
+            if(PtInRect(&cv,pt)){
+                s_ds->panning=true; SetCapture(h);
+                s_ds->panStartX=pt.x; s_ds->panStartY=pt.y;
+                s_ds->panStartPX=s_ds->panX; s_ds->panStartPY=s_ds->panY;
+                SetCursor(LoadCursor(NULL,IDC_SIZEALL));
+            }
         }
         InvalidateRect(h,NULL,FALSE);
         return 0; }
+    case WM_MBUTTONDOWN:{
+        POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
+        RECT cv=dsCanvasRect(h);
+        if(PtInRect(&cv,pt)){
+            s_ds->panning=true; SetCapture(h);
+            s_ds->panStartX=pt.x; s_ds->panStartY=pt.y;
+            s_ds->panStartPX=s_ds->panX; s_ds->panStartPY=s_ds->panY;
+        }
+        return 0; }
+    case WM_MBUTTONUP:
+        if(s_ds->panning){ s_ds->panning=false; ReleaseCapture(); }
+        return 0;
+    case WM_MOUSEWHEEL:{
+        // zoom-to-cursor: keep the mm point under the cursor fixed while zooming
+        POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
+        ScreenToClient(h,&pt);
+        RECT cv=dsCanvasRect(h);
+        if(!PtInRect(&cv,pt)) return 0;
+        RECT page; double zoom; dsPageMetrics(h,page,zoom);
+        double mmx=dsMMx(page,zoom,pt.x), mmy=dsMMy(page,zoom,pt.y);
+        int delta=GET_WHEEL_DELTA_WPARAM(w);
+        double factor = (delta>0)? 1.12 : (1.0/1.12);
+        double nz=s_ds->zoom*factor;
+        if(nz<0.5) nz=0.5; if(nz>10) nz=10;
+        s_ds->zoom=nz;
+        // recompute page origin (without pan) then adjust pan so (mmx,mmy)
+        // stays under the cursor.
+        double pw,ph; paperMM(s_ds->d.paper,pw,ph);
+        int Wpx=(int)(pw*nz), Hpx=(int)(ph*nz);
+        int baseX=cv.left+((cv.right-cv.left)-Wpx)/2;
+        int baseY=cv.top +((cv.bottom-cv.top)-Hpx)/2;
+        // want: baseX + panX + mmx*nz == pt.x  → panX = pt.x - baseX - mmx*nz
+        s_ds->panX = pt.x - baseX - mmx*nz;
+        s_ds->panY = pt.y - baseY - mmy*nz;
+        dsLayoutEditors(h); InvalidateRect(h,NULL,FALSE);
+        return 0; }
     case WM_LBUTTONUP:
+        if(s_ds->panning){ s_ds->panning=false; ReleaseCapture(); }
         if(s_ds->dragging){ s_ds->dragging=false; ReleaseCapture(); dsSyncEditors(h); }
         return 0;
     case WM_COMMAND:
@@ -810,6 +906,7 @@ void openPrintDesigner(HWND owner, int sectionIdx){
     s_ds=new DesignerState();
     s_ds->owner=owner; s_ds->section=sectionIdx; s_ds->sel=-1;
     s_ds->tplIdx=0; s_ds->hot=0; s_ds->dragging=false; s_ds->showTplList=false;
+    s_ds->panX=0; s_ds->panY=0; s_ds->panning=false;
     s_ds->zoom = (sectionIdx>=0)? (1.4) : 1.4;
     if(!loadDesignFile(sectionIdx,s_ds->d)) s_ds->d=defaultDesign(sectionIdx);
     s_ds->zoom = s_ds->d.paper? 2.0 : 1.4;   // fit A4/A5 to screen-ish

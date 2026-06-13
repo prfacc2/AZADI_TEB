@@ -235,7 +235,9 @@ static LRESULT CALLBACK calcProc(HWND h, UINT m, WPARAM w, LPARAM l){
         HDC dc=CreateCompatibleDC(dc0);
         HBITMAP bmp=CreateCompatibleBitmap(dc0,rc.right,rc.bottom);
         HGDIOBJ obm=SelectObject(dc,bmp);
-        FillRect(dc,&rc,g_brBg);
+        // Use the deeper bg2 tone so the white key/display surfaces stand out
+        // clearly in the light theme (they previously blended into the bg).
+        { HBRUSH bb=CreateSolidBrush(g_theme.bg2); FillRect(dc,&rc,bb); DeleteObject(bb); }
 
         RECT disp, cells[20]; calcLayout(h,disp,cells);
         // display panel

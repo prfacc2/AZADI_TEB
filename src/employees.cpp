@@ -6,6 +6,7 @@
 // ============================================================================
 #include "app.h"
 #include <stdio.h>
+#include <algorithm>
 
 static std::vector<std::wstring> splitPipe(const std::wstring& s){
     std::vector<std::wstring> out; size_t pos=0;
@@ -39,6 +40,17 @@ static void saveDepts(const std::vector<DeptCat>& v){
     std::wstring out;
     for(auto&c:v) out+=pipeEsc(c.id)+L"|"+pipeEsc(c.name)+L"|"+pipeEsc(c.manager)+L"|"+pipeEsc(c.icon)+L"\r\n";
     writeFileUtf8(deptsPath(),out,false);
+}
+//  v1.4.1: make sure the default «پذیرش» category always exists so the
+//  management panel and the per-section print designs have a baseline section.
+void seedDefaultDepts(){
+    auto v=loadDepts();
+    for(auto& c:v) if(c.name==L"پذیرش") return;     // already present
+    DeptCat p; p.id=L"DEP_PAZIRESH"; p.name=L"پذیرش";
+    p.manager=L""; p.icon=L"shield";
+    v.insert(v.begin(),p);
+    saveDepts(v);
+    logLine(L"seeded default dept: پذیرش");
 }
 bool addDept(const DeptCat& c, std::wstring& err){
     if(trim(c.name).empty()){ err=L"نام بخش نمی‌تواند خالی باشد."; return false; }
@@ -124,7 +136,8 @@ void setUserOnline(const std::wstring& username, bool on){
 }
 
 // ============================================================== cartable ====
-//  data\messages.dat:  from|to|time|seen|text     (to=="*" → broadcast)
+//  data\messages.dat:  from|to|time|seen|type|text   (to=="*" → broadcast)
+//  Legacy rows (5 fields, no type) are read as type=0 (عادی).
 static std::wstring msgPath(){ return dataDir()+L"\\messages.dat"; }
 std::vector<KMsg> loadMessages(const std::wstring& forUser){
     std::vector<KMsg> out;
@@ -137,17 +150,24 @@ std::vector<KMsg> loadMessages(const std::wstring& forUser){
         auto f=splitPipe(line);
         if(f.size()<5) continue;
         KMsg k; k.from=f[0]; k.to=f[1]; k.time=f[2]; k.seen=(f[3]==L"1");
-        k.text=f[4];
+        if(f.size()>=6){ k.type=_wtoi(f[4].c_str()); k.text=f[5]; }
+        else           { k.type=KMSG_NORMAL;        k.text=f[4]; }
         if(k.to==L"*" || k.to==forUser || forUser.empty()) out.push_back(k);
     }
     return out;
 }
-void pushMessage(const std::wstring& from, const std::wstring& to, const std::wstring& text){
+void pushMessageT(const std::wstring& from, const std::wstring& to,
+                  const std::wstring& text, int type){
     SYSTEMTIME st=iranNow();
     wchar_t tb[32]; swprintf(tb,32,L"%s %02d:%02d",jalaliDateShort(st).c_str(),st.wHour,st.wMinute);
-    std::wstring row=pipeEsc(from)+L"|"+pipeEsc(to)+L"|"+std::wstring(tb)+L"|0|"+pipeEsc(text)+L"\r\n";
+    wchar_t ty[8]; swprintf(ty,8,L"%d",type<0?0:(type>2?2:type));
+    std::wstring row=pipeEsc(from)+L"|"+pipeEsc(to)+L"|"+std::wstring(tb)+L"|0|"+
+                     std::wstring(ty)+L"|"+pipeEsc(text)+L"\r\n";
     writeFileUtf8(msgPath(),row,true);
-    logLine(L"message pushed to "+to);
+    logLine(L"message pushed to "+to+L" type "+ty);
+}
+void pushMessage(const std::wstring& from, const std::wstring& to, const std::wstring& text){
+    pushMessageT(from,to,text,KMSG_NORMAL);
 }
 int unseenMessageCount(const std::wstring& forUser){
     int n=0; for(auto&m:loadMessages(forUser)) if(!m.seen) n++; return n;
@@ -162,7 +182,58 @@ void markMessagesSeen(const std::wstring& forUser){
         auto f=splitPipe(line);
         if(f.size()<5){ out+=line+L"\r\n"; continue; }
         if((f[1]==L"*"||f[1]==forUser) && f[3]==L"0") f[3]=L"1";
-        out+=f[0]+L"|"+f[1]+L"|"+f[2]+L"|"+f[3]+L"|"+f[4]+L"\r\n";
+        if(f.size()>=6)
+            out+=f[0]+L"|"+f[1]+L"|"+f[2]+L"|"+f[3]+L"|"+f[4]+L"|"+f[5]+L"\r\n";
+        else
+            out+=f[0]+L"|"+f[1]+L"|"+f[2]+L"|"+f[3]+L"|"+f[4]+L"\r\n";
     }
     writeFileUtf8(msgPath(),out,false);
+}
+
+// =============================================== settings-change requests ====
+//  data\setreq.dat:  user|system|change|profile|time|seen
+static std::wstring setReqPath(){ return dataDir()+L"\\setreq.dat"; }
+std::vector<SetReq> loadSetReqs(){
+    std::vector<SetReq> out;
+    std::wstring all=readFileUtf8(setReqPath());
+    size_t pos=0;
+    while(pos<all.size()){
+        size_t e=all.find(L'\n',pos); if(e==std::wstring::npos) e=all.size();
+        std::wstring line=all.substr(pos,e-pos); pos=e+1;
+        if(trim(line).empty()) continue;
+        auto f=splitPipe(line);
+        if(f.size()<6) continue;
+        SetReq r; r.user=f[0]; r.system=f[1]; r.change=f[2]; r.profile=f[3];
+        r.time=f[4]; r.seen=(f[5]==L"1");
+        out.push_back(r);
+    }
+    // newest first
+    std::reverse(out.begin(),out.end());
+    return out;
+}
+void pushSetReq(const std::wstring& user, const std::wstring& system,
+                const std::wstring& change, const std::wstring& profile){
+    SYSTEMTIME st=iranNow();
+    wchar_t tb[32]; swprintf(tb,32,L"%s %02d:%02d",jalaliDateShort(st).c_str(),st.wHour,st.wMinute);
+    std::wstring row=pipeEsc(user)+L"|"+pipeEsc(system)+L"|"+pipeEsc(change)+L"|"+
+                     pipeEsc(profile)+L"|"+std::wstring(tb)+L"|0\r\n";
+    writeFileUtf8(setReqPath(),row,true);
+    logLine(L"settings change request from "+user);
+}
+int unseenSetReqCount(){
+    int n=0; for(auto&r:loadSetReqs()) if(!r.seen) n++; return n;
+}
+void markSetReqsSeen(){
+    std::wstring all=readFileUtf8(setReqPath()), out;
+    size_t pos=0;
+    while(pos<all.size()){
+        size_t e=all.find(L'\n',pos); if(e==std::wstring::npos) e=all.size();
+        std::wstring line=all.substr(pos,e-pos); pos=e+1;
+        if(trim(line).empty()) continue;
+        auto f=splitPipe(line);
+        if(f.size()<6){ out+=line+L"\r\n"; continue; }
+        f[5]=L"1";
+        out+=f[0]+L"|"+f[1]+L"|"+f[2]+L"|"+f[3]+L"|"+f[4]+L"|"+f[5]+L"\r\n";
+    }
+    writeFileUtf8(setReqPath(),out,false);
 }

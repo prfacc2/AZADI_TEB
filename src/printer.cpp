@@ -14,6 +14,25 @@
 #include "app.h"
 #include <stdio.h>
 
+// ----------------------------------------------------------------------------
+//  Record a "settings-change request" when a RECEPTION user (role 0) alters a
+//  printer / design setting, so management sees who/what/when on the red-badge
+//  panel. Manager/admin (role 1/2) edits are applied silently (they own it).
+// ----------------------------------------------------------------------------
+static std::wstring currentSystemName(){
+    wchar_t buf[256]={0}; DWORD n=255;
+    if(GetComputerNameW(buf,&n) && n>0) return std::wstring(buf,n);
+    return L"—";
+}
+static void logSettingsChange(const std::wstring& change){
+    if(g_session.user.username.empty()) return;
+    if(g_session.user.role!=0) return;   // only reception edits are "requests"
+    std::wstring who = g_session.user.fullname.empty()
+                     ? g_session.user.username : g_session.user.fullname;
+    std::wstring prof = g_session.user.dept.empty() ? L"پذیرش" : g_session.user.dept;
+    pushSetReq(who, currentSystemName(), change, prof);
+}
+
 // ------------------------------------------------------------- sections -----
 const wchar_t* PRINT_SECTIONS[] = {
     L"پذیرش درمانگاه",
@@ -70,10 +89,12 @@ struct DItem {
     int  lineStyle;     // 0 solid, 1 dashed, 2 dotted
     COLORREF borderColor;
     std::wstring logoPath;
+    COLORREF bgColor;   // label background fill; CLR_INVALID = transparent
+    int  align;         // 0 right, 1 center, 2 left (for labels)
     DItem():kind(IT_LABEL),x(10),y(10),w(50),h(8),
         fontSize(11),bold(false),italic(false),underline(false),strike(false),
         fontName(L"Vazirmatn"),color(RGB(0,0,0)),lineW(0.3),lineStyle(0),
-        borderColor(RGB(0,0,0)){}
+        borderColor(RGB(0,0,0)),bgColor(CLR_INVALID),align(0){}
 };
 
 struct Design {
@@ -122,8 +143,9 @@ static std::wstring serializeDesign(const Design& d){
             it.kind,it.x,it.y,it.w,it.h,it.fontSize,
             it.bold?1:0,it.italic?1:0,it.underline?1:0,it.strike?1:0,
             (unsigned)it.color,it.lineW,it.lineStyle,(unsigned)it.borderColor);
+        wchar_t b2[64]; swprintf(b2,64,L"\t%u\t%d",(unsigned)it.bgColor,it.align);
         out += std::wstring(b)+escTab(it.field)+L"\t"+escTab(it.text)+L"\t"
-            +escTab(it.fontName)+L"\t"+escTab(it.logoPath)+L"\r\n";
+            +escTab(it.fontName)+L"\t"+escTab(it.logoPath)+std::wstring(b2)+L"\r\n";
     }
     return out;
 }
@@ -159,6 +181,11 @@ static bool parseDesign(const std::wstring& all, Design& d){
         it.borderColor=(COLORREF)wcstoul(f[10].c_str(),NULL,10);
         it.field=f[11]; it.text=f[12]; it.fontName=f[13]; it.logoPath=f[14];
         if(trim(it.fontName).empty()) it.fontName=L"Vazirmatn";
+        // optional newer fields: bgColor, align
+        if(f.size()>15 && !trim(f[15]).empty())
+            it.bgColor=(COLORREF)wcstoul(f[15].c_str(),NULL,10);
+        else it.bgColor=CLR_INVALID;
+        if(f.size()>16) it.align=_wtoi(f[16].c_str());
         d.items.push_back(it);
     }
     return !first;
@@ -218,51 +245,161 @@ static Design defaultDesign(int sec){
     return d;
 }
 
-//  Pre-made templates offered in the designer dropdown.
+//  Pre-made templates offered in the designer dropdown — 10 modern Iranian
+//  clinic-reception layouts. Index 0 = section default (پذیرش-friendly).
 static const wchar_t* TEMPLATE_NAMES[] = {
-    L"پیش‌فرض حرفه‌ای",
-    L"ساده (فقط متن)",
-    L"رسمی با کادر",
-    L"فشرده A5",
+    L"۱) پیش‌فرض حرفه‌ای",
+    L"۲) ساده و سریع",
+    L"۳) رسمی با کادر آبی",
+    L"۴) فشرده A5",
+    L"۵) سربرگ رنگی مدرن",
+    L"۶) نوبت‌دهی درشت",
+    L"۷) رسید پرداخت",
+    L"۸) دو ستونه شیک",
+    L"۹) مینیمال خط‌دار",
+    L"۱۰) کارت بیمار",
 };
 static const int N_TEMPLATES = sizeof(TEMPLATE_NAMES)/sizeof(TEMPLATE_NAMES[0]);
 
+// --- small builder helpers shared by the templates --------------------------
+namespace tpl {
+    static DItem label(double x,double y,double w,const wchar_t* tok,
+                       const wchar_t* t,int sz,bool b,COLORREF col,int align=0){
+        DItem it; it.kind=IT_LABEL; it.x=x; it.y=y; it.w=w; it.h=sz*0.45;
+        it.field=tok?tok:L""; it.text=t?t:L""; it.fontSize=sz; it.bold=b;
+        it.color=col; it.align=align; return it;
+    }
+    static DItem hline(double x,double y,double w,double th,int style,COLORREF c){
+        DItem it; it.kind=IT_LINE_H; it.x=x; it.y=y; it.w=w; it.h=0;
+        it.lineW=th; it.lineStyle=style; it.color=c; return it;
+    }
+    static DItem border(double x,double y,double w,double h,double th,COLORREF c){
+        DItem it; it.kind=IT_BORDER; it.x=x; it.y=y; it.w=w; it.h=h;
+        it.lineW=th; it.borderColor=c; return it;
+    }
+    static DItem bar(double x,double y,double w,const wchar_t* tok,
+                     const wchar_t* t,int sz,COLORREF bg,COLORREF fg,int align=1){
+        DItem it=label(x,y,w,tok,t,sz,true,fg,align); it.bgColor=bg; return it;
+    }
+}
+
 static Design templateByIndex(int sec, int idx){
+    using namespace tpl;
     Design d;
     double cw,ch;
+    const wchar_t* secName=PRINT_SECTIONS[sec<N_PRINT_SECTIONS?sec:0];
+    std::wstring clinic=std::wstring(L"درمانگاه ")+APP_NAME_W;
+
     switch(idx){
-    case 1: { // simple text only
+    case 1: { // simple & fast (A5)
         d.paper=1; paperMM(d.paper,cw,ch);
-        auto add=[&](double y,const wchar_t* tok,const wchar_t* t,int sz,bool b){
-            DItem it; it.kind=IT_LABEL; it.x=8; it.y=y; it.w=cw-16; it.h=sz*0.45;
-            it.field=tok?tok:L""; it.text=t?t:L""; it.fontSize=sz; it.bold=b;
-            d.items.push_back(it); };
-        add(10,NULL,(std::wstring(L"درمانگاه ")+APP_NAME_W).c_str(),16,true);
-        add(20,NULL,PRINT_SECTIONS[sec<N_PRINT_SECTIONS?sec:0],12,true);
-        add(34,L"{queue}",L"نوبت: ",13,true);
-        add(44,L"{full}",L"بیمار: ",12,true);
-        add(52,L"{nid}",L"کد ملی: ",11,false);
-        add(60,L"{date}",L"تاریخ: ",11,false);
-        add(68,L"{paid}",L"پرداختی: ",12,true);
-        add(80,L"{issued}",L"",10,false);
+        d.items.push_back(label(8,10,cw-16,NULL,clinic.c_str(),16,true,RGB(20,50,100),1));
+        d.items.push_back(label(8,20,cw-16,NULL,secName,12,true,RGB(40,70,120),1));
+        d.items.push_back(label(8,34,cw-16,L"{queue}",L"نوبت: ",13,true,RGB(0,0,0)));
+        d.items.push_back(label(8,44,cw-16,L"{full}",L"بیمار: ",12,true,RGB(0,0,0)));
+        d.items.push_back(label(8,52,cw-16,L"{nid}",L"کد ملی: ",11,false,RGB(0,0,0)));
+        d.items.push_back(label(8,60,cw-16,L"{date}",L"تاریخ: ",11,false,RGB(0,0,0)));
+        d.items.push_back(label(8,68,cw-16,L"{paid}",L"پرداختی: ",12,true,RGB(150,20,20)));
+        d.items.push_back(label(8,80,cw-16,L"{issued}",L"",10,false,RGB(120,120,120)));
         return d; }
-    case 2: { // formal with border
-        d = defaultDesign(sec); d.paper=0; // A4
-        for(auto& it:d.items){ it.y*=1.2; it.x*=1.3; }
+    case 2: { // formal w/ blue frame (A4)
+        d = defaultDesign(sec); d.paper=0;
+        for(auto& it:d.items){ it.y*=1.18; it.x*=1.25; }
         return d; }
     case 3: { // compact A5
         d.paper=1; paperMM(d.paper,cw,ch);
-        auto add=[&](double x,double y,const wchar_t* tok,const wchar_t* t,int sz,bool b){
-            DItem it; it.kind=IT_LABEL; it.x=x; it.y=y; it.w=cw-2*x; it.h=sz*0.45;
-            it.field=tok?tok:L""; it.text=t?t:L""; it.fontSize=sz; it.bold=b;
-            d.items.push_back(it); };
-        add(6,8,NULL,(std::wstring(L"درمانگاه ")+APP_NAME_W).c_str(),13,true);
-        add(6,18,L"{queue}",L"نوبت: ",12,true);
-        add(60,18,L"{date}",L"تاریخ: ",10,false);
-        add(6,26,L"{full}",L"",12,true);
-        add(6,34,L"{nid}",L"کد ملی: ",10,false);
-        add(6,42,L"{paid}",L"پرداختی: ",11,true);
-        add(6,52,L"{issued}",L"",9,false);
+        d.items.push_back(label(6,8,cw-12,NULL,clinic.c_str(),13,true,RGB(20,50,100)));
+        d.items.push_back(label(6,18,80,L"{queue}",L"نوبت: ",12,true,RGB(0,0,0)));
+        d.items.push_back(label(cw-80,18,74,L"{date}",L"تاریخ: ",10,false,RGB(0,0,0),2));
+        d.items.push_back(label(6,26,cw-12,L"{full}",L"",12,true,RGB(0,0,0)));
+        d.items.push_back(label(6,34,cw-12,L"{nid}",L"کد ملی: ",10,false,RGB(0,0,0)));
+        d.items.push_back(label(6,42,cw-12,L"{paid}",L"پرداختی: ",11,true,RGB(150,20,20)));
+        d.items.push_back(label(6,52,cw-12,L"{issued}",L"",9,false,RGB(120,120,120)));
+        return d; }
+    case 4: { // modern colored header (A5)
+        d.paper=1; paperMM(d.paper,cw,ch);
+        d.items.push_back(bar(5,6,cw-10,NULL,clinic.c_str(),16,RGB(15,90,160),RGB(255,255,255),1));
+        d.items.push_back(bar(5,18,cw-10,NULL,secName,12,RGB(30,130,200),RGB(255,255,255),1));
+        d.items.push_back(label(8,32,70,L"{queue}",L"نوبت: ",14,true,RGB(15,90,160)));
+        d.items.push_back(label(cw-78,32,70,L"{time}",L"ساعت: ",11,false,RGB(0,0,0),2));
+        d.items.push_back(hline(8,40,cw-16,0.3,2,RGB(150,150,150)));
+        d.items.push_back(label(8,44,cw-16,L"{full}",L"بیمار: ",13,true,RGB(0,0,0)));
+        d.items.push_back(label(8,52,cw-16,L"{nid}",L"کد ملی: ",11,false,RGB(0,0,0)));
+        d.items.push_back(label(8,60,cw-16,L"{ins}",L"بیمه: ",11,false,RGB(0,0,0)));
+        d.items.push_back(bar(8,70,cw-16,L"{paid}",L"مبلغ پرداختی: ",14,RGB(235,245,255),RGB(150,20,20),0));
+        d.items.push_back(label(8,84,cw-16,L"{issued}",L"",9,false,RGB(120,120,120)));
+        return d; }
+    case 5: { // big queue number (A5)
+        d.paper=1; paperMM(d.paper,cw,ch);
+        d.items.push_back(label(6,8,cw-12,NULL,clinic.c_str(),13,true,RGB(20,50,100),1));
+        d.items.push_back(label(6,18,cw-12,NULL,L"شماره نوبت شما",12,false,RGB(80,80,80),1));
+        d.items.push_back(label(6,26,cw-12,L"{queue}",L"",40,true,RGB(15,90,160),1));
+        d.items.push_back(hline(8,60,cw-16,0.4,0,RGB(15,90,160)));
+        d.items.push_back(label(6,64,cw-12,L"{full}",L"",13,true,RGB(0,0,0),1));
+        d.items.push_back(label(6,74,cw-12,L"{dept}",L"بخش: ",11,false,RGB(0,0,0),1));
+        d.items.push_back(label(6,82,cw-12,L"{date}",L"",10,false,RGB(120,120,120),1));
+        return d; }
+    case 6: { // payment receipt (A5)
+        d.paper=1; paperMM(d.paper,cw,ch);
+        d.items.push_back(border(5,5,cw-10,ch-10,0.4,RGB(120,120,120)));
+        d.items.push_back(bar(6,7,cw-12,NULL,L"رسید پرداخت",15,RGB(40,120,60),RGB(255,255,255),1));
+        d.items.push_back(label(8,20,cw-16,NULL,clinic.c_str(),11,false,RGB(0,0,0),1));
+        d.items.push_back(label(8,30,cw-16,L"{full}",L"بیمار: ",12,true,RGB(0,0,0)));
+        d.items.push_back(label(8,38,cw-16,L"{date}",L"تاریخ: ",10,false,RGB(0,0,0)));
+        d.items.push_back(label(cw/2,38,cw/2-8,L"{time}",L"ساعت: ",10,false,RGB(0,0,0)));
+        d.items.push_back(hline(8,46,cw-16,0.3,2,RGB(150,150,150)));
+        d.items.push_back(label(8,50,cw-16,L"{total}",L"جمع کل: ",11,false,RGB(0,0,0)));
+        d.items.push_back(label(8,58,cw-16,L"{discount}",L"تخفیف: ",11,false,RGB(0,0,0)));
+        d.items.push_back(bar(8,68,cw-16,L"{paid}",L"پرداختی: ",14,RGB(235,250,238),RGB(40,120,60),0));
+        d.items.push_back(label(8,82,cw-16,L"{issued}",L"",9,false,RGB(120,120,120)));
+        return d; }
+    case 7: { // two-column elegant (A4)
+        d.paper=0; paperMM(d.paper,cw,ch);
+        d.items.push_back(border(8,8,cw-16,ch-16,0.5,RGB(40,70,120)));
+        d.items.push_back(bar(10,10,cw-20,NULL,clinic.c_str(),20,RGB(25,60,110),RGB(255,255,255),1));
+        d.items.push_back(label(10,26,cw-20,NULL,secName,14,true,RGB(40,70,120),1));
+        d.items.push_back(hline(12,40,cw-24,0.4,0,RGB(40,70,120)));
+        double cR=cw/2+4, cL=12, colW=cw/2-16;
+        d.items.push_back(label(cR,46,colW,L"{queue}",L"نوبت: ",14,true,RGB(0,0,0)));
+        d.items.push_back(label(cL,46,colW,L"{date}",L"تاریخ: ",12,false,RGB(0,0,0)));
+        d.items.push_back(label(cR,56,colW,L"{full}",L"بیمار: ",14,true,RGB(0,0,0)));
+        d.items.push_back(label(cL,56,colW,L"{time}",L"ساعت: ",12,false,RGB(0,0,0)));
+        d.items.push_back(label(cR,66,colW,L"{nid}",L"کد ملی: ",12,false,RGB(0,0,0)));
+        d.items.push_back(label(cL,66,colW,L"{father}",L"نام پدر: ",12,false,RGB(0,0,0)));
+        d.items.push_back(label(cR,76,colW,L"{mobile}",L"تلفن: ",12,false,RGB(0,0,0)));
+        d.items.push_back(label(cL,76,colW,L"{gender}",L"جنسیت: ",12,false,RGB(0,0,0)));
+        d.items.push_back(hline(12,88,cw-24,0.3,2,RGB(150,150,150)));
+        d.items.push_back(label(cR,92,colW,L"{ins}",L"بیمه: ",12,false,RGB(0,0,0)));
+        d.items.push_back(bar(cL,92,colW,L"{paid}",L"پرداختی: ",14,RGB(245,245,250),RGB(150,20,20),0));
+        d.items.push_back(label(12,108,cw-24,L"{issued}",L"",10,false,RGB(120,120,120)));
+        return d; }
+    case 8: { // minimal lined (A5)
+        d.paper=1; paperMM(d.paper,cw,ch);
+        d.items.push_back(label(8,8,cw-16,NULL,clinic.c_str(),15,true,RGB(0,0,0),1));
+        d.items.push_back(hline(8,18,cw-16,0.5,0,RGB(0,0,0)));
+        d.items.push_back(label(8,22,cw-16,L"{queue}",L"نوبت: ",13,true,RGB(0,0,0)));
+        d.items.push_back(hline(8,30,cw-16,0.2,1,RGB(180,180,180)));
+        d.items.push_back(label(8,33,cw-16,L"{full}",L"بیمار: ",12,true,RGB(0,0,0)));
+        d.items.push_back(hline(8,41,cw-16,0.2,1,RGB(180,180,180)));
+        d.items.push_back(label(8,44,cw-16,L"{nid}",L"کد ملی: ",11,false,RGB(0,0,0)));
+        d.items.push_back(hline(8,52,cw-16,0.2,1,RGB(180,180,180)));
+        d.items.push_back(label(8,55,cw-16,L"{date}",L"تاریخ: ",11,false,RGB(0,0,0)));
+        d.items.push_back(hline(8,63,cw-16,0.2,1,RGB(180,180,180)));
+        d.items.push_back(label(8,66,cw-16,L"{paid}",L"پرداختی: ",13,true,RGB(0,0,0)));
+        d.items.push_back(hline(8,75,cw-16,0.5,0,RGB(0,0,0)));
+        d.items.push_back(label(8,78,cw-16,L"{issued}",L"",9,false,RGB(120,120,120)));
+        return d; }
+    case 9: { // patient card (A5 landscape-ish compact)
+        d.paper=1; paperMM(d.paper,cw,ch);
+        d.items.push_back(border(6,6,cw-12,70,0.5,RGB(25,60,110)));
+        d.items.push_back(bar(8,8,cw-16,NULL,clinic.c_str(),14,RGB(25,60,110),RGB(255,255,255),1));
+        d.items.push_back(label(10,22,cw-20,L"{full}",L"",15,true,RGB(0,0,0),1));
+        d.items.push_back(label(10,34,cw-20,L"{nid}",L"کد ملی: ",11,false,RGB(0,0,0)));
+        d.items.push_back(label(10,42,cw-20,L"{birth}",L"تاریخ تولد: ",11,false,RGB(0,0,0)));
+        d.items.push_back(label(10,50,cw-20,L"{mobile}",L"تلفن: ",11,false,RGB(0,0,0)));
+        d.items.push_back(label(10,58,cw-20,L"{ins}",L"بیمه: ",11,false,RGB(0,0,0)));
+        d.items.push_back(bar(8,80,cw-16,L"{queue}",L"شماره نوبت: ",13,RGB(235,245,255),RGB(25,60,110),0));
+        d.items.push_back(label(8,92,cw-16,L"{date}",L"تاریخ مراجعه: ",10,false,RGB(120,120,120)));
         return d; }
     default:
         return defaultDesign(sec);
@@ -543,15 +680,20 @@ static LRESULT CALLBACK prnProc(HWND h, UINT m, WPARAM w, LPARAM l){
             if(i<(int)s_ps->printers.size()){
                 s_ps->sel=s_ps->printers[i];
                 setSetting(L"printer_name",s_ps->sel);
+                logSettingsChange(L"تغییر چاپگر پیش‌فرض به «"+s_ps->sel+L"»");
                 InvalidateRect(h,NULL,FALSE);
             }
             return 0;
         }
         switch(id){
-        case PSB_A4: s_ps->paper=0; setSetting(L"paper_size",L"A4"); InvalidateRect(h,NULL,FALSE); break;
-        case PSB_A5: s_ps->paper=1; setSetting(L"paper_size",L"A5"); InvalidateRect(h,NULL,FALSE); break;
-        case PSB_FIT: s_ps->mode=0; setSetting(L"print_mode",L"fit"); InvalidateRect(h,NULL,FALSE); break;
-        case PSB_FILL:s_ps->mode=1; setSetting(L"print_mode",L"fill");InvalidateRect(h,NULL,FALSE); break;
+        case PSB_A4: s_ps->paper=0; setSetting(L"paper_size",L"A4");
+            logSettingsChange(L"تغییر اندازه کاغذ به A4"); InvalidateRect(h,NULL,FALSE); break;
+        case PSB_A5: s_ps->paper=1; setSetting(L"paper_size",L"A5");
+            logSettingsChange(L"تغییر اندازه کاغذ به A5"); InvalidateRect(h,NULL,FALSE); break;
+        case PSB_FIT: s_ps->mode=0; setSetting(L"print_mode",L"fit");
+            logSettingsChange(L"تغییر حالت چاپ به «متناسب»"); InvalidateRect(h,NULL,FALSE); break;
+        case PSB_FILL:s_ps->mode=1; setSetting(L"print_mode",L"fill");
+            logSettingsChange(L"تغییر حالت چاپ به «پرکننده»"); InvalidateRect(h,NULL,FALSE); break;
         case PSB_TEST: doTestPrint(h); break;
         case PSB_ADV:  doAdvanced(h); break;
         case PSB_DESIGN:{ int sec=s_ps->section; prnClose();
@@ -675,16 +817,21 @@ bool printDesignedReceipt(const ReceptionRecord& r, int sectionIdx, HWND owner){
             if(s.empty()) continue;
             int px=mmX(it.x), py=mmY(it.y);
             int lf=-(int)(it.fontSize*dpiY/72.0);
+            int wpx=(int)(it.w*sx); if(wpx<10) wpx=horz;
+            RECT rr={px,py,px+wpx,py+lf*-3};
+            if(it.bgColor!=CLR_INVALID){
+                RECT bg={px,py,px+wpx,py+(int)(it.fontSize*dpiY/72.0*1.3)};
+                HBRUSH bb=CreateSolidBrush(it.bgColor); FillRect(dc,&bg,bb); DeleteObject(bb);
+            }
             HFONT f=CreateFontW(lf,0,0,0,it.bold?FW_BOLD:FW_NORMAL,
                 it.italic?1:0,it.underline?1:0,it.strike?1:0,DEFAULT_CHARSET,
                 0,0,CLEARTYPE_QUALITY,0,
                 it.fontName.empty()?L"Vazirmatn":it.fontName.c_str());
             HGDIOBJ of=SelectObject(dc,f);
             SetTextColor(dc,it.color);
-            int wpx=(int)(it.w*sx); if(wpx<10) wpx=horz;
-            RECT rr={px,py,px+wpx,py+lf*-3};
+            UINT al=(it.align==1)?DT_CENTER:(it.align==2)?DT_LEFT:DT_RIGHT;
             DrawTextW(dc,s.c_str(),-1,&rr,
-                DT_RIGHT|DT_TOP|DT_WORDBREAK|DT_RTLREADING|DT_NOPREFIX);
+                al|DT_TOP|DT_WORDBREAK|DT_RTLREADING|DT_NOPREFIX);
             SelectObject(dc,of); DeleteObject(f);
         } else if(it.kind==IT_LINE_H || it.kind==IT_LINE_V){
             int style=it.lineStyle==1?PS_DASH:it.lineStyle==2?PS_DOT:PS_SOLID;

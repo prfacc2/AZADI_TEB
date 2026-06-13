@@ -153,3 +153,69 @@ bool gpDrawBackground(HDC dc, RECT rc, bool dark, COLORREF scrim, int scrimA){
     }
     return true;
 }
+
+// ------------------------------------------------- tinted raster icons ------
+//  Real (raster) icons embedded as RCDATA PNGs are drawn white-on-alpha and
+//  recoloured to any theme colour at draw time via a GDI+ colour matrix. This
+//  gives the print buttons proper image icons that still adapt to the theme.
+static Image* s_iconCache[8] = {0};   // small fixed cache keyed by slot
+static int    s_iconResId[8] = {0};
+
+static Image* loadResImage(int resId){
+    HRSRC hr = FindResourceW(g_hInst, MAKEINTRESOURCEW(resId), RT_RCDATA);
+    if(!hr) return NULL;
+    HGLOBAL hg = LoadResource(g_hInst, hr);
+    DWORD   sz = SizeofResource(g_hInst, hr);
+    void*  dat = LockResource(hg);
+    if(!dat || !sz) return NULL;
+    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, sz);
+    if(!mem) return NULL;
+    void* p = GlobalLock(mem); memcpy(p, dat, sz); GlobalUnlock(mem);
+    IStream* st = NULL;
+    if(CreateStreamOnHGlobal(mem, TRUE, &st) != S_OK){ GlobalFree(mem); return NULL; }
+    Image* img = Image::FromStream(st);
+    st->Release();
+    if(img && img->GetLastStatus()!=Ok){ delete img; img=NULL; }
+    return img;
+}
+static Image* cachedResImage(int resId){
+    for(int i=0;i<8;i++) if(s_iconResId[i]==resId && s_iconCache[i]) return s_iconCache[i];
+    for(int i=0;i<8;i++) if(!s_iconCache[i]){
+        s_iconCache[i]=loadResImage(resId); s_iconResId[i]=resId; return s_iconCache[i];
+    }
+    return loadResImage(resId);   // cache full → load transient (rare)
+}
+
+//  Draw RCDATA PNG `resId` centred & aspect-fit inside `rc`, recoloured to
+//  `tint`.  Returns false if GDI+/resource unavailable so callers can fall back
+//  to the vector drawIcon().
+bool gpDrawTintedImageRes(HDC dc, int resId, RECT rc, COLORREF tint){
+    if(!s_gdipOK) return false;
+    Image* img = cachedResImage(resId);
+    if(!img) return false;
+
+    Graphics g(dc);
+    g.SetInterpolationMode(InterpolationModeHighQualityBicubic);
+    g.SetPixelOffsetMode(PixelOffsetModeHalf);
+    g.SetSmoothingMode(SmoothingModeAntiAlias);
+
+    int W = rc.right-rc.left, H = rc.bottom-rc.top;
+    if(W<=0||H<=0) return false;
+    REAL iw=(REAL)img->GetWidth(), ih=(REAL)img->GetHeight();
+    if(iw<=0||ih<=0) return false;
+    REAL scale = (W/iw < H/ih) ? W/iw : H/ih;   // contain-fit
+    REAL dw=iw*scale, dh=ih*scale;
+    REAL dx=rc.left+(W-dw)/2, dy=rc.top+(H-dh)/2;
+
+    // colour matrix: replace RGB with tint, keep source alpha
+    REAL r=GetRValue(tint)/255.0f, gg=GetGValue(tint)/255.0f, b=GetBValue(tint)/255.0f;
+    ColorMatrix cm = {
+        0,0,0,0,0,
+        0,0,0,0,0,
+        0,0,0,0,0,
+        0,0,0,1,0,
+        r,gg,b,0,1 };
+    ImageAttributes ia; ia.SetColorMatrix(&cm);
+    g.DrawImage(img, RectF(dx,dy,dw,dh), 0,0,iw,ih, UnitPixel, &ia);
+    return true;
+}
