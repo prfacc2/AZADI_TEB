@@ -521,3 +521,54 @@ void setFlatButtonImage(HWND btn, int resId){
     BtnData* d=(BtnData*)GetWindowLongPtrW(btn,GWLP_USERDATA);
     if(d){ d->imgIcon = resId; InvalidateRect(btn,NULL,TRUE); }
 }
+
+// ============================================================================
+//  Themed owner-draw combobox (v1.6.0)
+//  CBS_DROPDOWNLIST combos painted their dropdown LIST with the system colours
+//  (white bg / black text) which is unreadable in dark mode. Creating the combo
+//  with CBS_OWNERDRAWFIXED|CBS_HASSTRINGS and forwarding WM_DRAWITEM here paints
+//  every row with the theme palette and RTL-aligns Persian text.
+// ============================================================================
+HWND createThemedCombo(HWND parent, int id){
+    HWND c = CreateWindowExW(0, L"COMBOBOX", L"",
+        WS_CHILD|WS_VISIBLE|WS_TABSTOP|WS_VSCROLL|
+        CBS_DROPDOWNLIST|CBS_OWNERDRAWFIXED|CBS_HASSTRINGS,
+        0,0,10,10, parent,(HMENU)(UINT_PTR)id, g_hInst,0);
+    SendMessageW(c,WM_SETFONT,(WPARAM)g_fUI,TRUE);
+    return c;
+}
+static bool comboHasPersian(const wchar_t* s){
+    for(const wchar_t* p=s; *p; ++p){
+        wchar_t c=*p;
+        if(c>=0x06F0&&c<=0x06F9) continue;
+        if(c>=0x0660&&c<=0x0669) continue;
+        if((c>=0x0600&&c<=0x06FF)||(c>=0xFB50&&c<=0xFDFF)||(c>=0xFE70&&c<=0xFEFF))
+            return true;
+    }
+    return false;
+}
+//  Call from the parent's WM_DRAWITEM. Returns true if it handled a combo item.
+bool drawThemedComboItem(LPDRAWITEMSTRUCT dis){
+    if(!dis) return false;
+    if(dis->CtlType!=ODT_COMBOBOX) return false;
+    HDC dc=dis->hDC;
+    RECT rc=dis->rcItem;
+    bool selected = (dis->itemState & ODS_SELECTED)!=0;
+    COLORREF bg = selected ? g_theme.accent : g_theme.inputBg;
+    COLORREF fg = selected ? g_theme.accentText : g_theme.inputText;
+    HBRUSH br=CreateSolidBrush(bg); FillRect(dc,&rc,br); DeleteObject(br);
+    if((int)dis->itemID>=0){
+        wchar_t buf[256]={0};
+        SendMessageW(dis->hwndItem,CB_GETLBTEXT,dis->itemID,(LPARAM)buf);
+        SetBkMode(dc,TRANSPARENT);
+        SetTextColor(dc,fg);
+        HGDIOBJ of=SelectObject(dc,g_fUI);
+        RECT tr=rc; tr.right-=6; tr.left+=6;
+        UINT flags=DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX;
+        if(comboHasPersian(buf)) flags|=DT_RIGHT|DT_RTLREADING; else flags|=DT_LEFT;
+        DrawTextW(dc,buf,-1,&tr,flags);
+        SelectObject(dc,of);
+    }
+    if(dis->itemState & ODS_FOCUS) DrawFocusRect(dc,&rc);
+    return true;
+}

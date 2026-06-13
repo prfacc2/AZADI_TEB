@@ -1,0 +1,820 @@
+// ============================================================================
+//  appointment.cpp — نوبت‌دهی (Appointment) module (v1.6.0)
+//   • RIGHT  : «جستجوی بیمار رزرو کرده» + «مشخصات نوبت» + «مشخصات بیمار»
+//   • LEFT   : a read-only DataGridView of the appointments (RTL columns)
+//   • The patient block is DISABLED until a citizen is found; entering a valid
+//     national-id + Enter auto-fills it from the (offline) Civil-Registry.
+//   • Reuses the themed owner-draw combobox, the flat buttons and the smart
+//     Jalali date mask so it matches the rest of the program exactly.
+// ============================================================================
+#include "app.h"
+#include <commctrl.h>
+#include <stdio.h>
+
+#define AP_CLASS L"AzAppointment"
+
+// ---- control ids -----------------------------------------------------------
+enum {
+    // search group
+    AP_S_NID = 1400, AP_S_MOBILE, AP_S_FIRST, AP_S_LAST, AP_S_CANCELLED, AP_S_GO,
+    // appointment-details group
+    AP_A_DOCTOR, AP_A_DOC_REFRESH, AP_A_DOC_TODAY,
+    AP_A_SERVICE, AP_A_SVC_F5, AP_A_SVC_F4, AP_A_SVC_F3,
+    AP_A_DATE, AP_A_NEXT, AP_A_KIND,
+    // patient-details group
+    AP_P_NID, AP_P_FIRST, AP_P_FATHER, AP_P_MOBILE, AP_P_LAST, AP_P_GENDER,
+    AP_P_DESC, AP_P_FOREIGN, AP_P_RESERVE, AP_P_NEW, AP_P_CANCEL,
+    // grid toolbar
+    AP_T_MSG, AP_T_TRANSFER, AP_T_PRINT, AP_T_SAVELAYOUT, AP_T_DELLAYOUT
+};
+
+// ---- grid columns (RIGHT → LEFT) -------------------------------------------
+struct GCol { const wchar_t* title; int w; };   // w is a relative weight
+static const GCol GCOLS[] = {
+    { L"ابطال",          58 },
+    { L"ویرایش",         58 },
+    { L"چاپ",            48 },
+    { L"کاربر",          90 },
+    { L"مو...",          90 },   // موبایل
+    { L"پزشک",          130 },
+    { L"نام خانوادگی",  120 },
+    { L"نام",            90 },
+    { L"ش نوبت",         60 },
+    { L"ساعت نوبت",      78 },
+    { L"روز",            74 },
+    { L"تاریخ نوبت",     96 },
+    { L"نوع",            72 },
+};
+static const int N_GCOLS = (int)(sizeof(GCOLS)/sizeof(GCOLS[0]));
+
+// ---- per-page state --------------------------------------------------------
+struct ApptUI {
+    HWND page;
+    // search
+    HWND sNid, sMobile, sFirst, sLast, sCancelled, sGo;
+    // appointment details
+    HWND aDoctor, aDocRefresh, aDocToday;
+    HWND aService, aSvcF5, aSvcF4, aSvcF3;
+    HWND aDate, aNext, aKind;
+    // patient details
+    HWND pNid, pFirst, pFather, pMobile, pLast, pGender, pDesc;
+    HWND pForeign, pReserve, pNew, pCancel;
+    // grid toolbar
+    HWND tMsg, tTransfer, tPrint, tSaveLayout, tDelLayout;
+    // data
+    std::vector<Appointment> rows;   // shown rows (newest first)
+    std::vector<int>         srcIndex;   // map row → loadAppointments(true) index
+    int  sel, hot;                   // selected / hovered grid row
+    int  scroll;                     // first visible grid row
+    bool patientOn;                  // patient block enabled?
+    bool foreign;                    // foreign-national / newborn
+    bool kindInPerson;               // true=حضوری false=غیرحضوری
+    std::wstring statusMsg; COLORREF statusCol;
+    ApptUI():page(0),sel(-1),hot(-1),scroll(0),patientOn(false),foreign(false),
+        kindInPerson(true),statusCol(0){}
+};
+
+// ============================================================== metrics =====
+static int apRowH()    { return S(30); }
+static int apHdrH()    { return S(34); }
+
+// ---------------------------------------------------------------- doctors ---
+static void fillDoctors(ApptUI* u, bool todayOnly){
+    SendMessageW(u->aDoctor, CB_RESETCONTENT, 0, 0);
+    std::vector<DoctorDef> ds = todayOnly ? todaysDoctors() : loadDoctors();
+    for(auto& d : ds){
+        std::wstring s = d.name + L" — " + d.specialty;
+        SendMessageW(u->aDoctor, CB_ADDSTRING, 0, (LPARAM)s.c_str());
+    }
+    if(!ds.empty()) SendMessageW(u->aDoctor, CB_SETCURSEL, 0, 0);
+    // refresh the service list for the first doctor
+    SendMessageW(u->aService, CB_RESETCONTENT, 0, 0);
+    if(!ds.empty()){
+        for(auto& sv : ds[0].services)
+            SendMessageW(u->aService, CB_ADDSTRING, 0, (LPARAM)sv.c_str());
+        if(!ds[0].services.empty()) SendMessageW(u->aService, CB_SETCURSEL, 0, 0);
+    }
+}
+static void onDoctorChanged(ApptUI* u){
+    int idx = (int)SendMessageW(u->aDoctor, CB_GETCURSEL, 0, 0);
+    if(idx < 0) return;
+    auto ds = loadDoctors();
+    // match by the displayed "name — specialty" text
+    wchar_t buf[256]; GetWindowTextW(u->aDoctor, buf, 256);
+    std::wstring shown = buf;
+    SendMessageW(u->aService, CB_RESETCONTENT, 0, 0);
+    for(auto& d : ds){
+        std::wstring s = d.name + L" — " + d.specialty;
+        if(s == shown){
+            for(auto& sv : d.services)
+                SendMessageW(u->aService, CB_ADDSTRING, 0, (LPARAM)sv.c_str());
+            if(!d.services.empty()) SendMessageW(u->aService, CB_SETCURSEL, 0, 0);
+            break;
+        }
+    }
+}
+
+// ---------------------------------------------------------------- grid ------
+static void refreshGrid(ApptUI* u){
+    bool inclCancelled =
+        (SendMessageW(u->sCancelled, BM_GETCHECK, 0, 0) == BST_CHECKED);
+    std::vector<Appointment> all = loadAppointments(true);
+    u->rows.clear(); u->srcIndex.clear();
+    // newest first
+    for(int i=(int)all.size()-1; i>=0; --i){
+        if(all[i].cancelled && !inclCancelled) continue;
+        u->rows.push_back(all[i]);
+        u->srcIndex.push_back(i);
+    }
+    if(u->sel >= (int)u->rows.size()) u->sel = -1;
+    if(u->page) InvalidateRect(u->page, NULL, FALSE);
+}
+
+// ---------------------------------------------------- patient block on/off --
+static void setPatientEnabled(ApptUI* u, bool on){
+    u->patientOn = on;
+    HWND ctls[] = { u->pNid,u->pFirst,u->pFather,u->pMobile,u->pLast,
+                    u->pGender,u->pDesc,u->pForeign,u->pReserve };
+    for(HWND c : ctls) if(c) EnableWindow(c, on);
+    // the «جدید»/«انصراف» buttons stay enabled so the user can reset/clear.
+}
+static void resetPatient(ApptUI* u){
+    SetWindowTextW(u->pNid,   L"");
+    SetWindowTextW(u->pFirst, L"");
+    SetWindowTextW(u->pFather, L"");
+    SetWindowTextW(u->pMobile, L"");
+    SetWindowTextW(u->pLast,  L"");
+    SetWindowTextW(u->pDesc,  L"");
+    SendMessageW(u->pGender, CB_SETCURSEL, 0, 0);
+    SendMessageW(u->pForeign, BM_SETCHECK, BST_UNCHECKED, 0);
+    u->foreign = false;
+    setPatientEnabled(u, false);
+}
+
+// fill the patient block from a national-id (Civil-Registry simulation)
+static void lookupPatient(ApptUI* u){
+    wchar_t buf[32]; GetWindowTextW(u->pNid, buf, 32);
+    std::wstring nid = trim(buf);
+    bool foreign = (SendMessageW(u->pForeign, BM_GETCHECK, 0, 0) == BST_CHECKED);
+    u->foreign = foreign;
+    if(foreign){
+        // foreign nationals / newborns are NOT in the registry — just enable the
+        // fields so the operator can type the identity manually.
+        setPatientEnabled(u, true);
+        u->statusMsg = L"تابعیت غیرایرانی/نوزاد — مشخصات را دستی وارد کنید.";
+        u->statusCol = g_theme.warn;
+        SetFocus(u->pFirst);
+        InvalidateRect(u->page, NULL, FALSE);
+        return;
+    }
+    if(!validNationalId(nid)){
+        u->statusMsg = L"کد ملی نامعتبر است.";
+        u->statusCol = g_theme.danger;
+        InvalidateRect(u->page, NULL, FALSE);
+        return;
+    }
+    CitizenInfo c = lookupCitizen(nid);
+    if(!c.found){
+        u->statusMsg = L"اطلاعاتی برای این کد ملی یافت نشد.";
+        u->statusCol = g_theme.danger;
+        InvalidateRect(u->page, NULL, FALSE);
+        return;
+    }
+    setPatientEnabled(u, true);
+    SetWindowTextW(u->pFirst,  c.firstName.c_str());
+    SetWindowTextW(u->pLast,   c.lastName.c_str());
+    SetWindowTextW(u->pFather, c.fatherName.c_str());
+    SetWindowTextW(u->pMobile, c.mobile.c_str());
+    SendMessageW(u->pGender, CB_SETCURSEL, (c.gender==L"زن")?1:0, 0);
+    u->statusMsg = L"مشخصات بیمار از ثبت احوال دریافت شد.";
+    u->statusCol = g_theme.success;
+    InvalidateRect(u->page, NULL, FALSE);
+}
+
+// register the appointment (رزرو عادی نوبت)
+static void submitAppointment(ApptUI* u){
+    if(!u->patientOn){
+        u->statusMsg = L"ابتدا بیمار را با کد ملی پیدا کنید.";
+        u->statusCol = g_theme.danger;
+        InvalidateRect(u->page, NULL, FALSE); return;
+    }
+    Appointment a;
+    wchar_t b[256];
+    GetWindowTextW(u->pNid,   b,256); a.nationalId = trim(b);
+    GetWindowTextW(u->pFirst, b,256); a.firstName  = trim(b);
+    GetWindowTextW(u->pLast,  b,256); a.lastName   = trim(b);
+    GetWindowTextW(u->pMobile,b,256); a.mobile     = trim(b);
+    GetWindowTextW(u->aDoctor,b,256); a.doctor     = trim(b);
+    GetWindowTextW(u->aService,b,256);a.service    = trim(b);
+    GetWindowTextW(u->aDate,  b,256); a.apptDate   = trim(b);
+    if(a.apptDate.empty()) a.apptDate = jalaliDateShort(iranNow());
+    a.kind  = u->kindInPerson ? L"حضوری" : L"غیرحضوری";
+    a.user  = g_session.user.fullname.empty()?g_session.user.username
+                                             :g_session.user.fullname;
+    if(a.firstName.empty() || a.lastName.empty()){
+        u->statusMsg = L"نام و نام خانوادگی بیمار الزامی است.";
+        u->statusCol = g_theme.danger;
+        InvalidateRect(u->page, NULL, FALSE); return;
+    }
+    int q = saveAppointment(a);   // assigns queue no / time / day
+    wchar_t mb[200];
+    swprintf(mb,200,L"نوبت با شماره %d برای %s %s ثبت شد.",
+        q, a.firstName.c_str(), a.lastName.c_str());
+    u->statusMsg = toFaDigits(mb); u->statusCol = g_theme.success;
+    resetPatient(u);
+    refreshGrid(u);
+}
+
+// ---------------------------------------------------------------- search ----
+static void doSearch(ApptUI* u){
+    wchar_t b[128];
+    std::wstring nid,mob,fn,ln;
+    GetWindowTextW(u->sNid,   b,128); nid=trim(b);
+    GetWindowTextW(u->sMobile,b,128); mob=trim(b);
+    GetWindowTextW(u->sFirst, b,128); fn =trim(b);
+    GetWindowTextW(u->sLast,  b,128); ln =trim(b);
+    bool inclCancelled =
+        (SendMessageW(u->sCancelled, BM_GETCHECK, 0, 0) == BST_CHECKED);
+    if(nid.empty()&&mob.empty()&&fn.empty()&&ln.empty()){
+        refreshGrid(u);   // nothing typed → show everything
+        return;
+    }
+    std::vector<Appointment> res =
+        searchAppointments(nid,mob,fn,ln,inclCancelled);
+    // map results back to source indices so ابطال still works
+    std::vector<Appointment> all = loadAppointments(true);
+    u->rows.clear(); u->srcIndex.clear();
+    for(auto& r : res){
+        u->rows.push_back(r);
+        int found=-1;
+        for(int i=(int)all.size()-1;i>=0;--i){
+            if(all[i].nationalId==r.nationalId && all[i].queueNo==r.queueNo
+               && all[i].apptDate==r.apptDate){ found=i; break; }
+        }
+        u->srcIndex.push_back(found);
+    }
+    u->sel=-1;
+    wchar_t mb[80]; swprintf(mb,80,L"%d نتیجه یافت شد.",(int)res.size());
+    u->statusMsg=toFaDigits(mb); u->statusCol=g_theme.accent;
+    InvalidateRect(u->page,NULL,FALSE);
+}
+
+// ============================================================== layout ======
+//  RIGHT panel width ~ 46% of the page; LEFT panel (grid) takes the rest.
+static int apRightW(HWND h){
+    RECT rc; GetClientRect(h,&rc);
+    int w = (int)(rc.right*0.46);
+    if(w < S(420)) w = S(420);
+    if(w > rc.right - S(360)) w = rc.right - S(360);
+    return w;
+}
+static RECT apGridRect(HWND h){
+    RECT rc; GetClientRect(h,&rc);
+    RECT g;
+    g.left   = S(12);
+    g.right  = rc.right - apRightW(h) - S(12);
+    g.top    = S(54);    // below the grid toolbar
+    g.bottom = rc.bottom - S(12);
+    return g;
+}
+
+static void apLayout(HWND h, ApptUI* u){
+    RECT rc; GetClientRect(h,&rc);
+    int rW = apRightW(h);
+    int rx = rc.right - rW;                 // right panel left edge
+    int pad = S(14);
+    int innerR = rc.right - pad;            // right inner edge
+    int innerL = rx + pad;                  // left inner edge of right panel
+    int colW   = (innerR - innerL - S(10)) / 2;
+    int rightColX = innerR - colW;          // right column x
+    int leftColX  = innerL;                 // left column x
+    int fh = apRowH() - S(4);
+
+    // ---- search group (top) -----------------------------------------------
+    int y = S(40);
+    // row1: کد ملی (right) | نام (left)
+    MoveWindow(u->sNid,    rightColX, y, colW, fh, TRUE);
+    MoveWindow(u->sFirst,  leftColX,  y, colW, fh, TRUE);
+    y += apRowH();
+    // row2: شماره موبایل (right) | نام خانوادگی (left)
+    MoveWindow(u->sMobile, rightColX, y, colW, fh, TRUE);
+    MoveWindow(u->sLast,   leftColX,  y, colW, fh, TRUE);
+    y += apRowH();
+    // checkbox (full width)
+    MoveWindow(u->sCancelled, leftColX, y, innerR-innerL, fh, TRUE);
+    y += apRowH();
+    // جستجو button (right aligned)
+    MoveWindow(u->sGo, innerR-S(120), y, S(120), S(34), TRUE);
+    y += S(46);
+
+    // ---- appointment-details group ----------------------------------------
+    int gy = y + S(24);   // leave room for the group title
+    // پزشک combo + refresh + today
+    MoveWindow(u->aDocToday,  innerL, gy, S(96), fh, TRUE);
+    MoveWindow(u->aDocRefresh,innerL+S(102), gy, S(34), fh, TRUE);
+    MoveWindow(u->aDoctor,    innerL+S(140), gy, innerR-innerL-S(140), fh, TRUE);
+    gy += apRowH();
+    // خدمت combo + F5/F4/F3
+    MoveWindow(u->aSvcF3, innerL,        gy, S(34), fh, TRUE);
+    MoveWindow(u->aSvcF4, innerL+S(38),  gy, S(34), fh, TRUE);
+    MoveWindow(u->aSvcF5, innerL+S(76),  gy, S(34), fh, TRUE);
+    MoveWindow(u->aService, innerL+S(114), gy, innerR-innerL-S(114), fh, TRUE);
+    gy += apRowH();
+    // تاریخ نوبت
+    MoveWindow(u->aDate, rightColX, gy, colW, fh, TRUE);
+    // نوع دریافت نوبت toggle (left)
+    MoveWindow(u->aKind, leftColX, gy, colW, fh, TRUE);
+    gy += apRowH();
+    // ثبت و مرحله بعد
+    MoveWindow(u->aNext, innerR-S(150), gy, S(150), S(34), TRUE);
+    gy += S(46);
+
+    // ---- patient-details group --------------------------------------------
+    int py = gy + S(24);
+    // foreign checkbox (full width)
+    MoveWindow(u->pForeign, leftColX, py, innerR-innerL, fh, TRUE);
+    py += apRowH();
+    // کد ملی (right) | نام (left)  — actually nid full row for clarity
+    MoveWindow(u->pNid, rightColX, py, colW, fh, TRUE);
+    MoveWindow(u->pFirst, leftColX, py, colW, fh, TRUE);
+    py += apRowH();
+    // نام پدر (right) | نام خانوادگی (left)
+    MoveWindow(u->pFather, rightColX, py, colW, fh, TRUE);
+    MoveWindow(u->pLast,   leftColX,  py, colW, fh, TRUE);
+    py += apRowH();
+    // تلفن همراه (right) | جنسیت (left)
+    MoveWindow(u->pMobile, rightColX, py, colW, fh, TRUE);
+    MoveWindow(u->pGender, leftColX,  py, colW, fh, TRUE);
+    py += apRowH();
+    // توضیحات (full width)
+    MoveWindow(u->pDesc, leftColX, py, innerR-innerL, fh, TRUE);
+    py += apRowH()+S(2);
+    // buttons: رزرو عادی نوبت | جدید | انصراف
+    int bw=(innerR-innerL-S(16))/3;
+    MoveWindow(u->pReserve, innerR-bw,            py, bw, S(34), TRUE);
+    MoveWindow(u->pNew,     innerR-bw*2-S(8),     py, bw, S(34), TRUE);
+    MoveWindow(u->pCancel,  innerR-bw*3-S(16),    py, bw, S(34), TRUE);
+
+    // ---- grid toolbar (top-left) ------------------------------------------
+    RECT g = apGridRect(h);
+    int tbY=S(14), tbH=S(32), tx=g.right;
+    int wMsg=S(96),wTr=S(96),wPr=S(64),wSv=S(108),wDl=S(108),gp=S(6);
+    MoveWindow(u->tMsg,      tx-wMsg, tbY, wMsg, tbH, TRUE);
+    MoveWindow(u->tTransfer, tx-wMsg-gp-wTr, tbY, wTr, tbH, TRUE);
+    MoveWindow(u->tPrint,    tx-wMsg-gp-wTr-gp-wPr, tbY, wPr, tbH, TRUE);
+    MoveWindow(u->tSaveLayout,g.left+wDl+gp, tbY, wSv, tbH, TRUE);
+    MoveWindow(u->tDelLayout, g.left,         tbY, wDl, tbH, TRUE);
+}
+
+// ============================================================== grid paint ==
+//  Columns flow RIGHT → LEFT. We compute each column width by its weight so the
+//  whole table fills the available grid rect.
+static void computeColX(RECT g, int* xs /*N_GCOLS+1, RIGHT→LEFT edges*/){
+    int totalW=0; for(int i=0;i<N_GCOLS;i++) totalW+=GCOLS[i].w;
+    int avail=g.right-g.left;
+    int x=g.right;
+    xs[0]=x;
+    for(int i=0;i<N_GCOLS;i++){
+        int w=GCOLS[i].w*avail/totalW;
+        x-=w; xs[i+1]=x;
+    }
+    xs[N_GCOLS]=g.left;   // snap last edge
+}
+static int apVisibleRows(HWND h){
+    RECT g=apGridRect(h);
+    return (g.bottom-(g.top+apHdrH())) / apRowH();
+}
+static std::wstring cellText(const Appointment& a, int col){
+    switch(col){
+        case 0: return a.cancelled?L"باطل":L"●";        // ابطال
+        case 1: return L"✎";                            // ویرایش
+        case 2: return L"🖶";                            // چاپ
+        case 3: return a.user;                          // کاربر
+        case 4: return a.mobile;                        // موبایل
+        case 5: return a.doctor;                        // پزشک
+        case 6: return a.lastName;                      // نام خانوادگی
+        case 7: return a.firstName;                     // نام
+        case 8: { wchar_t b[16]; swprintf(b,16,L"%d",a.queueNo); return toFaDigits(b); }
+        case 9: return toFaDigits(a.apptTime);          // ساعت
+        case 10:return a.day;                           // روز
+        case 11:return toFaDigits(a.apptDate);          // تاریخ
+        case 12:return a.kind;                          // نوع
+    }
+    return L"";
+}
+static void paintGrid(HDC dc, HWND h, ApptUI* u){
+    RECT g=apGridRect(h);
+    // card background
+    gpRoundRect(dc,g,S(10),g_theme.surface,g_theme.border);
+    int xs[N_GCOLS+1]; computeColX(g,xs);
+    // header row
+    RECT hr={g.left,g.top,g.right,g.top+apHdrH()};
+    HRGN clip=CreateRoundRectRgn(g.left,g.top,g.right+1,g.bottom+1,S(10),S(10));
+    SelectClipRgn(dc,clip);
+    RECT hrFill=hr;
+    {
+        HBRUSH b=CreateSolidBrush(g_theme.surface2);
+        FillRect(dc,&hrFill,b); DeleteObject(b);
+    }
+    SelectObject(dc,g_fSmall);
+    SetTextColor(dc,g_theme.text);
+    for(int c=0;c<N_GCOLS;c++){
+        RECT cr={xs[c+1],hr.top,xs[c],hr.bottom};
+        RECT tr=cr; tr.left+=S(2); tr.right-=S(2);
+        DrawTextW(dc,GCOLS[c].title,-1,&tr,
+            DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
+    }
+    // grid lines + rows
+    HPEN pen=CreatePen(PS_SOLID,1,g_theme.border);
+    HGDIOBJ op=SelectObject(dc,pen);
+    int vis=apVisibleRows(h);
+    int y=g.top+apHdrH();
+    SelectObject(dc,g_fUI);
+    for(int r=0; r<vis; r++){
+        int idx=u->scroll+r;
+        if(idx>=(int)u->rows.size()) break;
+        RECT row={g.left,y,g.right,y+apRowH()};
+        if(idx==u->sel){
+            HBRUSH b=CreateSolidBrush(g_theme.accent);
+            FillRect(dc,&row,b); DeleteObject(b);
+        } else if(idx==u->hot){
+            HBRUSH b=CreateSolidBrush(g_theme.hover);
+            FillRect(dc,&row,b); DeleteObject(b);
+        } else if(r&1){
+            HBRUSH b=CreateSolidBrush(g_theme.bg2);
+            FillRect(dc,&row,b); DeleteObject(b);
+        }
+        const Appointment& a=u->rows[idx];
+        COLORREF txt = (idx==u->sel)?g_theme.accentText
+                       : a.cancelled?g_theme.textDim : g_theme.text;
+        SetTextColor(dc,txt);
+        for(int c=0;c<N_GCOLS;c++){
+            RECT cr={xs[c+1],row.top,xs[c],row.bottom};
+            RECT tr=cr; tr.left+=S(3); tr.right-=S(3);
+            std::wstring s=cellText(a,c);
+            // ابطال column: tint
+            if(c==0 && !a.cancelled) SetTextColor(dc,(idx==u->sel)?g_theme.accentText:g_theme.danger);
+            else if(c==0 && a.cancelled) SetTextColor(dc,g_theme.textDim);
+            else SetTextColor(dc,txt);
+            DrawTextW(dc,s.c_str(),-1,&tr,
+                DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
+        }
+        // row separator
+        MoveToEx(dc,g.left,row.bottom,0); LineTo(dc,g.right,row.bottom);
+        y+=apRowH();
+    }
+    // column separators
+    for(int c=1;c<N_GCOLS;c++){
+        MoveToEx(dc,xs[c],g.top,0); LineTo(dc,xs[c],g.bottom);
+    }
+    // header underline
+    MoveToEx(dc,g.left,g.top+apHdrH(),0); LineTo(dc,g.right,g.top+apHdrH());
+    SelectObject(dc,op); DeleteObject(pen);
+    SelectClipRgn(dc,NULL); DeleteObject(clip);
+    // empty hint
+    if(u->rows.empty()){
+        SetTextColor(dc,g_theme.textDim); SelectObject(dc,g_fUI);
+        RECT er={g.left,g.top+apHdrH(),g.right,g.bottom};
+        DrawTextW(dc,L"نوبتی برای نمایش وجود ندارد",-1,&er,
+            DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+    }
+}
+// returns row index (in u->rows) or -1; *col set to clicked column
+static int hitGridRow(HWND h, ApptUI* u, POINT pt, int* col){
+    RECT g=apGridRect(h);
+    if(!PtInRect(&g,pt)) return -1;
+    if(pt.y < g.top+apHdrH()) return -1;
+    int r=(pt.y-(g.top+apHdrH()))/apRowH();
+    int idx=u->scroll+r;
+    if(idx<0||idx>=(int)u->rows.size()) return -1;
+    if(col){
+        int xs[N_GCOLS+1]; computeColX(g,xs);
+        *col=-1;
+        for(int c=0;c<N_GCOLS;c++)
+            if(pt.x>=xs[c+1]&&pt.x<xs[c]){ *col=c; break; }
+    }
+    return idx;
+}
+
+// ============================================================== group boxes =
+static void drawGroup(HDC dc, RECT r, const wchar_t* title){
+    gpRoundRect(dc,r,S(10),g_theme.surface,g_theme.border);
+    // title chip on the top-right
+    SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.accent);
+    RECT tr={r.left+S(12),r.top-S(2),r.right-S(14),r.top+apHdrH()};
+    DrawTextW(dc,title,-1,&tr,
+        DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+}
+static void drawLabel(HDC dc, int x, int y, int w, const wchar_t* s){
+    SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
+    RECT r={x,y,x+w,y+S(16)};
+    DrawTextW(dc,s,-1,&r,DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+}
+static void apPaint(HWND h, ApptUI* u, HDC dc){
+    RECT rc; GetClientRect(h,&rc);
+    FillRect(dc,&rc,g_brBg);
+    SetBkMode(dc,TRANSPARENT);
+    int rW=apRightW(h);
+    int rx=rc.right-rW;
+    int pad=S(14);
+    int innerR=rc.right-pad, innerL=rx+pad;
+    int colW=(innerR-innerL-S(10))/2;
+    int rightColX=innerR-colW, leftColX=innerL;
+
+    // ---- group rects (mirror apLayout y-positions) ----
+    int y=S(40);
+    RECT gSearch={rx+S(6),S(10),rc.right-S(6),0};
+    int searchBottom = y + apRowH()*3 + S(34) + S(8);
+    gSearch.bottom = searchBottom;
+    drawGroup(dc,gSearch,L"جستجوی بیمار رزرو کرده");
+    // labels for search
+    drawLabel(dc,rightColX,y-S(15),colW,L"کد ملی");
+    drawLabel(dc,leftColX, y-S(15),colW,L"نام");
+    drawLabel(dc,rightColX,y+apRowH()-S(15),colW,L"شماره موبایل");
+    drawLabel(dc,leftColX, y+apRowH()-S(15),colW,L"نام خانوادگی");
+
+    int appTop = searchBottom + S(10);
+    int gy = appTop + S(24);
+    RECT gAppt={rx+S(6),appTop,rc.right-S(6),0};
+    int apptBottom = gy + apRowH()*3 + S(34) + S(8);
+    gAppt.bottom=apptBottom;
+    drawGroup(dc,gAppt,L"مشخصات نوبت");
+    drawLabel(dc,innerL+S(140),gy-S(15),S(120),L"پزشک");
+    drawLabel(dc,innerL+S(114),gy+apRowH()-S(15),S(120),L"خدمت");
+    drawLabel(dc,rightColX,gy+apRowH()*2-S(15),colW,L"تاریخ نوبت");
+    drawLabel(dc,leftColX, gy+apRowH()*2-S(15),colW,L"نوع دریافت نوبت");
+
+    int patTop = apptBottom + S(10);
+    int py = patTop + S(24);
+    RECT gPat={rx+S(6),patTop,rc.right-S(6),rc.bottom-S(10)};
+    drawGroup(dc,gPat,u->patientOn?L"مشخصات بیمار":L"مشخصات بیمار (غیرفعال)");
+    drawLabel(dc,rightColX,py+apRowH()-S(15),colW,L"کد ملی");
+    drawLabel(dc,leftColX, py+apRowH()-S(15),colW,L"نام");
+    drawLabel(dc,rightColX,py+apRowH()*2-S(15),colW,L"نام پدر");
+    drawLabel(dc,leftColX, py+apRowH()*2-S(15),colW,L"نام خانوادگی");
+    drawLabel(dc,rightColX,py+apRowH()*3-S(15),colW,L"تلفن همراه");
+    drawLabel(dc,leftColX, py+apRowH()*3-S(15),colW,L"جنسیت");
+    drawLabel(dc,leftColX, py+apRowH()*4-S(15),innerR-innerL,L"توضیحات");
+
+    // ---- status message line (above grid toolbar, on the left side) ----
+    if(!u->statusMsg.empty()){
+        RECT g=apGridRect(h);
+        SelectObject(dc,g_fSmall); SetTextColor(dc,u->statusCol);
+        RECT sr={g.left,S(50)-S(16),g.right,S(50)};
+        // status is drawn just under the toolbar inside the grid card top — but
+        // we keep it subtle; skip if it would overlap. Draw near bottom instead.
+        RECT br={g.left,rc.bottom-S(0),g.right,rc.bottom};
+        (void)sr;(void)br;
+        // draw under the right panel groups bottom area is busy; show at the
+        // very top-left toolbar baseline:
+        RECT tr={g.left, S(46), g.right, S(46)+S(16)};
+        DrawTextW(dc,u->statusMsg.c_str(),-1,&tr,
+            DT_LEFT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
+    }
+
+    // ---- the grid ----
+    paintGrid(dc,h,u);
+}
+
+// ----------------------------------------------- national-id Enter subclass -
+static WNDPROC g_nidPrev = NULL;
+static LRESULT CALLBACK nidProc(HWND h, UINT m, WPARAM w, LPARAM l){
+    if(m==WM_KEYDOWN && (w==VK_RETURN || w==VK_TAB)){
+        ApptUI* u=(ApptUI*)GetWindowLongPtrW(GetParent(h),GWLP_USERDATA);
+        if(u){ lookupPatient(u); return 0; }
+    }
+    if(m==WM_CHAR && w==VK_RETURN) return 0;   // suppress beep
+    return CallWindowProcW(g_nidPrev,h,m,w,l);
+}
+
+// ============================================================== window proc =
+static void updateKindButton(ApptUI* u){
+    SetWindowTextW(u->aKind, u->kindInPerson?L"حضوری":L"غیرحضوری");
+}
+static void updateToolbarState(ApptUI* u){
+    bool has = (u->sel>=0 && u->sel<(int)u->rows.size());
+    EnableWindow(u->tMsg, has);
+    EnableWindow(u->tTransfer, has);
+}
+
+static LRESULT CALLBACK apProc(HWND h, UINT m, WPARAM w, LPARAM l){
+    ApptUI* u=(ApptUI*)GetWindowLongPtrW(h,GWLP_USERDATA);
+    switch(m){
+    case WM_CREATE: {
+        CREATESTRUCTW* cs=(CREATESTRUCTW*)l;
+        u=(ApptUI*)cs->lpCreateParams;
+        SetWindowLongPtrW(h,GWLP_USERDATA,(LONG_PTR)u);
+        u->page=h;
+        DWORD es=WS_CHILD|WS_VISIBLE|WS_TABSTOP|ES_AUTOHSCROLL;
+        // ---- search controls ----
+        u->sNid   =CreateWindowExW(0,L"EDIT",L"",es|ES_NUMBER,0,0,10,10,h,(HMENU)AP_S_NID,g_hInst,0);
+        u->sMobile=CreateWindowExW(0,L"EDIT",L"",es|ES_NUMBER,0,0,10,10,h,(HMENU)AP_S_MOBILE,g_hInst,0);
+        u->sFirst =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)AP_S_FIRST,g_hInst,0);
+        u->sLast  =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)AP_S_LAST,g_hInst,0);
+        u->sCancelled=CreateWindowExW(0,L"BUTTON",L"نمایش بیمارانی که نوبت آن‌ها باطل شده است",
+            WS_CHILD|WS_VISIBLE|BS_AUTOCHECKBOX|BS_RIGHTBUTTON|BS_RIGHT,0,0,10,10,h,(HMENU)AP_S_CANCELLED,g_hInst,0);
+        u->sGo=createFlatButton(h,AP_S_GO,L"جستجو",ICO_NONE,BS_PRIMARY,0,0,10,10);
+        // ---- appointment-details controls ----
+        u->aDoctor =createThemedCombo(h,AP_A_DOCTOR);
+        u->aDocRefresh=createFlatButton(h,AP_A_DOC_REFRESH,L"",ICO_REFRESH,BS_OUTLINE,0,0,10,10);
+        u->aDocToday=createFlatButton(h,AP_A_DOC_TODAY,L"پزشکان امروز",ICO_NONE,BS_OUTLINE,0,0,10,10);
+        u->aService=createThemedCombo(h,AP_A_SERVICE);
+        u->aSvcF5=createFlatButton(h,AP_A_SVC_F5,L"F5",ICO_NONE,BS_OUTLINE,0,0,10,10);
+        u->aSvcF4=createFlatButton(h,AP_A_SVC_F4,L"F4",ICO_NONE,BS_OUTLINE,0,0,10,10);
+        u->aSvcF3=createFlatButton(h,AP_A_SVC_F3,L"F3",ICO_NONE,BS_OUTLINE,0,0,10,10);
+        u->aDate =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)AP_A_DATE,g_hInst,0);
+        u->aNext =createFlatButton(h,AP_A_NEXT,L"ثبت و مرحله بعد",ICO_CHECK,BS_PRIMARY,0,0,10,10);
+        u->aKind =createFlatButton(h,AP_A_KIND,L"حضوری",ICO_NONE,BS_OUTLINE,0,0,10,10);
+        // ---- patient-details controls ----
+        u->pForeign=CreateWindowExW(0,L"BUTTON",L"تابعیت غیرایرانی / نوزادان",
+            WS_CHILD|WS_VISIBLE|BS_AUTOCHECKBOX|BS_RIGHTBUTTON|BS_RIGHT,0,0,10,10,h,(HMENU)AP_P_FOREIGN,g_hInst,0);
+        u->pNid   =CreateWindowExW(0,L"EDIT",L"",es|ES_NUMBER,0,0,10,10,h,(HMENU)AP_P_NID,g_hInst,0);
+        u->pFirst =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)AP_P_FIRST,g_hInst,0);
+        u->pFather=CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)AP_P_FATHER,g_hInst,0);
+        u->pMobile=CreateWindowExW(0,L"EDIT",L"",es|ES_NUMBER,0,0,10,10,h,(HMENU)AP_P_MOBILE,g_hInst,0);
+        u->pLast  =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)AP_P_LAST,g_hInst,0);
+        u->pGender=createThemedCombo(h,AP_P_GENDER);
+        u->pDesc  =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)AP_P_DESC,g_hInst,0);
+        u->pReserve=createFlatButton(h,AP_P_RESERVE,L"رزرو عادی نوبت",ICO_SAVE,BS_PRIMARY,0,0,10,10);
+        u->pNew   =createFlatButton(h,AP_P_NEW,L"جدید",ICO_PLUS,BS_OUTLINE,0,0,10,10);
+        u->pCancel=createFlatButton(h,AP_P_CANCEL,L"انصراف",ICO_X,BS_OUTLINE,0,0,10,10);
+        // ---- grid toolbar ----
+        u->tMsg     =createFlatButton(h,AP_T_MSG,L"ارسال پیام",ICO_BELL,BS_OUTLINE,0,0,10,10);
+        u->tTransfer=createFlatButton(h,AP_T_TRANSFER,L"انتقال نوبت",ICO_DETACH,BS_OUTLINE,0,0,10,10);
+        u->tPrint   =createFlatButton(h,AP_T_PRINT,L"چاپ",ICO_PRINT,BS_OUTLINE,0,0,10,10);
+        u->tSaveLayout=createFlatButton(h,AP_T_SAVELAYOUT,L"ذخیره چیدمان",ICO_SAVE,BS_OUTLINE,0,0,10,10);
+        u->tDelLayout =createFlatButton(h,AP_T_DELLAYOUT,L"حذف چیدمان",ICO_TRASH,BS_OUTLINE,0,0,10,10);
+
+        // fonts
+        HWND eds[]={u->sNid,u->sMobile,u->sFirst,u->sLast,u->aDate,
+                    u->pNid,u->pFirst,u->pFather,u->pMobile,u->pLast,u->pDesc};
+        for(HWND e: eds){ SendMessageW(e,WM_SETFONT,(WPARAM)g_fUI,TRUE); enableEnterNavigation(e); }
+        // auto RTL/LTR on the text (name) fields
+        enableAutoDir(u->sFirst); enableAutoDir(u->sLast);
+        enableAutoDir(u->pFirst); enableAutoDir(u->pFather);
+        enableAutoDir(u->pLast);  enableAutoDir(u->pDesc);
+        // appointment date uses the smart Jalali mask
+        SendMessageW(u->aDate,EM_SETLIMITTEXT,10,0);
+        enableDateMask(u->aDate);
+        SetWindowTextW(u->aDate, jalaliDateShort(iranNow()).c_str());
+        SendMessageW(u->sCancelled,WM_SETFONT,(WPARAM)g_fSmall,TRUE);
+        SendMessageW(u->pForeign,WM_SETFONT,(WPARAM)g_fSmall,TRUE);
+        // gender combo
+        SendMessageW(u->pGender,CB_ADDSTRING,0,(LPARAM)L"مرد");
+        SendMessageW(u->pGender,CB_ADDSTRING,0,(LPARAM)L"زن");
+        SendMessageW(u->pGender,CB_SETCURSEL,0,0);
+        // national-id Enter subclass
+        g_nidPrev=(WNDPROC)SetWindowLongPtrW(u->pNid,GWLP_WNDPROC,(LONG_PTR)nidProc);
+
+        fillDoctors(u,false);
+        setPatientEnabled(u,false);
+        updateToolbarState(u);
+        refreshGrid(u);
+        return 0; }
+    case WM_SIZE: if(u) apLayout(h,u); return 0;
+    case WM_APP_THEME: InvalidateRect(h,NULL,TRUE); return 0;
+    case WM_CTLCOLOREDIT: {
+        HDC dc=(HDC)w;
+        SetTextColor(dc,g_theme.inputText); SetBkColor(dc,g_theme.inputBg);
+        return (LRESULT)g_brInput; }
+    case WM_CTLCOLORLISTBOX: {
+        HDC dc=(HDC)w;
+        SetTextColor(dc,g_theme.inputText); SetBkColor(dc,g_theme.inputBg);
+        return (LRESULT)g_brInput; }
+    case WM_CTLCOLORSTATIC: {
+        HDC dc=(HDC)w;
+        SetTextColor(dc,g_theme.text); SetBkColor(dc,g_theme.surface);
+        return (LRESULT)g_brSurface; }
+    case WM_DRAWITEM: {
+        if(drawThemedComboItem((LPDRAWITEMSTRUCT)l)) return TRUE;
+        break; }
+    case WM_MOUSEWHEEL: {
+        if(!u) return 0;
+        int delta=GET_WHEEL_DELTA_WPARAM(w);
+        int step=(delta>0)?-1:1;
+        int maxScroll=(int)u->rows.size()-apVisibleRows(h);
+        if(maxScroll<0) maxScroll=0;
+        u->scroll+=step;
+        if(u->scroll<0)u->scroll=0;
+        if(u->scroll>maxScroll)u->scroll=maxScroll;
+        InvalidateRect(h,NULL,FALSE);
+        return 0; }
+    case WM_MOUSEMOVE: {
+        if(!u) return 0;
+        POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
+        int col; int hit=hitGridRow(h,u,pt,&col);
+        if(hit!=u->hot){ u->hot=hit; InvalidateRect(h,NULL,FALSE); }
+        return 0; }
+    case WM_LBUTTONDOWN: {
+        if(!u) return 0;
+        POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
+        int col=-1; int hit=hitGridRow(h,u,pt,&col);
+        if(hit>=0){
+            u->sel=hit; updateToolbarState(u);
+            if(col==0){   // ابطال
+                const Appointment& a=u->rows[hit];
+                if(!a.cancelled){
+                    if(MessageBoxW(h,L"این نوبت باطل شود؟",L"ابطال نوبت",
+                        MB_YESNO|MB_ICONWARNING)==IDYES){
+                        int src=u->srcIndex[hit];
+                        if(src>=0){ cancelAppointment(src); refreshGrid(u); }
+                    }
+                }
+            } else if(col==2){   // چاپ
+                MessageBoxW(h,L"چاپ نوبت در دست توسعه است.",L"چاپ",MB_OK|MB_ICONINFORMATION);
+            }
+            InvalidateRect(h,NULL,FALSE);
+        }
+        return 0; }
+    case WM_COMMAND: {
+        if(!u) return 0;
+        int id=LOWORD(w), code=HIWORD(w);
+        if(id==AP_S_GO) doSearch(u);
+        else if(id==AP_S_CANCELLED && code==BN_CLICKED) refreshGrid(u);
+        else if(id==AP_A_DOCTOR && code==CBN_SELCHANGE) onDoctorChanged(u);
+        else if(id==AP_A_DOC_REFRESH) fillDoctors(u,false);
+        else if(id==AP_A_DOC_TODAY)   fillDoctors(u,true);
+        else if(id==AP_A_KIND){
+            u->kindInPerson=!u->kindInPerson; updateKindButton(u);
+        }
+        else if(id==AP_A_NEXT){
+            // "ثبت و مرحله بعد" — move focus to the patient block (enable on nid)
+            SetFocus(u->pNid);
+            u->statusMsg=L"کد ملی بیمار را وارد و Enter بزنید.";
+            u->statusCol=g_theme.accent; InvalidateRect(h,NULL,FALSE);
+        }
+        else if(id==AP_A_SVC_F5||id==AP_A_SVC_F4||id==AP_A_SVC_F3){
+            MessageBoxW(h,L"این قابلیت خدمت در دست توسعه است.",L"خدمت",MB_OK|MB_ICONINFORMATION);
+        }
+        else if(id==AP_P_FOREIGN && code==BN_CLICKED){
+            bool f=(SendMessageW(u->pForeign,BM_GETCHECK,0,0)==BST_CHECKED);
+            if(f) setPatientEnabled(u,true);   // allow manual entry immediately
+        }
+        else if(id==AP_P_RESERVE) submitAppointment(u);
+        else if(id==AP_P_NEW){ resetPatient(u); SetFocus(u->pNid);
+            u->statusMsg=L""; InvalidateRect(h,NULL,FALSE); }
+        else if(id==AP_P_CANCEL){ resetPatient(u);
+            u->statusMsg=L"انصراف انجام شد."; u->statusCol=g_theme.textDim;
+            InvalidateRect(h,NULL,FALSE); }
+        else if(id==AP_T_MSG){
+            if(u->sel>=0){
+                const Appointment& a=u->rows[u->sel];
+                pushMessageT(g_session.user.username,a.nationalId,
+                    L"یادآوری نوبت برای "+a.firstName+L" "+a.lastName,KMSG_NORMAL);
+                u->statusMsg=L"پیام برای بیمار ثبت شد."; u->statusCol=g_theme.success;
+                InvalidateRect(h,NULL,FALSE);
+            }
+        }
+        else if(id==AP_T_TRANSFER){
+            MessageBoxW(h,L"انتقال نوبت در دست توسعه است.",L"انتقال نوبت",MB_OK|MB_ICONINFORMATION);
+        }
+        else if(id==AP_T_PRINT) refreshGrid(u);
+        else if(id==AP_T_SAVELAYOUT){
+            setSetting(L"appt_layout_saved",L"1");
+            u->statusMsg=L"چیدمان ذخیره شد."; u->statusCol=g_theme.success;
+            InvalidateRect(h,NULL,FALSE);
+        }
+        else if(id==AP_T_DELLAYOUT){
+            setSetting(L"appt_layout_saved",L"0");
+            u->statusMsg=L"چیدمان حذف شد."; u->statusCol=g_theme.textDim;
+            InvalidateRect(h,NULL,FALSE);
+        }
+        return 0; }
+    case WM_ERASEBKGND: return 1;
+    case WM_PAINT: {
+        PAINTSTRUCT ps; HDC dc0=BeginPaint(h,&ps);
+        RECT rc; GetClientRect(h,&rc);
+        if(rc.right<=0||rc.bottom<=0){ EndPaint(h,&ps); return 0; }
+        HDC dc=CreateCompatibleDC(dc0);
+        HBITMAP bmp=CreateCompatibleBitmap(dc0,rc.right,rc.bottom);
+        HGDIOBJ obm=SelectObject(dc,bmp);
+        if(u) apPaint(h,u,dc);
+        BitBlt(dc0,0,0,rc.right,rc.bottom,dc,0,0,SRCCOPY);
+        SelectObject(dc,obm); DeleteObject(bmp); DeleteDC(dc);
+        EndPaint(h,&ps);
+        return 0; }
+    case WM_NCDESTROY:
+        if(u){ delete u; SetWindowLongPtrW(h,GWLP_USERDATA,0); }
+        break;
+    }
+    return DefWindowProcW(h,m,w,l);
+}
+
+// ============================================================== factory =====
+HWND createAppointmentPage(HWND parent){
+    static bool reg=false;
+    if(!reg){
+        WNDCLASSW wc={0};
+        wc.lpfnWndProc=apProc; wc.hInstance=g_hInst;
+        wc.hCursor=LoadCursor(NULL,IDC_ARROW);
+        wc.lpszClassName=AP_CLASS;
+        RegisterClassW(&wc); reg=true;
+    }
+    ApptUI* u=new ApptUI();
+    RECT rc; GetClientRect(parent,&rc);
+    HWND h=CreateWindowExW(0,AP_CLASS,L"",
+        WS_CHILD|WS_CLIPCHILDREN,
+        0,0,rc.right,rc.bottom,parent,NULL,g_hInst,u);
+    if(!h){ delete u; return NULL; }
+    return h;
+}

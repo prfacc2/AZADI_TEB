@@ -152,6 +152,7 @@ std::vector<KMsg> loadMessages(const std::wstring& forUser){
         KMsg k; k.from=f[0]; k.to=f[1]; k.time=f[2]; k.seen=(f[3]==L"1");
         if(f.size()>=6){ k.type=_wtoi(f[4].c_str()); k.text=f[5]; }
         else           { k.type=KMSG_NORMAL;        k.text=f[4]; }
+        k.pinned = (f.size()>=7 && f[6]==L"1");
         if(k.to==L"*" || k.to==forUser || forUser.empty()) out.push_back(k);
     }
     return out;

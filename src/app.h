@@ -90,6 +90,11 @@ void  setFlatButtonBg(HWND btn, COLORREF bg);
 void  setFlatButtonImage(HWND btn, int resId);
 void  drawIcon(HDC dc, int icon, RECT rc, COLORREF col, int thick);
 void  fillRoundRect(HDC dc, RECT rc, int rad, COLORREF fill, COLORREF border);
+//  v1.6.0: a fully theme-aware owner-draw combobox (fixes dark-mode dropdown
+//  white-on-white) — create with createThemedCombo, forward WM_DRAWITEM to
+//  drawThemedComboItem in the parent.
+HWND  createThemedCombo(HWND parent, int id);
+bool  drawThemedComboItem(LPDRAWITEMSTRUCT dis);
 
 // ---------------------------------------------------------------- GDI+ -----
 //  v1.3.0: a thin GDI+ helper layer gives us the "richer colours, lighting,
@@ -278,7 +283,8 @@ void       setUserOnline(const std::wstring& username, bool on);
 //    1 = فوری   (yellow / warning)
 //    2 = بحرانی (red / error)
 enum { KMSG_NORMAL=0, KMSG_URGENT=1, KMSG_CRITICAL=2 };
-struct KMsg { std::wstring from, to, text, time; bool seen; int type; };
+struct KMsg { std::wstring from, to, text, time; bool seen; int type; bool pinned;
+    KMsg():seen(false),type(0),pinned(false){} };
 std::vector<KMsg> loadMessages(const std::wstring& forUser);
 //  legacy 3-arg push (type defaults to عادی) and the new typed push.
 void  pushMessage(const std::wstring& from, const std::wstring& to,
@@ -300,9 +306,81 @@ void  pushSetReq(const std::wstring& user, const std::wstring& system,
 int   unseenSetReqCount();
 void  markSetReqsSeen();
 
+// ----------------------------------------------------------- appointment ----
+//  v1.6.0: the نوبت‌دهی (appointment) module lives as a tab inside the reception
+//  workspace. It owns its own page window with a search panel, an appointment-
+//  details panel, a patient-details panel (enabled only when a citizen is
+//  found) and a read-only DataGridView of the day's appointments.
+HWND createAppointmentPage(HWND parent);   // appointment.cpp
+
 // edit subclass: Enter / Tab => next field
 void enableEnterNavigation(HWND ctl);
 
 // edit subclass: smart Jalali date mask — user types digits only, slashes are
 // inserted automatically as YYYY/MM/DD (also keeps Enter/Tab navigation).
 void enableDateMask(HWND ctl);
+
+// edit subclass: automatic RTL/LTR alignment based on the typed content —
+// Persian/Arabic text aligns RIGHT (RTL), Latin/digits-only aligns LEFT.
+void enableAutoDir(HWND ctl);
+
+// ----------------------------------------------------- national registry ----
+//  v1.6.0: a deterministic offline simulation of the Iranian Civil Registry
+//  (ثبت احوال) + insurance enquiry.  validNationalId() does the real Iranian
+//  10-digit checksum; lookupCitizen() derives a stable, realistic identity
+//  (name, father, gender, birth date, mobile) from the code so the whole
+//  reception / appointment workflow runs end-to-end with NO external API and
+//  is ready to be swapped for a real web-service call later.
+struct CitizenInfo {
+    bool        found;
+    std::wstring firstName, lastName, fatherName, gender, birthDate, mobile;
+    std::vector<int> insurances;   // INSURANCES[] indices the person carries
+    CitizenInfo():found(false){}
+};
+bool         validNationalId(const std::wstring& id);
+CitizenInfo  lookupCitizen(const std::wstring& nationalId);
+
+// ----------------------------------------------------------- doctors --------
+//  Doctors & their services for the appointment screen (file-backed, seeded
+//  with realistic Iranian specialties so the workflow is usable out-of-box).
+struct DoctorDef { std::wstring name, specialty; std::vector<std::wstring> services; };
+std::vector<DoctorDef> loadDoctors();          // seeds defaults if empty
+std::vector<DoctorDef> todaysDoctors();        // doctors on shift today
+
+// ----------------------------------------------------------- appointments ---
+struct Appointment {
+    std::wstring nationalId, firstName, lastName, mobile;
+    std::wstring doctor, service, apptDate, apptTime, day, shift;
+    std::wstring kind;        // حضوری / غیرحضوری
+    std::wstring user;        // who registered it
+    int  queueNo;
+    bool cancelled;
+    Appointment():queueNo(0),cancelled(false){}
+};
+std::vector<Appointment> loadAppointments(bool includeCancelled);
+int  saveAppointment(Appointment& a);          // assigns queue no, persists
+bool cancelAppointment(int index);             // marks cancelled by list index
+bool updateAppointment(int index, const Appointment& a);
+std::vector<Appointment> searchAppointments(const std::wstring& nid,
+        const std::wstring& mobile, const std::wstring& fn,
+        const std::wstring& ln, bool includeCancelled);
+
+// ----------------------------------------------------- profile-change reqs --
+//  v1.6.0: a full profile-change request workflow (reception → management).
+//  data\profreq.dat: user|oldName|newName|oldPhoto|newPhoto|time|status|reason
+//   status: 0=pending 1=approved 2=rejected
+struct ProfReq {
+    std::wstring user, oldName, newName, oldPhoto, newPhoto, time, reason;
+    int status;
+    ProfReq():status(0){}
+};
+std::vector<ProfReq> loadProfReqs();
+void pushProfReq(const ProfReq& r);
+void setProfReqStatus(int indexNewestFirst, int status, const std::wstring& reason);
+int  unseenProfReqCount();      // pending count (for the manager badge)
+
+// ----------------------------------------------------------- cartable v2 ----
+//  Message actions: pin / seen / delete, all reported back to the manager.
+void  pinMessage(const std::wstring& forUser, int indexNewestFirst, bool pin);
+void  seenOneMessage(const std::wstring& forUser, int indexNewestFirst);
+void  deleteOneMessage(const std::wstring& forUser, int indexNewestFirst);

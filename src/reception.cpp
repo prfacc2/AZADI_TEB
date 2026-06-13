@@ -36,9 +36,10 @@
 
 // ============================================================== TAB PAGE ===
 enum TabKind {
-    TK_RECEPTION = 0,   // the patient reception + billing form
-    TK_PORTAL    = 1,   // پیام پرتابل — portal/admin message page (post-login)
-    TK_EMPTY     = 2    // a fresh blank tab (new-tab button)
+    TK_RECEPTION   = 0,   // the patient reception + billing form
+    TK_PORTAL      = 1,   // پیام پرتابل — portal/admin message page (post-login)
+    TK_EMPTY       = 2,   // a fresh blank tab (new-tab button)
+    TK_APPOINTMENT = 3    // نوبت‌دهی — the appointment module (its own child page)
 };
 struct TabPage {
     HWND page;                // container window (child of reception OR detached)
@@ -50,12 +51,14 @@ struct TabPage {
     HWND ePrice,eDiscount;
     HWND bSubmit,bPrtIns,bPrtRx,bPrtLast,bClose,bInquiry;
     HWND chkIns;             // «دارای بیمه» — کنار کد ملی، پیش‌فرض تیک‌خورده
+    HWND appt;               // نوبت‌دهی child page (kind==TK_APPOINTMENT)
+    std::vector<int> insAllowed;   // insurances this patient carries (inquiry)
     // computed billing
     long long total,mainShare,patientShare,baseDiff,orgShare,paid;
     bool detached;
     bool autoPrice;          // guard: ignore EN_CHANGE from our own auto-fill
     std::wstring lastMsg; COLORREF msgCol;
-    TabPage():page(0),kind(TK_RECEPTION),total(0),mainShare(0),patientShare(0),
+    TabPage():page(0),kind(TK_RECEPTION),appt(0),total(0),mainShare(0),patientShare(0),
         baseDiff(0),orgShare(0),paid(0),detached(false),autoPrice(false),msgCol(0){}
 };
 
@@ -164,6 +167,11 @@ static void rcVMetrics(int H, int& y0, int& step, int& rh){
 }
 static void tabPageLayout(HWND h, TabPage* t){
     if(!t) return;
+    if(t->kind==TK_APPOINTMENT){
+        if(t->appt){ RECT rc; GetClientRect(h,&rc);
+            MoveWindow(t->appt,0,0,rc.right,rc.bottom,TRUE); }
+        return;
+    }
     if(t->kind!=TK_RECEPTION) return;   // painted pages have no controls
     RECT rc; GetClientRect(h,&rc);
     int W=rc.right, H=rc.bottom;
@@ -180,10 +188,6 @@ static void tabPageLayout(HWND h, TabPage* t){
     MoveWindow(t->eLast,  xl, y0,          colW, rh, TRUE);
     MoveWindow(t->eNid,   xr, y0+step,     colW, rh, TRUE);
     MoveWindow(t->eFather,xl, y0+step,     colW, rh, TRUE);
-    // «دارای بیمه» checkbox sits on the national-id label row, left-aligned in the
-    // right column so it reads «کد ملی … ☑ دارای بیمه» without overlapping.
-    { int chkW=S(96);
-      MoveWindow(t->chkIns, xr, y0+step-S(22), chkW, S(18), TRUE); }
     MoveWindow(t->eBirth, xr, y0+2*step,   colW, rh, TRUE);
     MoveWindow(t->cGender,xl, y0+2*step,   colW, S(200), TRUE);
     // Section 2: تماس (rows 3..4)
@@ -193,6 +197,10 @@ static void tabPageLayout(HWND h, TabPage* t){
     // Section 3: نوبت و بیمه (rows 5..6)
     MoveWindow(t->cPType, xr, y0+5*step,   colW, S(200), TRUE);
     MoveWindow(t->cNType, xl, y0+5*step,   colW, S(200), TRUE);
+    // «دارای بیمه» checkbox sits ABOVE the insurance combo (right column),
+    // so unchecking it before picking insurance reads naturally top-to-bottom.
+    { int chkW=S(110);
+      MoveWindow(t->chkIns, xr, y0+6*step-S(20), chkW, S(18), TRUE); }
     MoveWindow(t->cIns,   xr, y0+6*step,   colW, S(240), TRUE);
     MoveWindow(t->cSupp,  xl, y0+6*step,   colW, S(240), TRUE);
     // Section 4: مبلغ (row 7)
@@ -227,26 +235,11 @@ static void tabPageLayout(HWND h, TabPage* t){
 //  basic-insurance organisation.  A "real" online inquiry would POST to the
 //  configured server; offline we do the local validation + deterministic
 //  mapping so the workflow is identical and ready to swap for a web call.
-static bool validNationalId(const std::wstring& id){
-    if(id.size()!=10) return false;
-    for(wchar_t c:id) if(c<L'0'||c>L'9') return false;
-    bool allSame=true; for(wchar_t c:id) if(c!=id[0]){ allSame=false; break; }
-    if(allSame) return false;
-    int sum=0; for(int i=0;i<9;i++) sum+=(id[i]-L'0')*(10-i);
-    int rem=sum%11, chk=id[9]-L'0';
-    return (rem<2)? (chk==rem) : (chk==11-rem);
-}
-//  returns an INSURANCES[] index, or -1 if it can't be determined.
-static int inquireInsurance(const std::wstring& nid){
-    if(!validNationalId(nid)) return -1;
-    // deterministic offline mapping (placeholder for a real web service):
-    int last=nid[9]-L'0';
-    if(last<=3) return 1;          // تأمین اجتماعی
-    if(last<=6) return 2;          // بیمه سلامت ایرانیان
-    if(last<=7) return 3;          // روستایی
-    if(last<=8) return 5;          // نیروهای مسلح
-    return 0;                       // آزاد
-}
+//  validNationalId() / lookupCitizen() now live in data_ext.cpp (shared with the
+//  appointment module). doInquiry() uses lookupCitizen() to auto-fill ALL the
+//  patient fields from the (offline) Civil-Registry and to detect when a patient
+//  carries 2 or 3 insurances — in which case it announces it and restricts the
+//  insurance combo to ONLY those organisations, highlighted in a distinct colour.
 static void doInquiry(TabPage* t, HWND h, bool quiet){
     wchar_t b[32]={0}; GetWindowTextW(t->eNid,b,32);
     std::wstring nid=trim(b);
@@ -257,14 +250,55 @@ static void doInquiry(TabPage* t, HWND h, bool quiet){
         }
         return;
     }
-    int idx=inquireInsurance(nid);
-    if(idx>=0){
+    CitizenInfo c = lookupCitizen(nid);
+    if(!c.found){
+        if(!quiet){
+            t->lastMsg=L"اطلاعاتی برای این کد ملی یافت نشد.";
+            t->msgCol=g_theme.danger; InvalidateRect(h,NULL,FALSE);
+        }
+        return;
+    }
+    // auto-fill every empty patient field from the registry
+    auto setIfEmpty=[&](HWND e, const std::wstring& v){
+        if(v.empty()) return;
+        wchar_t cur[256]; GetWindowTextW(e,cur,256);
+        if(trim(cur).empty()) SetWindowTextW(e,v.c_str());
+    };
+    setIfEmpty(t->eFirst, c.firstName);
+    setIfEmpty(t->eLast,  c.lastName);
+    setIfEmpty(t->eFather,c.fatherName);
+    setIfEmpty(t->eMobile,c.mobile);
+    setIfEmpty(t->eBirth, c.birthDate);
+    SendMessageW(t->cGender,CB_SETCURSEL,(c.gender==L"زن")?1:0,0);
+
+    // ---- insurance handling -------------------------------------------------
+    // remember which insurances this patient has, so WM_DRAWITEM on the combo
+    // can paint them in a distinct colour, and rebuild the list to show ONLY
+    // those organisations when the patient has more than one.
+    t->insAllowed = c.insurances;
+    SendMessageW(t->cIns,CB_RESETCONTENT,0,0);
+    if(c.insurances.size()>=2){
+        for(int ix : c.insurances){
+            if(ix>=0 && ix<N_INSURANCES)
+                SendMessageW(t->cIns,CB_ADDSTRING,0,(LPARAM)INSURANCES[ix].name);
+        }
+        SendMessageW(t->cIns,CB_SETCURSEL,0,0);
+        wchar_t mb[200];
+        swprintf(mb,200,L"این بیمار دارای %d بیمه است؛ فقط بیمه‌های او نمایش داده می‌شود.",
+            (int)c.insurances.size());
+        t->lastMsg=toFaDigits(mb); t->msgCol=g_theme.warn;
+    } else {
+        // single (or zero) — restore the full list and select the matched one
+        for(int i=0;i<N_INSURANCES;i++)
+            SendMessageW(t->cIns,CB_ADDSTRING,0,(LPARAM)INSURANCES[i].name);
+        int idx = c.insurances.empty()?0:c.insurances[0];
+        if(idx<0||idx>=N_INSURANCES) idx=0;
         SendMessageW(t->cIns,CB_SETCURSEL,idx,0);
-        recalc(t);
         t->lastMsg=std::wstring(L"استعلام بیمه: ")+INSURANCES[idx].name;
         t->msgCol=g_theme.success;
-        InvalidateRect(h,NULL,FALSE);
     }
+    recalc(t);
+    InvalidateRect(h,NULL,FALSE);
 }
 
 // gather form into record
@@ -440,6 +474,13 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         t=(TabPage*)cs->lpCreateParams;
         SetWindowLongPtrW(h,GWLP_USERDATA,(LONG_PTR)t);
         t->page=h;
+        // The appointment tab hosts the self-contained نوبت‌دهی page as a child
+        // that fills the whole tab area.
+        if(t->kind==TK_APPOINTMENT){
+            t->appt = createAppointmentPage(h);
+            if(t->appt) ShowWindow(t->appt, SW_SHOW);
+            return 0;
+        }
         // Portal-message and empty tabs are pure painted pages with no form
         // controls — they own no edit boxes, combos or buttons.
         if(t->kind!=TK_RECEPTION) return 0;
@@ -450,14 +491,15 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         t->eNid   =CreateWindowExW(0,L"EDIT",L"",es|ES_NUMBER,0,0,10,10,h,(HMENU)(ID_F_FIRST+2),g_hInst,0);
         t->eFather=CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)(ID_F_FIRST+3),g_hInst,0);
         t->eBirth =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)(ID_F_FIRST+4),g_hInst,0);
-        t->cGender=CreateWindowExW(0,L"COMBOBOX",L"",cbs,0,0,10,10,h,(HMENU)ID_F_GENDER,g_hInst,0);
+        t->cGender=createThemedCombo(h,ID_F_GENDER);
         t->eMobile=CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)(ID_F_FIRST+5),g_hInst,0);
         t->ePhone =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)(ID_F_FIRST+6),g_hInst,0);
         t->eAddr  =CreateWindowExW(WS_EX_RTLREADING|WS_EX_RIGHT,L"EDIT",L"",es,0,0,10,10,h,(HMENU)(ID_F_FIRST+7),g_hInst,0);
-        t->cPType =CreateWindowExW(0,L"COMBOBOX",L"",cbs,0,0,10,10,h,(HMENU)ID_F_PTYPE,g_hInst,0);
-        t->cNType =CreateWindowExW(0,L"COMBOBOX",L"",cbs,0,0,10,10,h,(HMENU)ID_F_NTYPE,g_hInst,0);
-        t->cIns   =CreateWindowExW(0,L"COMBOBOX",L"",cbs,0,0,10,10,h,(HMENU)ID_F_INS,g_hInst,0);
-        t->cSupp  =CreateWindowExW(0,L"COMBOBOX",L"",cbs,0,0,10,10,h,(HMENU)ID_F_SUPP,g_hInst,0);
+        t->cPType =createThemedCombo(h,ID_F_PTYPE);
+        t->cNType =createThemedCombo(h,ID_F_NTYPE);
+        t->cIns   =createThemedCombo(h,ID_F_INS);
+        t->cSupp  =createThemedCombo(h,ID_F_SUPP);
+        (void)cbs;
         t->ePrice =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)ID_F_PRICE,g_hInst,0);
         t->eDiscount=CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)ID_F_DISCOUNT,g_hInst,0);
         // «دارای بیمه» checkbox — placed beside the national-id field; checked by
@@ -513,6 +555,10 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             SendMessageW(eds[i],WM_SETFONT,(WPARAM)g_fUI,TRUE);
             enableEnterNavigation(eds[i]);
         }
+        // auto RTL/LTR alignment on the free-text fields (names/address):
+        // Persian content aligns right, Latin/digits align left.
+        enableAutoDir(t->eFirst); enableAutoDir(t->eLast);
+        enableAutoDir(t->eFather); enableAutoDir(t->eAddr);
         SendMessageW(t->eBirth,WM_SETFONT,(WPARAM)g_fUI,TRUE);
         SendMessageW(t->eBirth,EM_SETLIMITTEXT,10,0);
         enableDateMask(t->eBirth);
@@ -555,6 +601,10 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         // theme it so the selected text isn't white-on-white in dark mode.
         SetTextColor(dc,g_theme.inputText); SetBkColor(dc,g_theme.inputBg);
         return (LRESULT)g_brInput; }
+    case WM_DRAWITEM: {
+        // theme-aware owner-draw combobox items (fixes dark-mode dropdown)
+        if(drawThemedComboItem((LPDRAWITEMSTRUCT)l)) return TRUE;
+        break; }
     case WM_COMMAND: {
         if(!t) return 0;
         int id=LOWORD(w), code=HIWORD(w);
@@ -673,6 +723,13 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         FillRect(dc,&rc,g_brBg);
         SetBkMode(dc,TRANSPARENT);
 
+        // -------- Appointment tab: a child page fills it, just clear bg -------
+        if(t && t->kind==TK_APPOINTMENT){
+            BitBlt(dc0,0,0,rc.right,rc.bottom,dc,0,0,SRCCOPY);
+            SelectObject(dc,obm); DeleteObject(bmp); DeleteDC(dc);
+            EndPaint(h,&ps);
+            return 0;
+        }
         // -------- Portal-message / empty tabs: a centred glass card ----------
         if(t && t->kind!=TK_RECEPTION){
             drawTabPlaceholder(dc,rc,t->kind);
@@ -961,9 +1018,10 @@ static void addTabKind(HWND h, int kind){
     TabPage* t=new TabPage();
     t->kind=kind;
     std::wstring dept=g_session.user.dept;
-    if(kind==TK_PORTAL)      t->title=L"کارتابل";
-    else if(kind==TK_EMPTY)  t->title=L"تب جدید";
-    else                     t->title=L"پذیرش بیمار";
+    if(kind==TK_PORTAL)         t->title=L"کارتابل";
+    else if(kind==TK_EMPTY)     t->title=L"تب جدید";
+    else if(kind==TK_APPOINTMENT) t->title=L"نوبت‌دهی";
+    else                        t->title=L"پذیرش بیمار";
     RECT rc; GetClientRect(h,&rc);
     HWND pg=CreateWindowExW(0,TABPG_CLASS,L"",
         WS_CHILD|WS_CLIPCHILDREN,
@@ -1036,11 +1094,10 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
         s_rd = new RecData();
         s_rd->bNewPat = createFlatButton(h,ID_RC_NEWPAT,L"پذیرش جدید",ICO_PLUS,BS_PRIMARY,0,0,10,10);
         s_rd->bNewTab = createFlatButton(h,ID_RC_NEWTAB,L"تب جدید",ICO_TAB,BS_OUTLINE,0,0,10,10);
-        s_rd->bCalc = createFlatButton(h,ID_RC_CALC,L"ماشین حساب",ICO_CALC,BS_OUTLINE,0,0,10,10);
+        s_rd->bCalc = NULL;   // calculator moved to the frame header (left side)
         // blend the button corners into the info-bar surface (no white halo)
         setFlatButtonBg(s_rd->bNewPat,g_theme.surface2);
         setFlatButtonBg(s_rd->bNewTab,g_theme.surface2);
-        setFlatButtonBg(s_rd->bCalc,  g_theme.surface2);
         s_rd->lastUnseen = unseenMessageCount(g_session.user.username);
         SetTimer(h, 77, 5000, NULL);   // poll the cartable for new messages
         return 0;
@@ -1048,7 +1105,6 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
         if(s_rd){
             setFlatButtonBg(s_rd->bNewPat,g_theme.surface2);
             setFlatButtonBg(s_rd->bNewTab,g_theme.surface2);
-            setFlatButtonBg(s_rd->bCalc,  g_theme.surface2);
         }
         InvalidateRect(h,NULL,TRUE);
         return 0;
@@ -1088,10 +1144,9 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
         // LAYER 2 action buttons anchored to the RIGHT edge (RTL):
         // پذیرش جدید (right-most) → تب جدید → ماشین حساب
         int x = rc.right - S(14);
-        int wNew=S(150), wTab=S(120), wCalc=S(140), g=S(8);
+        int wNew=S(150), wTab=S(120), g=S(8);
         MoveWindow(s_rd->bNewPat, x-wNew,                 y, wNew,  bh, TRUE);
         MoveWindow(s_rd->bNewTab, x-wNew-g-wTab,          y, wTab,  bh, TRUE);
-        MoveWindow(s_rd->bCalc,   x-wNew-g-wTab-g-wCalc,  y, wCalc, bh, TRUE);
         recLayoutTabs(h);
         return 0; }
     case WM_COMMAND: {
@@ -1272,12 +1327,15 @@ HWND createReceptionScreen(HWND frame){
     HWND h=CreateWindowExW(0,RC_CLASS,L"",
         WS_CHILD|WS_VISIBLE|WS_CLIPCHILDREN,
         rc.left,rc.top,rc.right-rc.left,rc.bottom-rc.top,frame,NULL,g_hInst,NULL);
-    // On login the user lands on the "پیام پرتابل" (portal message) tab — the
-    // placeholder for future messages from the clinic management panel. A
-    // ready-to-use reception tab is opened beside it, but the portal tab stays
-    // active so it is what the user sees first.
-    addTabKind(h, TK_PORTAL);
+    // Tab order (RTL, right→left as displayed):
+    //   نوبت‌دهی → پذیرش بیمار → کارتابل
+    // The نوبت‌دهی (appointment) tab is FIRST (right-most). A ready-to-use
+    // reception tab sits beside it, and the permanent کارتابل (cartable) tab
+    // holds the management messages. On login the cartable is shown first so
+    // the user immediately sees any pending messages.
+    addTabKind(h, TK_APPOINTMENT);
     addTabKind(h, TK_RECEPTION);
-    if(s_rd){ s_rd->active=0; recLayoutTabs(h); }   // focus the portal tab
+    addTabKind(h, TK_PORTAL);
+    if(s_rd){ s_rd->active=2; recLayoutTabs(h); }   // focus the cartable tab
     return h;
 }

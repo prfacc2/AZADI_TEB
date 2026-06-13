@@ -17,12 +17,13 @@ HFONT g_fUI=0, g_fUIB=0, g_fSmall=0, g_fTitle=0, g_fBig=0, g_fHuge=0, g_fMono=0;
 //  v1.4.0: the header now carries ONLY the exit button (right) and the gear
 //  settings button (left). Theme-toggle and check-for-update were removed from
 //  the header and moved INTO the settings panel per the redesign brief.
-static HWND s_bExit=0, s_bSettings=0;
+static HWND s_bExit=0, s_bSettings=0, s_bCalc=0;
 static HWND s_screen=0;
 static ScreenId s_curScreen = SC_HOME;
 
 #define ID_FR_EXIT     101
 #define ID_FR_SETTINGS 104
+#define ID_FR_CALC     105
 #define TIMER_CLOCK  1
 
 // ------------------------------------------------------------------ fonts --
@@ -243,11 +244,14 @@ static void frameLayout(HWND h){
     // --- RIGHT side (RTL primary): EXIT is the right-most control; the app
     //     identity (logo + name + fullname + access) is painted to its LEFT.
     MoveWindow(s_bExit,  rc.right-pad-bh, y, bh, bh, TRUE);
-    // --- LEFT side: only the settings (gear) button now.
+    // --- LEFT side: settings (gear) button, then the calculator beside it —
+    //     handy in the header but out of the way of the tabs / actions.
     MoveWindow(s_bSettings, pad, y, bh, bh, TRUE);
+    MoveWindow(s_bCalc, pad+bh+S(8), y, bh, bh, TRUE);
     // keep the header buttons' rounded corners blended into the header gradient
     setFlatButtonBg(s_bExit,     g_theme.headerTop);
     setFlatButtonBg(s_bSettings, g_theme.headerTop);
+    setFlatButtonBg(s_bCalc,     g_theme.headerTop);
     if(s_screen){
         RECT cr=frameContentRect();
         MoveWindow(s_screen,cr.left,cr.top,cr.right-cr.left,cr.bottom-cr.top,TRUE);
@@ -260,8 +264,10 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         g_hFrame = h;
         s_bExit     = createFlatButton(h, ID_FR_EXIT,    L"", ICO_X,      BS_GHOST,0,0,10,10);
         s_bSettings = createFlatButton(h, ID_FR_SETTINGS,L"", ICO_GEAR,   BS_GHOST,0,0,10,10);
+        s_bCalc     = createFlatButton(h, ID_FR_CALC,    L"", ICO_CALC,   BS_GHOST,0,0,10,10);
         setFlatButtonBg(s_bExit,     g_theme.headerTop);
         setFlatButtonBg(s_bSettings, g_theme.headerTop);
+        setFlatButtonBg(s_bCalc,     g_theme.headerTop);
         SetTimer(h, TIMER_CLOCK, g_lowSpec?1000:500, NULL);
         return 0;
     case WM_SIZE: frameLayout(h); return 0;
@@ -270,6 +276,7 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         // the header buttons' corner-blend colour and repaint the whole frame.
         setFlatButtonBg(s_bExit,     g_theme.headerTop);
         setFlatButtonBg(s_bSettings, g_theme.headerTop);
+        setFlatButtonBg(s_bCalc,     g_theme.headerTop);
         InvalidateRect(h,NULL,TRUE);
         return 0;
     case WM_TIMER:
@@ -298,6 +305,7 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
             }
         }
         else if(id==ID_FR_SETTINGS) openSettingsPanel(h);
+        else if(id==ID_FR_CALC) openCalculator(h);
         return 0; }
     case WM_KEYDOWN: {
         // hidden admin: Ctrl + P + N held together (home screen only)
@@ -542,6 +550,24 @@ static LRESULT CALLBACK dateEditProc(HWND h, UINT m, WPARAM w, LPARAM l){
         hopField(h, w==VK_TAB && (GetKeyState(VK_SHIFT)&0x8000)!=0);
         return 0;
     }
+    if(m==WM_KEYDOWN && w==VK_DELETE){
+        // Delete key: if a range is selected, clear it; otherwise clear the
+        // WHOLE field (the user wants "press Delete → everything in the birth
+        // box is wiped" so a wrong date can be re-entered from scratch).
+        DWORD a=0,b=0; SendMessageW(h,EM_GETSEL,(WPARAM)&a,(LPARAM)&b);
+        wchar_t buf[64]; GetWindowTextW(h,buf,64);
+        if(a!=b){
+            std::wstring cur(buf);
+            std::wstring keep = digitsOnly(cur.substr(0,a)) +
+                (b<=cur.size()?digitsOnly(cur.substr(b)):L"");
+            std::wstring fm=formatJalaliMask(keep);
+            SetWindowTextW(h,fm.c_str());
+            SendMessageW(h,EM_SETSEL,fm.size(),fm.size());
+        } else {
+            SetWindowTextW(h,L"");
+        }
+        return 0;
+    }
     if(m==WM_CHAR){
         if(w==VK_RETURN || w==VK_TAB) return 0;            // no beep
         wchar_t buf[64]; GetWindowTextW(h,buf,64);
@@ -556,7 +582,32 @@ static LRESULT CALLBACK dateEditProc(HWND h, UINT m, WPARAM w, LPARAM l){
         SendMessageW(h, EM_GETSEL, (WPARAM)&selA, (LPARAM)&selB);
         bool atEnd   = (selA==selB) && (selA==(DWORD)cur.size());
         bool hasRange= (selA!=selB);
-        if(w!=VK_BACK && (hasRange || !atEnd)){
+        // v1.6.0 fix: Backspace must ALWAYS delete (a digit AND any auto slash
+        // that precedes it) regardless of caret position, and a selected range
+        // must be cleared completely — the old code stopped deleting once it hit
+        // a "/" (it removed the slash, then re-inserted it, so the field looked
+        // stuck). We now strip to a digit string, drop the last digit, and
+        // re-mask, so the user can fully clear a wrong birth date.
+        if(w==VK_BACK){
+            if(hasRange){
+                // delete the selection: keep digits OUTSIDE the selection
+                std::wstring before = cur.substr(0, selA);
+                std::wstring after  = (selB<=cur.size())?cur.substr(selB):L"";
+                std::wstring digs = digitsOnly(before+after);
+                std::wstring formatted = formatJalaliMask(digs);
+                SetWindowTextW(h, formatted.c_str());
+                SendMessageW(h, EM_SETSEL, formatted.size(), formatted.size());
+                return 0;
+            }
+            // no selection: drop the last DIGIT (skipping any trailing slash)
+            std::wstring digs = digitsOnly(cur);
+            if(!digs.empty()) digs.pop_back();
+            std::wstring formatted = formatJalaliMask(digs);
+            SetWindowTextW(h, formatted.c_str());
+            SendMessageW(h, EM_SETSEL, formatted.size(), formatted.size());
+            return 0;
+        }
+        if(hasRange || !atEnd){
             // pass digits/separators through to normal editing; block letters
             wchar_t ch=(wchar_t)w;
             if(ch>=0x06F0&&ch<=0x06F9) ch=(wchar_t)(L'0'+(ch-0x06F0));
@@ -564,14 +615,6 @@ static LRESULT CALLBACK dateEditProc(HWND h, UINT m, WPARAM w, LPARAM l){
             if((ch>=L'0'&&ch<=L'9')||ch==L'/')
                 return CallWindowProcW(s_oldDate,h,m,(WPARAM)ch,l);
             return 0;   // ignore other chars while mid-edit
-        }
-        if(w==VK_BACK){
-            if(!cur.empty()) cur.pop_back();
-            // re-normalise after deletion
-            std::wstring formatted = formatJalaliMask(cur);
-            SetWindowTextW(h, formatted.c_str());
-            SendMessageW(h, EM_SETSEL, formatted.size(), formatted.size());
-            return 0;
         }
         // Accept a SPACE or slash as an explicit field separator (relaxed entry
         // like "1340 5 20"). Map it to a single slash in the working buffer.
@@ -600,6 +643,57 @@ void enableDateMask(HWND ctl){
     WNDPROC old = (WNDPROC)SetWindowLongPtrW(ctl, GWLP_WNDPROC,
         (LONG_PTR)dateEditProc);
     if(!s_oldDate) s_oldDate = old;
+}
+
+// ============= automatic RTL / LTR alignment based on typed content =========
+//  Persian app: a field that contains Persian/Arabic letters should read &
+//  align RIGHT (RTL); a field that is Latin/digits only should align LEFT.
+//  We flip WS_EX_RTLREADING/WS_EX_RIGHT (and the matching styles) live as the
+//  user types, then re-apply on every change. Enter/Tab still navigate.
+static WNDPROC s_oldDir = NULL;
+static bool hasPersian(const std::wstring& s){
+    for(wchar_t c : s){
+        if((c>=0x0600 && c<=0x06FF) || (c>=0xFB50 && c<=0xFDFF) ||
+           (c>=0xFE70 && c<=0xFEFF)){
+            // treat Persian/Arabic DIGITS as neutral, letters as RTL
+            if(c>=0x06F0 && c<=0x06F9) continue;
+            if(c>=0x0660 && c<=0x0669) continue;
+            return true;
+        }
+    }
+    return false;
+}
+static void applyDir(HWND h){
+    wchar_t buf[512]; GetWindowTextW(h,buf,512);
+    bool rtl = hasPersian(buf);
+    // empty → default to RTL (Persian app) so the caret sits on the right
+    if(buf[0]==0) rtl=true;
+    LONG ex = GetWindowLongW(h, GWL_EXSTYLE);
+    LONG st = GetWindowLongW(h, GWL_STYLE);
+    bool curRtl = (ex & WS_EX_RTLREADING)!=0;
+    if(rtl==curRtl) return;            // no change needed
+    if(rtl){ ex |= (WS_EX_RTLREADING|WS_EX_RIGHT); st &= ~ES_CENTER; st |= ES_RIGHT; }
+    else   { ex &= ~(WS_EX_RTLREADING|WS_EX_RIGHT); st &= ~ES_RIGHT; st |= ES_LEFT; }
+    DWORD selA=0,selB=0; SendMessageW(h,EM_GETSEL,(WPARAM)&selA,(LPARAM)&selB);
+    SetWindowLongW(h, GWL_EXSTYLE, ex);
+    SetWindowLongW(h, GWL_STYLE, st);
+    SetWindowPos(h,NULL,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_FRAMECHANGED);
+    InvalidateRect(h,NULL,TRUE);
+    SendMessageW(h,EM_SETSEL,selA,selB);
+}
+static LRESULT CALLBACK dirEditProc(HWND h, UINT m, WPARAM w, LPARAM l){
+    if(m==WM_KEYDOWN && w==VK_RETURN){ hopField(h,false); return 0; }
+    if(m==WM_KEYDOWN && w==VK_TAB){
+        hopField(h,(GetKeyState(VK_SHIFT)&0x8000)!=0); return 0; }
+    if(m==WM_CHAR && (w==VK_RETURN || w==VK_TAB)) return 0;   // kill beep
+    LRESULT r = CallWindowProcW(s_oldDir, h, m, w, l);
+    if(m==WM_CHAR || m==WM_KEYUP || m==WM_PASTE || m==WM_CUT) applyDir(h);
+    return r;
+}
+void enableAutoDir(HWND ctl){
+    WNDPROC old=(WNDPROC)SetWindowLongPtrW(ctl,GWLP_WNDPROC,(LONG_PTR)dirEditProc);
+    if(!s_oldDir) s_oldDir=old;
+    applyDir(ctl);
 }
 
 // ================================================================ MAIN =====
