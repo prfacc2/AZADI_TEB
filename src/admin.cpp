@@ -5,6 +5,7 @@
 #include "app.h"
 #include <commctrl.h>
 #include <stdio.h>
+#include <algorithm>
 
 // ================================================================ ADMIN ====
 #define AD_CLASS L"AzAdmin"
@@ -226,60 +227,12 @@ HWND createAdminScreen(HWND frame){
 }
 
 // ============================================================ MANAGEMENT ===
-//  Placeholder panel — extensible foundation for future modules.
-#define MG_CLASS L"AzManage"
-static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
-    switch(m){
-    case WM_ERASEBKGND: return 1;
-    case WM_PAINT: {
-        PAINTSTRUCT ps; HDC dc0=BeginPaint(h,&ps);
-        RECT rc; GetClientRect(h,&rc);
-        HDC dc=CreateCompatibleDC(dc0);
-        HBITMAP bmp=CreateCompatibleBitmap(dc0,rc.right,rc.bottom);
-        HGDIOBJ obm=SelectObject(dc,bmp);
-        FillRect(dc,&rc,g_brBg);
-        SetBkMode(dc,TRANSPARENT);
-
-        int cw=S(560), chh=S(220);
-        int cx=(rc.right-cw)/2, cy=(rc.bottom-chh)/2;
-        RECT card={cx,cy,cx+cw,cy+chh};
-        fillRoundRect(dc,card,S(16),g_theme.surface,g_theme.border);
-
-        int isz=S(44);
-        RECT ic={cx+cw/2-isz/2,cy+S(28),cx+cw/2+isz/2,cy+S(28)+isz};
-        drawIcon(dc,ICO_SHIELD,ic,g_theme.accent,S(3));
-
-        SetTextColor(dc,g_theme.text);
-        SelectObject(dc,g_fTitle);
-        RECT tr={cx,cy+S(86),cx+cw,cy+S(122)};
-        DrawTextW(dc,L"پنل مدیریت درمانگاه",-1,&tr,
-            DT_CENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
-        SelectObject(dc,g_fUI);
-        SetTextColor(dc,g_theme.textDim);
-        RECT sr={cx+S(30),cy+S(128),cx+cw-S(30),cy+chh-S(20)};
-        std::wstring sub = L"کاربر جاری: " + g_session.user.fullname +
-            L" (" + g_session.user.username + L")\n"
-            L"ماژول‌های گزارش‌گیری و مدیریت در نسخه‌های بعدی به این بخش اضافه می‌شود.";
-        DrawTextW(dc,sub.c_str(),-1,&sr,
-            DT_CENTER|DT_WORDBREAK|DT_RTLREADING|DT_NOPREFIX);
-
-        BitBlt(dc0,0,0,rc.right,rc.bottom,dc,0,0,SRCCOPY);
-        SelectObject(dc,obm); DeleteObject(bmp); DeleteDC(dc);
-        EndPaint(h,&ps);
-        return 0; }
-    }
-    return DefWindowProcW(h,m,w,l);
-}
-HWND createManageScreen(HWND frame){
-    static bool reg=false;
-    if(!reg){
-        WNDCLASSW wc={0};
-        wc.lpfnWndProc=manageProc; wc.hInstance=g_hInst;
-        wc.hCursor=LoadCursor(NULL,IDC_ARROW);
-        wc.lpszClassName=MG_CLASS;
-        RegisterClassW(&wc); reg=true;
-    }
-    RECT rc=frameContentRect();
-    return CreateWindowExW(0,MG_CLASS,L"",WS_CHILD|WS_VISIBLE|WS_CLIPCHILDREN,
-        rc.left,rc.top,rc.right-rc.left,rc.bottom-rc.top,frame,NULL,g_hInst,NULL);
-}
+//  Full management panel (v1.4.0):
+//   • Department CATEGORIES (add name/manager/auto-or-manual id/icon).
+//   • Filter the category grid by alphabet / newest.
+//   • Click a category → employee TABLE (photo, name, username, shift,
+//     online status «برخط»/offline, details button).
+//   • Details → formal full info + print preview (A4/A5) of the personnel card.
+//   • Create-employee request collects full identity + doc paths.
+//   • Printer-design access toggle (per the brief) opens the print designer.
+#include "manage.inc"

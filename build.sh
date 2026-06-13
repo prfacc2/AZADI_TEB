@@ -18,7 +18,8 @@ $RES -O coff -i src/app.rc -o obj/app.res
 echo "[2/3] Compiling C++..."
 SRCS="src/main.cpp src/util.cpp src/handlers.cpp src/theme.cpp src/users.cpp \
       src/billing.cpp src/calculator.cpp src/dialogs.cpp src/update.cpp \
-      src/admin.cpp src/reception.cpp src/gdiplus.cpp src/settings.cpp"
+      src/admin.cpp src/reception.cpp src/gdiplus.cpp src/settings.cpp \
+      src/printer.cpp src/employees.cpp"
 
 $CXX -std=c++17 -O2 -municode -mwindows \
     -D_WIN32_IE=0x0700 \

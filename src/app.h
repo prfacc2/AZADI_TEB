@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.3.0"
+#define APP_VERSION_W   L"1.4.0"
 #define APP_NAME_W      L"\u0622\u0632\u0627\u062f\u06cc \u0637\u0628"   // آزادی طب
 #define APP_CLASS_W     L"AzadiTebFrame"
 
@@ -81,6 +81,11 @@ HWND  createFlatButton(HWND parent, int id, const wchar_t* text,
                        int icon, int style,
                        int x,int y,int w,int h, const wchar_t* sub=NULL);
 void  setFlatButtonIcon(HWND btn, int icon);   // in-place icon swap (v1.1.0)
+//  v1.4.0: tell a flat button what colour sits BEHIND its rounded corners so
+//  the antialiased corners blend into the real surface (fixes the "white
+//  corners in dark mode" bug on header/bar buttons). Pass CLR_INVALID to let
+//  the button ask its parent (default behaviour).
+void  setFlatButtonBg(HWND btn, COLORREF bg);
 void  drawIcon(HDC dc, int icon, RECT rc, COLORREF col, int thick);
 void  fillRoundRect(HDC dc, RECT rc, int rad, COLORREF fill, COLORREF border);
 
@@ -224,6 +229,44 @@ void closeSettingsPanel();
 
 // ----------------------------------------------------------------- update --
 void checkRemoteUpdate(HWND owner);      // remote-update over HTTP(S)
+
+// ------------------------------------------------------------- print system --
+//  v1.4.0: printer configuration + a full print-layout DESIGNER.
+//  Sections (each prints differently): پذیرش / تزریقات / آزمایشگاه …
+extern const wchar_t* PRINT_SECTIONS[];  extern const int N_PRINT_SECTIONS;
+//  Open the printer-settings dialog (default printer, test, paper size,
+//  fit/fill, advanced) — persisted in settings.
+void openPrinterSettings(HWND owner);
+//  Open the visual print designer for a given section index.
+void openPrintDesigner(HWND owner, int sectionIdx);
+//  Render the saved design for a section onto a printer DC for a real receipt.
+//  Returns false if no design exists (caller falls back to the classic layout).
+bool printDesignedReceipt(const ReceptionRecord& r, int sectionIdx, HWND owner);
+
+// --------------------------------------------------------------- employees --
+//  Department categories + employee directory (management panel).
+struct DeptCat { std::wstring id, name, manager, icon; };
+std::vector<DeptCat> loadDepts();
+bool addDept(const DeptCat& c, std::wstring& err);
+bool removeDept(const std::wstring& id);
+//  Extended employee profile (beyond the login User record).
+struct EmpProfile {
+    std::wstring username, nationalId, fatherName, address, landline,
+                 shiftFrom, shiftTo, photoPath, idCardPath, deptId;
+};
+EmpProfile loadEmpProfile(const std::wstring& username);
+void       saveEmpProfile(const EmpProfile& p);
+bool       isUserOnline(const std::wstring& username);   // session presence
+void       setUserOnline(const std::wstring& username, bool on);
+
+// ------------------------------------------------------------------ kartabl --
+//  Cartable / inbox messages pushed from management to a user (or broadcast).
+struct KMsg { std::wstring from, to, text, time; bool seen; };
+std::vector<KMsg> loadMessages(const std::wstring& forUser);
+void  pushMessage(const std::wstring& from, const std::wstring& to,
+                  const std::wstring& text);
+int   unseenMessageCount(const std::wstring& forUser);
+void  markMessagesSeen(const std::wstring& forUser);
 
 // edit subclass: Enter / Tab => next field
 void enableEnterNavigation(HWND ctl);

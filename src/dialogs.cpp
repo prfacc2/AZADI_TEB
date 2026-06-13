@@ -272,13 +272,25 @@ static void shiftRefresh(ShiftData* d){
     HWND bs[3]={d->b0,d->b1,d->b2};
     for(int i=0;i<3;i++){
         std::wstring t = names[i];
-        if(i==d->sel) t = L"\u25CF  " + t;
+        if(i==as)            t = L"\u25CF  " + t + L"  (شیفت جاری)";
+        else if(i==d->sel)   t = L"\u25CF  " + t;
         SetWindowTextW(bs[i], t.c_str());
-        EnableWindow(bs[i], !d->autoMode);
+        // v1.4.0: in manual mode only the CURRENT (detected) shift is valid —
+        // the two non-matching shifts are disabled so the user can't pick an
+        // out-of-hours shift by mistake. In auto mode all are disabled (locked).
+        bool enabled = d->autoMode ? false : (i==as);
+        EnableWindow(bs[i], enabled);
+        // highlight the current shift with the success colour; selected (but not
+        // current) gets the accent; others stay default.
+        if(i==as)            setFlatButtonBg(bs[i], g_theme.success);
+        else if(i==d->sel)   setFlatButtonBg(bs[i], g_theme.accent);
+        else                 setFlatButtonBg(bs[i], CLR_INVALID);
     }
+    // keep the manual selection aligned with the only valid shift
+    if(!d->autoMode) d->sel = as;
     SetWindowTextW(d->bAuto, d->autoMode
         ? L"\u2611  حالت خودکار فعال است — تشخیص بر اساس ساعت ایران"
-        : L"\u2610  حالت خودکار (برای انتخاب دستی، تیک را بردارید)");
+        : L"\u2610  حالت دستی — تنها شیفت جاری قابل انتخاب است");
 }
 static void shiftLayout(HWND h, ShiftData* d){
     RECT c; shiftCard(h,c);
