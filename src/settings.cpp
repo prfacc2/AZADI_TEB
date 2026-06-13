@@ -143,22 +143,10 @@ static void doAbout(HWND h){
 }
 // reception profile editing (name+photo) — pending management approval -------
 static void doProfile(HWND h){
-    // pick a photo
-    wchar_t file[MAX_PATH]={0};
-    OPENFILENAMEW ofn={0}; ofn.lStructSize=sizeof(ofn); ofn.hwndOwner=h;
-    ofn.lpstrFilter=L"تصاویر\0*.png;*.jpg;*.jpeg;*.bmp\0همه فایل‌ها\0*.*\0";
-    ofn.lpstrFile=file; ofn.nMaxFile=MAX_PATH;
-    ofn.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST;
-    std::wstring chosen;
-    if(GetOpenFileNameW(&ofn)) chosen=file;
-    // store as a pending change for management approval
-    EmpProfile p=loadEmpProfile(g_session.user.username);
-    if(!chosen.empty()) setSetting(L"pending_photo_"+g_session.user.username, chosen);
-    setSetting(L"pending_name_"+g_session.user.username, g_session.user.fullname);
-    MessageBoxW(h,
-        L"درخواست تغییر نام/عکس پروفایل ثبت شد.\n"
-        L"این تغییر پس از تأیید مدیریت اعمال خواهد شد.",
-        L"پروفایل کاربر", MB_OK|MB_ICONINFORMATION);
+    // Open the full profile-edit modal (current name read-only, new name edit,
+    // photo picker, تأیید/انصراف). It queues a ProfReq for management approval.
+    HWND root=GetAncestor(h,GA_ROOT); if(!root) root=h;
+    showProfileDialog(root);
 }
 
 // --------------------------------------------------------------- painting --

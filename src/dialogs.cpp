@@ -402,3 +402,172 @@ bool showShiftDialog(HWND parent, int& shift){
     runModal(ov,parent,NULL,0,ID_SH_OK);
     return ok;
 }
+
+// ============================================================ PROFILE ======
+//  Edit display-name + photo. The change is NOT applied immediately; it is
+//  queued as a ProfReq that management must approve (see manage.inc). The
+//  current name is shown read-only, the user types a new name and may pick a
+//  photo, then «تأیید» queues the request.
+#define PF_CLASS     L"AzProfile"
+#define ID_PF_OLD     701
+#define ID_PF_NEW     702
+#define ID_PF_PICK    703
+#define ID_PF_OK      704
+#define ID_PF_CANCEL  705
+
+struct ProfData {
+    bool* ok;
+    std::wstring user, oldName, oldPhoto, newPhoto;
+    HWND eOld, eNew, bPick, bOk, bCancel;
+};
+static void profCard(HWND h, RECT& card){
+    RECT rc; GetClientRect(h,&rc);
+    int cw=S(460), chh=S(420);
+    card.left=(rc.right-cw)/2; card.top=(rc.bottom-chh)/2;
+    card.right=card.left+cw; card.bottom=card.top+chh;
+}
+static void profLayout(HWND h, ProfData* d){
+    RECT c; profCard(h,c);
+    int cw=c.right-c.left;
+    int ew=cw-S(60), ex=c.left+S(30);
+    MoveWindow(d->eOld,  ex, c.top+S(150), ew, S(32), TRUE);
+    MoveWindow(d->eNew,  ex, c.top+S(216), ew, S(32), TRUE);
+    MoveWindow(d->bPick, ex, c.top+S(272), ew, S(40), TRUE);
+    MoveWindow(d->bOk,   ex, c.top+S(338), ew/2-S(6), S(46), TRUE);
+    MoveWindow(d->bCancel, ex+ew/2+S(6), c.top+S(338), ew/2-S(6), S(46), TRUE);
+}
+static LRESULT CALLBACK profProc(HWND h, UINT m, WPARAM w, LPARAM l){
+    ProfData* d=(ProfData*)GetWindowLongPtrW(h,GWLP_USERDATA);
+    switch(m){
+    case WM_CREATE: {
+        CREATESTRUCTW* cs=(CREATESTRUCTW*)l;
+        d=(ProfData*)cs->lpCreateParams;
+        SetWindowLongPtrW(h,GWLP_USERDATA,(LONG_PTR)d);
+        DWORD es = WS_CHILD|WS_VISIBLE|WS_TABSTOP|ES_AUTOHSCROLL;
+        d->eOld = CreateWindowExW(0,L"EDIT",d->oldName.c_str(),
+            es|ES_READONLY,0,0,10,10,h,(HMENU)ID_PF_OLD,g_hInst,0);
+        d->eNew = CreateWindowExW(0,L"EDIT",d->oldName.c_str(),
+            es,0,0,10,10,h,(HMENU)ID_PF_NEW,g_hInst,0);
+        SendMessageW(d->eOld,WM_SETFONT,(WPARAM)g_fUI,TRUE);
+        SendMessageW(d->eNew,WM_SETFONT,(WPARAM)g_fUI,TRUE);
+        SendMessageW(d->eNew,EM_SETSEL,0,-1);
+        d->bPick   = createFlatButton(h,ID_PF_PICK,L"انتخاب عکس پروفایل…",ICO_USER,BS_OUTLINE,0,0,10,10);
+        d->bOk     = createFlatButton(h,ID_PF_OK,L"تأیید",ICO_CHECK,BS_PRIMARY,0,0,10,10);
+        d->bCancel = createFlatButton(h,ID_PF_CANCEL,L"انصراف",0,BS_OUTLINE,0,0,10,10);
+        profLayout(h,d);
+        return 0; }
+    case WM_SIZE: if(d) profLayout(h,d); return 0;
+    case WM_CTLCOLOREDIT: {
+        HDC dc=(HDC)w;
+        SetTextColor(dc,g_theme.inputText);
+        SetBkColor(dc,g_theme.inputBg);
+        return (LRESULT)g_brInput; }
+    case WM_CTLCOLORSTATIC: {
+        HDC dc=(HDC)w; SetBkColor(dc,g_theme.surface);
+        return (LRESULT)g_brSurface; }
+    case WM_COMMAND: {
+        if(!d) return 0;
+        int id=LOWORD(w);
+        if(id==ID_PF_PICK){
+            wchar_t file[MAX_PATH]={0};
+            OPENFILENAMEW ofn={0}; ofn.lStructSize=sizeof(ofn); ofn.hwndOwner=h;
+            ofn.lpstrFilter=L"تصاویر\0*.png;*.jpg;*.jpeg;*.bmp\0همه فایل‌ها\0*.*\0";
+            ofn.lpstrFile=file; ofn.nMaxFile=MAX_PATH;
+            ofn.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST;
+            if(GetOpenFileNameW(&ofn)){
+                d->newPhoto=file;
+                std::wstring lbl=L"عکس انتخاب شد: ";
+                std::wstring p=d->newPhoto;
+                size_t sl=p.find_last_of(L"\\/");
+                lbl += (sl==std::wstring::npos)? p : p.substr(sl+1);
+                SetWindowTextW(d->bPick, lbl.c_str());
+            }
+            InvalidateRect(h,NULL,TRUE);
+        } else if(id==ID_PF_OK){
+            wchar_t nb[256]={0}; GetWindowTextW(d->eNew,nb,256);
+            std::wstring nn=trim(nb);
+            if(nn.empty() && d->newPhoto.empty()){
+                MessageBoxW(h,L"نام جدید را وارد کنید یا عکسی انتخاب نمایید.",
+                    L"پروفایل کاربر", MB_OK|MB_ICONWARNING);
+                return 0;
+            }
+            int r=MessageBoxW(h,
+                L"این تغییر بلافاصله اعمال نمی‌شود.\n"
+                L"درخواست شما برای تأیید به مدیریت ارسال خواهد شد.\n\nادامه می‌دهید؟",
+                L"تأیید درخواست", MB_YESNO|MB_ICONQUESTION);
+            if(r!=IDYES) return 0;
+            ProfReq req;
+            req.user    = d->user;
+            req.oldName = d->oldName;
+            req.newName = nn.empty()? d->oldName : nn;
+            req.oldPhoto= d->oldPhoto;
+            req.newPhoto= d->newPhoto;
+            pushProfReq(req);
+            *d->ok=true;
+            MessageBoxW(h,
+                L"درخواست تغییر پروفایل ثبت شد.\n"
+                L"پس از تأیید مدیریت اعمال خواهد شد و در کارتابل به شما اطلاع داده می‌شود.",
+                L"پروفایل کاربر", MB_OK|MB_ICONINFORMATION);
+            DestroyWindow(h);
+        } else if(id==ID_PF_CANCEL){
+            *d->ok=false; DestroyWindow(h);
+        }
+        return 0; }
+    case WM_CLOSE: if(d){ *d->ok=false; } DestroyWindow(h); return 0;
+    case WM_ERASEBKGND: return 1;
+    case WM_PAINT: {
+        PAINTSTRUCT ps; HDC dc0=BeginPaint(h,&ps);
+        RECT rc; GetClientRect(h,&rc);
+        HDC dc=CreateCompatibleDC(dc0);
+        HBITMAP bmp=CreateCompatibleBitmap(dc0,rc.right,rc.bottom);
+        HGDIOBJ obm=SelectObject(dc,bmp);
+        HBRUSH dim=CreateSolidBrush(g_dark?RGB(8,10,14):RGB(150,160,176));
+        FillRect(dc,&rc,dim); DeleteObject(dim);
+        RECT c; profCard(h,c);
+        RECT shd=c; OffsetRect(&shd,0,S(6));
+        fillRoundRect(dc,shd,S(18),g_dark?RGB(5,7,10):RGB(120,130,146),CLR_INVALID);
+        fillRoundRect(dc,c,S(18),g_theme.surface,g_theme.border);
+        SetBkMode(dc,TRANSPARENT);
+        SetTextColor(dc,g_theme.text);
+        SelectObject(dc,g_fTitle);
+        RECT tr={c.left,c.top+S(22),c.right,c.top+S(56)};
+        DrawTextW(dc,L"ویرایش پروفایل کاربر",-1,&tr,
+            DT_CENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+        SelectObject(dc,g_fSmall);
+        SetTextColor(dc,g_theme.textDim);
+        RECT sr={c.left,c.top+S(60),c.right,c.top+S(88)};
+        DrawTextW(dc,L"تغییر پس از تأیید مدیریت اعمال می‌شود",-1,&sr,
+            DT_CENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+        // labels above the edit boxes
+        SelectObject(dc,g_fUI);
+        SetTextColor(dc,g_theme.textDim);
+        RECT l1={c.left+S(30),c.top+S(126),c.right-S(30),c.top+S(148)};
+        DrawTextW(dc,L"نام فعلی",-1,&l1,DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+        RECT l2={c.left+S(30),c.top+S(192),c.right-S(30),c.top+S(214)};
+        DrawTextW(dc,L"نام جدید",-1,&l2,DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+        BitBlt(dc0,0,0,rc.right,rc.bottom,dc,0,0,SRCCOPY);
+        SelectObject(dc,obm); DeleteObject(bmp); DeleteDC(dc);
+        EndPaint(h,&ps);
+        return 0; }
+    }
+    return DefWindowProcW(h,m,w,l);
+}
+bool showProfileDialog(HWND parent){
+    static bool reg=false;
+    if(!reg){ regClass(PF_CLASS, profProc); reg=true; }
+    bool ok=false;
+    ProfData d; d.ok=&ok;
+    d.user    = g_session.user.username;
+    d.oldName = g_session.user.fullname;
+    d.oldPhoto= getSetting(L"photo_"+d.user, L"");
+    d.newPhoto= L"";
+    d.eOld=d.eNew=d.bPick=d.bOk=d.bCancel=NULL;
+    RECT fr; GetWindowRect(parent,&fr);
+    HWND ov=CreateWindowExW(0,PF_CLASS,L"",
+        WS_POPUP|WS_VISIBLE,
+        fr.left,fr.top,fr.right-fr.left,fr.bottom-fr.top,
+        parent,NULL,g_hInst,&d);
+    if(!ov) return false;
+    runModal(ov,parent,d.eNew,ID_PF_NEW,ID_PF_OK);
+    return ok;
+}

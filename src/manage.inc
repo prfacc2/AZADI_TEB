@@ -16,6 +16,7 @@ enum {
     MG_ADD_EMP, MG_DESIGN,
     MG_MSG,                // «پیام به کارکنان» (open compose modal)
     MG_REQS,               // «درخواست تغییرات تنظیمات» (open requests modal)
+    MG_PROFREQS,           // «درخواست‌های تغییر پروفایل» (open profile-requests modal)
     MG_CARD_BASE=2200,     // clicking a category card
     MG_DETAIL_BASE=2400,   // clicking an employee "details" button
 };
@@ -35,6 +36,7 @@ struct ManageState {
     // controls
     HWND eName, eMgr, eId, bAdd, bAutoId, bAbc, bNew, bBack, bAddEmp, bDesign;
     HWND bMsg, bReqs;           // «پیام به کارکنان» / «درخواست تغییرات تنظیمات»
+    HWND bProfReqs;             // «درخواست‌های تغییر پروفایل»
     bool autoId;
     std::vector<DeptCat> cats;
     std::vector<EmpRow>  emps;
@@ -43,6 +45,7 @@ struct ManageState {
 static ManageState* s_mg=NULL;
 static HWND g_hManage=NULL;          // the live management screen window
 static void mgRefreshReqBadge();     // forward decl (defined below)
+static void openProfReqs(HWND owner); // forward decl (defined below)
 
 // ---- data refresh ----------------------------------------------------------
 static void mgLoadCats(){
@@ -99,13 +102,16 @@ static void mgLayout(HWND h){
         int ty=S(116);
         MoveWindow(s_mg->bMsg,  W-pad-S(200),            ty, S(200), fh, TRUE);
         MoveWindow(s_mg->bReqs, W-pad-S(200)-S(8)-S(280),ty, S(280), fh, TRUE);
+        MoveWindow(s_mg->bProfReqs, W-pad-S(200)-S(8)-S(280)-S(8)-S(280), ty, S(280), fh, TRUE);
         ShowWindow(s_mg->bMsg,SW_SHOW); ShowWindow(s_mg->bReqs,SW_SHOW);
+        ShowWindow(s_mg->bProfReqs,SW_SHOW);
     } else {
         ShowWindow(s_mg->eName,SW_HIDE); ShowWindow(s_mg->eMgr,SW_HIDE);
         ShowWindow(s_mg->bAutoId,SW_HIDE); ShowWindow(s_mg->bAdd,SW_HIDE);
         ShowWindow(s_mg->eId,SW_HIDE);
         ShowWindow(s_mg->bAbc,SW_HIDE); ShowWindow(s_mg->bNew,SW_HIDE);
         ShowWindow(s_mg->bMsg,SW_HIDE); ShowWindow(s_mg->bReqs,SW_HIDE);
+        ShowWindow(s_mg->bProfReqs,SW_HIDE);
         int fh2=S(38);
         MoveWindow(s_mg->bBack,  W-pad-S(120), S(70), S(120), fh2, TRUE);
         MoveWindow(s_mg->bAddEmp,W-pad-S(120)-S(8)-S(170), S(70), S(170), fh2, TRUE);
@@ -584,6 +590,182 @@ static void openSetReqs(HWND owner){
     BringWindowToTop(s_mr); SetFocus(s_mr);
 }
 
+// ============== «درخواست‌های تغییر پروفایل» (profile-change requests) ========
+//  Each pending request shows old→new name and whether a photo was attached.
+//  Manager can «تأیید» (approve → applies override + green cartable) or
+//  «رد» (reject → red cartable with the optional reason from the textbox).
+#define MGPRF_CLASS L"AzMgProf"
+#define ID_PR_REASON 3101
+struct ProfReqState {
+    std::vector<ProfReq> reqs;
+    int sel;                 // selected row (for the reason box), -1 none
+    HWND eReason;
+};
+static HWND s_pr=NULL; static ProfReqState* s_prs=NULL;
+static void prClose(){ if(s_pr&&IsWindow(s_pr)){ HWND v=s_pr; s_pr=NULL; DestroyWindow(v);} }
+static RECT prCard(HWND h){ RECT rc; GetClientRect(h,&rc);
+    int w=S(780),hh=S(600);
+    RECT c={(rc.right-w)/2,(rc.bottom-hh)/2,(rc.right+w)/2,(rc.bottom+hh)/2}; return c; }
+static int  prRowH(){ return S(84); }
+static int  prListTop(HWND h){ RECT c=prCard(h); return c.top+S(64); }
+static RECT prRowRect(HWND h, int i){
+    RECT c=prCard(h); int y=prListTop(h)+i*(prRowH()+S(8));
+    RECT r={c.left+S(20),y,c.right-S(20),y+prRowH()}; return r; }
+// the two action buttons live on the LEFT side of each row
+static RECT prApproveRect(RECT row){ RECT b={row.left+S(12),row.top+S(20),row.left+S(120),row.bottom-S(20)}; return b; }
+static RECT prRejectRect (RECT row){ RECT b={row.left+S(128),row.top+S(20),row.left+S(220),row.bottom-S(20)}; return b; }
+static void prLayoutReason(HWND h){
+    if(!s_prs||!s_prs->eReason) return;
+    RECT c=prCard(h);
+    int ry=c.bottom-S(52), rw=c.right-c.left-S(48)-S(150);
+    MoveWindow(s_prs->eReason, c.left+S(24), ry, rw, S(34), TRUE);
+    ShowWindow(s_prs->eReason, SW_SHOW);
+}
+static void prDoApprove(HWND h, int i){
+    if(!s_prs || i<0 || i>=(int)s_prs->reqs.size()) return;
+    if(s_prs->reqs[i].status!=0) return;
+    setProfReqStatus(i, 1, L"");
+    s_prs->reqs=loadProfReqs(); s_prs->sel=-1;
+    SetWindowTextW(s_prs->eReason,L"");
+    mgRefreshReqBadge();
+    if(g_hManage) InvalidateRect(g_hManage,NULL,FALSE);
+    InvalidateRect(h,NULL,FALSE);
+}
+static void prDoReject(HWND h, int i){
+    if(!s_prs || i<0 || i>=(int)s_prs->reqs.size()) return;
+    if(s_prs->reqs[i].status!=0) return;
+    wchar_t rb[512]={0}; if(s_prs->eReason) GetWindowTextW(s_prs->eReason,rb,512);
+    setProfReqStatus(i, 2, trim(rb));   // reason may be empty
+    s_prs->reqs=loadProfReqs(); s_prs->sel=-1;
+    SetWindowTextW(s_prs->eReason,L"");
+    mgRefreshReqBadge();
+    if(g_hManage) InvalidateRect(g_hManage,NULL,FALSE);
+    InvalidateRect(h,NULL,FALSE);
+}
+static LRESULT CALLBACK prProc(HWND h, UINT m, WPARAM w, LPARAM l){
+    switch(m){
+    case WM_CREATE: {
+        s_prs=new ProfReqState(); s_prs->reqs=loadProfReqs(); s_prs->sel=-1;
+        DWORD es=WS_CHILD|WS_VISIBLE|ES_AUTOHSCROLL;
+        s_prs->eReason=CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)ID_PR_REASON,g_hInst,0);
+        SendMessageW(s_prs->eReason,WM_SETFONT,(WPARAM)g_fUI,TRUE);
+        SendMessageW(s_prs->eReason,EM_SETCUEBANNER,TRUE,(LPARAM)L"دلیل رد (اختیاری)");
+        prLayoutReason(h);
+        return 0; }
+    case WM_NCDESTROY: if(s_prs){ delete s_prs; s_prs=NULL; } s_pr=NULL;
+        if(g_hFrame) InvalidateRect(g_hFrame,NULL,TRUE); return 0;
+    case WM_ERASEBKGND: return 1;
+    case WM_CTLCOLOREDIT:{ HDC dc=(HDC)w; SetTextColor(dc,g_theme.inputText);
+        SetBkColor(dc,g_theme.inputBg); return (LRESULT)g_brInput; }
+    case WM_KEYDOWN: if(w==VK_ESCAPE){ prClose(); return 0; } break;
+    case WM_LBUTTONDOWN:{ POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
+        RECT c=prCard(h);
+        RECT cb={c.left+S(14),c.top+S(14),c.left+S(40),c.top+S(40)};
+        if(!PtInRect(&c,pt)){ prClose(); return 0; }
+        if(PtInRect(&cb,pt)){ prClose(); return 0; }
+        if(s_prs){
+            for(int i=0;i<(int)s_prs->reqs.size();i++){
+                if(s_prs->reqs[i].status!=0) continue;
+                RECT row=prRowRect(h,i);
+                if(row.top>c.bottom-S(80)) break;
+                RECT ab=prApproveRect(row), rb=prRejectRect(row);
+                if(PtInRect(&ab,pt)){ prDoApprove(h,i); return 0; }
+                if(PtInRect(&rb,pt)){ s_prs->sel=i; prDoReject(h,i); return 0; }
+                if(PtInRect(&row,pt)){ s_prs->sel=i; SetFocus(s_prs->eReason);
+                    InvalidateRect(h,NULL,FALSE); return 0; }
+            }
+        }
+        return 0; }
+    case WM_PAINT:{ PAINTSTRUCT ps; HDC dc0=BeginPaint(h,&ps);
+        RECT rc; GetClientRect(h,&rc);
+        HDC dc=CreateCompatibleDC(dc0);
+        HBITMAP bmp=CreateCompatibleBitmap(dc0,rc.right,rc.bottom);
+        HGDIOBJ obm=SelectObject(dc,bmp);
+        { HBRUSH sb=CreateSolidBrush(g_dark?RGB(6,9,14):RGB(28,36,48));
+          FillRect(dc,&rc,sb); DeleteObject(sb); }
+        gpFillAlpha(dc,rc,0,g_dark?RGB(0,0,0):RGB(20,28,40),120);
+        RECT c=prCard(h);
+        gpShadow(dc,c,S(20),S(22),80);
+        { HBRUSH pb=CreateSolidBrush(g_theme.surface); FillRect(dc,&c,pb); DeleteObject(pb); }
+        gpGradRoundRect(dc,c,S(18),g_theme.surfaceTop,g_theme.surface,g_theme.border);
+        SetBkMode(dc,TRANSPARENT);
+        { RECT cb={c.left+S(14),c.top+S(14),c.left+S(40),c.top+S(40)};
+          RECT ci={cb.left+S(5),cb.top+S(5),cb.right-S(5),cb.bottom-S(5)};
+          drawIcon(dc,ICO_X,ci,g_theme.text,S(2)); }
+        SelectObject(dc,g_fTitle); SetTextColor(dc,g_theme.danger);
+        RECT tr={c.left+S(24),c.top+S(16),c.right-S(54),c.top+S(50)};
+        DrawTextW(dc,L"درخواست‌های تغییر پروفایل کارکنان",-1,&tr,
+            DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+        // build pending list count
+        int pending=0; if(s_prs) for(auto&q:s_prs->reqs) if(q.status==0) pending++;
+        if(!s_prs || pending==0){
+            SelectObject(dc,g_fUI); SetTextColor(dc,g_theme.textDim);
+            RECT er={c.left+S(24),prListTop(h),c.right-S(24),prListTop(h)+S(40)};
+            DrawTextW(dc,L"درخواست در انتظار تأییدی وجود ندارد.",-1,&er,
+                DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+            // still show recently processed (history) below, dimmed
+        }
+        if(s_prs){
+            for(int i=0;i<(int)s_prs->reqs.size();i++){
+                ProfReq& q=s_prs->reqs[i];
+                if(q.status!=0) continue;   // only pending in the actionable list
+                RECT row=prRowRect(h,i);
+                if(row.top>c.bottom-S(80)) break;
+                bool selected=(s_prs->sel==i);
+                gpRoundRect(dc,row,S(10),selected?g_theme.surface2:g_theme.surface,
+                    selected?g_theme.accent:g_theme.danger,255);
+                // text (RIGHT side)
+                SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.text);
+                RECT l1={row.left+S(230),row.top+S(8),row.right-S(14),row.top+S(32)};
+                std::wstring head=L"کاربر: "+(q.user.empty()?std::wstring(L"—"):q.user)+
+                    L"   •   "+q.time;
+                DrawTextW(dc,head.c_str(),-1,&l1,
+                    DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
+                SelectObject(dc,g_fUI); SetTextColor(dc,g_theme.textDim);
+                RECT l2={row.left+S(230),row.top+S(32),row.right-S(14),row.top+S(56)};
+                std::wstring nm=L"نام: "+q.oldName+L"  ←  "+q.newName;
+                DrawTextW(dc,nm.c_str(),-1,&l2,
+                    DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
+                RECT l3={row.left+S(230),row.top+S(54),row.right-S(14),row.bottom-S(6)};
+                std::wstring ph = q.newPhoto.empty()? std::wstring(L"عکس: بدون تغییر")
+                                                    : std::wstring(L"عکس: جدید پیوست شد");
+                DrawTextW(dc,ph.c_str(),-1,&l3,
+                    DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
+                // action buttons (LEFT)
+                RECT ab=prApproveRect(row);
+                gpRoundRect(dc,ab,S(8),g_theme.success,g_theme.success,255);
+                SetTextColor(dc,RGB(255,255,255)); SelectObject(dc,g_fUIB);
+                DrawTextW(dc,L"تأیید",-1,&ab,DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+                RECT rb=prRejectRect(row);
+                gpRoundRect(dc,rb,S(8),g_theme.danger,g_theme.danger,255);
+                SetTextColor(dc,RGB(255,255,255));
+                DrawTextW(dc,L"رد",-1,&rb,DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+            }
+        }
+        // reason hint label (above the textbox, LEFT-aligned in RTL = right edge)
+        SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
+        RECT hr={c.left+S(24),c.bottom-S(80),c.right-S(24),c.bottom-S(58)};
+        DrawTextW(dc,L"برای «رد»، ابتدا ردیف را انتخاب کنید و در صورت تمایل دلیل را بنویسید (اختیاری).",-1,&hr,
+            DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+        BitBlt(dc0,0,0,rc.right,rc.bottom,dc,0,0,SRCCOPY);
+        SelectObject(dc,obm); DeleteObject(bmp); DeleteDC(dc);
+        EndPaint(h,&ps); return 0; }
+    }
+    return DefWindowProcW(h,m,w,l);
+}
+static void openProfReqs(HWND owner){
+    if(s_pr&&IsWindow(s_pr)) prClose();
+    static bool reg=false;
+    if(!reg){ WNDCLASSW wc={0}; wc.lpfnWndProc=prProc; wc.hInstance=g_hInst;
+        wc.hCursor=LoadCursor(NULL,IDC_ARROW); wc.lpszClassName=MGPRF_CLASS;
+        RegisterClassW(&wc); reg=true; }
+    RECT rc; GetClientRect(g_hFrame,&rc);
+    POINT org={0,0}; ClientToScreen(g_hFrame,&org);
+    s_pr=CreateWindowExW(WS_EX_TOPMOST,MGPRF_CLASS,L"",WS_POPUP|WS_VISIBLE,
+        org.x,org.y,rc.right,rc.bottom,g_hFrame,NULL,g_hInst,NULL);
+    BringWindowToTop(s_pr); SetFocus(s_pr);
+}
+
 // ---- hit testing -----------------------------------------------------------
 static int mgHit(HWND h, POINT pt){
     if(!s_mg) return 0;
@@ -610,6 +792,14 @@ static void mgRefreshReqBadge(){
     if(n>0) lbl=L"● ("+toFaDigits(std::to_wstring(n))+L") "+lbl;
     SetWindowTextW(s_mg->bReqs,lbl.c_str());
     InvalidateRect(s_mg->bReqs,NULL,TRUE);
+    // profile-change requests badge
+    if(s_mg->bProfReqs){
+        int pn=unseenProfReqCount();
+        std::wstring pl=L"درخواست‌های تغییر پروفایل";
+        if(pn>0) pl=L"● ("+toFaDigits(std::to_wstring(pn))+L") "+pl;
+        SetWindowTextW(s_mg->bProfReqs,pl.c_str());
+        InvalidateRect(s_mg->bProfReqs,NULL,TRUE);
+    }
 }
 
 // ---- painting --------------------------------------------------------------
@@ -743,6 +933,7 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         s_mg->bDesign=createFlatButton(h,MG_DESIGN,L"طراحی چاپ این بخش",ICO_PRINT,BS_OUTLINE,0,0,10,10);
         s_mg->bMsg =createFlatButton(h,MG_MSG,L"پیام به کارکنان",ICO_BELL,BS_PRIMARY,0,0,10,10);
         s_mg->bReqs=createFlatButton(h,MG_REQS,L"درخواست‌های تغییر تنظیمات",ICO_GEAR,BS_DANGER,0,0,10,10);
+        s_mg->bProfReqs=createFlatButton(h,MG_PROFREQS,L"درخواست‌های تغییر پروفایل",ICO_USER,BS_DANGER,0,0,10,10);
         HWND eds[3]={s_mg->eName,s_mg->eMgr,s_mg->eId};
         for(HWND e:eds){ SendMessageW(e,WM_SETFONT,(WPARAM)g_fUI,TRUE); enableEnterNavigation(e); }
         g_hManage=h;
@@ -774,6 +965,7 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         case MG_DESIGN: openPrintDesigner(g_hFrame,0); break;
         case MG_MSG:  openMsgCompose(h); break;
         case MG_REQS: openSetReqs(h); break;
+        case MG_PROFREQS: openProfReqs(h); break;
         }
         return 0; }
     case WM_MOUSEMOVE:{ POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};

@@ -230,6 +230,9 @@ HWND createManageScreen(HWND frame);     // admin.cpp
 // role: 0 پذیرش / 1 مدیریت / 2 admin (hidden, prf)
 bool showLoginDialog(HWND parent, int role, User& out);
 bool showShiftDialog(HWND parent, int& shift);
+// profile edit (name + photo) — submits a ProfReq for management approval.
+// returns true if the user pressed «تأیید» and a request was queued.
+bool showProfileDialog(HWND parent);
 
 // ------------------------------------------------------------- calculator --
 void openCalculator(HWND owner);

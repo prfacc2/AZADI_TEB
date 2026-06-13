@@ -115,6 +115,9 @@ bool verifyLogin(const std::wstring& uname, const std::wstring& pass,
                 return false;
             }
             out = u;
+            // apply any management-approved display-name override
+            { std::wstring ov=getSetting(L"name_override_"+u.username,L"");
+              if(!ov.empty()) out.fullname=ov; }
             logLine(L"login ok: "+uname);
             return true;
         }
