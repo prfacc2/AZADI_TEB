@@ -623,6 +623,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
 
     installVazirFont();              // embedded Vazirmatn + per-user install
     gdipStartup();                   // v1.3.0: GDI+ rendering layer
+    seedDefaultDepts();              // v1.4.1: ensure «پذیرش» category exists
 
     // responsive scale: based on monitor size + DPI
     HDC sdc=GetDC(NULL);

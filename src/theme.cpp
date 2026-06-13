@@ -10,15 +10,18 @@ HBRUSH  g_brBg=0, g_brSurface=0, g_brSurface2=0, g_brInput=0;
 void applyTheme(bool dark){
     g_dark = dark;
     if(dark){
-        // ---- Modern "midnight teal" dark palette (deep, low eye-strain) ----
-        g_theme.bg          = RGB(13, 17, 23);    // near-black slate
-        g_theme.bg2         = RGB(17, 23, 33);
-        g_theme.surface     = RGB(24, 30, 39);    // card
-        g_theme.surfaceTop  = RGB(31, 39, 50);    // card gradient top
-        g_theme.surface2    = RGB(17, 22, 29);    // bars
-        g_theme.border      = RGB(50, 58, 72);    // clearly visible separators
-        g_theme.text        = RGB(232, 239, 246);
-        g_theme.textDim     = RGB(146, 159, 176);
+        // ---- True-black dark palette. The page background is (near) pure black
+        //      as requested so card edges & button corners no longer glow white;
+        //      surfaces step up in lightness only slightly so the UI has depth
+        //      without bright halos. Labels/text are deliberately bright. ----
+        g_theme.bg          = RGB(0, 0, 0);       // pure black page
+        g_theme.bg2         = RGB(8, 10, 14);
+        g_theme.surface     = RGB(20, 24, 30);    // card
+        g_theme.surfaceTop  = RGB(28, 33, 41);    // card gradient top
+        g_theme.surface2    = RGB(12, 14, 18);    // bars
+        g_theme.border      = RGB(54, 62, 76);    // clearly visible separators
+        g_theme.text        = RGB(238, 243, 249);
+        g_theme.textDim     = RGB(170, 182, 198); // brighter dim text (legible)
         g_theme.accent      = RGB(56, 170, 255);  // bright sky-blue
         g_theme.accent2     = RGB(30, 120, 220);  // gradient end
         g_theme.accentHover = RGB(96, 190, 255);
@@ -27,24 +30,28 @@ void applyTheme(bool dark){
         g_theme.dangerHover = RGB(250, 128, 128);
         g_theme.success     = RGB(74, 210, 148);
         g_theme.warn        = RGB(245, 184, 84);
-        g_theme.inputBg     = RGB(30, 38, 49);    // distinctly lighter than card
-        g_theme.inputText   = RGB(236, 242, 248);
-        g_theme.hover       = RGB(35, 44, 57);
-        g_theme.headerTop   = RGB(22, 30, 42);
-        g_theme.headerBot   = RGB(15, 20, 28);
+        g_theme.inputBg     = RGB(26, 31, 39);    // distinctly lighter than card
+        g_theme.inputText   = RGB(240, 245, 250);
+        g_theme.hover       = RGB(34, 40, 50);
+        g_theme.headerTop   = RGB(14, 17, 22);
+        g_theme.headerBot   = RGB(6, 8, 11);
     } else {
         // ---- Refined light palette: NOT flat white. A soft cool-grey page,
         //      warm-tinted cards with a gentle top-light gradient, a richer
         //      indigo→sky accent, and an amber highlight so the UI has depth
         //      and contrast instead of one washed-out white sheet. ----
-        g_theme.bg          = RGB(232, 238, 247); // page (cool soft grey-blue)
-        g_theme.bg2         = RGB(221, 230, 243); // subtle gradient bottom
-        g_theme.surface     = RGB(255, 255, 255); // card body
-        g_theme.surfaceTop  = RGB(250, 252, 255); // card gradient top (airy)
-        g_theme.surface2    = RGB(243, 247, 252); // bars
-        g_theme.border      = RGB(214, 223, 236);
-        g_theme.text        = RGB(28, 38, 56);
-        g_theme.textDim     = RGB(108, 122, 145);
+        //  More tonal depth so the screen is not one flat sheet that strains the
+        //  eyes: the page is a noticeably tinted soft blue-grey, cards are clean
+        //  white, bars sit one step below white, and the header reads white →
+        //  one shade lower so its three layers are distinguishable.
+        g_theme.bg          = RGB(223, 231, 242); // page (cool soft grey-blue, deeper)
+        g_theme.bg2         = RGB(208, 219, 236); // subtle gradient bottom
+        g_theme.surface     = RGB(255, 255, 255); // card body (clean white)
+        g_theme.surfaceTop  = RGB(249, 251, 255); // card gradient top (airy)
+        g_theme.surface2    = RGB(236, 241, 248); // bars (one notch below white)
+        g_theme.border      = RGB(200, 211, 227);
+        g_theme.text        = RGB(26, 36, 54);
+        g_theme.textDim     = RGB(98, 113, 137);
         g_theme.accent      = RGB(33, 102, 232);  // indigo-blue
         g_theme.accent2     = RGB(46, 150, 240);  // sky end for gradients
         g_theme.accentHover = RGB(54, 124, 246);
@@ -53,11 +60,11 @@ void applyTheme(bool dark){
         g_theme.dangerHover = RGB(236, 86, 100);
         g_theme.success     = RGB(20, 160, 108);
         g_theme.warn        = RGB(220, 150, 30);
-        g_theme.inputBg     = RGB(245, 248, 253); // tinted, not pure white
+        g_theme.inputBg     = RGB(243, 247, 252); // tinted, not pure white
         g_theme.inputText   = RGB(22, 30, 46);
-        g_theme.hover       = RGB(233, 240, 251);
+        g_theme.hover       = RGB(228, 237, 250);
         g_theme.headerTop   = RGB(255, 255, 255);
-        g_theme.headerBot   = RGB(240, 245, 251);
+        g_theme.headerBot   = RGB(235, 241, 249);
     }
     if(g_brBg)       DeleteObject(g_brBg);
     if(g_brSurface)  DeleteObject(g_brSurface);
@@ -248,15 +255,28 @@ void drawIcon(HDC dc, int icon, RECT rc, COLORREF col, int thick){
         MoveToEx(dc,a.x-r/3,a.y,0); LineTo(dc,a.x,a.y); LineTo(dc,a.x,a.y+r/3);
         break; }
     case ICO_GEAR: {
-        int ri=(r*52)/100, ro=(r*92)/100;
-        for(int i=0;i<8;i++){
-            double a=i*3.14159/4;
-            int x1=cx+(int)(ri*cos(a)+0.5), y1=cy+(int)(ri*sin(a)+0.5);
-            int x2=cx+(int)(ro*cos(a)+0.5), y2=cy+(int)(ro*sin(a)+0.5);
-            MoveToEx(dc,x1,y1,0); LineTo(dc,x2,y2);
+        // A clear, recognisable cog drawn as an OUTLINE (no hole-punch needed):
+        //   • a toothed outer ring (single closed polygon with 8 teeth)
+        //   • a small centre circle hole.
+        // Drawn with the current pen so it inherits icon colour & thickness and
+        // blends onto any background.
+        const int N=8;
+        double rOut=r*0.96, rIn=r*0.66;
+        POINT poly[N*4]; int n=0;
+        double tw=0.22;   // tooth angular half width (fraction of the gap)
+        double half=(3.14159265/N);
+        for(int i=0;i<N;i++){
+            double a=i*2*3.14159265/N;
+            double aA=a-half*(1.0-tw), aB=a-half*tw;
+            double aC=a+half*tw,       aD=a+half*(1.0-tw);
+            poly[n].x=cx+(int)(rIn *cos(aA)+0.5); poly[n].y=cy+(int)(rIn *sin(aA)+0.5); n++;
+            poly[n].x=cx+(int)(rOut*cos(aB)+0.5); poly[n].y=cy+(int)(rOut*sin(aB)+0.5); n++;
+            poly[n].x=cx+(int)(rOut*cos(aC)+0.5); poly[n].y=cy+(int)(rOut*sin(aC)+0.5); n++;
+            poly[n].x=cx+(int)(rIn *cos(aD)+0.5); poly[n].y=cy+(int)(rIn *sin(aD)+0.5); n++;
         }
-        Ellipse(dc,cx-ri,cy-ri,cx+ri,cy+ri);
-        Ellipse(dc,cx-r/4,cy-r/4,cx+r/4,cy+r/4);
+        Polygon(dc,poly,n);                       // toothed ring (outline)
+        int rh=(r*34)/100;
+        Ellipse(dc,cx-rh,cy-rh,cx+rh,cy+rh);      // centre hole
         break; }
     case ICO_BELL: {
         Arc(dc,cx-r+2,cy-r+2,cx+r-2,cy+r,  cx-r+2,cy+r/3, cx+r-2,cy+r/3);
@@ -286,6 +306,7 @@ struct BtnData {
     int icon, style;
     bool hover, down;
     COLORREF bg;     // explicit colour behind rounded corners (CLR_INVALID = ask parent)
+    int imgIcon;     // RCDATA id of a raster icon (0 = use vector `icon`)
 };
 static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
     BtnData* d = (BtnData*)GetWindowLongPtrW(h, GWLP_USERDATA);
@@ -297,6 +318,7 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
         d->style = HIWORD((UINT_PTR)cs->lpCreateParams);
         d->hover = d->down = false;
         d->bg    = CLR_INVALID;
+        d->imgIcon = 0;
         if(cs->lpszName) d->text = cs->lpszName;
         SetWindowLongPtrW(h, GWLP_USERDATA, (LONG_PTR)d);
         return TRUE; }
@@ -417,8 +439,25 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
             }
         } else {
             bool hasText = d && !d->text.empty();
+            bool hasImg  = d && d->imgIcon;
             int isz = S(17);
-            if(d && d->icon && hasText){
+            int iszImg = S(22);   // raster icons read better a touch larger
+            if(hasImg && hasText){
+                // raster icon flush-right, text to its left (RTL feel)
+                RECT ir={rc.right-S(12)-iszImg, rc.bottom/2-iszImg/2,
+                         rc.right-S(12), rc.bottom/2+iszImg/2};
+                if(!gpDrawTintedImageRes(dc, d->imgIcon, ir, txt))
+                    drawIcon(dc, d->icon, ir, txt, S(2));
+                SelectObject(dc, g_fUI);
+                RECT tr={S(10),0,rc.right-S(18)-iszImg,rc.bottom};
+                DrawTextW(dc, d->text.c_str(), -1, &tr,
+                    DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+            } else if(hasImg){
+                RECT ir={rc.right/2-iszImg/2, rc.bottom/2-iszImg/2,
+                         rc.right/2+iszImg/2, rc.bottom/2+iszImg/2};
+                if(!gpDrawTintedImageRes(dc, d->imgIcon, ir, txt))
+                    drawIcon(dc, d->icon, ir, txt, S(2));
+            } else if(d && d->icon && hasText){
                 // icon right, text left of it (RTL feel)
                 RECT ir={rc.right-S(12)-isz, rc.bottom/2-isz/2,
                          rc.right-S(12), rc.bottom/2+isz/2};
@@ -474,4 +513,11 @@ void setFlatButtonBg(HWND btn, COLORREF bg){
     if(!btn || !IsWindow(btn)) return;
     BtnData* d=(BtnData*)GetWindowLongPtrW(btn,GWLP_USERDATA);
     if(d){ d->bg = bg; InvalidateRect(btn,NULL,TRUE); }
+}
+//  v1.4.1: give a flat button a real raster icon (RCDATA id). Pass 0 to clear
+//  and fall back to the vector icon.
+void setFlatButtonImage(HWND btn, int resId){
+    if(!btn || !IsWindow(btn)) return;
+    BtnData* d=(BtnData*)GetWindowLongPtrW(btn,GWLP_USERDATA);
+    if(d){ d->imgIcon = resId; InvalidateRect(btn,NULL,TRUE); }
 }

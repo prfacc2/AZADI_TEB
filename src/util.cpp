@@ -14,7 +14,48 @@ std::wstring exeDir(){
 static std::wstring ensureDir(const std::wstring& d){
     CreateDirectoryW(d.c_str(), NULL); return d;
 }
-std::wstring dataDir(){ return ensureDir(exeDir()+L"\\data"); }
+// data root may be redirected to a SHARED NETWORK FOLDER so that all reception
+// terminals + the management station read/write the SAME files (designs,
+// messages, settings-change requests) → live sync across the network.
+//   • create  <exe>\dataroot.ini  containing a single line with a UNC/drive path
+//     e.g.  \\SERVER\AzadiTeb\data    or   Z:\AzadiTeb\data
+//   • if absent (or unreachable) we fall back to the local  <exe>\data  folder.
+static std::wstring readDataRootOverride(){
+    std::wstring cfg = exeDir()+L"\\dataroot.ini";
+    HANDLE h=CreateFileW(cfg.c_str(),GENERIC_READ,FILE_SHARE_READ,NULL,
+        OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);
+    if(h==INVALID_HANDLE_VALUE) return L"";
+    char buf[1024]={0}; DWORD rd=0;
+    ReadFile(h,buf,sizeof(buf)-1,&rd,NULL); CloseHandle(h);
+    if(rd==0) return L"";
+    // strip a UTF-8 BOM if present
+    int off=0; if(rd>=3 && (unsigned char)buf[0]==0xEF) off=3;
+    int wn=MultiByteToWideChar(CP_UTF8,0,buf+off,(int)rd-off,NULL,0);
+    std::wstring s(wn,0);
+    MultiByteToWideChar(CP_UTF8,0,buf+off,(int)rd-off,&s[0],wn);
+    // first non-empty trimmed line
+    std::wstring line; for(wchar_t c:s){ if(c==L'\r'||c==L'\n'){ if(!line.empty())break; } else line+=c; }
+    while(!line.empty() && (line.front()==L' '||line.front()==L'\t')) line.erase(line.begin());
+    while(!line.empty() && (line.back()==L' '||line.back()==L'\t')) line.pop_back();
+    return line;
+}
+std::wstring dataDir(){
+    static std::wstring cached;
+    static bool resolved=false;
+    if(!resolved){
+        resolved=true;
+        std::wstring ov=readDataRootOverride();
+        if(!ov.empty()){
+            // try to create / reach it; if it works, use it
+            CreateDirectoryW(ov.c_str(),NULL);
+            DWORD a=GetFileAttributesW(ov.c_str());
+            if(a!=INVALID_FILE_ATTRIBUTES && (a&FILE_ATTRIBUTE_DIRECTORY))
+                cached=ov;
+        }
+        if(cached.empty()) cached=ensureDir(exeDir()+L"\\data");
+    }
+    return cached;
+}
 std::wstring logsDir(){ return ensureDir(exeDir()+L"\\logs"); }
 
 // --------------------------------------------------------------- utf8 file -

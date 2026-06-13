@@ -120,6 +120,10 @@ static LRESULT CALLBACK adminProc(HWND h, UINT m, WPARAM w, LPARAM l){
         HDC dc=(HDC)w;
         SetTextColor(dc,g_theme.inputText); SetBkColor(dc,g_theme.inputBg);
         return (LRESULT)g_brInput; }
+    case WM_CTLCOLORSTATIC: {
+        HDC dc=(HDC)w;
+        SetTextColor(dc,g_theme.inputText); SetBkColor(dc,g_theme.inputBg);
+        return (LRESULT)g_brInput; }
     case WM_COMMAND: {
         if(!d) return 0;
         int id=LOWORD(w);

@@ -32,6 +32,7 @@
 #define ID_F_PRT_LAST 643
 #define ID_F_CLOSE    644
 #define ID_F_INQUIRY  645   // استعلام بیمه با کد ملی
+#define ID_F_HASINS   646   // چک‌باکس «دارای بیمه» کنار کد ملی
 
 // ============================================================== TAB PAGE ===
 enum TabKind {
@@ -48,6 +49,7 @@ struct TabPage {
     HWND cPType,cIns,cSupp,cNType;
     HWND ePrice,eDiscount;
     HWND bSubmit,bPrtIns,bPrtRx,bPrtLast,bClose,bInquiry;
+    HWND chkIns;             // «دارای بیمه» — کنار کد ملی، پیش‌فرض تیک‌خورده
     // computed billing
     long long total,mainShare,patientShare,baseDiff,orgShare,paid;
     bool detached;
@@ -119,10 +121,12 @@ static void recalc(TabPage* t){
 // ------------------------------------------------------------- tab layout --
 // Manual RTL, plain (non-mirrored) coordinates.
 //   Page layout (RTL):
-//     ┌──────────── form card (LEFT, wide) ────────────┐  ┌─ billing card ─┐
-//     │  patient sections, two columns                 │  │ (RIGHT, fixed) │
-//     └────────────────────────────────────────────────┘  └────────────────┘
-//   Inside the form card every field has its own framed input + label above.
+//     ┌─ billing card ─┐  ┌──────────── form card (RIGHT, wide) ────────────┐
+//     │ (LEFT, fixed)  │  │  patient sections, two columns                  │
+//     │  print buttons │  └─────────────────────────────────────────────────┘
+//     └────────────────┘
+//   The billing / print card sits on the LEFT so the print actions live on the
+//   left edge (per requirement); the patient form fills the wide right area.
 static const int RC_OUT = 18;   // outer page padding
 static const int RC_GAP = 16;   // gap between form card and billing card
 static const int RC_IN  = 22;   // inner card padding
@@ -131,13 +135,14 @@ static const int BILL_W = 340;  // billing card width
 static void rcMetrics(int W, int& cardL, int& cardR, int& billL, int& billR,
                       int& colW, int& xr, int& xl, bool& stacked){
     int pad=S(RC_OUT);
-    billR = W - pad;
-    billL = billR - S(BILL_W);
-    cardL = pad;
-    cardR = billL - S(RC_GAP);
+    // billing/print card on the LEFT, patient form card on the RIGHT
+    billL = pad;
+    billR = billL + S(BILL_W);
+    cardR = W - pad;
+    cardL = billR + S(RC_GAP);
     int fw = (cardR - S(RC_IN)) - (cardL + S(RC_IN));
     stacked = fw < S(320);
-    if(stacked){ billL = billR = W; cardR = W - pad; fw = (cardR-S(RC_IN))-(cardL+S(RC_IN)); }
+    if(stacked){ billL = billR = 0; cardL = pad; fw = (cardR-S(RC_IN))-(cardL+S(RC_IN)); }
     colW = (fw - S(18))/2;
     xr = (cardR - S(RC_IN)) - colW;            // right column (RTL first field)
     xl = cardL + S(RC_IN);                     // left column
@@ -146,13 +151,15 @@ static void rcMetrics(int W, int& cardL, int& cardR, int& billL, int& billR,
 //  small / low-res monitors (responsive requirement).
 static void rcVMetrics(int H, int& y0, int& step, int& rh){
     // y0 must clear: card top (S16) + header (≈S46) + separator (S52) and then
-    // leave S44 above the first row for its section caption. So start ~S118.
-    y0 = S(118); step = S(62); rh = S(34);
-    int need = y0 + 8*step + S(120);
+    // leave room above the first row for its section caption. Start ~S124.
+    // step must be tall enough that: label(18px) + gap(6) + input(rh) fit with a
+    // small gap before the next label, so nothing overlaps.
+    y0 = S(124); step = S(66); rh = S(34);
+    int need = y0 + 8*step + S(126);
     if(H > 0 && need > H){
-        step = (H - y0 - S(120)) / 8;
-        if(step < S(48)) step = S(48);
-        rh = step - S(28); if(rh > S(34)) rh = S(34); if(rh < S(24)) rh = S(24);
+        step = (H - y0 - S(126)) / 8;
+        if(step < S(56)) step = S(56);     // keep label+input from overlapping
+        rh = step - S(30); if(rh > S(34)) rh = S(34); if(rh < S(26)) rh = S(26);
     }
 }
 static void tabPageLayout(HWND h, TabPage* t){
@@ -173,6 +180,10 @@ static void tabPageLayout(HWND h, TabPage* t){
     MoveWindow(t->eLast,  xl, y0,          colW, rh, TRUE);
     MoveWindow(t->eNid,   xr, y0+step,     colW, rh, TRUE);
     MoveWindow(t->eFather,xl, y0+step,     colW, rh, TRUE);
+    // «دارای بیمه» checkbox sits on the national-id label row, left-aligned in the
+    // right column so it reads «کد ملی … ☑ دارای بیمه» without overlapping.
+    { int chkW=S(96);
+      MoveWindow(t->chkIns, xr, y0+step-S(22), chkW, S(18), TRUE); }
     MoveWindow(t->eBirth, xr, y0+2*step,   colW, rh, TRUE);
     MoveWindow(t->cGender,xl, y0+2*step,   colW, S(200), TRUE);
     // Section 2: تماس (rows 3..4)
@@ -300,6 +311,9 @@ static void resetForm(TabPage* t){
     SendMessageW(t->cGender,CB_SETCURSEL,0,0);
     SendMessageW(t->cPType, CB_SETCURSEL,1,0);   // سرپایی default
     SendMessageW(t->cNType, CB_SETCURSEL,0,0);   // عادی
+    // next patient defaults to «دارای بیمه» again
+    SendMessageW(t->chkIns, BM_SETCHECK, BST_CHECKED, 0);
+    EnableWindow(t->bInquiry, TRUE);
     SetWindowTextW(t->eDiscount,L"");
     SetWindowTextW(t->ePrice,L"");               // recalc auto-fills tariff
     recalc(t);
@@ -348,17 +362,27 @@ static void drawCartable(HDC dc, const RECT& rc){
         KMsg& mm=msgs[i];
         int ch=S(60);
         RECT card={panel.left+S(16),y,panel.right-S(16),y+ch};
+        // severity colour: عادی=green / فوری=yellow / بحرانی=red
+        COLORREF sevCol = mm.type==KMSG_CRITICAL ? g_theme.danger
+                        : mm.type==KMSG_URGENT   ? g_theme.warn
+                        :                          g_theme.success;
+        const wchar_t* sevLbl = mm.type==KMSG_CRITICAL ? L"بحرانی"
+                              : mm.type==KMSG_URGENT   ? L"فوری"
+                              :                          L"عادی";
         gpRoundRect(dc,card,S(10),
             mm.seen?g_theme.surface:g_theme.surface2,
-            mm.seen?g_theme.border:g_theme.accent,255);
+            mm.seen?g_theme.border:sevCol,255);
+        // coloured severity stripe down the right edge (RTL leading edge)
+        RECT stripe={card.right-S(6),card.top+S(2),card.right-S(2),card.bottom-S(2)};
+        gpRoundRect(dc,stripe,S(2),sevCol,CLR_INVALID,255);
         if(!mm.seen){
-            RECT dot={card.right-S(26),card.top+S(8),card.right-S(14),card.top+S(20)};
-            gpRoundRect(dc,dot,S(6),g_theme.danger,CLR_INVALID,255);
+            RECT dot={card.right-S(30),card.top+S(8),card.right-S(18),card.top+S(20)};
+            gpRoundRect(dc,dot,S(6),sevCol,CLR_INVALID,255);
         }
         SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.text);
-        RECT fr={card.left+S(14),card.top+S(6),card.right-S(34),card.top+S(28)};
-        std::wstring from=L"از: "+(mm.from.empty()?std::wstring(L"مدیریت"):mm.from)+
-            L"   •   "+mm.time;
+        RECT fr={card.left+S(14),card.top+S(6),card.right-S(40),card.top+S(28)};
+        std::wstring from=L"["+std::wstring(sevLbl)+L"] از: "+
+            (mm.from.empty()?std::wstring(L"مدیریت"):mm.from)+L"   •   "+mm.time;
         DrawTextW(dc,from.c_str(),-1,&fr,
             DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
         SelectObject(dc,g_fUI); SetTextColor(dc,g_theme.textDim);
@@ -436,6 +460,14 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         t->cSupp  =CreateWindowExW(0,L"COMBOBOX",L"",cbs,0,0,10,10,h,(HMENU)ID_F_SUPP,g_hInst,0);
         t->ePrice =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)ID_F_PRICE,g_hInst,0);
         t->eDiscount=CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)ID_F_DISCOUNT,g_hInst,0);
+        // «دارای بیمه» checkbox — placed beside the national-id field; checked by
+        // default so Enter on the id field runs the validated insurance inquiry.
+        // Unchecking it switches to manual insurance selection (no auto-inquiry).
+        t->chkIns =CreateWindowExW(0,L"BUTTON",L"دارای بیمه",
+            WS_CHILD|WS_VISIBLE|BS_AUTOCHECKBOX|BS_RIGHTBUTTON|BS_RIGHT,
+            0,0,10,10,h,(HMENU)ID_F_HASINS,g_hInst,0);
+        SendMessageW(t->chkIns,WM_SETFONT,(WPARAM)g_fSmall,TRUE);
+        SendMessageW(t->chkIns,BM_SETCHECK,BST_CHECKED,0);
 
         SendMessageW(t->cGender,CB_ADDSTRING,0,(LPARAM)L"مرد");
         SendMessageW(t->cGender,CB_ADDSTRING,0,(LPARAM)L"زن");
@@ -461,6 +493,18 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         t->bPrtLast=createFlatButton(h,ID_F_PRT_LAST,L"چاپ آخرین قبض (F8)",ICO_PRINT,BS_OUTLINE,0,0,10,10);
         t->bClose  =createFlatButton(h,ID_F_CLOSE,L"خروج (بستن تب)",ICO_LOGOUT,BS_DANGER,0,0,10,10);
         t->bInquiry=createFlatButton(h,ID_F_INQUIRY,L"استعلام بیمه",ICO_SHIELD,BS_OUTLINE,0,0,10,10);
+        // v1.4.1: real raster icons on the print-action buttons (left card)
+        setFlatButtonImage(t->bPrtIns, IMG_IC_SHIELD);
+        setFlatButtonImage(t->bPrtRx,  IMG_IC_RECEIPT);
+        setFlatButtonImage(t->bPrtLast,IMG_IC_LAST);
+        // blend button corners: submit sits on the form card (surface); the
+        // billing/print buttons sit on the page background (bg).
+        setFlatButtonBg(t->bSubmit, g_theme.surface);
+        setFlatButtonBg(t->bPrtIns, g_theme.surface);
+        setFlatButtonBg(t->bPrtRx,  g_theme.surface);
+        setFlatButtonBg(t->bPrtLast,g_theme.surface);
+        setFlatButtonBg(t->bClose,  g_theme.surface);
+        setFlatButtonBg(t->bInquiry,g_theme.surface);
 
         // birth-date uses the smart Jalali mask (digits-only, auto slashes)
         HWND eds[11]={t->eFirst,t->eLast,t->eNid,t->eFather,
@@ -480,12 +524,35 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         recalc(t);
         return 0; }
     case WM_SIZE: if(t) tabPageLayout(h,t); return 0;
+    case WM_APP_THEME:
+        if(t && t->kind==TK_RECEPTION){
+            setFlatButtonBg(t->bSubmit, g_theme.surface);
+            setFlatButtonBg(t->bPrtIns, g_theme.surface);
+            setFlatButtonBg(t->bPrtRx,  g_theme.surface);
+            setFlatButtonBg(t->bPrtLast,g_theme.surface);
+            setFlatButtonBg(t->bClose,  g_theme.surface);
+            setFlatButtonBg(t->bInquiry,g_theme.surface);
+        }
+        InvalidateRect(h,NULL,TRUE);
+        return 0;
     case WM_CTLCOLOREDIT: {
         HDC dc=(HDC)w;
         SetTextColor(dc,g_theme.inputText); SetBkColor(dc,g_theme.inputBg);
         return (LRESULT)g_brInput; }
     case WM_CTLCOLORLISTBOX: {
         HDC dc=(HDC)w;
+        SetTextColor(dc,g_theme.inputText); SetBkColor(dc,g_theme.inputBg);
+        return (LRESULT)g_brInput; }
+    case WM_CTLCOLORSTATIC: {
+        HDC dc=(HDC)w;
+        // The «دارای بیمه» checkbox sits on the form card (surface) — paint its
+        // label with surface bg + normal text so it blends with the card.
+        if(t && (HWND)l==t->chkIns){
+            SetTextColor(dc,g_theme.text); SetBkColor(dc,g_theme.surface);
+            return (LRESULT)g_brSurface;
+        }
+        // CBS_DROPDOWNLIST combos paint their closed display via STATIC color —
+        // theme it so the selected text isn't white-on-white in dark mode.
         SetTextColor(dc,g_theme.inputText); SetBkColor(dc,g_theme.inputBg);
         return (LRESULT)g_brInput; }
     case WM_COMMAND: {
@@ -506,11 +573,35 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             recalc(t); InvalidateRect(h,NULL,FALSE);
         }
         else if(id==(ID_F_FIRST+2) && code==EN_KILLFOCUS){
-            // national-id field lost focus → automatic insurance inquiry (quiet)
-            doInquiry(t,h,true);
+            // national-id field lost focus (Enter/Tab navigates away). If the
+            // patient is marked as insured, run the validated inquiry and show an
+            // error on an invalid id; otherwise leave the manual list untouched.
+            bool insured = SendMessageW(t->chkIns,BM_GETCHECK,0,0)==BST_CHECKED;
+            if(insured) doInquiry(t,h,false);   // show invalid-id error
         }
         else if(id==ID_F_INQUIRY){
-            doInquiry(t,h,false);   // manual inquiry (shows errors)
+            // manual «استعلام بیمه» button — only meaningful when insured
+            if(SendMessageW(t->chkIns,BM_GETCHECK,0,0)==BST_CHECKED)
+                doInquiry(t,h,false);
+            else {
+                t->lastMsg=L"برای استعلام، گزینه «دارای بیمه» را فعال کنید.";
+                t->msgCol=g_theme.warn; InvalidateRect(h,NULL,FALSE);
+            }
+        }
+        else if(id==ID_F_HASINS && code==BN_CLICKED){
+            // toggling insured state: when unchecked, reset to free/«آزاد» so the
+            // user picks insurance manually; recalc + redraw either way.
+            bool insured = SendMessageW(t->chkIns,BM_GETCHECK,0,0)==BST_CHECKED;
+            EnableWindow(t->bInquiry, insured);
+            if(!insured){
+                SendMessageW(t->cIns,CB_SETCURSEL,0,0);   // index 0 = آزاد/بدون بیمه
+                t->lastMsg=L"حالت بدون بیمه — بیمه را به‌صورت دستی انتخاب کنید.";
+                t->msgCol=g_theme.textDim;
+            } else {
+                t->lastMsg=L"حالت دارای بیمه — کد ملی را وارد و Enter بزنید.";
+                t->msgCol=g_theme.accent;
+            }
+            recalc(t); InvalidateRect(h,NULL,FALSE);
         }
         else if(id==ID_F_SUBMIT){
             ReceptionRecord r; collect(t,r);
@@ -645,8 +736,9 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 RECT wr; GetWindowRect(inputs[i],&wr);
                 POINT a={wr.left,wr.top}, b={wr.right,wr.bottom};
                 ScreenToClient(h,&a); ScreenToClient(h,&b);
-                RECT well={a.x-S(7),a.y-S(5),b.x+S(7),
-                           (b.y<a.y+S(40))?a.y+S(40):b.y+S(5)};
+                int minH = a.y + (rh2>S(28)?rh2:S(34));
+                RECT well={a.x-S(7),a.y-S(4),b.x+S(7),
+                           (b.y<minH)?minH:b.y+S(4)};
                 if(b.y<=a.y) continue;        // not yet laid out
                 bool focused = (inputs[i]==foc);
                 fillRoundRect(dc,well,S(8),g_theme.inputBg,
@@ -945,8 +1037,20 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
         s_rd->bNewPat = createFlatButton(h,ID_RC_NEWPAT,L"پذیرش جدید",ICO_PLUS,BS_PRIMARY,0,0,10,10);
         s_rd->bNewTab = createFlatButton(h,ID_RC_NEWTAB,L"تب جدید",ICO_TAB,BS_OUTLINE,0,0,10,10);
         s_rd->bCalc = createFlatButton(h,ID_RC_CALC,L"ماشین حساب",ICO_CALC,BS_OUTLINE,0,0,10,10);
+        // blend the button corners into the info-bar surface (no white halo)
+        setFlatButtonBg(s_rd->bNewPat,g_theme.surface2);
+        setFlatButtonBg(s_rd->bNewTab,g_theme.surface2);
+        setFlatButtonBg(s_rd->bCalc,  g_theme.surface2);
         s_rd->lastUnseen = unseenMessageCount(g_session.user.username);
         SetTimer(h, 77, 5000, NULL);   // poll the cartable for new messages
+        return 0;
+    case WM_APP_THEME:
+        if(s_rd){
+            setFlatButtonBg(s_rd->bNewPat,g_theme.surface2);
+            setFlatButtonBg(s_rd->bNewTab,g_theme.surface2);
+            setFlatButtonBg(s_rd->bCalc,  g_theme.surface2);
+        }
+        InvalidateRect(h,NULL,TRUE);
         return 0;
     case WM_TIMER:
         if(w==77 && s_rd){

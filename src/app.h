@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.4.0"
+#define APP_VERSION_W   L"1.5.0"
 #define APP_NAME_W      L"\u0622\u0632\u0627\u062f\u06cc \u0637\u0628"   // آزادی طب
 #define APP_CLASS_W     L"AzadiTebFrame"
 
@@ -86,6 +86,8 @@ void  setFlatButtonIcon(HWND btn, int icon);   // in-place icon swap (v1.1.0)
 //  corners in dark mode" bug on header/bar buttons). Pass CLR_INVALID to let
 //  the button ask its parent (default behaviour).
 void  setFlatButtonBg(HWND btn, COLORREF bg);
+//  v1.4.1: give a flat button a real raster icon (RCDATA id; 0 = vector icon).
+void  setFlatButtonImage(HWND btn, int resId);
 void  drawIcon(HDC dc, int icon, RECT rc, COLORREF col, int thick);
 void  fillRoundRect(HDC dc, RECT rc, int rad, COLORREF fill, COLORREF border);
 
@@ -109,6 +111,15 @@ void gpFillAlpha(HDC dc, RECT rc, int rad, COLORREF fill, int alpha);
 //  into rc, then a translucent scrim of `scrim` colour at `scrimA` alpha so
 //  foreground text stays perfectly legible.  Returns false if no image.
 bool gpDrawBackground(HDC dc, RECT rc, bool dark, COLORREF scrim, int scrimA);
+//  v1.4.1: draw a real (raster) RCDATA PNG icon, aspect-fit & centred in rc and
+//  recoloured to `tint`. Used for the print-action buttons. Returns false if
+//  GDI+ / resource unavailable so callers fall back to the vector drawIcon().
+bool gpDrawTintedImageRes(HDC dc, int resId, RECT rc, COLORREF tint);
+//  RCDATA ids of the print-action raster icons (see app.rc):
+#define IMG_IC_PRINTER 201
+#define IMG_IC_RECEIPT 202
+#define IMG_IC_SHIELD  203
+#define IMG_IC_LAST    204
 //  Crisp anti-aliased line / circle helpers used by the new header clock etc.
 void gpLine(HDC dc, int x1,int y1,int x2,int y2, COLORREF col, float w, int alpha=255);
 
@@ -249,6 +260,7 @@ struct DeptCat { std::wstring id, name, manager, icon; };
 std::vector<DeptCat> loadDepts();
 bool addDept(const DeptCat& c, std::wstring& err);
 bool removeDept(const std::wstring& id);
+void seedDefaultDepts();   // ensure the «پذیرش» default category exists
 //  Extended employee profile (beyond the login User record).
 struct EmpProfile {
     std::wstring username, nationalId, fatherName, address, landline,
@@ -261,12 +273,32 @@ void       setUserOnline(const std::wstring& username, bool on);
 
 // ------------------------------------------------------------------ kartabl --
 //  Cartable / inbox messages pushed from management to a user (or broadcast).
-struct KMsg { std::wstring from, to, text, time; bool seen; };
+//  v1.4.1: messages carry a severity TYPE so the cartable can colour-code them:
+//    0 = عادی   (green / safe)
+//    1 = فوری   (yellow / warning)
+//    2 = بحرانی (red / error)
+enum { KMSG_NORMAL=0, KMSG_URGENT=1, KMSG_CRITICAL=2 };
+struct KMsg { std::wstring from, to, text, time; bool seen; int type; };
 std::vector<KMsg> loadMessages(const std::wstring& forUser);
+//  legacy 3-arg push (type defaults to عادی) and the new typed push.
 void  pushMessage(const std::wstring& from, const std::wstring& to,
                   const std::wstring& text);
+void  pushMessageT(const std::wstring& from, const std::wstring& to,
+                   const std::wstring& text, int type);
 int   unseenMessageCount(const std::wstring& forUser);
 void  markMessagesSeen(const std::wstring& forUser);
+
+// ------------------------------------------------- settings-change requests --
+//  v1.4.1: when a reception workstation changes printer / design settings, a
+//  change-request record is written so management sees who / which system /
+//  what changed (with date+time) under a red notification badge.
+//  data\setreq.dat:  user|system|change|profile|time|seen
+struct SetReq { std::wstring user, system, change, profile, time; bool seen; };
+std::vector<SetReq> loadSetReqs();
+void  pushSetReq(const std::wstring& user, const std::wstring& system,
+                 const std::wstring& change, const std::wstring& profile);
+int   unseenSetReqCount();
+void  markSetReqsSeen();
 
 // edit subclass: Enter / Tab => next field
 void enableEnterNavigation(HWND ctl);
