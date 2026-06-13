@@ -8,6 +8,8 @@
 #include "app.h"
 #include <commctrl.h>
 #include <stdio.h>
+#include <algorithm>
+#include <utility>
 
 #define RC_CLASS   L"AzReception"
 #define TABPG_CLASS L"AzRecTab"
@@ -452,70 +454,131 @@ static void resetForm(TabPage* t){
 //  line. The portal page is the placeholder for future messages pushed by the
 //  clinic management panel; the empty page invites the user to start a task.
 // ----- the cartable (کارتابل): a real inbox of management messages ----------
-static void drawCartable(HDC dc, const RECT& rc){
-    gpGradRoundRect(dc,(RECT&)rc,0,g_theme.bg,g_theme.bg2,CLR_INVALID);
-    SetBkMode(dc,TRANSPARENT);
-    int pad=S(24);
-    RECT panel={rc.left+pad, rc.top+pad, rc.right-pad, rc.bottom-pad};
-    gpShadow(dc,panel,S(18),S(22),50);
-    gpFillAlpha(dc,panel,S(18),g_theme.surfaceTop,235);
-    gpRoundRect(dc,panel,S(18),CLR_INVALID,g_theme.border,255);
+//  v2: messages are drawn as fixed-size RECTANGLE TILES laid side-by-side and
+//  wrapping into rows (not full-width lines). Pinned messages float to the
+//  front; the rest are sorted by send date (newest first). Clicking a tile
+//  opens a context menu (پین کردن / دیدن / پاک کردن). The background is solid
+//  dark with NO gradient bleed so colours stay crisp on the dark theme.
+struct CartTile { RECT r; int disp; };       // disp = index into s_cartMsgs
+static std::vector<CartTile> s_cartTiles;    // hit-test map, rebuilt each paint
+static std::vector<KMsg>     s_cartMsgs;      // the list shown (sorted)
+static std::vector<int>      s_cartNF;        // display-pos → plain newest-first idx
 
-    // header
-    RECT hdr={panel.left,panel.top,panel.right,panel.top+S(56)};
-    gpGradRoundRect(dc,hdr,S(18),g_theme.accent2,g_theme.accent,CLR_INVALID);
-    RECT hdrB={panel.left,panel.top+S(30),panel.right,panel.top+S(56)};
+// load + sort: pinned first, then by send time (newest first). loadMessages
+// already returns oldest-first, so we reverse for newest-first then stable-
+// partition the pinned ones to the front. s_cartNF remembers each tile's
+// PLAIN newest-first index (what the data layer's pin/seen/delete expects).
+static void cartReload(){
+    auto raw=loadMessages(g_session.user.username);
+    std::reverse(raw.begin(),raw.end());     // newest first (by storage order)
+    // pair each message with its plain newest-first index, then stable-sort
+    std::vector<std::pair<KMsg,int>> v;
+    for(int i=0;i<(int)raw.size();i++) v.push_back({raw[i],i});
+    std::stable_sort(v.begin(),v.end(),
+        [](const std::pair<KMsg,int>&a,const std::pair<KMsg,int>&b){
+            return a.first.pinned && !b.first.pinned; });
+    s_cartMsgs.clear(); s_cartNF.clear();
+    for(auto&p:v){ s_cartMsgs.push_back(p.first); s_cartNF.push_back(p.second); }
+}
+static void drawCartable(HDC dc, const RECT& rc){
+    // solid dark background — no gradient bleed
+    { HBRUSH bg=CreateSolidBrush(g_theme.bg); FillRect(dc,(RECT*)&rc,bg); DeleteObject(bg); }
+    SetBkMode(dc,TRANSPARENT);
+    int pad=S(20);
+    RECT panel={rc.left+pad, rc.top+pad, rc.right-pad, rc.bottom-pad};
+    { HBRUSH pb=CreateSolidBrush(g_theme.surface); FillRect(dc,&panel,pb); DeleteObject(pb); }
+    gpRoundRect(dc,panel,S(16),CLR_INVALID,g_theme.border,255);
+
+    // header bar
+    RECT hdr={panel.left,panel.top,panel.right,panel.top+S(52)};
+    gpGradRoundRect(dc,hdr,S(16),g_theme.accent2,g_theme.accent,CLR_INVALID);
+    RECT hdrB={panel.left,panel.top+S(28),panel.right,panel.top+S(52)};
     gpGradRoundRect(dc,hdrB,0,g_theme.accent2,g_theme.accent,CLR_INVALID);
-    RECT bi={panel.right-S(48),panel.top+S(14),panel.right-S(20),panel.top+S(42)};
+    RECT bi={panel.right-S(44),panel.top+S(12),panel.right-S(18),panel.top+S(38)};
     drawIcon(dc,ICO_BELL,bi,RGB(255,255,255),S(2));
     SelectObject(dc,g_fTitle); SetTextColor(dc,RGB(255,255,255));
-    RECT tr={panel.left+S(20),panel.top+S(10),panel.right-S(56),panel.top+S(46)};
+    RECT tr={panel.left+S(20),panel.top+S(8),panel.right-S(52),panel.top+S(44)};
     DrawTextW(dc,L"کارتابل — پیام‌های مدیریت درمانگاه",-1,&tr,
         DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
 
-    auto msgs=loadMessages(g_session.user.username);
-    int y=panel.top+S(70);
-    if(msgs.empty()){
+    cartReload();
+    s_cartTiles.clear();
+    int topY=panel.top+S(64);
+    if(s_cartMsgs.empty()){
         SelectObject(dc,g_fUI); SetTextColor(dc,g_theme.textDim);
-        RECT er={panel.left+S(24),y,panel.right-S(24),y+S(40)};
+        RECT er={panel.left+S(24),topY,panel.right-S(24),topY+S(40)};
         DrawTextW(dc,L"در حال حاضر پیامی از مدیریت دریافت نشده است.",-1,&er,
             DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
         return;
     }
-    // newest first
-    for(int i=(int)msgs.size()-1;i>=0&& y<panel.bottom-S(20);i--){
-        KMsg& mm=msgs[i];
-        int ch=S(60);
-        RECT card={panel.left+S(16),y,panel.right-S(16),y+ch};
-        // severity colour: عادی=green / فوری=yellow / بحرانی=red
+    // tile grid metrics — responsive column count
+    int areaW = panel.right-panel.left-S(32);
+    int tileMinW = S(300);
+    int cols = areaW / (tileMinW+S(12)); if(cols<1) cols=1; if(cols>4) cols=4;
+    int gap  = S(12);
+    int tileW = (areaW - gap*(cols-1)) / cols;
+    int tileH = S(96);
+    int x0    = panel.right-S(16);            // RTL: lay out from the RIGHT edge
+    int col=0, row=0;
+    for(int i=0;i<(int)s_cartMsgs.size();i++){
+        KMsg& mm=s_cartMsgs[i];
+        int tx = x0 - (col+1)*tileW - col*gap;
+        int ty = topY + row*(tileH+gap);
+        if(ty>panel.bottom-tileH-S(8)) break;     // ran out of vertical room
+        RECT card={tx,ty,tx+tileW,ty+tileH};
+        s_cartTiles.push_back({card,(int)i});
+
         COLORREF sevCol = mm.type==KMSG_CRITICAL ? g_theme.danger
                         : mm.type==KMSG_URGENT   ? g_theme.warn
                         :                          g_theme.success;
         const wchar_t* sevLbl = mm.type==KMSG_CRITICAL ? L"بحرانی"
                               : mm.type==KMSG_URGENT   ? L"فوری"
                               :                          L"عادی";
+        // tile body: surface2 when unseen, surface when seen
         gpRoundRect(dc,card,S(10),
             mm.seen?g_theme.surface:g_theme.surface2,
             mm.seen?g_theme.border:sevCol,255);
-        // coloured severity stripe down the right edge (RTL leading edge)
-        RECT stripe={card.right-S(6),card.top+S(2),card.right-S(2),card.bottom-S(2)};
+        // severity stripe down the RIGHT (RTL leading) edge
+        RECT stripe={card.right-S(6),card.top+S(4),card.right-S(2),card.bottom-S(4)};
         gpRoundRect(dc,stripe,S(2),sevCol,CLR_INVALID,255);
+        // pinned badge (top-LEFT corner)
+        if(mm.pinned){
+            RECT pin={card.left+S(8),card.top+S(8),card.left+S(58),card.top+S(28)};
+            gpRoundRect(dc,pin,S(9),g_theme.accent,CLR_INVALID,255);
+            SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.accentText);
+            DrawTextW(dc,L"\U0001F4CC پین",-1,&pin,
+                DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX);
+        }
+        // unseen dot (top-right, before the stripe)
         if(!mm.seen){
-            RECT dot={card.right-S(30),card.top+S(8),card.right-S(18),card.top+S(20)};
+            RECT dot={card.right-S(28),card.top+S(8),card.right-S(16),card.top+S(20)};
             gpRoundRect(dc,dot,S(6),sevCol,CLR_INVALID,255);
         }
+        // header line: [severity] from — time
         SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.text);
-        RECT fr={card.left+S(14),card.top+S(6),card.right-S(40),card.top+S(28)};
-        std::wstring from=L"["+std::wstring(sevLbl)+L"] از: "+
-            (mm.from.empty()?std::wstring(L"مدیریت"):mm.from)+L"   •   "+mm.time;
-        DrawTextW(dc,from.c_str(),-1,&fr,
-            DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
-        SelectObject(dc,g_fUI); SetTextColor(dc,g_theme.textDim);
-        RECT br={card.left+S(14),card.top+S(28),card.right-S(14),card.bottom-S(4)};
-        DrawTextW(dc,mm.text.c_str(),-1,&br,
+        RECT fr={card.left+S(12),card.top+S(8),card.right-S(34),card.top+S(30)};
+        std::wstring head=L"["+std::wstring(sevLbl)+L"] "+
+            (mm.from.empty()?std::wstring(L"مدیریت"):mm.from);
+        DrawTextW(dc,head.c_str(),-1,&fr,
             DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
-        y+=ch+S(8);
+        // date line
+        SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
+        RECT dr={card.left+S(12),card.top+S(30),card.right-S(12),card.top+S(48)};
+        DrawTextW(dc,(L"\U0001F4C5 "+mm.time).c_str(),-1,&dr,
+            DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
+        // body text (wrapped to 2 lines)
+        SelectObject(dc,g_fUI); SetTextColor(dc,g_theme.text);
+        RECT br={card.left+S(12),card.top+S(50),card.right-S(12),card.bottom-S(8)};
+        DrawTextW(dc,mm.text.c_str(),-1,&br,
+            DT_RIGHT|DT_WORDBREAK|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS|DT_EDITCONTROL);
+
+        col++; if(col>=cols){ col=0; row++; }
     }
+}
+// hit-test a click against the cartable tiles → display index into s_cartMsgs
+static int cartHit(POINT pt){
+    for(auto& t:s_cartTiles) if(PtInRect(&t.r,pt)) return t.disp;
+    return -1;
 }
 static void drawTabPlaceholder(HDC dc, const RECT& rc, int kind){
     if(kind==TK_PORTAL){ drawCartable(dc,rc); return; }
@@ -985,6 +1048,33 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
     case WM_KEYDOWN:
         if(w==VK_F8){ printLastReceipt(h); return 0; }
         break;
+    case WM_LBUTTONDOWN: {
+        // cartable: clicking a message tile opens a پین/دیدن/پاک‌کردن menu
+        if(t && t->kind==TK_PORTAL){
+            POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
+            int disp=cartHit(pt);         // display index into s_cartMsgs
+            if(disp>=0 && disp<(int)s_cartMsgs.size() && disp<(int)s_cartNF.size()){
+                KMsg& mm=s_cartMsgs[disp];
+                int nf=s_cartNF[disp];    // plain newest-first index for data layer
+                HMENU mnu=CreatePopupMenu();
+                AppendMenuW(mnu,MF_STRING,1,
+                    mm.pinned?L"برداشتن پین":L"پین کردن");
+                AppendMenuW(mnu,MF_STRING|(mm.seen?MF_GRAYED:0),2,L"علامت دیده‌شده");
+                AppendMenuW(mnu,MF_SEPARATOR,0,NULL);
+                AppendMenuW(mnu,MF_STRING,3,L"پاک کردن");
+                POINT sp=pt; ClientToScreen(h,&sp);
+                int cmd=TrackPopupMenu(mnu,TPM_RETURNCMD|TPM_RIGHTBUTTON,
+                    sp.x,sp.y,0,h,NULL);
+                DestroyMenu(mnu);
+                std::wstring me=g_session.user.username;
+                if(cmd==1){ pinMessage(me,nf,!mm.pinned); }
+                else if(cmd==2){ seenOneMessage(me,nf); }
+                else if(cmd==3){ deleteOneMessage(me,nf); }
+                if(cmd){ InvalidateRect(h,NULL,FALSE); }
+            }
+            return 0;
+        }
+        break; }
     case WM_ERASEBKGND: return 1;
     case WM_PAINT: {
         PAINTSTRUCT ps; HDC dc0=BeginPaint(h,&ps);
