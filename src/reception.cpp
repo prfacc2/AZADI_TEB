@@ -33,6 +33,23 @@
 #define ID_F_CLOSE    644
 #define ID_F_INQUIRY  645   // استعلام بیمه با کد ملی
 #define ID_F_HASINS   646   // چک‌باکس «دارای بیمه» کنار کد ملی
+// ---- right info panel ids (v1.6.0) ----
+#define ID_F_ARCHIVE     650
+#define ID_F_ARCHIVE_GO  651
+#define ID_F_FILE        652
+#define ID_F_FILE_GO     653
+#define ID_F_BOOKNO      654
+#define ID_F_BOOKNO_CHK  655
+#define ID_F_VALID       656
+#define ID_F_VALID_AUTO  657
+#define ID_F_RXDATE      658
+#define ID_F_RXDATE_AUTO 659
+#define ID_F_SUPP_PANEL  660
+#define ID_F_SUPP_PCT    661
+#define ID_F_SUPP_GO     662
+#define ID_F_DOCCODE     663
+#define ID_F_DOCNAME     664
+#define ID_F_DOCSEARCH   665
 
 // ============================================================== TAB PAGE ===
 enum TabKind {
@@ -53,6 +70,14 @@ struct TabPage {
     HWND chkIns;             // «دارای بیمه» — کنار کد ملی، پیش‌فرض تیک‌خورده
     HWND appt;               // نوبت‌دهی child page (kind==TK_APPOINTMENT)
     std::vector<int> insAllowed;   // insurances this patient carries (inquiry)
+    // ---- right info panel (v1.6.0) ----
+    HWND eArchive, bArchiveGo;     // ش بایگانی + استعلام
+    HWND eFile,    bFileGo;        // ش پرونده + استعلام
+    HWND eBookNo;  HWND chkBookNo; // ش دفترچه + enable checkbox
+    HWND eValid;   HWND chkValidAuto;   // تاریخ اعتبار + اتوماتیک
+    HWND eRxDate;  HWND chkRxAuto;      // تاریخ نسخه + اتوماتیک
+    HWND cSuppPanel; HWND eSuppPct; HWND bSuppGo;  // بیمه مکمل + درصد + استعلام
+    HWND eDocCode, eDocName, bDocSearch;           // پزشک معالج
     // computed billing
     long long total,mainShare,patientShare,baseDiff,orgShare,paid;
     bool detached;
@@ -134,21 +159,37 @@ static const int RC_OUT = 18;   // outer page padding
 static const int RC_GAP = 16;   // gap between form card and billing card
 static const int RC_IN  = 22;   // inner card padding
 static const int BILL_W = 340;  // billing card width
+static const int INFO_W = 320;  // right info-panel width (v1.6.0)
 
-static void rcMetrics(int W, int& cardL, int& cardR, int& billL, int& billR,
-                      int& colW, int& xr, int& xl, bool& stacked){
+//  infoL/infoR give the right info-panel bounds (0 if it doesn't fit).
+static void rcMetrics2(int W, int& cardL, int& cardR, int& billL, int& billR,
+                       int& infoL, int& infoR, int& colW, int& xr, int& xl,
+                       bool& stacked){
     int pad=S(RC_OUT);
-    // billing/print card on the LEFT, patient form card on the RIGHT
+    // billing/print card on the LEFT, info panel on the RIGHT, form in middle
     billL = pad;
     billR = billL + S(BILL_W);
-    cardR = W - pad;
+    infoR = W - pad;
+    infoL = infoR - S(INFO_W);
     cardL = billR + S(RC_GAP);
+    cardR = infoL - S(RC_GAP);
     int fw = (cardR - S(RC_IN)) - (cardL + S(RC_IN));
     stacked = fw < S(320);
-    if(stacked){ billL = billR = 0; cardL = pad; fw = (cardR-S(RC_IN))-(cardL+S(RC_IN)); }
+    if(stacked){
+        // drop the side panels and let the form fill the page
+        billL = billR = 0; infoL = infoR = 0;
+        cardL = pad; cardR = W - pad;
+        fw = (cardR-S(RC_IN))-(cardL+S(RC_IN));
+    }
     colW = (fw - S(18))/2;
     xr = (cardR - S(RC_IN)) - colW;            // right column (RTL first field)
     xl = cardL + S(RC_IN);                     // left column
+}
+//  Back-compat wrapper for callers that don't need the info panel bounds.
+static void rcMetrics(int W, int& cardL, int& cardR, int& billL, int& billR,
+                      int& colW, int& xr, int& xl, bool& stacked){
+    int infoL,infoR;
+    rcMetrics2(W,cardL,cardR,billL,billR,infoL,infoR,colW,xr,xl,stacked);
 }
 //  Vertical metrics adapt to available height so the form never overflows on
 //  small / low-res monitors (responsive requirement).
@@ -176,8 +217,8 @@ static void tabPageLayout(HWND h, TabPage* t){
     RECT rc; GetClientRect(h,&rc);
     int W=rc.right, H=rc.bottom;
     if(W<=0 || H<=0) return;
-    int cardL,cardR,billL,billR,colW,xr,xl; bool stacked;
-    rcMetrics(W,cardL,cardR,billL,billR,colW,xr,xl,stacked);
+    int cardL,cardR,billL,billR,infoL,infoR,colW,xr,xl; bool stacked;
+    rcMetrics2(W,cardL,cardR,billL,billR,infoL,infoR,colW,xr,xl,stacked);
     int y0,step,rh; rcVMetrics(H,y0,step,rh);
     int formLeft = cardL+S(RC_IN);
     int formRight= cardR-S(RC_IN);
@@ -227,6 +268,56 @@ static void tabPageLayout(HWND h, TabPage* t){
         ShowWindow(t->bInquiry,SW_SHOW);
         ShowWindow(t->bPrtIns,SW_HIDE); ShowWindow(t->bPrtRx,SW_HIDE);
         ShowWindow(t->bPrtLast,SW_HIDE); ShowWindow(t->bClose,SW_HIDE);
+    }
+
+    // ====================== RIGHT INFO PANEL layout ======================
+    HWND infoCtls[]={t->eArchive,t->bArchiveGo,t->eFile,t->bFileGo,t->eBookNo,
+        t->chkBookNo,t->eValid,t->chkValidAuto,t->eRxDate,t->chkRxAuto,
+        t->cSuppPanel,t->eSuppPct,t->bSuppGo,t->eDocCode,t->eDocName,t->bDocSearch};
+    if(stacked || infoR<=infoL){
+        for(HWND c: infoCtls) if(c) ShowWindow(c,SW_HIDE);
+    } else {
+        for(HWND c: infoCtls) if(c) ShowWindow(c,SW_SHOW);
+        int ipad=S(16);
+        int iL=infoL+ipad, iR=infoR-ipad;
+        int iw=iR-iL;
+        int rh2=S(28), gp=S(6);
+        // y starts below: avatar(70) + identity(40) + chips(54) ≈ painted header
+        int y=S(16)+S(74)+S(40)+S(40)+S(8);   // ~ after avatar + نسخه + قبض/بارکد + P:S
+        // --- search keys group ---
+        y += S(26);  // group title
+        int btnW=S(78);
+        MoveWindow(t->bArchiveGo, iL, y, btnW, rh2, TRUE);
+        MoveWindow(t->eArchive,   iL+btnW+gp, y, iw-btnW-gp, rh2, TRUE);
+        y += rh2+gp;
+        MoveWindow(t->bFileGo,    iL, y, btnW, rh2, TRUE);
+        MoveWindow(t->eFile,      iL+btnW+gp, y, iw-btnW-gp, rh2, TRUE);
+        y += rh2+S(16);
+        // --- insurance block group ---
+        y += S(26);  // group title
+        // ش دفترچه + فعال checkbox
+        MoveWindow(t->chkBookNo, iL, y, S(64), rh2, TRUE);
+        MoveWindow(t->eBookNo,   iL+S(70), y, iw-S(70), rh2, TRUE);
+        y += rh2+gp;
+        // تاریخ اعتبار + اتوماتیک
+        MoveWindow(t->chkValidAuto, iL, y, S(86), rh2, TRUE);
+        MoveWindow(t->eValid,       iL+S(92), y, iw-S(92), rh2, TRUE);
+        y += rh2+gp;
+        // تاریخ نسخه + اتوماتیک
+        MoveWindow(t->chkRxAuto, iL, y, S(86), rh2, TRUE);
+        MoveWindow(t->eRxDate,   iL+S(92), y, iw-S(92), rh2, TRUE);
+        y += rh2+gp;
+        // بیمه مکمل + درصد + استعلام
+        MoveWindow(t->bSuppGo,    iL, y, btnW, rh2, TRUE);
+        MoveWindow(t->eSuppPct,   iL+btnW+gp, y, S(48), rh2, TRUE);
+        MoveWindow(t->cSuppPanel, iL+btnW+gp+S(54), y, iw-btnW-gp-S(54), rh2, TRUE);
+        y += rh2+S(16);
+        // --- پزشک معالج group ---
+        y += S(26);  // group title
+        MoveWindow(t->eDocCode, iL, y, iw, rh2, TRUE);
+        y += rh2+gp;
+        MoveWindow(t->bDocSearch, iL, y, btnW, rh2, TRUE);
+        MoveWindow(t->eDocName,   iL+btnW+gp, y, iw-btnW-gp, rh2, TRUE);
     }
 }
 
@@ -465,6 +556,96 @@ static void drawTabPlaceholder(HDC dc, const RECT& rc, int kind){
         DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
 }
 
+// ------------------------------------------------- right info-panel paint --
+//  Draws a round profile avatar with a GUEST icon coloured by the patient's
+//  gender (no real photo), the نسخه الکترونیک / قبض-بارکد chips, the «P : S»
+//  counters and the group titles for the search-keys / insurance / doctor
+//  blocks. The actual edit controls are positioned by tabPageLayout.
+static void drawGuestAvatar(HDC dc, int cx, int cy, int r, bool female){
+    COLORREF ring = female? RGB(0xE8,0x6A,0xA6) : RGB(0x4F,0x8E,0xF7);
+    // disc
+    HBRUSH br=CreateSolidBrush(g_theme.surface2);
+    HPEN pn=CreatePen(PS_SOLID,S(2),ring);
+    HGDIOBJ ob=SelectObject(dc,br), op=SelectObject(dc,pn);
+    Ellipse(dc,cx-r,cy-r,cx+r,cy+r);
+    // head + shoulders (guest silhouette)
+    HBRUSH brh=CreateSolidBrush(ring);
+    SelectObject(dc,brh);
+    SelectObject(dc,GetStockObject(NULL_PEN));
+    int hr=r*38/100;            // head radius
+    int hy=cy-r*22/100;         // head center y
+    Ellipse(dc,cx-hr,hy-hr,cx+hr,hy+hr);
+    // shoulders arc
+    int sw=r*78/100, sy=cy+r*10/100, sh=r*90/100;
+    Ellipse(dc,cx-sw,sy,cx+sw,sy+sh*2);
+    SelectObject(dc,op); SelectObject(dc,ob);
+    DeleteObject(br); DeleteObject(pn); DeleteObject(brh);
+}
+static void paintInfoGroup(HDC dc, int iL, int iR, int y, const wchar_t* title, int icon){
+    SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.accent);
+    int icoW=S(16);
+    RECT si={iR-icoW,y+S(1),iR,y+S(17)};
+    drawIcon(dc,icon,si,g_theme.accent,S(2));
+    RECT sr={iL,y,iR-icoW-S(6),y+S(18)};
+    DrawTextW(dc,title,-1,&sr,DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+    HPEN pn=CreatePen(PS_SOLID,1,g_theme.border);
+    HGDIOBJ op=SelectObject(dc,pn);
+    MoveToEx(dc,iL,y+S(20),0); LineTo(dc,iR,y+S(20));
+    SelectObject(dc,op); DeleteObject(pn);
+}
+static void paintInfoPanel(HDC dc, TabPage* t, int infoL, int infoR, int H){
+    RECT card={infoL,S(16),infoR,H-S(16)};
+    fillRoundRect(dc,card,S(16),g_theme.surface,g_theme.border);
+    int ipad=S(16);
+    int iL=infoL+ipad, iR=infoR-ipad;
+    // gender from the combo
+    bool female = (SendMessageW(t->cGender,CB_GETCURSEL,0,0)==1);
+    // --- avatar ---
+    int cx=(iL+iR)/2, cy=card.top+S(46), r=S(34);
+    drawGuestAvatar(dc,cx,cy,r,female);
+    // --- نسخه الکترونیک chip ---
+    int y=cy+r+S(10);
+    { RECT chip={iL,y,iR,y+S(26)};
+      fillRoundRect(dc,chip,S(8),g_theme.accent,CLR_INVALID);
+      SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.accentText);
+      DrawTextW(dc,L"نسخه الکترونیک",-1,&chip,
+          DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX); }
+    y+=S(32);
+    // --- قبض - ماه / بارکد ---
+    { RECT box={iL,y,iR,y+S(30)};
+      fillRoundRect(dc,box,S(8),g_theme.inputBg,g_theme.border);
+      SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
+      SYSTEMTIME st=iranNow(); int jy,jm,jd;
+      gregToJalali(st.wYear,st.wMonth,st.wDay,jy,jm,jd);
+      wchar_t b[64]; swprintf(b,64,L"قبض - ماه %d  /  بارکد",jm);
+      RECT tr=box; tr.right-=S(8);
+      DrawTextW(dc,toFaDigits(b).c_str(),-1,&tr,
+          DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX); }
+    y+=S(36);
+    // --- P : 0   S : 0 counters ---
+    { SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.text);
+      int pCount=countTodayReceptions();
+      wchar_t b[40]; swprintf(b,40,L"P : %d        S : %d",pCount,detectShift());
+      RECT tr={iL,y,iR,y+S(20)};
+      DrawTextW(dc,toFaDigits(b).c_str(),-1,&tr,
+          DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX); }
+    y+=S(28);
+    // group titles align with tabPageLayout's y progression
+    paintInfoGroup(dc,iL,iR,y,L"کلیدهای جستجو",ICO_ID);
+    int rh2=S(28), gp=S(6);
+    y += S(26) + (rh2+gp)*2 + S(16);
+    paintInfoGroup(dc,iL,iR,y,L"بیمه",ICO_SHIELD);
+    y += S(26) + (rh2+gp)*4 + S(16);
+    paintInfoGroup(dc,iL,iR,y,L"پزشک معالج",ICO_CROSS_MED);
+    // --- انجام دهنده (current user) at the very bottom ---
+    { SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
+      std::wstring who=L"انجام دهنده: "+
+          (g_session.user.fullname.empty()?g_session.user.username:g_session.user.fullname);
+      RECT tr={iL,card.bottom-S(26),iR,card.bottom-S(8)};
+      DrawTextW(dc,who.c_str(),-1,&tr,
+          DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX); }
+}
+
 // ----------------------------------------------------------- tab page proc -
 static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
     TabPage* t=(TabPage*)GetWindowLongPtrW(h,GWLP_USERDATA);
@@ -567,6 +748,57 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             SendMessageW(cbsArr[i],WM_SETFONT,(WPARAM)g_fUI,TRUE);
         // default patient type = سرپایی (most common), triggers tariff auto-fill
         SendMessageW(t->cPType,CB_SETCURSEL,1,0);
+
+        // ====================== RIGHT INFO PANEL (v1.6.0) ====================
+        // search keys
+        t->eArchive  =CreateWindowExW(0,L"EDIT",L"",es|ES_NUMBER,0,0,10,10,h,(HMENU)ID_F_ARCHIVE,g_hInst,0);
+        t->bArchiveGo=createFlatButton(h,ID_F_ARCHIVE_GO,L"استعلام",ICO_NONE,BS_OUTLINE,0,0,10,10);
+        t->eFile     =CreateWindowExW(0,L"EDIT",L"",es|ES_NUMBER,0,0,10,10,h,(HMENU)ID_F_FILE,g_hInst,0);
+        t->bFileGo   =createFlatButton(h,ID_F_FILE_GO,L"استعلام",ICO_NONE,BS_OUTLINE,0,0,10,10);
+        // insurance block
+        t->eBookNo   =CreateWindowExW(0,L"EDIT",L"",es|ES_NUMBER,0,0,10,10,h,(HMENU)ID_F_BOOKNO,g_hInst,0);
+        t->chkBookNo =CreateWindowExW(0,L"BUTTON",L"فعال",
+            WS_CHILD|WS_VISIBLE|BS_AUTOCHECKBOX|BS_RIGHTBUTTON|BS_RIGHT,0,0,10,10,h,(HMENU)ID_F_BOOKNO_CHK,g_hInst,0);
+        t->eValid    =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)ID_F_VALID,g_hInst,0);
+        t->chkValidAuto=CreateWindowExW(0,L"BUTTON",L"اتوماتیک",
+            WS_CHILD|WS_VISIBLE|BS_AUTOCHECKBOX|BS_RIGHTBUTTON|BS_RIGHT,0,0,10,10,h,(HMENU)ID_F_VALID_AUTO,g_hInst,0);
+        t->eRxDate   =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)ID_F_RXDATE,g_hInst,0);
+        t->chkRxAuto =CreateWindowExW(0,L"BUTTON",L"اتوماتیک",
+            WS_CHILD|WS_VISIBLE|BS_AUTOCHECKBOX|BS_RIGHTBUTTON|BS_RIGHT,0,0,10,10,h,(HMENU)ID_F_RXDATE_AUTO,g_hInst,0);
+        t->cSuppPanel=createThemedCombo(h,ID_F_SUPP_PANEL);
+        t->eSuppPct  =CreateWindowExW(0,L"EDIT",L"",es|ES_NUMBER,0,0,10,10,h,(HMENU)ID_F_SUPP_PCT,g_hInst,0);
+        t->bSuppGo   =createFlatButton(h,ID_F_SUPP_GO,L"استعلام",ICO_NONE,BS_OUTLINE,0,0,10,10);
+        // پزشک معالج
+        t->eDocCode  =CreateWindowExW(0,L"EDIT",L"",es|ES_NUMBER,0,0,10,10,h,(HMENU)ID_F_DOCCODE,g_hInst,0);
+        t->eDocName  =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)ID_F_DOCNAME,g_hInst,0);
+        t->bDocSearch=createFlatButton(h,ID_F_DOCSEARCH,L"جستجو",ICO_NONE,BS_OUTLINE,0,0,10,10);
+        // fonts + behaviour
+        HWND infoEds[]={t->eArchive,t->eFile,t->eBookNo,t->eValid,t->eRxDate,
+                        t->eSuppPct,t->eDocCode,t->eDocName};
+        for(HWND e: infoEds){ SendMessageW(e,WM_SETFONT,(WPARAM)g_fUI,TRUE); enableEnterNavigation(e); }
+        enableAutoDir(t->eDocName);
+        SendMessageW(t->eValid,EM_SETLIMITTEXT,10,0);  enableDateMask(t->eValid);
+        SendMessageW(t->eRxDate,EM_SETLIMITTEXT,10,0); enableDateMask(t->eRxDate);
+        SendMessageW(t->cSuppPanel,WM_SETFONT,(WPARAM)g_fUI,TRUE);
+        for(int i=0;i<N_SUPP;i++)
+            SendMessageW(t->cSuppPanel,CB_ADDSTRING,0,(LPARAM)SUPP_INSURANCES[i].name);
+        SendMessageW(t->cSuppPanel,CB_SETCURSEL,0,0);
+        HWND infoChks[]={t->chkBookNo,t->chkValidAuto,t->chkRxAuto};
+        for(HWND c: infoChks) SendMessageW(c,WM_SETFONT,(WPARAM)g_fSmall,TRUE);
+        // ش دفترچه disabled until its checkbox is ticked
+        EnableWindow(t->eBookNo,FALSE);
+        SendMessageW(t->chkValidAuto,BM_SETCHECK,BST_CHECKED,0);
+        SendMessageW(t->chkRxAuto,BM_SETCHECK,BST_CHECKED,0);
+        // اتوماتیک = current Iran date/time
+        SetWindowTextW(t->eValid, jalaliDateShort(iranNow()).c_str());
+        SetWindowTextW(t->eRxDate,jalaliDateShort(iranNow()).c_str());
+        EnableWindow(t->eValid,FALSE); EnableWindow(t->eRxDate,FALSE);
+        // doctor inquiry buttons sit on the surface (info panel) — blend corners
+        setFlatButtonBg(t->bArchiveGo,g_theme.surface);
+        setFlatButtonBg(t->bFileGo,   g_theme.surface);
+        setFlatButtonBg(t->bSuppGo,   g_theme.surface);
+        setFlatButtonBg(t->bDocSearch,g_theme.surface);
+
         recalc(t);
         return 0; }
     case WM_SIZE: if(t) tabPageLayout(h,t); return 0;
@@ -578,6 +810,10 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             setFlatButtonBg(t->bPrtLast,g_theme.surface);
             setFlatButtonBg(t->bClose,  g_theme.surface);
             setFlatButtonBg(t->bInquiry,g_theme.surface);
+            setFlatButtonBg(t->bArchiveGo,g_theme.surface);
+            setFlatButtonBg(t->bFileGo,   g_theme.surface);
+            setFlatButtonBg(t->bSuppGo,   g_theme.surface);
+            setFlatButtonBg(t->bDocSearch,g_theme.surface);
         }
         InvalidateRect(h,NULL,TRUE);
         return 0;
@@ -591,9 +827,10 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         return (LRESULT)g_brInput; }
     case WM_CTLCOLORSTATIC: {
         HDC dc=(HDC)w;
-        // The «دارای بیمه» checkbox sits on the form card (surface) — paint its
-        // label with surface bg + normal text so it blends with the card.
-        if(t && (HWND)l==t->chkIns){
+        // Checkboxes sit on a card (surface) — paint their labels with surface
+        // bg + normal text so they blend with the card (no white box).
+        if(t && ((HWND)l==t->chkIns || (HWND)l==t->chkBookNo ||
+                 (HWND)l==t->chkValidAuto || (HWND)l==t->chkRxAuto)){
             SetTextColor(dc,g_theme.text); SetBkColor(dc,g_theme.surface);
             return (LRESULT)g_brSurface;
         }
@@ -708,6 +945,42 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         }
         else if(id==ID_F_PRT_LAST) printLastReceipt(h);
         else if(id==ID_F_CLOSE) closeTab(t);
+        // ---- right info-panel handlers ----
+        else if(id==ID_F_BOOKNO_CHK && code==BN_CLICKED){
+            bool on=SendMessageW(t->chkBookNo,BM_GETCHECK,0,0)==BST_CHECKED;
+            EnableWindow(t->eBookNo,on);
+            if(on) SetFocus(t->eBookNo);
+        }
+        else if(id==ID_F_VALID_AUTO && code==BN_CLICKED){
+            bool on=SendMessageW(t->chkValidAuto,BM_GETCHECK,0,0)==BST_CHECKED;
+            EnableWindow(t->eValid,!on);
+            if(on) SetWindowTextW(t->eValid,jalaliDateShort(iranNow()).c_str());
+        }
+        else if(id==ID_F_RXDATE_AUTO && code==BN_CLICKED){
+            bool on=SendMessageW(t->chkRxAuto,BM_GETCHECK,0,0)==BST_CHECKED;
+            EnableWindow(t->eRxDate,!on);
+            if(on) SetWindowTextW(t->eRxDate,jalaliDateShort(iranNow()).c_str());
+        }
+        else if(id==ID_F_ARCHIVE_GO || id==ID_F_FILE_GO){
+            // archive/file-number inquiry: reuse the national-id inquiry path so a
+            // found record auto-fills the patient block (placeholder mapping).
+            doInquiry(t,h,true);
+            t->lastMsg=L"استعلام انجام شد."; t->msgCol=g_theme.accent;
+            InvalidateRect(h,NULL,FALSE);
+        }
+        else if(id==ID_F_SUPP_GO){
+            int si=(int)SendMessageW(t->cSuppPanel,CB_GETCURSEL,0,0);
+            if(si>=0 && si<N_SUPP){
+                SendMessageW(t->cSupp,CB_SETCURSEL,si,0);
+                wchar_t pb[16]; swprintf(pb,16,L"%d",SUPP_INSURANCES[si].pct);
+                SetWindowTextW(t->eSuppPct,toFaDigits(pb).c_str());
+                recalc(t); InvalidateRect(h,NULL,FALSE);
+            }
+        }
+        else if(id==ID_F_DOCSEARCH){
+            t->lastMsg=L"جستجوی پزشک معالج در دست توسعه است.";
+            t->msgCol=g_theme.textDim; InvalidateRect(h,NULL,FALSE);
+        }
         return 0; }
     case WM_KEYDOWN:
         if(w==VK_F8){ printLastReceipt(h); return 0; }
@@ -739,11 +1012,14 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             return 0;
         }
 
-        int cardL,cardR,billL,billR,colW,xr,xl; bool stacked;
-        rcMetrics(rc.right,cardL,cardR,billL,billR,colW,xr,xl,stacked);
+        int cardL,cardR,billL,billR,infoL,infoR,colW,xr,xl; bool stacked;
+        rcMetrics2(rc.right,cardL,cardR,billL,billR,infoL,infoR,colW,xr,xl,stacked);
         int y0,step,rh2; rcVMetrics(rc.bottom,y0,step,rh2);
         int formLeft = cardL+S(RC_IN), formRight = cardR-S(RC_IN);
         int fw = formRight-formLeft;
+
+        // ============ RIGHT INFO PANEL ============
+        if(!stacked && infoR>infoL) paintInfoPanel(dc,t,infoL,infoR,rc.bottom);
 
         // ============ FORM CARD (left, wide) ============
         RECT fcard={cardL,S(16),cardR,rc.bottom-S(16)};
