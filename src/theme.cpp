@@ -529,12 +529,39 @@ void setFlatButtonImage(HWND btn, int resId){
 //  with CBS_OWNERDRAWFIXED|CBS_HASSTRINGS and forwarding WM_DRAWITEM here paints
 //  every row with the theme palette and RTL-aligns Persian text.
 // ============================================================================
+// v1.7.0: subclass the combo so its NON-CLIENT frame uses a flat, theme-aware
+// border instead of the system's chunky 3-D edge (which looked like a thick
+// white box in dark mode). We draw our own 1-px rounded border over the frame
+// after the default paint, matching the input wells behind the control.
+static WNDPROC s_comboOldProc = NULL;
+static LRESULT CALLBACK themedComboProc(HWND h, UINT m, WPARAM w, LPARAM l){
+    LRESULT r = CallWindowProcW(s_comboOldProc, h, m, w, l);
+    if(m==WM_PAINT || m==WM_NCPAINT){
+        HDC dc=GetWindowDC(h);
+        if(dc){
+            RECT rc; GetClientRect(h,&rc);
+            // GetClientRect is client-origin; for window DC use window rect size
+            RECT wr; GetWindowRect(h,&wr);
+            RECT br={0,0,wr.right-wr.left,wr.bottom-wr.top};
+            HPEN pn=CreatePen(PS_SOLID,1,g_theme.border);
+            HGDIOBJ op=SelectObject(dc,pn);
+            HGDIOBJ ob=SelectObject(dc,GetStockObject(NULL_BRUSH));
+            RoundRect(dc,br.left,br.top,br.right-1,br.bottom-1,S(8),S(8));
+            SelectObject(dc,op); SelectObject(dc,ob);
+            DeleteObject(pn);
+            ReleaseDC(h,dc);
+        }
+    }
+    return r;
+}
 HWND createThemedCombo(HWND parent, int id){
     HWND c = CreateWindowExW(0, L"COMBOBOX", L"",
         WS_CHILD|WS_VISIBLE|WS_TABSTOP|WS_VSCROLL|
         CBS_DROPDOWNLIST|CBS_OWNERDRAWFIXED|CBS_HASSTRINGS,
         0,0,10,10, parent,(HMENU)(UINT_PTR)id, g_hInst,0);
     SendMessageW(c,WM_SETFONT,(WPARAM)g_fUI,TRUE);
+    WNDPROC old=(WNDPROC)SetWindowLongPtrW(c,GWLP_WNDPROC,(LONG_PTR)themedComboProc);
+    if(!s_comboOldProc) s_comboOldProc=old;
     return c;
 }
 static bool comboHasPersian(const wchar_t* s){
@@ -557,18 +584,37 @@ bool drawThemedComboItem(LPDRAWITEMSTRUCT dis){
     COLORREF bg = selected ? g_theme.accent : g_theme.inputBg;
     COLORREF fg = selected ? g_theme.accentText : g_theme.inputText;
     HBRUSH br=CreateSolidBrush(bg); FillRect(dc,&rc,br); DeleteObject(br);
-    if((int)dis->itemID>=0){
-        wchar_t buf[256]={0};
-        SendMessageW(dis->hwndItem,CB_GETLBTEXT,dis->itemID,(LPARAM)buf);
+    // itemID == -1 is the COLLAPSED SELECTION FIELD (the always-visible part of
+    // the combo). We must paint its text too, otherwise the chosen value would
+    // be invisible. Pull it from the current selection.
+    wchar_t buf[256]={0};
+    int item=(int)dis->itemID;
+    if(item<0) item=(int)SendMessageW(dis->hwndItem,CB_GETCURSEL,0,0);
+    if(item>=0){
+        SendMessageW(dis->hwndItem,CB_GETLBTEXT,item,(LPARAM)buf);
         SetBkMode(dc,TRANSPARENT);
         SetTextColor(dc,fg);
         HGDIOBJ of=SelectObject(dc,g_fUI);
-        RECT tr=rc; tr.right-=6; tr.left+=6;
+        // leave room on the LEFT for the dropdown arrow when this is the
+        // collapsed field (RTL: arrow sits on the left, text on the right).
+        RECT tr=rc; tr.right-=6; tr.left+=((int)dis->itemID<0?S(22):6);
         UINT flags=DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX;
         if(comboHasPersian(buf)) flags|=DT_RIGHT|DT_RTLREADING; else flags|=DT_LEFT;
         DrawTextW(dc,buf,-1,&tr,flags);
         SelectObject(dc,of);
     }
-    if(dis->itemState & ODS_FOCUS) DrawFocusRect(dc,&rc);
+    // v1.7.0: draw a flat, theme-coloured dropdown arrow on the collapsed
+    // field so dark mode no longer shows the system's thick white arrow box.
+    if((int)dis->itemID<0){
+        int cx=rc.left+S(12), cy=(rc.top+rc.bottom)/2;
+        POINT tri[3]={ {cx-S(5),cy-S(2)}, {cx+S(5),cy-S(2)}, {cx,cy+S(4)} };
+        HBRUSH ab=CreateSolidBrush(g_theme.textDim);
+        HPEN   ap=CreatePen(PS_SOLID,1,g_theme.textDim);
+        HGDIOBJ ob=SelectObject(dc,ab), op=SelectObject(dc,ap);
+        Polygon(dc,tri,3);
+        SelectObject(dc,ob); SelectObject(dc,op);
+        DeleteObject(ab); DeleteObject(ap);
+    }
+    if((dis->itemState & ODS_FOCUS) && (int)dis->itemID>=0) DrawFocusRect(dc,&rc);
     return true;
 }

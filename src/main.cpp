@@ -18,12 +18,20 @@ HFONT g_fUI=0, g_fUIB=0, g_fSmall=0, g_fTitle=0, g_fBig=0, g_fHuge=0, g_fMono=0;
 //  settings button (left). Theme-toggle and check-for-update were removed from
 //  the header and moved INTO the settings panel per the redesign brief.
 static HWND s_bExit=0, s_bSettings=0, s_bCalc=0;
+//  v1.7.0: the «پذیرش جدید» / «نوبت‌دهی» / «تب جدید» actions were moved out of
+//  the reception tab strip and INTO this header so the navigation is clean and
+//  professional. They are shown only while the reception screen is active and
+//  are routed to it via receptionAction().
+static HWND s_bNewPat=0, s_bAppt=0, s_bNewTab=0;
 static HWND s_screen=0;
 static ScreenId s_curScreen = SC_HOME;
 
 #define ID_FR_EXIT     101
 #define ID_FR_SETTINGS 104
 #define ID_FR_CALC     105
+#define ID_FR_NEWPAT   106
+#define ID_FR_APPT     107
+#define ID_FR_NEWTAB   108
 #define TIMER_CLOCK  1
 
 // ------------------------------------------------------------------ fonts --
@@ -61,6 +69,7 @@ RECT frameContentRect(){
     return rc;
 }
 
+static void frameLayout(HWND h);   // fwd (header layout, defined below)
 // ----------------------------------------------------------- screen switch -
 void switchScreen(ScreenId id){
     if(s_screen){ DestroyWindow(s_screen); s_screen=0; }
@@ -74,6 +83,7 @@ void switchScreen(ScreenId id){
     RECT rc = frameContentRect();
     if(s_screen)
         MoveWindow(s_screen, rc.left, rc.top, rc.right-rc.left, rc.bottom-rc.top, TRUE);
+    frameLayout(g_hFrame);   // refresh header action buttons for the new screen
     InvalidateRect(g_hFrame, NULL, TRUE);
 }
 
@@ -237,6 +247,27 @@ HWND createHomeScreen(HWND frame){
 }
 
 // =============================================================== FRAME =====
+//  v1.7.0: show/position the reception action buttons in the header. They live
+//  on the LEFT, after the gear+calculator, and only while the reception screen
+//  is active (RTL: laid out left→right since they sit on the LEFT side).
+static void updateHeaderButtons(HWND h){
+    bool show = (s_curScreen==SC_RECEPTION);
+    ShowWindow(s_bNewPat, show?SW_SHOW:SW_HIDE);
+    ShowWindow(s_bAppt,   show?SW_SHOW:SW_HIDE);
+    ShowWindow(s_bNewTab, show?SW_SHOW:SW_HIDE);
+    if(!show) return;
+    int bh=S(38), pad=S(14);
+    int y=(topBarH()-bh)/2;
+    // start after the gear (pad) + calculator (pad+bh+gap) cluster
+    int x = pad + bh + S(8) + bh + S(18);
+    int wNew=S(132), wAppt=S(118), wTab=S(108), g=S(8);
+    MoveWindow(s_bNewPat, x,                       y, wNew,  bh, TRUE);
+    MoveWindow(s_bAppt,   x+wNew+g,                 y, wAppt, bh, TRUE);
+    MoveWindow(s_bNewTab, x+wNew+g+wAppt+g,         y, wTab,  bh, TRUE);
+    setFlatButtonBg(s_bNewPat, g_theme.headerTop);
+    setFlatButtonBg(s_bAppt,   g_theme.headerTop);
+    setFlatButtonBg(s_bNewTab, g_theme.headerTop);
+}
 static void frameLayout(HWND h){
     RECT rc; GetClientRect(h,&rc);
     int bh=S(38), pad=S(14);
@@ -252,6 +283,7 @@ static void frameLayout(HWND h){
     setFlatButtonBg(s_bExit,     g_theme.headerTop);
     setFlatButtonBg(s_bSettings, g_theme.headerTop);
     setFlatButtonBg(s_bCalc,     g_theme.headerTop);
+    updateHeaderButtons(h);
     if(s_screen){
         RECT cr=frameContentRect();
         MoveWindow(s_screen,cr.left,cr.top,cr.right-cr.left,cr.bottom-cr.top,TRUE);
@@ -265,9 +297,23 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         s_bExit     = createFlatButton(h, ID_FR_EXIT,    L"", ICO_X,      BS_GHOST,0,0,10,10);
         s_bSettings = createFlatButton(h, ID_FR_SETTINGS,L"", ICO_GEAR,   BS_GHOST,0,0,10,10);
         s_bCalc     = createFlatButton(h, ID_FR_CALC,    L"", ICO_CALC,   BS_GHOST,0,0,10,10);
+        // header action buttons (reception only) — created hidden, shown by
+        // updateHeaderButtons() when the reception screen becomes active.
+        s_bNewPat   = createFlatButton(h, ID_FR_NEWPAT, L"پذیرش جدید", ICO_PLUS, BS_PRIMARY,0,0,10,10,
+                          L"ثبت پذیرش بیمار جدید");
+        s_bAppt     = createFlatButton(h, ID_FR_APPT,   L"نوبت‌دهی",   ICO_CAL,  BS_OUTLINE,0,0,10,10,
+                          L"باز کردن صفحهٔ نوبت‌دهی");
+        s_bNewTab   = createFlatButton(h, ID_FR_NEWTAB, L"تب جدید",    ICO_TAB,  BS_OUTLINE,0,0,10,10,
+                          L"باز کردن یک تب خالی");
+        ShowWindow(s_bNewPat,SW_HIDE);
+        ShowWindow(s_bAppt,  SW_HIDE);
+        ShowWindow(s_bNewTab,SW_HIDE);
         setFlatButtonBg(s_bExit,     g_theme.headerTop);
         setFlatButtonBg(s_bSettings, g_theme.headerTop);
         setFlatButtonBg(s_bCalc,     g_theme.headerTop);
+        setFlatButtonBg(s_bNewPat,   g_theme.headerTop);
+        setFlatButtonBg(s_bAppt,     g_theme.headerTop);
+        setFlatButtonBg(s_bNewTab,   g_theme.headerTop);
         SetTimer(h, TIMER_CLOCK, g_lowSpec?1000:500, NULL);
         return 0;
     case WM_SIZE: frameLayout(h); return 0;
@@ -277,6 +323,9 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         setFlatButtonBg(s_bExit,     g_theme.headerTop);
         setFlatButtonBg(s_bSettings, g_theme.headerTop);
         setFlatButtonBg(s_bCalc,     g_theme.headerTop);
+        setFlatButtonBg(s_bNewPat,   g_theme.headerTop);
+        setFlatButtonBg(s_bAppt,     g_theme.headerTop);
+        setFlatButtonBg(s_bNewTab,   g_theme.headerTop);
         InvalidateRect(h,NULL,TRUE);
         return 0;
     case WM_TIMER:
@@ -306,6 +355,10 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         }
         else if(id==ID_FR_SETTINGS) openSettingsPanel(h);
         else if(id==ID_FR_CALC) openCalculator(h);
+        // v1.7.0: header reception-action buttons → route to reception screen
+        else if(id==ID_FR_NEWPAT) receptionAction(RA_NEWPAT);
+        else if(id==ID_FR_APPT)   receptionAction(RA_APPOINTMENT);
+        else if(id==ID_FR_NEWTAB) receptionAction(RA_NEWTAB);
         return 0; }
     case WM_KEYDOWN: {
         // hidden admin: Ctrl + P + N held together (home screen only)

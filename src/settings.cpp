@@ -51,6 +51,19 @@ struct SetState {
 };
 static HWND s_set = NULL;
 static SetState* s_st = NULL;
+// v1.7.0 perf: cache of the EXPENSIVE static layers (scrim + GDI+ shadow +
+// alpha blur + card gradient + cover + avatar + identity). Rebuilt only when
+// the window is sized or the theme flips — NOT on every mouse move. Hover
+// repaints just blit this cache for the dirty strip, then redraw the rows.
+static HDC     s_bgDC  = NULL;
+static HBITMAP s_bgBmp = NULL;
+static HGDIOBJ s_bgOld = NULL;
+static int     s_bgW=0, s_bgH=0;
+static void freeBgCache(){
+    if(s_bgDC){ SelectObject(s_bgDC,s_bgOld); DeleteDC(s_bgDC); s_bgDC=NULL; }
+    if(s_bgBmp){ DeleteObject(s_bgBmp); s_bgBmp=NULL; }
+    s_bgW=s_bgH=0;
+}
 
 // ---- geometry: a centered card -------------------------------------------
 static int cardW(){ return S(460); }
@@ -82,6 +95,28 @@ static int hitRow(HWND h, POINT pt){
         if(PtInRect(&r,pt)) return s_st->rows[i].id;
     }
     return 0;
+}
+// v1.7.0 perf: return the on-screen rectangle for a hot-id (a row, the close
+// button, or nothing). Used so WM_MOUSEMOVE invalidates ONLY the small region
+// whose hover state changed — never the whole full-screen scrim/shadow/blur
+// (that full repaint caused the stuttering on the settings window).
+static bool hotRectFor(HWND h, int id, RECT& out){
+    if(id==0 || id==-1) return false;
+    RECT card=cardRect(h);
+    if(id==-2){ // close (×) button top-left
+        out = {card.left+S(10),card.top+S(10),card.left+S(44),card.top+S(44)};
+        return true;
+    }
+    if(!s_st) return false;
+    for(size_t i=0;i<s_st->rows.size();i++){
+        if(s_st->rows[i].id==id){
+            RECT r=rowRect(card,(int)i);
+            // pad a couple px so the rounded border/hover ring is fully covered
+            out = {r.left-S(2),r.top-S(2),r.right+S(2),r.bottom+S(2)};
+            return true;
+        }
+    }
+    return false;
 }
 
 // position the server edit box (only shown for admin/manage) ----------------
@@ -171,11 +206,17 @@ static void drawValueChip(HDC dc, RECT row, const wchar_t* val){
     SelectObject(dc,of);
 }
 
-static void paintPanel(HWND h, HDC dc0){
+// Build the static (expensive) background into the cache DC. Called only on
+// open / size / theme change — never on hover.
+static void buildBgCache(HWND h, HDC ref){
     RECT rc; GetClientRect(h,&rc);
-    HDC dc=CreateCompatibleDC(dc0);
-    HBITMAP bmp=CreateCompatibleBitmap(dc0,rc.right,rc.bottom);
-    HGDIOBJ obm=SelectObject(dc,bmp);
+    if(rc.right<=0||rc.bottom<=0) return;
+    freeBgCache();
+    s_bgDC=CreateCompatibleDC(ref);
+    s_bgBmp=CreateCompatibleBitmap(ref,rc.right,rc.bottom);
+    s_bgOld=SelectObject(s_bgDC,s_bgBmp);
+    s_bgW=rc.right; s_bgH=rc.bottom;
+    HDC dc=s_bgDC;
 
     // dim scrim
     { HBRUSH sb=CreateSolidBrush(g_dark?RGB(6,9,14):RGB(28,36,48));
@@ -199,9 +240,8 @@ static void paintPanel(HWND h, HDC dc0){
     RECT coverBot={card.left,card.top+S(60),card.right,card.top+S(96)};
     gpGradRoundRect(dc,coverBot,0,g_theme.accent2,g_theme.accent,CLR_INVALID);
 
-    // close (×) top-left
+    // close (×) icon top-left (the hover highlight is drawn live on top)
     { RECT cb={card.left+S(14),card.top+S(14),card.left+S(40),card.top+S(40)};
-      if(s_st && s_st->hot==-2) gpRoundRect(dc,cb,S(8),RGB(255,255,255),CLR_INVALID,60);
       RECT ci={cb.left+S(5),cb.top+S(5),cb.right-S(5),cb.bottom-S(5)};
       drawIcon(dc,ICO_X,ci,RGB(255,255,255),S(2)); }
 
@@ -241,8 +281,20 @@ static void paintPanel(HWND h, HDC dc0){
     RECT srr={card.left+S(16),nr.bottom,card.right-S(16),nr.bottom+S(22)};
     DrawTextW(dc,sub.c_str(),-1,&srr,
         DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+}
 
-    // rows
+// Draw the interactive rows (and live close-button hover) onto dc, clipped by
+// the caller. Cheap enough to run on every hover change.
+static void paintRows(HWND h, HDC dc){
+    RECT card=cardRect(h);
+    SetBkMode(dc,TRANSPARENT);
+    // live close (×) hover highlight (icon itself lives in the cached bg)
+    if(s_st && s_st->hot==-2){
+        RECT cb={card.left+S(14),card.top+S(14),card.left+S(40),card.top+S(40)};
+        gpRoundRect(dc,cb,S(8),RGB(255,255,255),CLR_INVALID,60);
+        RECT ci={cb.left+S(5),cb.top+S(5),cb.right-S(5),cb.bottom-S(5)};
+        drawIcon(dc,ICO_X,ci,RGB(255,255,255),S(2));
+    }
     if(s_st){
         for(size_t i=0;i<s_st->rows.size();i++){
             RowDef& rd=s_st->rows[i];
@@ -279,8 +331,36 @@ static void paintPanel(HWND h, HDC dc0){
             }
         }
     }
+}
 
-    BitBlt(dc0,0,0,rc.right,rc.bottom,dc,0,0,SRCCOPY);
+// Composite: blit the cached static background for the dirty strip, draw the
+// (cheap) rows on top, then copy out. On open / size / theme change the cache
+// is (re)built first; on hover it is reused, so the heavy GDI+ scrim/shadow/
+// gradient work runs ONCE, not on every mouse move.
+static void paintPanel(HWND h, HDC dc0, const RECT* dirty){
+    RECT rc; GetClientRect(h,&rc);
+    if(rc.right<=0||rc.bottom<=0) return;
+    if(!s_bgDC || s_bgW!=rc.right || s_bgH!=rc.bottom)
+        buildBgCache(h,dc0);
+    if(!s_bgDC) return;
+
+    HDC dc=CreateCompatibleDC(dc0);
+    HBITMAP bmp=CreateCompatibleBitmap(dc0,rc.right,rc.bottom);
+    HGDIOBJ obm=SelectObject(dc,bmp);
+
+    RECT d = (dirty && dirty->right>dirty->left && dirty->bottom>dirty->top)
+             ? *dirty : rc;
+    int dw=d.right-d.left, dh=d.bottom-d.top;
+    // 1) bring back the cached static layers for the dirty region only
+    BitBlt(dc,d.left,d.top,dw,dh,s_bgDC,d.left,d.top,SRCCOPY);
+    // 2) draw the interactive rows on top (GDI clip keeps this to the strip)
+    HRGN clip=CreateRectRgn(d.left,d.top,d.right,d.bottom);
+    SelectClipRgn(dc,clip);
+    paintRows(h,dc);
+    SelectClipRgn(dc,NULL); DeleteObject(clip);
+    // 3) copy the composited strip to the screen
+    BitBlt(dc0,d.left,d.top,dw,dh,dc,d.left,d.top,SRCCOPY);
+
     SelectObject(dc,obm); DeleteObject(bmp); DeleteDC(dc);
 }
 
@@ -289,19 +369,37 @@ static LRESULT CALLBACK setProc(HWND h, UINT m, WPARAM w, LPARAM l){
     switch(m){
     case WM_ERASEBKGND: return 1;
     case WM_PAINT: { PAINTSTRUCT ps; HDC dc=BeginPaint(h,&ps);
-        paintPanel(h,dc); EndPaint(h,&ps); return 0; }
-    case WM_APP_THEME: InvalidateRect(h,NULL,FALSE); return 0;
+        // pass the invalidated rect so hover repaints copy only that strip
+        RECT dirty=ps.rcPaint;
+        paintPanel(h,dc, &dirty); EndPaint(h,&ps); return 0; }
+    case WM_APP_THEME: freeBgCache(); InvalidateRect(h,NULL,FALSE); return 0;
     case WM_MOUSEMOVE: {
         POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
         RECT card=cardRect(h);
         int hr;
         RECT cb={card.left+S(14),card.top+S(14),card.left+S(40),card.top+S(40)};
         if(PtInRect(&cb,pt)) hr=-2; else hr=hitRow(h,pt);
-        if(s_st && hr!=s_st->hot){ s_st->hot=hr; InvalidateRect(h,NULL,FALSE); }
+        if(s_st && hr!=s_st->hot){
+            // v1.7.0 perf: repaint ONLY the two affected rectangles (the row we
+            // left + the row we entered) instead of the whole scrim. This stops
+            // the heavy full-screen redraw (shadow+gradient+alpha) on every
+            // mouse move that made the panel stutter.
+            RECT oldR, newR;
+            bool haveOld=hotRectFor(h,s_st->hot,oldR);
+            int old=s_st->hot; s_st->hot=hr;
+            bool haveNew=hotRectFor(h,hr,newR);
+            (void)old;
+            if(haveOld) InvalidateRect(h,&oldR,FALSE);
+            if(haveNew) InvalidateRect(h,&newR,FALSE);
+        }
         TRACKMOUSEEVENT te={sizeof(te),TME_LEAVE,h,0}; TrackMouseEvent(&te);
         return 0; }
     case WM_MOUSELEAVE:
-        if(s_st && s_st->hot!=0){ s_st->hot=0; InvalidateRect(h,NULL,FALSE); }
+        if(s_st && s_st->hot!=0){
+            RECT oldR; bool haveOld=hotRectFor(h,s_st->hot,oldR);
+            s_st->hot=0;
+            if(haveOld) InvalidateRect(h,&oldR,FALSE);
+        }
         return 0;
     case WM_LBUTTONDOWN: {
         POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
@@ -334,8 +432,9 @@ static LRESULT CALLBACK setProc(HWND h, UINT m, WPARAM w, LPARAM l){
     case WM_CTLCOLOREDIT: { HDC dc=(HDC)w;
         SetTextColor(dc,g_theme.inputText); SetBkColor(dc,g_theme.inputBg);
         return (LRESULT)g_brInput; }
-    case WM_SIZE: layoutServerEdit(h); InvalidateRect(h,NULL,FALSE); return 0;
+    case WM_SIZE: freeBgCache(); layoutServerEdit(h); InvalidateRect(h,NULL,FALSE); return 0;
     case WM_DESTROY:
+        freeBgCache();
         if(s_st){ delete s_st; s_st=NULL; }
         s_set=NULL; return 0;
     }

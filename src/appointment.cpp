@@ -70,9 +70,12 @@ struct ApptUI {
     bool foreign;                    // foreign-national / newborn
     bool kindInPerson;               // true=حضوری false=غیرحضوری
     int  editSrc;                    // source index being edited (-1 = new)
+    bool idChecked;                  // an inquiry was performed
+    bool idVerified;                 // a trusted source verified the identity
     std::wstring statusMsg; COLORREF statusCol;
     ApptUI():page(0),sel(-1),hot(-1),scroll(0),patientOn(false),foreign(false),
-        kindInPerson(true),editSrc(-1),statusCol(0){}
+        kindInPerson(true),editSrc(-1),idChecked(false),idVerified(false),
+        statusCol(0){}
 };
 
 // ============================================================== metrics =====
@@ -149,6 +152,7 @@ static void resetPatient(ApptUI* u){
     SendMessageW(u->pGender, CB_SETCURSEL, 0, 0);
     SendMessageW(u->pForeign, BM_SETCHECK, BST_UNCHECKED, 0);
     u->foreign = false;
+    u->idChecked = false; u->idVerified = false;
     setPatientEnabled(u, false);
 }
 
@@ -158,10 +162,12 @@ static void lookupPatient(ApptUI* u){
     std::wstring nid = trim(buf);
     bool foreign = (SendMessageW(u->pForeign, BM_GETCHECK, 0, 0) == BST_CHECKED);
     u->foreign = foreign;
+    u->idChecked = true; u->idVerified = false;
     if(foreign){
         // foreign nationals / newborns are NOT in the registry — just enable the
         // fields so the operator can type the identity manually.
         setPatientEnabled(u, true);
+        u->idChecked = false;   // manual entry is expected, not a failed verify
         u->statusMsg = L"تابعیت غیرایرانی/نوزاد — مشخصات را دستی وارد کنید.";
         u->statusCol = g_theme.warn;
         SetFocus(u->pFirst);
@@ -169,25 +175,37 @@ static void lookupPatient(ApptUI* u){
         return;
     }
     if(!validNationalId(nid)){
-        u->statusMsg = L"کد ملی نامعتبر است.";
+        setPatientEnabled(u, true);   // allow manual entry, no guessing
+        u->statusMsg = L"کد ملی نامعتبر است؛ مشخصات را دستی وارد کنید (قاب قرمز).";
         u->statusCol = g_theme.danger;
+        SetFocus(u->pFirst);
         InvalidateRect(u->page, NULL, FALSE);
         return;
     }
     CitizenInfo c = lookupCitizen(nid);
     if(!c.found){
-        u->statusMsg = L"اطلاعاتی برای این کد ملی یافت نشد.";
+        // No trusted source verified it → manual entry, never fabricate.
+        setPatientEnabled(u, true);
+        if(c.lookupFailed)
+            u->statusMsg = L"استعلام برخط ناموفق بود؛ مشخصات را دستی وارد کنید.";
+        else
+            u->statusMsg = L"هویت تأیید نشد؛ نام و نام خانوادگی را دستی وارد کنید (قاب قرمز).";
         u->statusCol = g_theme.danger;
+        SetFocus(u->pFirst);
         InvalidateRect(u->page, NULL, FALSE);
         return;
     }
     setPatientEnabled(u, true);
-    SetWindowTextW(u->pFirst,  c.firstName.c_str());
-    SetWindowTextW(u->pLast,   c.lastName.c_str());
-    SetWindowTextW(u->pFather, c.fatherName.c_str());
-    SetWindowTextW(u->pMobile, c.mobile.c_str());
-    SendMessageW(u->pGender, CB_SETCURSEL, (c.gender==L"زن")?1:0, 0);
-    u->statusMsg = L"مشخصات بیمار از ثبت احوال دریافت شد.";
+    u->idVerified = true;
+    if(!c.firstName.empty())  SetWindowTextW(u->pFirst,  c.firstName.c_str());
+    if(!c.lastName.empty())   SetWindowTextW(u->pLast,   c.lastName.c_str());
+    if(!c.fatherName.empty()) SetWindowTextW(u->pFather, c.fatherName.c_str());
+    if(!c.mobile.empty())     SetWindowTextW(u->pMobile, c.mobile.c_str());
+    if(c.gender==L"زن")  SendMessageW(u->pGender, CB_SETCURSEL, 1, 0);
+    else if(c.gender==L"مرد") SendMessageW(u->pGender, CB_SETCURSEL, 0, 0);
+    u->statusMsg = (c.source==CS_LOCAL)
+        ? L"مشخصات بیمار از سوابق همین درمانگاه بازیابی شد."
+        : L"مشخصات بیمار از سامانهٔ معتبر دریافت شد.";
     u->statusCol = g_theme.success;
     InvalidateRect(u->page, NULL, FALSE);
 }
@@ -234,6 +252,15 @@ static void submitAppointment(ApptUI* u){
         return;
     }
     int q = saveAppointment(a);   // assigns queue no / time / day
+    // v1.7.0: remember the REAL identity the operator confirmed for next-time
+    // recall — never fabricated, only what was actually entered/verified here.
+    {
+        int gi=(int)SendMessageW(u->pGender,CB_GETCURSEL,0,0);
+        std::wstring gender = gi==1?L"زن":L"مرد";
+        wchar_t fb[128]; GetWindowTextW(u->pFather,fb,128);
+        rememberPatient(a.nationalId,a.firstName,a.lastName,trim(fb),
+            gender,L"",a.mobile,std::vector<int>());
+    }
     wchar_t mb[200];
     swprintf(mb,200,L"نوبت با شماره %d برای %s %s ثبت شد.",
         q, a.firstName.c_str(), a.lastName.c_str());
@@ -775,6 +802,24 @@ static void apPaint(HWND h, ApptUI* u, HDC dc){
     drawLabel(dc,rightColX,py+apRowH()*3-S(15),colW,L"تلفن همراه");
     drawLabel(dc,leftColX, py+apRowH()*3-S(15),colW,L"جنسیت");
     drawLabel(dc,leftColX, py+apRowH()*4-S(15),innerR-innerL,L"توضیحات");
+
+    // v1.7.0: when an inquiry could NOT verify the identity, draw a clear danger
+    // frame around the name (pFirst) and surname (pLast) edit boxes so the
+    // operator sees they must enter / re-check those by hand (no fabrication).
+    if(u->idChecked && !u->idVerified){
+        HWND warn[2]={u->pFirst,u->pLast};
+        for(HWND wctl:warn){
+            if(!wctl) continue;
+            RECT wr; GetWindowRect(wctl,&wr);
+            POINT a={wr.left,wr.top}, b={wr.right,wr.bottom};
+            ScreenToClient(h,&a); ScreenToClient(h,&b);
+            if(b.y<=a.y) continue;
+            RECT fr={a.x-S(3),a.y-S(3),b.x+S(3),b.y+S(3)};
+            fillRoundRect(dc,fr,S(6),CLR_INVALID,g_theme.danger);
+            RECT fr2={fr.left-1,fr.top-1,fr.right+1,fr.bottom+1};
+            fillRoundRect(dc,fr2,S(7),CLR_INVALID,g_theme.danger);
+        }
+    }
 
     // ---- status message line (above grid toolbar, on the left side) ----
     if(!u->statusMsg.empty()){

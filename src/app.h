@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.6.0"
+#define APP_VERSION_W   L"1.7.0"
 #define APP_NAME_W      L"\u0622\u0632\u0627\u062f\u06cc \u0637\u0628"   // آزادی طب
 #define APP_CLASS_W     L"AzadiTebFrame"
 
@@ -227,6 +227,13 @@ HWND createReceptionScreen(HWND frame);  // reception.cpp
 HWND createAdminScreen(HWND frame);      // admin.cpp
 HWND createManageScreen(HWND frame);     // admin.cpp
 
+// v1.7.0: header→reception action routing. The frame header (main.cpp) owns
+// the «پذیرش جدید» / «نوبت‌دهی» / «تب جدید» buttons and routes them to the
+// active reception screen via these helpers. RA_* names the requested action.
+enum RecAction { RA_NEWPAT=0, RA_APPOINTMENT=1, RA_NEWTAB=2 };
+HWND receptionWindow();                  // the live reception HWND (or NULL)
+void receptionAction(RecAction a);       // route a header action to reception
+
 // ---------------------------------------------------------------- dialogs --
 // role: 0 پذیرش / 1 مدیریت / 2 admin (hidden, prf)
 bool showLoginDialog(HWND parent, int role, User& out);
@@ -335,14 +342,37 @@ void enableAutoDir(HWND ctl);
 //  (name, father, gender, birth date, mobile) from the code so the whole
 //  reception / appointment workflow runs end-to-end with NO external API and
 //  is ready to be swapped for a real web-service call later.
+//  v1.7.0: identity is NEVER fabricated. `found` means a TRUSTED source returned
+//  a verified record (an online ثبت احوال web-service, or a locally-stored
+//  patient previously registered by an operator). When no trusted source can
+//  verify the code, `found` stays false and the UI must let the operator type
+//  the identity MANUALLY — it must not invent a name, gender, birth-date or
+//  insurance. `source` says where the data came from so the UI can show it.
+enum CitizenSource {
+    CS_NONE = 0,   // nothing known — manual entry required
+    CS_LOCAL,      // recalled from a patient previously registered here
+    CS_REGISTRY    // returned by a configured online registry web-service
+};
 struct CitizenInfo {
-    bool        found;
+    bool        found;          // true ONLY when a trusted source verified it
+    int         source;         // CitizenSource
+    bool        idValid;        // the 10-digit checksum is valid
+    bool        lookupTried;    // an online lookup was attempted
+    bool        lookupFailed;   // the online lookup failed/was unavailable
     std::wstring firstName, lastName, fatherName, gender, birthDate, mobile;
-    std::vector<int> insurances;   // INSURANCES[] indices the person carries
-    CitizenInfo():found(false){}
+    std::vector<int> insurances;   // INSURANCES[] indices VERIFIED for this person
+    CitizenInfo():found(false),source(CS_NONE),idValid(false),
+        lookupTried(false),lookupFailed(false){}
 };
 bool         validNationalId(const std::wstring& id);
 CitizenInfo  lookupCitizen(const std::wstring& nationalId);
+//  Persist a verified/manually-confirmed patient locally so the SAME national
+//  code recalls the SAME real identity next time (no fabrication, no randomness).
+void         rememberPatient(const std::wstring& nationalId,
+                 const std::wstring& firstName, const std::wstring& lastName,
+                 const std::wstring& fatherName, const std::wstring& gender,
+                 const std::wstring& birthDate, const std::wstring& mobile,
+                 const std::vector<int>& insurances);
 
 // ----------------------------------------------------------- doctors --------
 //  Doctors & their services for the appointment screen (file-backed, seeded

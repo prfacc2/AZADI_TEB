@@ -19,6 +19,10 @@
 #define ID_RC_CALC    501
 #define ID_RC_NEWTAB  502
 #define ID_RC_NEWPAT  503   // "پذیرش جدید" — clears the ACTIVE tab's form
+#define ID_RC_APPT    504   // "نوبت‌دهی" — focus (or open) the appointment tab
+//  v1.7.0: these three actions are now triggered from BUTTONS IN THE FRAME
+//  HEADER (main.cpp) and routed to this window via WM_COMMAND, so the tab
+//  strip stays clean. The header sends ID_RC_NEWPAT / ID_RC_APPT / ID_RC_NEWTAB.
 // per-tab form ids
 #define ID_F_FIRST    601   // base for sequential edits
 #define ID_F_GENDER   620
@@ -84,9 +88,23 @@ struct TabPage {
     long long total,mainShare,patientShare,baseDiff,orgShare,paid;
     bool detached;
     bool autoPrice;          // guard: ignore EN_CHANGE from our own auto-fill
+    //  v1.7.0: identity-verification state. After an inquiry, if NO trusted
+    //  source could verify the national code, we flag name+surname so the form
+    //  shows a clear validation (danger) border instead of fabricating data.
+    bool idChecked;          // an inquiry was performed
+    bool idVerified;         // a trusted source verified the identity
+    //  v1.7.0 cartable (کارتابل) view state — only meaningful for TK_PORTAL.
+    //   cartDetail : false → tile list, true → full message details view
+    //   cartSelDisp: the display index (into s_cartMsgs) being viewed
+    //   cartSelNF  : the plain newest-first index (for the data layer)
+    //   cartHotBtn : which detail-view button is hovered (0=none)
+    bool cartDetail;
+    int  cartSelDisp, cartSelNF, cartHotBtn;
     std::wstring lastMsg; COLORREF msgCol;
     TabPage():page(0),kind(TK_RECEPTION),appt(0),total(0),mainShare(0),patientShare(0),
-        baseDiff(0),orgShare(0),paid(0),detached(false),autoPrice(false),msgCol(0){}
+        baseDiff(0),orgShare(0),paid(0),detached(false),autoPrice(false),
+        idChecked(false),idVerified(false),
+        cartDetail(false),cartSelDisp(-1),cartSelNF(-1),cartHotBtn(0),msgCol(0){}
 };
 
 struct RecData {
@@ -95,7 +113,16 @@ struct RecData {
     int active;
     int hotTab, hotClose, hotDetach;     // hover indices
     int lastUnseen;                      // cartable poll state
-    RecData():active(-1),hotTab(-1),hotClose(-1),hotDetach(-1),lastUnseen(0){}
+    // v1.7.0: drag-and-drop tab reordering -----------------------------------
+    bool  dragArmed;     // mouse down on a tab body, may become a drag
+    bool  dragging;      // a reorder drag is in progress
+    int   dragIdx;       // index of the tab being dragged
+    POINT dragStart;     // where the press began (to apply a small threshold)
+    int   dragX;         // current mouse x (for the floating ghost)
+    int   dropIdx;       // computed insertion index (drop target)
+    RecData():active(-1),hotTab(-1),hotClose(-1),hotDetach(-1),lastUnseen(0),
+        dragArmed(false),dragging(false),dragIdx(-1),dragX(0),dropIdx(-1){
+        dragStart.x=dragStart.y=0; }
 };
 static RecData* s_rd = NULL;             // single reception screen at a time
 
@@ -240,10 +267,12 @@ static void tabPageLayout(HWND h, TabPage* t){
     // Section 3: نوبت و بیمه (rows 5..6)
     MoveWindow(t->cPType, xr, y0+5*step,   colW, S(200), TRUE);
     MoveWindow(t->cNType, xl, y0+5*step,   colW, S(200), TRUE);
-    // «دارای بیمه» checkbox sits ABOVE the insurance combo (right column),
-    // so unchecking it before picking insurance reads naturally top-to-bottom.
-    { int chkW=S(110);
-      MoveWindow(t->chkIns, xr, y0+6*step-S(20), chkW, S(18), TRUE); }
+    // «دارای بیمه» checkbox sits ABOVE the insurance combo (right column) and
+    // doubles as that field's header (the painted "بیمه اصلی" label is omitted
+    // here to avoid a checkbox-over-label collision). It spans the full column
+    // width so — with BS_RIGHTBUTTON|BS_RIGHT — its check glyph lines up with the
+    // RTL leading (right) edge of the combo directly below it.
+    MoveWindow(t->chkIns, xr, y0+6*step-S(20), colW, S(18), TRUE);
     MoveWindow(t->cIns,   xr, y0+6*step,   colW, S(240), TRUE);
     MoveWindow(t->cSupp,  xl, y0+6*step,   colW, S(240), TRUE);
     // Section 4: مبلغ (row 7)
@@ -324,70 +353,94 @@ static void tabPageLayout(HWND h, TabPage* t){
 }
 
 // ----- national-id insurance inquiry ---------------------------------------
-//  Validate an Iranian 10-digit national code (checksum) and derive a likely
-//  basic-insurance organisation.  A "real" online inquiry would POST to the
-//  configured server; offline we do the local validation + deterministic
-//  mapping so the workflow is identical and ready to swap for a web call.
-//  validNationalId() / lookupCitizen() now live in data_ext.cpp (shared with the
-//  appointment module). doInquiry() uses lookupCitizen() to auto-fill ALL the
-//  patient fields from the (offline) Civil-Registry and to detect when a patient
-//  carries 2 or 3 insurances — in which case it announces it and restricts the
-//  insurance combo to ONLY those organisations, highlighted in a distinct colour.
+//  Validate an Iranian 10-digit national code (checksum) and look the patient
+//  up against a TRUSTED source only. validNationalId() / lookupCitizen() live in
+//  data_ext.cpp (shared with the appointment module). doInquiry() uses
+//  lookupCitizen() to auto-fill the patient fields ONLY from a verified record
+//  (online registry web-service when configured, or the local store of
+//  previously-verified patients) and to detect when a patient carries 2 or 3
+//  insurances — in which case it announces it and restricts the insurance combo
+//  to ONLY those organisations, highlighted in a distinct colour.
+//  v1.7.0: no fabrication. We only fill fields when a TRUSTED source (online
+//  registry web-service or the local store of previously-verified patients)
+//  returns a real record. When nothing verifies the code we DO NOT guess — the
+//  name + surname wells turn into a danger/validation state and the operator
+//  enters the identity by hand (which is then remembered on save).
+static void rebuildInsuranceCombo(TabPage* t, const std::vector<int>& verified){
+    t->insAllowed = verified;
+    SendMessageW(t->cIns,CB_RESETCONTENT,0,0);
+    if(verified.size()>=2){
+        for(int ix : verified)
+            if(ix>=0 && ix<N_INSURANCES)
+                SendMessageW(t->cIns,CB_ADDSTRING,0,(LPARAM)INSURANCES[ix].name);
+        SendMessageW(t->cIns,CB_SETCURSEL,0,0);
+    } else {
+        for(int i=0;i<N_INSURANCES;i++)
+            SendMessageW(t->cIns,CB_ADDSTRING,0,(LPARAM)INSURANCES[i].name);
+        int idx = verified.empty()?0:verified[0];
+        if(idx<0||idx>=N_INSURANCES) idx=0;
+        SendMessageW(t->cIns,CB_SETCURSEL,idx,0);
+    }
+}
 static void doInquiry(TabPage* t, HWND h, bool quiet){
     wchar_t b[32]={0}; GetWindowTextW(t->eNid,b,32);
     std::wstring nid=trim(b);
+    t->idChecked=true; t->idVerified=false;
     if(!validNationalId(nid)){
+        t->insAllowed.clear();
         if(!quiet){
-            t->lastMsg=L"کد ملی نامعتبر است (۱۰ رقم و رقم کنترلی صحیح).";
-            t->msgCol=g_theme.danger; InvalidateRect(h,NULL,FALSE);
+            t->lastMsg=L"کد ملی نامعتبر است (۱۰ رقم و رقم کنترلی صحیح). مشخصات را دستی وارد کنید.";
+            t->msgCol=g_theme.danger;
         }
+        InvalidateRect(h,NULL,FALSE);
         return;
     }
     CitizenInfo c = lookupCitizen(nid);
     if(!c.found){
+        // No trusted source verified it → manual entry, no guessing.
+        t->insAllowed.clear();
+        // keep the full insurance list editable for manual selection
+        rebuildInsuranceCombo(t, std::vector<int>());
         if(!quiet){
-            t->lastMsg=L"اطلاعاتی برای این کد ملی یافت نشد.";
-            t->msgCol=g_theme.danger; InvalidateRect(h,NULL,FALSE);
+            if(c.lookupFailed)
+                t->lastMsg=L"استعلام برخط ناموفق بود (سرور در دسترس نیست). مشخصات را دستی وارد و بررسی کنید.";
+            else
+                t->lastMsg=L"هویت تأیید نشد؛ نام و نام خانوادگی را دستی وارد کنید (قاب قرمز).";
+            t->msgCol=g_theme.danger;
         }
+        recalc(t);
+        InvalidateRect(h,NULL,FALSE);
+        SetFocus(t->eFirst);
         return;
     }
-    // auto-fill every empty patient field from the registry
-    auto setIfEmpty=[&](HWND e, const std::wstring& v){
-        if(v.empty()) return;
-        wchar_t cur[256]; GetWindowTextW(e,cur,256);
-        if(trim(cur).empty()) SetWindowTextW(e,v.c_str());
+    // verified — fill only the fields the trusted source actually returned
+    t->idVerified=true;
+    auto setIfPresent=[&](HWND e, const std::wstring& v){
+        if(!v.empty()) SetWindowTextW(e,v.c_str());
     };
-    setIfEmpty(t->eFirst, c.firstName);
-    setIfEmpty(t->eLast,  c.lastName);
-    setIfEmpty(t->eFather,c.fatherName);
-    setIfEmpty(t->eMobile,c.mobile);
-    setIfEmpty(t->eBirth, c.birthDate);
-    SendMessageW(t->cGender,CB_SETCURSEL,(c.gender==L"زن")?1:0,0);
+    setIfPresent(t->eFirst, c.firstName);
+    setIfPresent(t->eLast,  c.lastName);
+    setIfPresent(t->eFather,c.fatherName);
+    setIfPresent(t->eMobile,c.mobile);
+    setIfPresent(t->eBirth, c.birthDate);
+    if(c.gender==L"زن") SendMessageW(t->cGender,CB_SETCURSEL,1,0);
+    else if(c.gender==L"مرد") SendMessageW(t->cGender,CB_SETCURSEL,0,0);
 
-    // ---- insurance handling -------------------------------------------------
-    // remember which insurances this patient has, so WM_DRAWITEM on the combo
-    // can paint them in a distinct colour, and rebuild the list to show ONLY
-    // those organisations when the patient has more than one.
-    t->insAllowed = c.insurances;
-    SendMessageW(t->cIns,CB_RESETCONTENT,0,0);
+    // ---- insurance: ONLY what the trusted source verified ----
+    rebuildInsuranceCombo(t, c.insurances);
+    std::wstring src = c.source==CS_REGISTRY ? L"ثبت احوال/سامانه بیمه"
+                     : c.source==CS_LOCAL    ? L"سوابق همین درمانگاه"
+                     :                          L"منبع معتبر";
     if(c.insurances.size()>=2){
-        for(int ix : c.insurances){
-            if(ix>=0 && ix<N_INSURANCES)
-                SendMessageW(t->cIns,CB_ADDSTRING,0,(LPARAM)INSURANCES[ix].name);
-        }
-        SendMessageW(t->cIns,CB_SETCURSEL,0,0);
-        wchar_t mb[200];
-        swprintf(mb,200,L"این بیمار دارای %d بیمه است؛ فقط بیمه‌های او نمایش داده می‌شود.",
-            (int)c.insurances.size());
+        wchar_t mb[220];
+        swprintf(mb,220,L"هویت تأیید شد (%s) — این بیمار %d بیمهٔ معتبر دارد.",
+            src.c_str(),(int)c.insurances.size());
         t->lastMsg=toFaDigits(mb); t->msgCol=g_theme.warn;
+    } else if(c.insurances.size()==1){
+        t->lastMsg=L"هویت تأیید شد ("+src+L") — بیمه: "+INSURANCES[c.insurances[0]].name;
+        t->msgCol=g_theme.success;
     } else {
-        // single (or zero) — restore the full list and select the matched one
-        for(int i=0;i<N_INSURANCES;i++)
-            SendMessageW(t->cIns,CB_ADDSTRING,0,(LPARAM)INSURANCES[i].name);
-        int idx = c.insurances.empty()?0:c.insurances[0];
-        if(idx<0||idx>=N_INSURANCES) idx=0;
-        SendMessageW(t->cIns,CB_SETCURSEL,idx,0);
-        t->lastMsg=std::wstring(L"استعلام بیمه: ")+INSURANCES[idx].name;
+        t->lastMsg=L"هویت تأیید شد ("+src+L") — بیمه‌ای ثبت نشده؛ در صورت نیاز دستی انتخاب کنید.";
         t->msgCol=g_theme.success;
     }
     recalc(t);
@@ -443,6 +496,7 @@ static void resetForm(TabPage* t){
     EnableWindow(t->bInquiry, TRUE);
     SetWindowTextW(t->eDiscount,L"");
     SetWindowTextW(t->ePrice,L"");               // recalc auto-fills tariff
+    t->idChecked=false; t->idVerified=false; t->insAllowed.clear();
     recalc(t);
     t->lastMsg.clear();
     if(t->page){ InvalidateRect(t->page,NULL,FALSE); }
@@ -463,6 +517,11 @@ struct CartTile { RECT r; int disp; };       // disp = index into s_cartMsgs
 static std::vector<CartTile> s_cartTiles;    // hit-test map, rebuilt each paint
 static std::vector<KMsg>     s_cartMsgs;      // the list shown (sorted)
 static std::vector<int>      s_cartNF;        // display-pos → plain newest-first idx
+// v1.7.0 detail-view buttons (rebuilt each paint of the details screen)
+enum { CART_BTN_NONE=0, CART_BTN_MARK=1, CART_BTN_TOGGLEREAD=2,
+       CART_BTN_DELETE=3, CART_BTN_BACK=4 };
+struct CartBtn { RECT r; int id; };
+static std::vector<CartBtn> s_cartBtns;      // detail-view button hit map
 
 // load + sort: pinned first, then by send time (newest first). loadMessages
 // already returns oldest-first, so we reverse for newest-first then stable-
@@ -480,7 +539,138 @@ static void cartReload(){
     s_cartMsgs.clear(); s_cartNF.clear();
     for(auto&p:v){ s_cartMsgs.push_back(p.first); s_cartNF.push_back(p.second); }
 }
-static void drawCartable(HDC dc, const RECT& rc){
+// severity colour + label helpers (priority/status of a message) -----------
+static COLORREF sevColor(int type){
+    return type==KMSG_CRITICAL ? g_theme.danger
+         : type==KMSG_URGENT   ? g_theme.warn
+         :                       g_theme.success;
+}
+static const wchar_t* sevLabel(int type){
+    return type==KMSG_CRITICAL ? L"بحرانی"
+         : type==KMSG_URGENT   ? L"فوری"
+         :                       L"عادی";
+}
+// split a stored time string "1403/05/20 14:30" → date + time parts ----------
+static void splitMsgTime(const std::wstring& s, std::wstring& date, std::wstring& time){
+    size_t sp=s.find(L' ');
+    if(sp==std::wstring::npos){ date=s; time=L""; }
+    else { date=s.substr(0,sp); time=s.substr(sp+1); }
+}
+
+// ----- the FULL message DETAILS view (sender, priority, date, time, body) ---
+static void drawCartDetail(HDC dc, const RECT& rc, TabPage* t){
+    { HBRUSH bg=CreateSolidBrush(g_theme.bg); FillRect(dc,(RECT*)&rc,bg); DeleteObject(bg); }
+    SetBkMode(dc,TRANSPARENT);
+    s_cartBtns.clear();
+    cartReload();
+    // resolve the selected message by its STABLE newest-first index (cartSelNF)
+    // so it stays correct even if the list re-sorts (e.g. after pin/seen).
+    int sel=-1;
+    for(int i=0;i<(int)s_cartNF.size();i++)
+        if(s_cartNF[i]==t->cartSelNF){ sel=i; break; }
+    if(sel<0 && t->cartSelDisp>=0 && t->cartSelDisp<(int)s_cartMsgs.size())
+        sel=t->cartSelDisp;
+    if(sel<0 || sel>=(int)s_cartMsgs.size()){
+        t->cartDetail=false; return;     // selection no longer valid (deleted)
+    }
+    t->cartSelDisp=sel;
+    KMsg& mm=s_cartMsgs[sel];
+    COLORREF sev=sevColor(mm.type);
+
+    int pad=S(20);
+    RECT panel={rc.left+pad, rc.top+pad, rc.right-pad, rc.bottom-pad};
+    { HBRUSH pb=CreateSolidBrush(g_theme.surface); FillRect(dc,&panel,pb); DeleteObject(pb); }
+    gpRoundRect(dc,panel,S(16),CLR_INVALID,g_theme.border,255);
+
+    // header bar (priority-coloured so status reads at a glance)
+    RECT hdr={panel.left,panel.top,panel.right,panel.top+S(52)};
+    gpGradRoundRect(dc,hdr,S(16),sev,sev,CLR_INVALID);
+    RECT hdrB={panel.left,panel.top+S(28),panel.right,panel.top+S(52)};
+    gpGradRoundRect(dc,hdrB,0,sev,sev,CLR_INVALID);
+    RECT bi={panel.right-S(44),panel.top+S(12),panel.right-S(18),panel.top+S(38)};
+    drawIcon(dc,ICO_BELL,bi,RGB(255,255,255),S(2));
+    SelectObject(dc,g_fTitle); SetTextColor(dc,RGB(255,255,255));
+    RECT tr={panel.left+S(20),panel.top+S(8),panel.right-S(52),panel.top+S(44)};
+    DrawTextW(dc,L"جزئیات پیام مدیریت",-1,&tr,
+        DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+    // pin icon top-right of the header when pinned
+    if(mm.pinned){
+        SelectObject(dc,g_fUIB); SetTextColor(dc,RGB(255,255,255));
+        RECT pr={panel.left+S(16),panel.top+S(12),panel.left+S(120),panel.top+S(40)};
+        DrawTextW(dc,L"\U0001F4CC سنجاق‌شده",-1,&pr,
+            DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX);
+    }
+
+    std::wstring date,time; splitMsgTime(mm.time,date,time);
+    int x0=panel.left+S(24), x1=panel.right-S(24);
+    int y=panel.top+S(70);
+    // metadata grid rows -----------------------------------------------------
+    struct Meta{ const wchar_t* k; std::wstring v; COLORREF vc; };
+    std::wstring sender=mm.from.empty()?std::wstring(L"مدیریت درمانگاه"):mm.from;
+    std::wstring recip = (mm.to==L"*")?std::wstring(L"همهٔ کاربران"):mm.to;
+    Meta rows[]={
+        {L"فرستنده",     sender,                        g_theme.text},
+        {L"گیرنده",      recip,                         g_theme.text},
+        {L"اولویت / وضعیت", std::wstring(sevLabel(mm.type))+
+            (mm.seen?L"  •  خوانده‌شده":L"  •  خوانده‌نشده"), sev},
+        {L"تاریخ",        toFaDigits(date),             g_theme.text},
+        {L"ساعت",         toFaDigits(time),             g_theme.text},
+    };
+    for(auto& r : rows){
+        SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
+        RECT kr={x1-S(150),y,x1,y+S(22)};
+        DrawTextW(dc,r.k,-1,&kr,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+        SelectObject(dc,g_fUIB); SetTextColor(dc,r.vc);
+        RECT vr={x0,y,x1-S(160),y+S(22)};
+        DrawTextW(dc,r.v.c_str(),-1,&vr,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+        y+=S(28);
+    }
+    // separator
+    { HPEN pn=CreatePen(PS_SOLID,1,g_theme.border); HGDIOBJ op=SelectObject(dc,pn);
+      MoveToEx(dc,x0,y+S(4),0); LineTo(dc,x1,y+S(4)); SelectObject(dc,op); DeleteObject(pn); }
+    y+=S(16);
+    // description / body ------------------------------------------------------
+    SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.accent);
+    RECT dl={x0,y,x1,y+S(20)};
+    DrawTextW(dc,L"متن پیام",-1,&dl,DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+    y+=S(24);
+    SelectObject(dc,g_fUI); SetTextColor(dc,g_theme.text);
+    RECT body={x0,y,x1,panel.bottom-S(70)};
+    DrawTextW(dc,mm.text.c_str(),-1,&body,
+        DT_RIGHT|DT_WORDBREAK|DT_RTLREADING|DT_NOPREFIX|DT_EDITCONTROL);
+
+    // action buttons (bottom strip): بازگشت | حذف | علامت خوانده‌شده | باز/نخوانده
+    int by=panel.bottom-S(54), bh=S(38);
+    int bx=panel.left+S(24);            // RTL: lay out from LEFT going right
+    struct Btn{int id; const wchar_t* lbl; COLORREF fill; COLORREF txt;};
+    Btn defs[]={
+        {CART_BTN_BACK,       L"بازگشت",            g_theme.surface2, g_theme.text},
+        {CART_BTN_DELETE,     L"حذف پیام",          g_theme.danger,   RGB(255,255,255)},
+        {CART_BTN_TOGGLEREAD, mm.seen?L"خوانده":L"علامت خوانده‌شده",
+                              g_theme.surface2, g_theme.text},
+        {CART_BTN_MARK,       L"خواندن",            g_theme.accent,   g_theme.accentText},
+    };
+    for(auto& d : defs){
+        SelectObject(dc,g_fUIB);
+        SIZE sz; GetTextExtentPoint32W(dc,d.lbl,(int)wcslen(d.lbl),&sz);
+        int bw=sz.cx+S(34);
+        RECT r={bx,by,bx+bw,by+bh};
+        bool hov=(t->cartHotBtn==d.id);
+        fillRoundRect(dc,r,S(9), hov?g_theme.accent:d.fill,
+                      hov?g_theme.accent:g_theme.border);
+        SetTextColor(dc, hov?g_theme.accentText:d.txt);
+        DrawTextW(dc,d.lbl,-1,&r,DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+        s_cartBtns.push_back({r,d.id});
+        bx+=bw+S(10);
+    }
+    SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
+    RECT hint={bx+S(8),by,panel.right-S(20),by+bh};
+    DrawTextW(dc,L"برای بازگشت کلید Esc را بزنید",-1,&hint,
+        DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+}
+
+static void drawCartList(HDC dc, const RECT& rc, TabPage* t){
+    (void)t;
     // solid dark background — no gradient bleed
     { HBRUSH bg=CreateSolidBrush(g_theme.bg); FillRect(dc,(RECT*)&rc,bg); DeleteObject(bg); }
     SetBkMode(dc,TRANSPARENT);
@@ -511,6 +701,12 @@ static void drawCartable(HDC dc, const RECT& rc){
             DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
         return;
     }
+    // a small caption inviting the user to click for details
+    SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.accentText);
+    RECT cap={panel.left+S(20),panel.top+S(34),panel.right-S(52),panel.top+S(50)};
+    DrawTextW(dc,L"برای دیدن جزئیات روی پیام کلیک کنید — راست‌کلیک: سنجاق",-1,&cap,
+        DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+
     // tile grid metrics — responsive column count
     int areaW = panel.right-panel.left-S(32);
     int tileMinW = S(300);
@@ -528,35 +724,33 @@ static void drawCartable(HDC dc, const RECT& rc){
         RECT card={tx,ty,tx+tileW,ty+tileH};
         s_cartTiles.push_back({card,(int)i});
 
-        COLORREF sevCol = mm.type==KMSG_CRITICAL ? g_theme.danger
-                        : mm.type==KMSG_URGENT   ? g_theme.warn
-                        :                          g_theme.success;
-        const wchar_t* sevLbl = mm.type==KMSG_CRITICAL ? L"بحرانی"
-                              : mm.type==KMSG_URGENT   ? L"فوری"
-                              :                          L"عادی";
-        // tile body: surface2 when unseen, surface when seen
+        COLORREF sevCol = sevColor(mm.type);
+        const wchar_t* sevLbl = sevLabel(mm.type);
+        // tile body: surface2 when unseen, surface when seen — each tile is a
+        // distinct card clearly separated from the panel background.
         gpRoundRect(dc,card,S(10),
-            mm.seen?g_theme.surface:g_theme.surface2,
+            mm.seen?g_theme.surface2:g_theme.surface,
             mm.seen?g_theme.border:sevCol,255);
         // severity stripe down the RIGHT (RTL leading) edge
         RECT stripe={card.right-S(6),card.top+S(4),card.right-S(2),card.bottom-S(4)};
         gpRoundRect(dc,stripe,S(2),sevCol,CLR_INVALID,255);
-        // pinned badge (top-LEFT corner)
+        // v1.7.0: PIN icon at the TOP-RIGHT corner (just left of the stripe)
+        // when the message is pinned.
         if(mm.pinned){
-            RECT pin={card.left+S(8),card.top+S(8),card.left+S(58),card.top+S(28)};
+            RECT pin={card.right-S(32),card.top+S(6),card.right-S(10),card.top+S(28)};
             gpRoundRect(dc,pin,S(9),g_theme.accent,CLR_INVALID,255);
             SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.accentText);
-            DrawTextW(dc,L"\U0001F4CC پین",-1,&pin,
+            DrawTextW(dc,L"\U0001F4CC",-1,&pin,
                 DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX);
         }
-        // unseen dot (top-right, before the stripe)
+        // unseen dot (top-LEFT)
         if(!mm.seen){
-            RECT dot={card.right-S(28),card.top+S(8),card.right-S(16),card.top+S(20)};
+            RECT dot={card.left+S(10),card.top+S(10),card.left+S(22),card.top+S(22)};
             gpRoundRect(dc,dot,S(6),sevCol,CLR_INVALID,255);
         }
-        // header line: [severity] from — time
+        // header line: [severity] from
         SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.text);
-        RECT fr={card.left+S(12),card.top+S(8),card.right-S(34),card.top+S(30)};
+        RECT fr={card.left+S(28),card.top+S(8),card.right-(mm.pinned?S(38):S(12)),card.top+S(30)};
         std::wstring head=L"["+std::wstring(sevLbl)+L"] "+
             (mm.from.empty()?std::wstring(L"مدیریت"):mm.from);
         DrawTextW(dc,head.c_str(),-1,&fr,
@@ -564,7 +758,7 @@ static void drawCartable(HDC dc, const RECT& rc){
         // date line
         SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
         RECT dr={card.left+S(12),card.top+S(30),card.right-S(12),card.top+S(48)};
-        DrawTextW(dc,(L"\U0001F4C5 "+mm.time).c_str(),-1,&dr,
+        DrawTextW(dc,(L"\U0001F4C5 "+toFaDigits(mm.time)).c_str(),-1,&dr,
             DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
         // body text (wrapped to 2 lines)
         SelectObject(dc,g_fUI); SetTextColor(dc,g_theme.text);
@@ -575,13 +769,22 @@ static void drawCartable(HDC dc, const RECT& rc){
         col++; if(col>=cols){ col=0; row++; }
     }
 }
+static void drawCartable(HDC dc, const RECT& rc, TabPage* t){
+    if(t && t->cartDetail) drawCartDetail(dc,rc,t);
+    else                   drawCartList(dc,rc,t);
+}
 // hit-test a click against the cartable tiles → display index into s_cartMsgs
 static int cartHit(POINT pt){
     for(auto& t:s_cartTiles) if(PtInRect(&t.r,pt)) return t.disp;
     return -1;
 }
-static void drawTabPlaceholder(HDC dc, const RECT& rc, int kind){
-    if(kind==TK_PORTAL){ drawCartable(dc,rc); return; }
+// hit-test a click/hover against the detail-view buttons → CART_BTN_*
+static int cartBtnHit(POINT pt){
+    for(auto& b:s_cartBtns) if(PtInRect(&b.r,pt)) return b.id;
+    return CART_BTN_NONE;
+}
+static void drawTabPlaceholder(HDC dc, const RECT& rc, int kind, TabPage* t){
+    if(kind==TK_PORTAL){ drawCartable(dc,rc,t); return; }
     // soft page gradient
     gpGradRoundRect(dc,(RECT&)rc,0,g_theme.bg,g_theme.bg2,CLR_INVALID);
 
@@ -974,6 +1177,15 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 t->msgCol=g_theme.danger;
             } else {
                 int q=saveReception(r);
+                // v1.7.0: remember this REAL (operator-confirmed) identity so the
+                // same national code recalls the same patient next time — never
+                // fabricated, only what was actually entered/verified here.
+                {
+                    std::vector<int> ins;
+                    if(r.insIdx>0 && r.insIdx<N_INSURANCES) ins.push_back(r.insIdx);
+                    rememberPatient(r.nationalId,r.firstName,r.lastName,
+                        r.fatherName,r.gender,r.birthDate,r.mobile,ins);
+                }
                 wchar_t mb[160];
                 swprintf(mb,160,L"پذیرش با شماره نوبت %d ثبت شد — %s %s",
                     q, r.firstName.c_str(), r.lastName.c_str());
@@ -1079,30 +1291,90 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         return 0; }
     case WM_KEYDOWN:
         if(w==VK_F8){ printLastReceipt(h); return 0; }
+        // v1.7.0: Esc returns from the message details view to the list
+        if(w==VK_ESCAPE && t && t->kind==TK_PORTAL && t->cartDetail){
+            t->cartDetail=false; t->cartHotBtn=0;
+            InvalidateRect(h,NULL,FALSE);
+            return 0;
+        }
         break;
-    case WM_LBUTTONDOWN: {
-        // cartable: clicking a message tile opens a پین/دیدن/پاک‌کردن menu
-        if(t && t->kind==TK_PORTAL){
+    case WM_SETCURSOR: {
+        // hand cursor while hovering a clickable message tile or detail button
+        if(t && t->kind==TK_PORTAL && LOWORD(l)==HTCLIENT){
+            POINT pt; GetCursorPos(&pt); ScreenToClient(h,&pt);
+            bool hand = t->cartDetail ? (cartBtnHit(pt)!=CART_BTN_NONE)
+                                      : (cartHit(pt)>=0);
+            if(hand){ SetCursor(LoadCursor(NULL,IDC_HAND)); return TRUE; }
+        }
+        break; }
+    case WM_MOUSEMOVE: {
+        // detail-view: track which action button is hovered (for highlight)
+        if(t && t->kind==TK_PORTAL && t->cartDetail){
             POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
-            int disp=cartHit(pt);         // display index into s_cartMsgs
+            int hb=cartBtnHit(pt);
+            if(hb!=t->cartHotBtn){ t->cartHotBtn=hb; InvalidateRect(h,NULL,FALSE); }
+            TRACKMOUSEEVENT te={sizeof(te),TME_LEAVE,h,0}; TrackMouseEvent(&te);
+        }
+        break; }
+    case WM_MOUSELEAVE:
+        if(t && t->kind==TK_PORTAL && t->cartHotBtn){
+            t->cartHotBtn=0; InvalidateRect(h,NULL,FALSE);
+        }
+        break;
+    case WM_RBUTTONDOWN: {
+        // v1.7.0: RIGHT-CLICK on a tile shows ONLY the pin/unpin option.
+        if(t && t->kind==TK_PORTAL && !t->cartDetail){
+            POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
+            int disp=cartHit(pt);
             if(disp>=0 && disp<(int)s_cartMsgs.size() && disp<(int)s_cartNF.size()){
                 KMsg& mm=s_cartMsgs[disp];
-                int nf=s_cartNF[disp];    // plain newest-first index for data layer
+                int nf=s_cartNF[disp];
                 HMENU mnu=CreatePopupMenu();
                 AppendMenuW(mnu,MF_STRING,1,
-                    mm.pinned?L"برداشتن پین":L"پین کردن");
-                AppendMenuW(mnu,MF_STRING|(mm.seen?MF_GRAYED:0),2,L"علامت دیده‌شده");
-                AppendMenuW(mnu,MF_SEPARATOR,0,NULL);
-                AppendMenuW(mnu,MF_STRING,3,L"پاک کردن");
+                    mm.pinned?L"برداشتن سنجاق":L"سنجاق کردن");
                 POINT sp=pt; ClientToScreen(h,&sp);
                 int cmd=TrackPopupMenu(mnu,TPM_RETURNCMD|TPM_RIGHTBUTTON,
                     sp.x,sp.y,0,h,NULL);
                 DestroyMenu(mnu);
-                std::wstring me=g_session.user.username;
-                if(cmd==1){ pinMessage(me,nf,!mm.pinned); }
-                else if(cmd==2){ seenOneMessage(me,nf); }
-                else if(cmd==3){ deleteOneMessage(me,nf); }
-                if(cmd){ InvalidateRect(h,NULL,FALSE); }
+                if(cmd==1){ pinMessage(g_session.user.username,nf,!mm.pinned);
+                            InvalidateRect(h,NULL,FALSE); }
+            }
+            return 0;
+        }
+        break; }
+    case WM_LBUTTONDOWN: {
+        if(t && t->kind==TK_PORTAL){
+            POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
+            std::wstring me=g_session.user.username;
+            if(t->cartDetail){
+                // ----- detail view: action buttons -----
+                int bid=cartBtnHit(pt);
+                if(bid==CART_BTN_BACK){
+                    t->cartDetail=false; t->cartHotBtn=0;
+                    InvalidateRect(h,NULL,FALSE);
+                } else if(bid==CART_BTN_MARK || bid==CART_BTN_TOGGLEREAD){
+                    // «خواندن» / «علامت خوانده‌شده» — mark this message seen
+                    if(t->cartSelNF>=0) seenOneMessage(me,t->cartSelNF);
+                    InvalidateRect(h,NULL,FALSE);
+                } else if(bid==CART_BTN_DELETE){
+                    if(MessageBoxW(h,L"این پیام حذف شود؟",L"حذف پیام",
+                        MB_YESNO|MB_ICONQUESTION)==IDYES){
+                        if(t->cartSelNF>=0) deleteOneMessage(me,t->cartSelNF);
+                        t->cartDetail=false; t->cartHotBtn=0;
+                        InvalidateRect(h,NULL,FALSE);
+                    }
+                }
+                return 0;
+            }
+            // ----- list view: clicking a tile OPENS the full details -----
+            int disp=cartHit(pt);
+            if(disp>=0 && disp<(int)s_cartMsgs.size() && disp<(int)s_cartNF.size()){
+                t->cartSelDisp=disp;
+                t->cartSelNF=s_cartNF[disp];
+                t->cartDetail=true; t->cartHotBtn=0;
+                // opening a message marks it read (مشاهده شد)
+                if(!s_cartMsgs[disp].seen) seenOneMessage(me,t->cartSelNF);
+                InvalidateRect(h,NULL,FALSE);
             }
             return 0;
         }
@@ -1127,7 +1399,7 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         }
         // -------- Portal-message / empty tabs: a centred glass card ----------
         if(t && t->kind!=TK_RECEPTION){
-            drawTabPlaceholder(dc,rc,t->kind);
+            drawTabPlaceholder(dc,rc,t->kind,t);
             BitBlt(dc0,0,0,rc.right,rc.bottom,dc,0,0,SRCCOPY);
             SelectObject(dc,obm); DeleteObject(bmp); DeleteDC(dc);
             EndPaint(h,&ps);
@@ -1196,8 +1468,17 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
                            (b.y<minH)?minH:b.y+S(4)};
                 if(b.y<=a.y) continue;        // not yet laid out
                 bool focused = (inputs[i]==foc);
-                fillRoundRect(dc,well,S(8),g_theme.inputBg,
-                    focused?g_theme.accent:g_theme.border);
+                // v1.7.0: when an inquiry could NOT verify the identity, the
+                // name (i==0) and surname (i==1) wells show a danger border so
+                // the operator clearly sees they must enter/check them by hand.
+                bool invalid = (t->idChecked && !t->idVerified && (i==0||i==1));
+                COLORREF bord = invalid ? g_theme.danger
+                              : focused ? g_theme.accent : g_theme.border;
+                fillRoundRect(dc,well,S(8),g_theme.inputBg,bord);
+                if(invalid){   // a second, brighter ring to make it unmistakable
+                    RECT w2={well.left-1,well.top-1,well.right+1,well.bottom+1};
+                    fillRoundRect(dc,w2,S(9),CLR_INVALID,g_theme.danger);
+                }
             }
         }
 
@@ -1212,7 +1493,11 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             {L"تلفن همراه",xr,y0+3*step-S(20),colW},{L"تلفن ثابت",xl,y0+3*step-S(20),colW},
             {L"آدرس",formLeft,y0+4*step-S(20),fw},{NULL,0,0,0},
             {L"نوع بیمار",xr,y0+5*step-S(20),colW},{L"نوع نوبت",xl,y0+5*step-S(20),colW},
-            {L"بیمه اصلی",xr,y0+6*step-S(20),colW},{L"بیمه مکمل",xl,y0+6*step-S(20),colW},
+            // NOTE: the right-column slot at row 6 is the «دارای بیمه» checkbox
+            // (which doubles as the main-insurance field header) — so we DON'T
+            // paint a separate "بیمه اصلی" label there (it would sit under the
+            // checkbox). Only the supplementary-insurance label is painted.
+            {NULL,0,0,0},{L"بیمه مکمل",xl,y0+6*step-S(20),colW},
             {L"مبلغ خدمت (ریال)",xr,y0+7*step-S(20),colW},{L"تخفیف (ریال)",xl,y0+7*step-S(20),colW},
         };
         for(int i=0;i<16;i++){
@@ -1390,6 +1675,36 @@ static void detachTab(TabPage* t){
 // ============================================================== TAB STRIP ==
 static HWND recWnd(){ return s_rd?FindWindowExW(g_hFrame,NULL,RC_CLASS,NULL):NULL; }
 
+// v1.7.0: persist the user's preferred tab order. We store the sequence of the
+// permanent tab KINDS (نوبت‌دهی / پذیرش / کارتابل) as a CSV in the settings
+// file so a drag-reorder survives between runs. Reception (form) tabs the user
+// opened ad-hoc and detached tabs are not persisted (only the fixed trio).
+static void saveTabOrder(){
+    if(!s_rd) return;
+    std::wstring csv;
+    for(auto* t : s_rd->tabs){
+        if(t->detached) continue;
+        // only the singleton/permanent kinds define a stable order
+        if(t->kind==TK_APPOINTMENT || t->kind==TK_RECEPTION || t->kind==TK_PORTAL){
+            if(!csv.empty()) csv += L",";
+            wchar_t b[8]; swprintf(b,8,L"%d",t->kind); csv += b;
+        }
+    }
+    if(!csv.empty()) setSetting(L"tab_order", csv);
+}
+// return the persisted kind order (e.g. {3,0,1}); empty if none saved.
+static std::vector<int> loadTabOrder(){
+    std::vector<int> out;
+    std::wstring csv=getSetting(L"tab_order",L"");
+    size_t p=0;
+    while(p<csv.size()){
+        size_t e=csv.find(L',',p); if(e==std::wstring::npos) e=csv.size();
+        std::wstring tok=csv.substr(p,e-p); p=e+1;
+        if(!tok.empty()) out.push_back(_wtoi(tok.c_str()));
+    }
+    return out;
+}
+
 static void recLayoutTabs(HWND h){
     RECT rc; GetClientRect(h,&rc);
     if(!s_rd) return;
@@ -1434,6 +1749,20 @@ static void addTabKind(HWND h, int kind){
     else SetFocus(h);
 }
 static void addTab(HWND h){ addTabKind(h, TK_RECEPTION); }
+// v1.7.0: focus the appointment (نوبت‌دهی) tab if one already exists; otherwise
+// open a fresh one. Triggered by the header's «نوبت‌دهی» button.
+static void focusAppointmentTab(HWND h){
+    if(!s_rd) return;
+    for(size_t i=0;i<s_rd->tabs.size();i++){
+        if(s_rd->tabs[i]->kind==TK_APPOINTMENT && !s_rd->tabs[i]->detached){
+            s_rd->active=(int)i;
+            recLayoutTabs(h);
+            InvalidateRect(h,NULL,FALSE);
+            return;
+        }
+    }
+    addTabKind(h, TK_APPOINTMENT);
+}
 static void closeTab(TabPage* t){
     if(!s_rd) return;
     HWND h=recWnd();
@@ -1484,26 +1813,37 @@ static int hitTab(HWND h, POINT pt, int* part){
     (void)vis;
     return -1;
 }
+// v1.7.0: compute the insertion slot for a drag at mouse-x. Tabs flow RTL
+// (right→left): index 0 is right-most. We pick the slot whose horizontal
+// centre is nearest to the cursor. Returns a value in [0, tabCount].
+static int dropIndexForX(HWND h, int mouseX){
+    if(!s_rd || s_rd->tabs.empty()) return 0;
+    int n=(int)s_rd->tabs.size();
+    for(int i=0;i<n;i++){
+        RECT r=tabRect(h,i);
+        int mid=(r.left+r.right)/2;
+        // RTL: if the cursor is to the RIGHT of this tab's centre, it belongs
+        // BEFORE it (smaller index sits further right).
+        if(mouseX > mid) return i;
+    }
+    return n;   // dropped past the left-most tab → end of the list
+}
 
 // ------------------------------------------------------------- reception ---
 static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
     switch(m){
     case WM_CREATE:
         s_rd = new RecData();
-        s_rd->bNewPat = createFlatButton(h,ID_RC_NEWPAT,L"پذیرش جدید",ICO_PLUS,BS_PRIMARY,0,0,10,10);
-        s_rd->bNewTab = createFlatButton(h,ID_RC_NEWTAB,L"تب جدید",ICO_TAB,BS_OUTLINE,0,0,10,10);
-        s_rd->bCalc = NULL;   // calculator moved to the frame header (left side)
-        // blend the button corners into the info-bar surface (no white halo)
-        setFlatButtonBg(s_rd->bNewPat,g_theme.surface2);
-        setFlatButtonBg(s_rd->bNewTab,g_theme.surface2);
+        // v1.7.0: «پذیرش جدید» / «نوبت‌دهی» / «تب جدید» now live in the FRAME
+        // HEADER (main.cpp). The reception info-bar no longer owns any action
+        // buttons, so the tab strip is clean and uncluttered.
+        s_rd->bNewPat = NULL;
+        s_rd->bNewTab = NULL;
+        s_rd->bCalc   = NULL;   // calculator also in the frame header
         s_rd->lastUnseen = unseenMessageCount(g_session.user.username);
         SetTimer(h, 77, 5000, NULL);   // poll the cartable for new messages
         return 0;
     case WM_APP_THEME:
-        if(s_rd){
-            setFlatButtonBg(s_rd->bNewPat,g_theme.surface2);
-            setFlatButtonBg(s_rd->bNewTab,g_theme.surface2);
-        }
         InvalidateRect(h,NULL,TRUE);
         return 0;
     case WM_TIMER:
@@ -1537,34 +1877,46 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
         break;
     case WM_SIZE: {
         if(!s_rd) return 0;
-        RECT rc; GetClientRect(h,&rc);
-        int bh=S(38), y=(infoBarH()-bh)/2;
-        // LAYER 2 action buttons anchored to the RIGHT edge (RTL):
-        // پذیرش جدید (right-most) → تب جدید → ماشین حساب
-        int x = rc.right - S(14);
-        int wNew=S(150), wTab=S(120), g=S(8);
-        MoveWindow(s_rd->bNewPat, x-wNew,                 y, wNew,  bh, TRUE);
-        MoveWindow(s_rd->bNewTab, x-wNew-g-wTab,          y, wTab,  bh, TRUE);
+        // v1.7.0: action buttons moved to the frame header — only the tab
+        // strip needs re-laying out here.
         recLayoutTabs(h);
         return 0; }
     case WM_COMMAND: {
         int id=LOWORD(w);
         if(id==ID_RC_CALC) openCalculator(g_hFrame);
         else if(id==ID_RC_NEWTAB) addTabKind(h, TK_EMPTY);   // new-tab → empty
+        else if(id==ID_RC_APPT) focusAppointmentTab(h);      // نوبت‌دهی
         else if(id==ID_RC_NEWPAT){
-            // "پذیرش جدید" — reuse the ACTIVE tab ONLY if it is already a
-            // reception form; otherwise open a fresh reception tab (so the
-            // portal/empty pages are never overwritten unexpectedly).
+            // "پذیرش جدید" (پذیرش جدید/New Admission) — always open a FRESH
+            // reception tab so a new patient never overwrites the form the
+            // operator is currently filling. If the active tab is an EMPTY
+            // placeholder, reuse it; otherwise add a new reception tab.
             if(s_rd && s_rd->active>=0 && s_rd->active<(int)s_rd->tabs.size()
-               && s_rd->tabs[s_rd->active]->kind==TK_RECEPTION)
-                resetForm(s_rd->tabs[s_rd->active]);
-            else
+               && s_rd->tabs[s_rd->active]->kind==TK_EMPTY){
+                // turn the empty tab into a reception tab in place
+                addTab(h);
+            } else {
                 addTab(h);   // open a new reception tab
+            }
         }
         return 0; }
     case WM_MOUSEMOVE: {
         if(!s_rd) return 0;
         POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
+        // v1.7.0: drag-reorder in progress (or arming) ----------------------
+        if(s_rd->dragArmed){
+            int dx=pt.x-s_rd->dragStart.x;
+            if(!s_rd->dragging && (dx>S(6)||dx<-S(6)))
+                s_rd->dragging=true;            // crossed the threshold
+            if(s_rd->dragging){
+                s_rd->dragX=pt.x;
+                s_rd->dropIdx=dropIndexForX(h,pt.x);
+                SetCursor(LoadCursor(NULL,IDC_SIZEWE));
+                RECT bar={0,infoBarH(),S(2000),infoBarH()+tabBarH()};
+                InvalidateRect(h,&bar,FALSE);
+                return 0;
+            }
+        }
         int part=0, hit=hitTab(h,pt,&part);
         int hc = (part==1)?hit:-1, hd=(part==2)?hit:-1;
         if(hit!=s_rd->hotTab || hc!=s_rd->hotClose || hd!=s_rd->hotDetach){
@@ -1575,8 +1927,18 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
         TRACKMOUSEEVENT t={sizeof(t),TME_LEAVE,h,0}; TrackMouseEvent(&t);
         return 0; }
     case WM_MOUSELEAVE:
-        if(s_rd && s_rd->hotTab!=-1){
+        // don't clear hover while a drag (with capture) is active
+        if(s_rd && !s_rd->dragging && s_rd->hotTab!=-1){
             s_rd->hotTab=s_rd->hotClose=s_rd->hotDetach=-1;
+            RECT bar={0,infoBarH(),S(2000),infoBarH()+tabBarH()};
+            InvalidateRect(h,&bar,FALSE);
+        }
+        return 0;
+    case WM_CAPTURECHANGED:
+        // capture was lost (e.g. alt-tab) — cancel any pending/active drag
+        if(s_rd && (s_rd->dragArmed||s_rd->dragging)){
+            s_rd->dragArmed=false; s_rd->dragging=false;
+            s_rd->dragIdx=-1; s_rd->dropIdx=-1;
             RECT bar={0,infoBarH(),S(2000),infoBarH()+tabBarH()};
             InvalidateRect(h,&bar,FALSE);
         }
@@ -1602,11 +1964,42 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
                     if(t->page) InvalidateRect(t->page,NULL,FALSE);
                 }
                 InvalidateRect(h,NULL,FALSE);
+                // v1.7.0: arm a potential drag-reorder on the tab BODY. It only
+                // becomes a real drag once the cursor moves past a threshold,
+                // so a plain click still just activates the tab.
+                s_rd->dragArmed=true; s_rd->dragging=false;
+                s_rd->dragIdx=hit; s_rd->dragStart=pt; s_rd->dragX=pt.x;
+                s_rd->dropIdx=hit;
+                SetCapture(h);
             } else {
                 // focus the detached window
                 HWND det=GetParent(t->page);
                 if(det) SetForegroundWindow(det);
             }
+        }
+        return 0; }
+    case WM_LBUTTONUP: {
+        if(!s_rd) return 0;
+        bool wasDragging=s_rd->dragging;
+        int from=s_rd->dragIdx, to=s_rd->dropIdx;
+        if(GetCapture()==h) ReleaseCapture();
+        s_rd->dragArmed=false; s_rd->dragging=false;
+        if(wasDragging && from>=0 && from<(int)s_rd->tabs.size()){
+            // RTL drop-index → list insertion. dropIndexForX returns the slot
+            // the dragged tab should occupy; normalise when moving rightward.
+            if(to<0) to=0; if(to>(int)s_rd->tabs.size()) to=(int)s_rd->tabs.size();
+            int adj = (to>from)? to-1 : to;
+            if(adj!=from && adj>=0 && adj<(int)s_rd->tabs.size()){
+                TabPage* moved=s_rd->tabs[from];
+                s_rd->tabs.erase(s_rd->tabs.begin()+from);
+                s_rd->tabs.insert(s_rd->tabs.begin()+adj, moved);
+                // keep the moved tab active and persist the new order
+                s_rd->active=adj;
+                saveTabOrder();
+                recLayoutTabs(h);
+            }
+            s_rd->dragIdx=-1; s_rd->dropIdx=-1;
+            InvalidateRect(h,NULL,FALSE);
         }
         return 0; }
     case WM_KEYDOWN:
@@ -1696,12 +2089,33 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
                         (int)i==s_rd->hotDetach?RGB(255,255,255):g_theme.textDim,S(2));
                 }
             }
+            // v1.7.0: drag-reorder drop indicator — a bright accent bar at the
+            // boundary where the tab will be inserted, plus a subtle highlight
+            // of the tab being dragged.
+            if(s_rd->dragging && s_rd->dragIdx>=0){
+                int di=s_rd->dropIdx;
+                if(di<0) di=0; if(di>(int)s_rd->tabs.size()) di=(int)s_rd->tabs.size();
+                int barX;
+                if(di>=(int)s_rd->tabs.size()){
+                    RECT last=tabRect(h,(int)s_rd->tabs.size()-1);
+                    barX=last.left-S(3);
+                } else {
+                    RECT r=tabRect(h,di);
+                    barX=r.right+S(3);
+                }
+                int top=infoBarH()+S(4), bot=infoBarH()+tabBarH()-S(2);
+                RECT ind={barX-S(2),top,barX+S(2),bot};
+                fillRoundRect(dc,ind,S(2),g_theme.accent,CLR_INVALID);
+                // dim-highlight the dragged tab so it reads as "lifted"
+                RECT dr=tabRect(h,s_rd->dragIdx);
+                fillRoundRect(dc,dr,S(9),g_theme.hover,g_theme.accent);
+            }
             if(s_rd->tabs.empty()){
                 SetTextColor(dc,g_theme.textDim);
                 SelectObject(dc,g_fUI);
                 RECT er={0,infoBarH()+tabBarH(),rc.right,rc.bottom};
                 DrawTextW(dc,
-                    L"برای شروع، روی دکمه «پذیرش جدید» کلیک کنید",
+                    L"برای شروع، «پذیرش جدید» را از نوار بالا انتخاب کنید",
                     -1,&er,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
             }
         }
@@ -1712,6 +2126,19 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
     }
     return DefWindowProcW(h,m,w,l);
 }
+// v1.7.0: public routing used by the frame header (main.cpp) ----------------
+HWND receptionWindow(){
+    return FindWindowExW(g_hFrame,NULL,RC_CLASS,NULL);
+}
+void receptionAction(RecAction a){
+    HWND rec=receptionWindow();
+    if(!rec || !IsWindow(rec)) return;
+    int id = a==RA_APPOINTMENT ? ID_RC_APPT
+           : a==RA_NEWTAB      ? ID_RC_NEWTAB
+           :                     ID_RC_NEWPAT;
+    SendMessageW(rec, WM_COMMAND, MAKEWPARAM(id,0), 0);
+}
+
 HWND createReceptionScreen(HWND frame){
     static bool reg=false;
     if(!reg){
@@ -1734,6 +2161,27 @@ HWND createReceptionScreen(HWND frame){
     addTabKind(h, TK_APPOINTMENT);
     addTabKind(h, TK_RECEPTION);
     addTabKind(h, TK_PORTAL);
-    if(s_rd){ s_rd->active=2; recLayoutTabs(h); }   // focus the cartable tab
+    // v1.7.0: re-apply the user's saved drag-reorder of the permanent tabs.
+    if(s_rd){
+        std::vector<int> ord=loadTabOrder();
+        if(ord.size()==s_rd->tabs.size()){
+            std::vector<TabPage*> reordered;
+            std::vector<bool> used(s_rd->tabs.size(),false);
+            for(int kind : ord){
+                for(size_t i=0;i<s_rd->tabs.size();i++)
+                    if(!used[i] && s_rd->tabs[i]->kind==kind){
+                        reordered.push_back(s_rd->tabs[i]); used[i]=true; break;
+                    }
+            }
+            // append anything not matched (safety) then commit if complete
+            for(size_t i=0;i<s_rd->tabs.size();i++)
+                if(!used[i]) reordered.push_back(s_rd->tabs[i]);
+            if(reordered.size()==s_rd->tabs.size()) s_rd->tabs=reordered;
+        }
+        // focus the cartable tab wherever it now sits
+        for(size_t i=0;i<s_rd->tabs.size();i++)
+            if(s_rd->tabs[i]->kind==TK_PORTAL){ s_rd->active=(int)i; break; }
+        recLayoutTabs(h);
+    }
     return h;
 }

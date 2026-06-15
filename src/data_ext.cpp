@@ -1,11 +1,14 @@
 // ============================================================================
-//  data_ext.cpp  (v1.6.0)
-//  Extended data layer added for the appointment (نوبت‌دهی) module and the
-//  upgraded reception screen:
-//    • A deterministic OFFLINE simulation of the Iranian Civil Registry
-//      (ثبت احوال) + insurance enquiry — real 10-digit checksum, then a stable
-//      identity derived from the code so the whole workflow runs with NO
-//      external API and is trivially swapped for a real web-service later.
+//  data_ext.cpp  (v1.7.0)
+//  Extended data layer for the appointment (نوبت‌دهی) module and the upgraded
+//  reception screen:
+//    • Iranian Civil-Registry (ثبت احوال) + insurance lookup with NO fabrication.
+//      We validate the 10-digit national-code checksum, then resolve the
+//      identity ONLY from a trusted source: (1) a configured online registry
+//      web-service, or (2) the local store of patients this clinic already
+//      verified by hand. If neither verifies the code we return "not found" and
+//      the UI shows an unverified state + manual entry — we never invent a name,
+//      birth date, address or insurance.
 //    • Doctors + their services (file-backed, seeded with realistic specialties)
 //    • Appointment store (CSV-like .dat, queue numbers, cancel/edit/search)
 //    • Profile-change request workflow (reception → management approval)
@@ -17,6 +20,7 @@
 #include "app.h"
 #include <stdio.h>
 #include <algorithm>
+#include <wininet.h>
 
 // ---- shared little helpers (kept local to avoid clashing with employees.cpp)
 static std::vector<std::wstring> dx_split(const std::wstring& s, wchar_t sep){
@@ -31,7 +35,8 @@ static std::wstring dx_esc(const std::wstring& s){
 }
 
 // ============================================================================
-//  NATIONAL REGISTRY (ثبت احوال) — offline deterministic simulation
+//  NATIONAL REGISTRY (ثبت احوال) — checksum validation + trusted lookup only
+//  (no fabrication; see lookupCitizen() below)
 // ============================================================================
 bool validNationalId(const std::wstring& id){
     if(id.size()!=10) return false;
@@ -43,67 +48,156 @@ bool validNationalId(const std::wstring& id){
     return (rem<2)? (chk==rem) : (chk==11-rem);
 }
 
-//  pools of realistic Iranian names so the derived identity looks natural
-static const wchar_t* MALE_NAMES[] = {
-    L"محمد",L"علی",L"رضا",L"حسین",L"مهدی",L"امیر",L"سعید",L"حسن",L"محسن",
-    L"احمد",L"ابوالفضل",L"یاسر",L"کامران",L"بهروز",L"فرهاد",L"سجاد" };
-static const wchar_t* FEMALE_NAMES[] = {
-    L"فاطمه",L"زهرا",L"مریم",L"لیلا",L"سمیرا",L"نرگس",L"الهام",L"سارا",
-    L"مینا",L"شیما",L"نسرین",L"پریسا",L"معصومه",L"راضیه",L"آرزو",L"هانیه" };
-static const wchar_t* FAMILY[] = {
-    L"احمدی",L"محمدی",L"حسینی",L"رضایی",L"کریمی",L"موسوی",L"جعفری",L"اکبری",
-    L"ایزدپناه",L"حسن‌پور",L"صادقی",L"نوری",L"رحیمی",L"قاسمی",L"یوسفی",
-    L"باقری",L"مرادی",L"شریفی",L"کاظمی",L"عباسی" };
+// ----------------------------------------------------------------------------
+//  LOCAL PATIENT STORE  (data\patients.dat) — REAL identities the clinic has
+//  already verified / entered by hand. This is NOT fabricated data: it only
+//  ever contains records an operator confirmed and saved. Recalling the same
+//  national code returns exactly what was stored before.
+//    nid|first|last|father|gender|birth|mobile|insCsv
+// ----------------------------------------------------------------------------
+static std::wstring patientsPath(){ return dataDir()+L"\\patients.dat"; }
 
-static int hashNid(const std::wstring& nid){
-    unsigned h=2166136261u;
-    for(wchar_t c:nid){ h^=(unsigned)c; h*=16777619u; }
-    return (int)(h & 0x7fffffff);
+static bool parseInsCsv(const std::wstring& csv, std::vector<int>& out){
+    out.clear();
+    for(auto& s : dx_split(csv,L',')){
+        std::wstring t=trim(s);
+        if(t.empty()) continue;
+        int v=_wtoi(t.c_str());
+        if(v>=0 && v<N_INSURANCES) out.push_back(v);
+    }
+    return !out.empty();
+}
+static std::wstring insToCsv(const std::vector<int>& v){
+    std::wstring s;
+    for(size_t i=0;i<v.size();i++){ if(i) s+=L","; wchar_t b[8]; swprintf(b,8,L"%d",v[i]); s+=b; }
+    return s;
 }
 
+//  Look the national code up in the local patient store. Returns CS_LOCAL on
+//  hit; CS_NONE otherwise. Never invents anything.
+static bool lookupLocalPatient(const std::wstring& nationalId, CitizenInfo& c){
+    std::wstring all=readFileUtf8(patientsPath());
+    size_t pos=0;
+    while(pos<all.size()){
+        size_t e=all.find(L'\n',pos); if(e==std::wstring::npos) e=all.size();
+        std::wstring line=trim(all.substr(pos,e-pos)); pos=e+1;
+        if(line.empty()) continue;
+        auto f=dx_split(line,L'|');
+        if(f.size()<7) continue;
+        if(trim(f[0])!=nationalId) continue;
+        c.firstName=f[1]; c.lastName=f[2]; c.fatherName=f[3];
+        c.gender=f[4]; c.birthDate=f[5]; c.mobile=f[6];
+        if(f.size()>=8) parseInsCsv(f[7],c.insurances);
+        c.found=true; c.source=CS_LOCAL;
+        return true;
+    }
+    return false;
+}
+
+void rememberPatient(const std::wstring& nationalId,
+        const std::wstring& firstName, const std::wstring& lastName,
+        const std::wstring& fatherName, const std::wstring& gender,
+        const std::wstring& birthDate, const std::wstring& mobile,
+        const std::vector<int>& insurances){
+    if(nationalId.empty()) return;
+    if(trim(firstName).empty() && trim(lastName).empty()) return;  // nothing real
+    // load all, replace existing record for this nid, otherwise append
+    std::wstring all=readFileUtf8(patientsPath());
+    std::vector<std::wstring> kept;
+    size_t pos=0;
+    while(pos<all.size()){
+        size_t e=all.find(L'\n',pos); if(e==std::wstring::npos) e=all.size();
+        std::wstring line=trim(all.substr(pos,e-pos)); pos=e+1;
+        if(line.empty()) continue;
+        auto f=dx_split(line,L'|');
+        if(f.size()>=1 && trim(f[0])==nationalId) continue;   // drop old copy
+        kept.push_back(line);
+    }
+    std::wstring row = dx_esc(nationalId)+L"|"+dx_esc(firstName)+L"|"+dx_esc(lastName)
+        + L"|"+dx_esc(fatherName)+L"|"+dx_esc(gender)+L"|"+dx_esc(birthDate)
+        + L"|"+dx_esc(mobile)+L"|"+insToCsv(insurances);
+    kept.push_back(row);
+    std::wstring out; for(auto& l:kept) out+=l+L"\r\n";
+    writeFileUtf8(patientsPath(),out,false);
+}
+
+// ----------------------------------------------------------------------------
+//  ONLINE REGISTRY WEB-SERVICE (optional). Configure `registry_url` in
+//  data\settings.ini, e.g.  https://host/api/citizen?nid={NID}
+//  The endpoint must return a small UTF-8 key=value body. Recognised keys:
+//    found=1|0  first=  last=  father=  gender=مرد|زن  birth=YYYY/MM/DD
+//    mobile=  insurances=1,2  (INSURANCES[] indices)
+//  If no URL is configured, or the request fails / times out, we DO NOT guess —
+//  the caller falls back to manual entry and the UI shows the failure.
+// ----------------------------------------------------------------------------
+static std::string regHttpGet(const std::wstring& url, bool* okOut){
+    *okOut=false; std::string body;
+    HINTERNET net=InternetOpenW(L"AzadiTeb/1.7", INTERNET_OPEN_TYPE_PRECONFIG,NULL,NULL,0);
+    if(!net) return body;
+    // short timeouts so a missing/slow server never freezes the UI
+    DWORD to=4000;
+    InternetSetOptionW(net,INTERNET_OPTION_CONNECT_TIMEOUT,&to,sizeof(to));
+    InternetSetOptionW(net,INTERNET_OPTION_RECEIVE_TIMEOUT,&to,sizeof(to));
+    InternetSetOptionW(net,INTERNET_OPTION_SEND_TIMEOUT,&to,sizeof(to));
+    HINTERNET f=InternetOpenUrlW(net,url.c_str(),NULL,0,
+        INTERNET_FLAG_RELOAD|INTERNET_FLAG_NO_CACHE_WRITE,0);
+    if(f){
+        char buf[2048]; DWORD rd;
+        while(InternetReadFile(f,buf,sizeof(buf),&rd)&&rd) body.append(buf,rd);
+        InternetCloseHandle(f); *okOut=true;
+    }
+    InternetCloseHandle(net);
+    return body;
+}
+static std::wstring regKV(const std::wstring& body, const std::wstring& key){
+    // find "key=" at a line start, return trimmed value to end of line
+    std::wstring k=key+L"=";
+    size_t pos=0;
+    while(pos<body.size()){
+        size_t e=body.find(L'\n',pos); if(e==std::wstring::npos) e=body.size();
+        std::wstring line=trim(body.substr(pos,e-pos)); pos=e+1;
+        if(line.size()>=k.size() && line.compare(0,k.size(),k)==0)
+            return trim(line.substr(k.size()));
+    }
+    return L"";
+}
+static bool lookupRegistry(const std::wstring& nationalId, CitizenInfo& c){
+    std::wstring tmpl=getSetting(L"registry_url",L"");
+    if(trim(tmpl).empty()) return false;     // no online source configured
+    c.lookupTried=true;
+    // substitute {NID}
+    std::wstring url=tmpl; size_t p=url.find(L"{NID}");
+    if(p!=std::wstring::npos) url.replace(p,5,nationalId);
+    else { url += (url.find(L'?')==std::wstring::npos?L"?nid=":L"&nid=")+nationalId; }
+    bool ok=false; std::string raw=regHttpGet(url,&ok);
+    if(!ok || raw.empty()){ c.lookupFailed=true; return false; }
+    int n=MultiByteToWideChar(CP_UTF8,0,raw.c_str(),(int)raw.size(),NULL,0);
+    std::wstring body(n,0);
+    MultiByteToWideChar(CP_UTF8,0,raw.c_str(),(int)raw.size(),&body[0],n);
+    if(regKV(body,L"found")==L"0"){ return false; }  // server says not found (not a failure)
+    std::wstring first=regKV(body,L"first"), last=regKV(body,L"last");
+    if(first.empty() && last.empty()){ c.lookupFailed=true; return false; }
+    c.firstName=first; c.lastName=last;
+    c.fatherName=regKV(body,L"father");
+    c.gender=regKV(body,L"gender");
+    c.birthDate=regKV(body,L"birth");
+    c.mobile=regKV(body,L"mobile");
+    parseInsCsv(regKV(body,L"insurances"),c.insurances);
+    c.found=true; c.source=CS_REGISTRY;
+    return true;
+}
+
+//  No fabrication. Order of trust:
+//   1) configured online registry web-service (if any),
+//   2) the local store of patients this clinic already verified,
+//   3) nothing — caller enables manual entry and shows the unverified state.
 CitizenInfo lookupCitizen(const std::wstring& nationalId){
     CitizenInfo c;
-    if(!validNationalId(nationalId)) return c;        // c.found stays false
-    c.found=true;
-    int h=hashNid(nationalId);
-    bool male = ((h>>3)&1)==0;
-    c.gender = male ? L"مرد" : L"زن";
-    if(male) c.firstName = MALE_NAMES[h % (sizeof(MALE_NAMES)/sizeof(*MALE_NAMES))];
-    else     c.firstName = FEMALE_NAMES[(h/7) % (sizeof(FEMALE_NAMES)/sizeof(*FEMALE_NAMES))];
-    c.lastName   = FAMILY[(h/13) % (sizeof(FAMILY)/sizeof(*FAMILY))];
-    c.fatherName = MALE_NAMES[(h/29) % (sizeof(MALE_NAMES)/sizeof(*MALE_NAMES))];
-    // a plausible Jalali birth date (year 1340..1399)
-    int by = 1340 + (h % 60);
-    int bm = 1 + ((h/61) % 12);
-    int bd = 1 + ((h/733) % 28);
-    wchar_t bb[16]; swprintf(bb,16,L"%04d/%02d/%02d",by,bm,bd);
-    c.birthDate = bb;
-    // a plausible mobile number 09xxxxxxxxx
-    wchar_t mb[16];
-    swprintf(mb,16,L"09%09d",(h % 1000000000));
-    c.mobile = mb;
-    // ---- insurance(s): MOST people carry exactly one basic insurance; some
-    //      (deterministically) carry two or three so the multi-insurance UX is
-    //      exercised. Index 0 (آزاد) is never returned here.
-    int last = nationalId[9]-L'0';
-    int primary;
-    if(last<=3) primary=1;          // تأمین اجتماعی
-    else if(last<=6) primary=2;     // بیمه سلامت ایرانیان
-    else if(last<=7) primary=3;     // روستایی
-    else if(last<=8) primary=5;     // نیروهای مسلح
-    else primary=4;                 // کارکنان دولت
-    c.insurances.push_back(primary);
-    int extra = (h/97) % 10;        // ~30% have a second, ~10% a third
-    if(extra<3){
-        int second = 2 + ((h/131) % 4);   // 2..5
-        if(second!=primary) c.insurances.push_back(second);
-        if(extra==0){
-            int third = 1 + ((h/271) % 5); // 1..5
-            bool dup=false; for(int x:c.insurances) if(x==third) dup=true;
-            if(!dup) c.insurances.push_back(third);
-        }
-    }
-    return c;
+    c.idValid = validNationalId(nationalId);
+    if(!c.idValid) return c;                 // invalid code → not found, no guess
+    if(lookupRegistry(nationalId,c)) return c;
+    if(lookupLocalPatient(nationalId,c)) return c;
+    return c;                                // c.found stays false
 }
 
 // ============================================================================
