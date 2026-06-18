@@ -1175,6 +1175,13 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
     case WM_COMMAND: {
         if(!t) return 0;
         int id=LOWORD(w), code=HIWORD(w);
+        // Repaint the field wells whenever an edit/combo gains or loses focus so
+        // the focused well border updates immediately (thin red focus ring that
+        // fades back to the normal hairline once the field is left/clicked away).
+        if(code==EN_SETFOCUS || code==EN_KILLFOCUS ||
+           code==CBN_SETFOCUS || code==CBN_KILLFOCUS){
+            InvalidateRect(h,NULL,FALSE);
+        }
         if((id==ID_F_INS||id==ID_F_SUPP) && code==CBN_SELCHANGE){
             recalc(t); InvalidateRect(h,NULL,FALSE);
         }
@@ -1560,8 +1567,12 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 // name (i==0) and surname (i==1) wells show a danger border so
                 // the operator clearly sees they must enter/check them by hand.
                 bool invalid = (t->idChecked && !t->idVerified && (i==0||i==1));
+                // v1.8.0 UI: a focused field gets a THIN, soft-RED hairline ring
+                // (never the harsh default black EDIT border). When the field is
+                // not focused the ring fades back to the normal subtle border.
+                COLORREF focusRing = blendColor(g_theme.danger, g_theme.inputBg, 60);
                 COLORREF bord = invalid ? g_theme.danger
-                              : focused ? g_theme.accent : g_theme.border;
+                              : focused ? focusRing : g_theme.border;
                 fillRoundRect(dc,well,S(8),g_theme.inputBg,bord);
                 if(invalid){   // a second, brighter ring to make it unmistakable
                     RECT w2={well.left-1,well.top-1,well.right+1,well.bottom+1};

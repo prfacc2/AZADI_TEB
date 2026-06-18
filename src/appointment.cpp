@@ -79,7 +79,9 @@ struct ApptUI {
 };
 
 // ============================================================== metrics =====
-static int apRowH()    { return S(30); }
+static int apRowH()    { return S(44); }  // v1.8.0: roomier rows so labels,
+                                          // input wells and the next row never
+                                          // overlap (was 30, far too tight)
 static int apHdrH()    { return S(34); }
 
 // ---------------------------------------------------------------- doctors ---
@@ -535,10 +537,12 @@ static void apLayout(HWND h, ApptUI* u){
     int colW   = (innerR - innerL - S(10)) / 2;
     int rightColX = innerR - colW;          // right column x
     int leftColX  = innerL;                 // left column x
-    int fh = apRowH() - S(4);
+    int fh = S(28);   // v1.8.0: fixed, comfortable input height (rows are taller
+                      // now so the extra space becomes label gap, not a giant box)
 
     // ---- search group (top) -----------------------------------------------
-    int y = S(40);
+    // v1.8.0: first row pushed down so its label clears the group-box title.
+    int y = S(56);
     // row1: کد ملی (right) | نام (left)
     MoveWindow(u->sNid,    rightColX, y, colW, fh, TRUE);
     MoveWindow(u->sFirst,  leftColX,  y, colW, fh, TRUE);
@@ -769,16 +773,16 @@ static void apPaint(HWND h, ApptUI* u, HDC dc){
     int rightColX=innerR-colW, leftColX=innerL;
 
     // ---- group rects (mirror apLayout y-positions) ----
-    int y=S(40);
+    int y=S(56);
     RECT gSearch={rx+S(6),S(10),rc.right-S(6),0};
     int searchBottom = y + apRowH()*3 + S(34) + S(8);
     gSearch.bottom = searchBottom;
     drawGroup(dc,gSearch,L"جستجوی بیمار رزرو کرده");
     // labels for search
-    drawLabel(dc,rightColX,y-S(15),colW,L"کد ملی");
-    drawLabel(dc,leftColX, y-S(15),colW,L"نام");
-    drawLabel(dc,rightColX,y+apRowH()-S(15),colW,L"شماره موبایل");
-    drawLabel(dc,leftColX, y+apRowH()-S(15),colW,L"نام خانوادگی");
+    drawLabel(dc,rightColX,y-S(20),colW,L"کد ملی");
+    drawLabel(dc,leftColX, y-S(20),colW,L"نام");
+    drawLabel(dc,rightColX,y+apRowH()-S(20),colW,L"شماره موبایل");
+    drawLabel(dc,leftColX, y+apRowH()-S(20),colW,L"نام خانوادگی");
 
     int appTop = searchBottom + S(10);
     int gy = appTop + S(24);
@@ -786,22 +790,43 @@ static void apPaint(HWND h, ApptUI* u, HDC dc){
     int apptBottom = gy + apRowH()*3 + S(34) + S(8);
     gAppt.bottom=apptBottom;
     drawGroup(dc,gAppt,L"مشخصات نوبت");
-    drawLabel(dc,innerL+S(140),gy-S(15),S(120),L"پزشک");
-    drawLabel(dc,innerL+S(114),gy+apRowH()-S(15),S(120),L"خدمت");
-    drawLabel(dc,rightColX,gy+apRowH()*2-S(15),colW,L"تاریخ نوبت");
-    drawLabel(dc,leftColX, gy+apRowH()*2-S(15),colW,L"نوع دریافت نوبت");
+    drawLabel(dc,innerL+S(140),gy-S(20),S(120),L"پزشک");
+    drawLabel(dc,innerL+S(114),gy+apRowH()-S(20),S(120),L"خدمت");
+    drawLabel(dc,rightColX,gy+apRowH()*2-S(20),colW,L"تاریخ نوبت");
+    drawLabel(dc,leftColX, gy+apRowH()*2-S(20),colW,L"نوع دریافت نوبت");
 
     int patTop = apptBottom + S(10);
     int py = patTop + S(24);
     RECT gPat={rx+S(6),patTop,rc.right-S(6),rc.bottom-S(10)};
     drawGroup(dc,gPat,u->patientOn?L"مشخصات بیمار":L"مشخصات بیمار (غیرفعال)");
-    drawLabel(dc,rightColX,py+apRowH()-S(15),colW,L"کد ملی");
-    drawLabel(dc,leftColX, py+apRowH()-S(15),colW,L"نام");
-    drawLabel(dc,rightColX,py+apRowH()*2-S(15),colW,L"نام پدر");
-    drawLabel(dc,leftColX, py+apRowH()*2-S(15),colW,L"نام خانوادگی");
-    drawLabel(dc,rightColX,py+apRowH()*3-S(15),colW,L"تلفن همراه");
-    drawLabel(dc,leftColX, py+apRowH()*3-S(15),colW,L"جنسیت");
-    drawLabel(dc,leftColX, py+apRowH()*4-S(15),innerR-innerL,L"توضیحات");
+    drawLabel(dc,rightColX,py+apRowH()-S(20),colW,L"کد ملی");
+    drawLabel(dc,leftColX, py+apRowH()-S(20),colW,L"نام");
+    drawLabel(dc,rightColX,py+apRowH()*2-S(20),colW,L"نام پدر");
+    drawLabel(dc,leftColX, py+apRowH()*2-S(20),colW,L"نام خانوادگی");
+    drawLabel(dc,rightColX,py+apRowH()*3-S(20),colW,L"تلفن همراه");
+    drawLabel(dc,leftColX, py+apRowH()*3-S(20),colW,L"جنسیت");
+    drawLabel(dc,leftColX, py+apRowH()*4-S(20),innerR-innerL,L"توضیحات");
+
+    // v1.8.0 UI: framed input wells behind every field (matches the reception
+    // form). A focused field gets a THIN soft-red focus ring; unfocused fields
+    // keep a subtle hairline border. This replaces the bare, borderless edits.
+    {
+        HWND edits[]={u->pNid,u->pFirst,u->pFather,u->pMobile,u->pLast,
+            u->pGender,u->pDesc,u->aDate,u->sNid,u->sFirst,u->sMobile,u->sLast,
+            u->aDoctor,u->aService};
+        HWND foc=GetFocus();
+        COLORREF focusRing = blendColor(g_theme.danger, g_theme.inputBg, 60);
+        for(HWND ec:edits){
+            if(!ec || !IsWindowVisible(ec)) continue;
+            RECT wr; GetWindowRect(ec,&wr);
+            POINT a={wr.left,wr.top}, b={wr.right,wr.bottom};
+            ScreenToClient(h,&a); ScreenToClient(h,&b);
+            if(b.y<=a.y) continue;
+            RECT well={a.x-S(6),a.y-S(4),b.x+S(6),b.y+S(4)};
+            COLORREF bord = (ec==foc)? focusRing : g_theme.border;
+            fillRoundRect(dc,well,S(8),g_theme.inputBg,bord);
+        }
+    }
 
     // v1.7.0: when an inquiry could NOT verify the identity, draw a clear danger
     // frame around the name (pFirst) and surname (pLast) edit boxes so the
@@ -1000,6 +1025,11 @@ static LRESULT CALLBACK apProc(HWND h, UINT m, WPARAM w, LPARAM l){
     case WM_COMMAND: {
         if(!u) return 0;
         int id=LOWORD(w), code=HIWORD(w);
+        // v1.8.0: repaint so the focused field's thin red focus ring updates.
+        if(code==EN_SETFOCUS || code==EN_KILLFOCUS ||
+           code==CBN_SETFOCUS || code==CBN_KILLFOCUS){
+            InvalidateRect(h,NULL,FALSE);
+        }
         if(id==AP_S_GO) doSearch(u);
         else if(id==AP_S_CANCELLED && code==BN_CLICKED) refreshGrid(u);
         else if(id==AP_A_DOCTOR && code==CBN_SELCHANGE) onDoctorChanged(u);

@@ -1,2 +1,2 @@
-1.6.0
+1.8.1
 https://github.com/perofesor/Azadi-Teb/raw/main/build/AzadiTeb.exe

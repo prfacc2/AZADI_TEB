@@ -37,6 +37,19 @@ extern HFONT g_fUI, g_fUIB, g_fSmall, g_fTitle, g_fBig, g_fHuge, g_fMono;
 // scale helper
 inline int S(int v){ return (int)(v * g_scale + 0.5); }
 
+// Blend color `a` toward `b` by `pct` percent (0 = pure a, 100 = pure b).
+// Used for subtle, theme-aware UI tints (e.g. a soft focus ring).
+inline COLORREF blendColor(COLORREF a, COLORREF b, int pct){
+    if(pct<0) pct=0;
+    if(pct>100) pct=100;
+    int ra=GetRValue(a), ga=GetGValue(a), ba=GetBValue(a);
+    int rb=GetRValue(b), gb=GetGValue(b), bb=GetBValue(b);
+    int r=ra+(rb-ra)*pct/100;
+    int g=ga+(gb-ga)*pct/100;
+    int bl=ba+(bb-ba)*pct/100;
+    return RGB(r,g,bl);
+}
+
 // ------------------------------------------------------------------ theme --
 struct Theme {
     COLORREF bg;          // window background
