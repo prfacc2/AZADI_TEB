@@ -367,7 +367,7 @@ static bool apPrompt(HWND owner,const wchar_t* title,const wchar_t* label,
     if(!dlg) return false;
     CreateWindowW(L"STATIC",label,WS_CHILD|WS_VISIBLE|SS_RIGHT,
         S(14),S(14),W-S(28),S(22),dlg,NULL,g_hInst,NULL);
-    ps.edit=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",L"",
+    ps.edit=CreateWindowExW(0,L"EDIT",L"",
         WS_CHILD|WS_VISIBLE|ES_AUTOHSCROLL|ES_RIGHT,
         S(14),S(42),W-S(28),S(28),dlg,NULL,g_hInst,NULL);
     SendMessageW(ps.edit,WM_SETFONT,(WPARAM)g_fUI,TRUE);
@@ -651,8 +651,8 @@ static std::wstring cellText(const Appointment& a, int col){
 }
 static void paintGrid(HDC dc, HWND h, ApptUI* u){
     RECT g=apGridRect(h);
-    // card background
-    gpRoundRect(dc,g,S(10),g_theme.surface,g_theme.border);
+    // card background (v1.8.0: corners patched to page bg)
+    gpRoundRectBg(dc,g,S(10),g_theme.surface,g_theme.border,g_theme.bg);
     int xs[N_GCOLS+1]; computeColX(g,xs);
     // header row
     RECT hr={g.left,g.top,g.right,g.top+apHdrH()};

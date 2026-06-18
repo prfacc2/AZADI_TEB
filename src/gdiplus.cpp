@@ -73,6 +73,57 @@ void gpFillAlpha(HDC dc, RECT rc, int rad, COLORREF fill, int alpha){
     gpRoundRect(dc, rc, rad, fill, CLR_INVALID, alpha);
 }
 
+// ---------------------------------------------------------------------------
+//  v1.8.0  rounded-corner background fix
+//  gpRoundRect / gpGradRoundRect only fill the rounded path, so the 4 corner
+//  triangles (inside the bounding rect but outside the path) keep whatever was
+//  in the DC before — that produced the "wrong colour / black corner" artefact
+//  on rounded controls when the surrounding pixels were not pre-painted with
+//  the theme background.  The *Bg variants below paint those corner gaps with
+//  `bg` FIRST, so corners always blend into the theme surface.
+// ---------------------------------------------------------------------------
+
+//  Paint just the 4 corner gaps of a rounded rect with `bg`.
+void gpFillCorners(HDC dc, RECT rc, int rad, COLORREF bg){
+    int w = rc.right-rc.left, h = rc.bottom-rc.top;
+    if(w<=0||h<=0) return;
+    int d = rad*2;
+    if(d>w) d=w;
+    if(d>h) d=h;
+    if(d<2) return;                 // square — nothing to patch
+    int r = d/2;
+    if(!s_gdipOK){
+        // Plain-GDI fallback: subtract a round-rect region from the full rect
+        // and flood the remainder (the corners) with bg.
+        HRGN full  = CreateRectRgn(rc.left, rc.top, rc.right, rc.bottom);
+        HRGN round = CreateRoundRectRgn(rc.left, rc.top, rc.right+1, rc.bottom+1, d, d);
+        CombineRgn(full, full, round, RGN_DIFF);
+        HBRUSH br = CreateSolidBrush(bg);
+        FillRgn(dc, full, br);
+        DeleteObject(br); DeleteObject(full); DeleteObject(round);
+        return;
+    }
+    Graphics g(dc); g.SetSmoothingMode(SmoothingModeAntiAlias);
+    // Build a region = boundingRect - roundedPath, fill with bg.
+    Rect b(rc.left, rc.top, w-1, h-1);
+    GraphicsPath rp; roundPath(rp, b, rad);
+    Region reg(b);                  // whole bounding box
+    reg.Exclude(&rp);               // remove the rounded interior → corners only
+    SolidBrush br(C(bg));
+    g.FillRegion(&br, &reg);
+    (void)r;
+}
+
+void gpRoundRectBg(HDC dc, RECT rc, int rad, COLORREF fill, COLORREF border, COLORREF bg, int alpha){
+    if(bg!=CLR_INVALID) gpFillCorners(dc, rc, rad, bg);
+    gpRoundRect(dc, rc, rad, fill, border, alpha);
+}
+
+void gpGradRoundRectBg(HDC dc, RECT rc, int rad, COLORREF top, COLORREF bottom, COLORREF border, COLORREF bg){
+    if(bg!=CLR_INVALID) gpFillCorners(dc, rc, rad, bg);
+    gpGradRoundRect(dc, rc, rad, top, bottom, border);
+}
+
 //  Soft drop shadow: draw several expanding translucent rounded rects so the
 //  edge fades out — a cheap, dependency-free blur that gives cards real depth.
 void gpShadow(HDC dc, RECT rc, int rad, int spread, int alpha){

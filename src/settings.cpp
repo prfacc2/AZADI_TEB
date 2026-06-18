@@ -34,6 +34,7 @@ enum {
     ROW_PROFILE,      // edit profile name+photo (reception+, needs approval)
     ROW_DENSITY,
     ROW_AUTOPRINT,
+    ROW_SAVEDMSGS,    // v1.8.0: enable «پیام‌های ذخیره‌شده» (off by default)
     ROW_SERVER,
     ROW_ABOUT,
     ROW_LOGOUT
@@ -45,7 +46,7 @@ struct SetState {
     HWND owner;
     HWND eServer;
     int  hot;
-    bool dark, compact, autoPrint, notify;
+    bool dark, compact, autoPrint, notify, savedMsgs;
     std::vector<RowDef> rows;       // built per-role on open
     int  role;                      // -1 guest, 0 reception, 1 manage, 2 admin
 };
@@ -162,6 +163,15 @@ static void doNotifyToggle(HWND h){
     s_st->notify=!s_st->notify;
     setSetting(L"notify", s_st->notify?L"1":L"0");
     InvalidateRect(h,NULL,FALSE);
+}
+// v1.8.0: enable/disable the locally-stored «پیام‌های ذخیره‌شده» archive.
+static void doSavedMsgsToggle(HWND h){
+    if(!s_st) return;
+    s_st->savedMsgs=!s_st->savedMsgs;
+    setSetting(L"saved_msgs_enabled", s_st->savedMsgs?L"1":L"0");
+    InvalidateRect(h,NULL,FALSE);
+    // repaint any open reception so the archive icon appears/disappears live
+    if(g_hFrame) InvalidateRect(g_hFrame,NULL,TRUE);
 }
 static void saveServerUrl(){
     if(!s_st || !s_st->eServer || serverRowIndex()<0) return;
@@ -324,6 +334,7 @@ static void paintRows(HWND h, HDC dc){
             else if(rd.id==ROW_DENSITY) drawValueChip(dc,r, s_st->compact?L"فشرده":L"متعارف");
             else if(rd.id==ROW_AUTOPRINT) drawToggle(dc,lcx,lcy,s_st->autoPrint);
             else if(rd.id==ROW_NOTIFY)  drawToggle(dc,lcx,lcy,s_st->notify);
+            else if(rd.id==ROW_SAVEDMSGS) drawToggle(dc,lcx,lcy,s_st->savedMsgs);
             else if(rd.id==ROW_SERVER){ /* edit box overlays */ }
             else {
                 RECT cv={r.left+S(14),lcy-S(8),r.left+S(28),lcy+S(8)};
@@ -412,6 +423,7 @@ static LRESULT CALLBACK setProc(HWND h, UINT m, WPARAM w, LPARAM l){
             case ROW_THEME:       doThemeToggle(h); break;
             case ROW_UPDATE:      saveServerUrl(); checkRemoteUpdate(h); break;
             case ROW_NOTIFY:      doNotifyToggle(h); break;
+            case ROW_SAVEDMSGS:   doSavedMsgsToggle(h); break;
             case ROW_PRINTER:     closeSettingsPanel(); openPrinterSettings(g_hFrame); break;
             case ROW_PRINTDESIGN: closeSettingsPanel(); openPrinterSettings(g_hFrame); break;
             case ROW_PROFILE:     doProfile(h); break;
@@ -455,6 +467,7 @@ static void buildRows(SetState* st){
     st->rows.push_back({ROW_THEME,   L"تغییر پوسته (تم)",   ICO_MOON,  NULL,false});
     st->rows.push_back({ROW_UPDATE,  L"بررسی به‌روزرسانی",  ICO_UPDATE,L"دریافت آخرین نسخه",false});
     st->rows.push_back({ROW_NOTIFY,  L"تنظیمات اعلان",      ICO_BELL,  L"صدا و هشدار پیام جدید",false});
+    st->rows.push_back({ROW_SAVEDMSGS,L"پیام‌های ذخیره‌شده", ICO_SAVE, L"بایگانی محلی پیام‌ها (به‌صورت پیش‌فرض غیرفعال)",true});
     st->rows.push_back({ROW_PRINTER, L"تنظیمات چاپگر",      ICO_PRINT, L"پرینتر، اندازه و طراحی چاپ",false});
     if(st->role==0){
         // reception can request a profile change (needs approval)
@@ -488,6 +501,7 @@ void openSettingsPanel(HWND frameOwner){
     s_st->compact=(getSetting(L"density",L"normal")==L"compact");
     s_st->autoPrint=(getSetting(L"auto_print",L"0")==L"1");
     s_st->notify=(getSetting(L"notify",L"1")==L"1");
+    s_st->savedMsgs=(getSetting(L"saved_msgs_enabled",L"0")==L"1");
     s_st->role = g_session.user.username.empty() ? -1 : g_session.user.role;
     buildRows(s_st);
 

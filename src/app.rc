@@ -14,12 +14,17 @@
 202 RCDATA "../assets/icons/ic_receipt.png"
 203 RCDATA "../assets/icons/ic_shield.png"
 204 RCDATA "../assets/icons/ic_last.png"
+// v1.8.0: settings (gear) + calculator raster icons — white-on-alpha PNGs that
+// are tinted to the theme accent at draw time so they read cleanly on BOTH the
+// light and the dark theme.
+205 RCDATA "../assets/icons/ic_settings.png"
+206 RCDATA "../assets/icons/ic_calc.png"
 
 1 24 "app.manifest"
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,7,0,0
- PRODUCTVERSION 1,7,0,0
+ FILEVERSION 1,8,0,0
+ PRODUCTVERSION 1,8,0,0
  FILEFLAGSMASK 0x3fL
  FILEFLAGS 0x0L
  FILEOS 0x40004L
@@ -32,11 +37,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "Azadi-Teb"
             VALUE "FileDescription", "Azadi-Teb Clinic Reception & Management System"
-            VALUE "FileVersion", "1.7.0.0"
+            VALUE "FileVersion", "1.8.0.0"
             VALUE "InternalName", "AzadiTeb"
             VALUE "OriginalFilename", "AzadiTeb.exe"
             VALUE "ProductName", "Azadi-Teb"
-            VALUE "ProductVersion", "1.7.0"
+            VALUE "ProductVersion", "1.8.0"
         END
     END
     BLOCK "VarFileInfo"

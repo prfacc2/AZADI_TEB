@@ -80,8 +80,9 @@ static LRESULT CALLBACK adminProc(HWND h, UINT m, WPARAM w, LPARAM l){
         d->list=CreateWindowExW(WS_EX_LAYOUTRTL|WS_EX_RTLREADING,WC_LISTVIEWW,L"",
             WS_CHILD|WS_VISIBLE|WS_TABSTOP|LVS_REPORT|LVS_SINGLESEL|LVS_SHOWSELALWAYS,
             0,0,10,10,h,(HMENU)ID_AD_LIST,g_hInst,0);
+        // v1.8.0: drop GRIDLINES — borderless, clean, theme-integrated list.
         ListView_SetExtendedListViewStyle(d->list,
-            LVS_EX_FULLROWSELECT|LVS_EX_GRIDLINES|LVS_EX_DOUBLEBUFFER);
+            LVS_EX_FULLROWSELECT|LVS_EX_DOUBLEBUFFER);
         const wchar_t* cols[4]={L"نام کاربری",L"نام شخص",L"بخش",L"نوع دسترسی"};
         int widths[4]={S(140),S(190),S(170),S(120)};
         for(int i=0;i<4;i++){

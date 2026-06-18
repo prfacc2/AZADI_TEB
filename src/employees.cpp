@@ -91,6 +91,11 @@ EmpProfile loadEmpProfile(const std::wstring& username){
         else if(k==L"shiftFrom") p.shiftFrom=v; else if(k==L"shiftTo") p.shiftTo=v;
         else if(k==L"photo") p.photoPath=v; else if(k==L"idcard") p.idCardPath=v;
         else if(k==L"dept") p.deptId=v;
+        // v1.8.0 extended fields
+        else if(k==L"empId") p.empId=v; else if(k==L"uniqueId") p.uniqueId=v;
+        else if(k==L"position") p.position=v; else if(k==L"mobile") p.mobile=v;
+        else if(k==L"email") p.email=v; else if(k==L"hireDate") p.hireDate=v;
+        else if(k==L"workHours") p.workHours=v;
     }
     return p;
 }
@@ -105,6 +110,13 @@ void saveEmpProfile(const EmpProfile& p){
     s+=L"photo="+p.photoPath+L"\r\n";
     s+=L"idcard="+p.idCardPath+L"\r\n";
     s+=L"dept="+p.deptId+L"\r\n";
+    s+=L"empId="+p.empId+L"\r\n";
+    s+=L"uniqueId="+p.uniqueId+L"\r\n";
+    s+=L"position="+p.position+L"\r\n";
+    s+=L"mobile="+p.mobile+L"\r\n";
+    s+=L"email="+p.email+L"\r\n";
+    s+=L"hireDate="+p.hireDate+L"\r\n";
+    s+=L"workHours="+p.workHours+L"\r\n";
     writeFileUtf8(empPath(p.username),s,false);
 }
 
@@ -237,4 +249,62 @@ void markSetReqsSeen(){
         out+=f[0]+L"|"+f[1]+L"|"+f[2]+L"|"+f[3]+L"|"+f[4]+L"|"+f[5]+L"\r\n";
     }
     writeFileUtf8(setReqPath(),out,false);
+}
+
+// ============================================== saved (archived) messages ====
+//  data\saved_msgs.dat:  from|to|time|type|attachPath|text
+static std::wstring savedMsgPath(){ return dataDir()+L"\\saved_msgs.dat"; }
+static std::wstring attachDir(){
+    std::wstring d=dataDir()+L"\\attachments";
+    CreateDirectoryW(d.c_str(),NULL);
+    return d;
+}
+bool savedMsgsEnabled(){
+    return getSetting(L"saved_msgs_enabled",L"0")==L"1";
+}
+std::vector<SavedMsg> loadSavedMsgs(){
+    std::vector<SavedMsg> out;
+    std::wstring all=readFileUtf8(savedMsgPath());
+    size_t pos=0;
+    while(pos<all.size()){
+        size_t e=all.find(L'\n',pos); if(e==std::wstring::npos) e=all.size();
+        std::wstring line=all.substr(pos,e-pos); pos=e+1;
+        if(trim(line).empty()) continue;
+        auto f=splitPipe(line);
+        if(f.size()<6) continue;
+        SavedMsg m; m.from=f[0]; m.to=f[1]; m.time=f[2];
+        m.type=_wtoi(f[3].c_str()); m.attachPath=f[4]; m.text=f[5];
+        out.push_back(m);
+    }
+    std::reverse(out.begin(),out.end());   // newest first
+    return out;
+}
+void pushSavedMsg(const std::wstring& from, const std::wstring& to,
+                  const std::wstring& text, int type,
+                  const std::wstring& attachPath){
+    SYSTEMTIME st=iranNow();
+    wchar_t tb[32]; swprintf(tb,32,L"%s %02d:%02d",jalaliDateShort(st).c_str(),st.wHour,st.wMinute);
+    wchar_t ty[8]; swprintf(ty,8,L"%d",type<0?0:(type>2?2:type));
+    std::wstring row=pipeEsc(from)+L"|"+pipeEsc(to)+L"|"+std::wstring(tb)+L"|"+
+                     std::wstring(ty)+L"|"+pipeEsc(attachPath)+L"|"+pipeEsc(text)+L"\r\n";
+    writeFileUtf8(savedMsgPath(),row,true);
+    logLine(L"message archived to saved store");
+}
+int savedMsgCount(){ return (int)loadSavedMsgs().size(); }
+
+//  Copy an attachment into data\attachments\ with a unique name so it survives
+//  even if the original source file is later moved/deleted. Returns the stored
+//  path (which the recipient can download/open) or L"" on failure.
+std::wstring copyAttachmentLocal(const std::wstring& srcPath){
+    if(trim(srcPath).empty()) return L"";
+    std::wstring dir=attachDir();
+    // derive filename
+    size_t slash=srcPath.find_last_of(L"\\/");
+    std::wstring base=(slash==std::wstring::npos)?srcPath:srcPath.substr(slash+1);
+    SYSTEMTIME st=iranNow();
+    wchar_t pre[32]; swprintf(pre,32,L"%02d%02d%02d%02d%02d_",
+        st.wYear%100,st.wMonth,st.wDay,st.wHour,st.wMinute);
+    std::wstring dst=dir+L"\\"+std::wstring(pre)+base;
+    if(CopyFileW(srcPath.c_str(),dst.c_str(),FALSE)) return dst;
+    return L"";
 }

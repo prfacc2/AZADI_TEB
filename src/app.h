@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.7.0"
+#define APP_VERSION_W   L"1.8.0"
 #define APP_NAME_W      L"\u0622\u0632\u0627\u062f\u06cc \u0637\u0628"   // آزادی طب
 #define APP_CLASS_W     L"AzadiTebFrame"
 
@@ -75,7 +75,13 @@ enum IconId {
     ICO_ID, ICO_PHONE, ICO_CAL, ICO_PIN, ICO_RECEIPT, ICO_CLOCK, ICO_REFRESH,
     ICO_GEAR, ICO_BELL, ICO_TAB, ICO_CHEVRON
 };
-enum BtnStyle { BS_GHOST=0, BS_PRIMARY=1, BS_DANGER=2, BS_OUTLINE=3, BS_CARD=4 };
+enum BtnStyle { BS_GHOST=0, BS_PRIMARY=1, BS_DANGER=2, BS_OUTLINE=3, BS_CARD=4,
+                //  v1.8.0: a distinct, non-red "attention" style (violet/teal)
+                //  used for the management change-request categories so they
+                //  stand out clearly WITHOUT using the danger red.
+                BS_INFO=5 };
+//  v1.8.0: a distinct accent for the "attention / requests" controls (NOT red).
+extern COLORREF g_infoAccent, g_infoAccent2;
 void  registerFlatButton();
 HWND  createFlatButton(HWND parent, int id, const wchar_t* text,
                        int icon, int style,
@@ -108,6 +114,16 @@ void gdipShutdown();
 void gpRoundRect(HDC dc, RECT rc, int rad, COLORREF fill, COLORREF border, int alpha=255);
 //  Vertical 2-stop gradient rounded rectangle.
 void gpGradRoundRect(HDC dc, RECT rc, int rad, COLORREF top, COLORREF bottom, COLORREF border);
+//  v1.8.0: rounded-rect variants that FIRST paint the 4 corner triangles (the
+//  area outside the rounded path but inside the bounding rect) with `bg` so the
+//  corners always match the surrounding theme background — no dark/black/wrong
+//  colour artefacts on rounded controls, cards, wells, lists or combos.
+void gpRoundRectBg(HDC dc, RECT rc, int rad, COLORREF fill, COLORREF border, COLORREF bg, int alpha=255);
+void gpGradRoundRectBg(HDC dc, RECT rc, int rad, COLORREF top, COLORREF bottom, COLORREF border, COLORREF bg);
+//  Paint only the 4 rounded-corner gaps of `rc` (radius `rad`) with `bg`. Use
+//  this to "patch" the corners behind any rounded region whose interior is
+//  already drawn (e.g. owner-drawn lists / combos / regions).
+void gpFillCorners(HDC dc, RECT rc, int rad, COLORREF bg);
 //  Soft drop shadow behind a rounded rect (blurred, layered look).
 void gpShadow(HDC dc, RECT rc, int rad, int spread, int alpha);
 //  Solid translucent rounded fill (for glass overlays / dim layers).
@@ -126,6 +142,9 @@ bool gpDrawImageFileCircle(HDC dc, const std::wstring& path, RECT rc);
 #define IMG_IC_RECEIPT 202
 #define IMG_IC_SHIELD  203
 #define IMG_IC_LAST    204
+//  v1.8.0: header settings (gear) + calculator raster icons.
+#define IMG_IC_SETTINGS 205
+#define IMG_IC_CALC     206
 //  Crisp anti-aliased line / circle helpers used by the new header clock etc.
 void gpLine(HDC dc, int x1,int y1,int x2,int y2, COLORREF col, float w, int alpha=255);
 
@@ -278,9 +297,13 @@ bool addDept(const DeptCat& c, std::wstring& err);
 bool removeDept(const std::wstring& id);
 void seedDefaultDepts();   // ensure the «پذیرش» default category exists
 //  Extended employee profile (beyond the login User record).
+//  v1.8.0: added empId (auto/manual personnel code), uniqueId (system-unique
+//  identifier, auto/manual), position/title, mobile, email, hireDate and
+//  workHours (weekly hours) so the new-employee form is complete.
 struct EmpProfile {
     std::wstring username, nationalId, fatherName, address, landline,
                  shiftFrom, shiftTo, photoPath, idCardPath, deptId;
+    std::wstring empId, uniqueId, position, mobile, email, hireDate, workHours;
 };
 EmpProfile loadEmpProfile(const std::wstring& username);
 void       saveEmpProfile(const EmpProfile& p);
@@ -316,6 +339,24 @@ void  pushSetReq(const std::wstring& user, const std::wstring& system,
                  const std::wstring& change, const std::wstring& profile);
 int   unseenSetReqCount();
 void  markSetReqsSeen();
+
+// ------------------------------------------------- saved (archived) messages --
+//  v1.8.0: when «پیام‌های ذخیره‌شده» (Saved Messages) is enabled in settings, a
+//  message can be archived to permanent local storage with its text and any
+//  downloadable attachments preserved. Stored in data\saved_msgs.dat:
+//      from|to|time|type|attachPath|text
+struct SavedMsg { std::wstring from, to, time, attachPath, text; int type; bool seen;
+    SavedMsg():type(0),seen(false){} };
+std::vector<SavedMsg> loadSavedMsgs();
+void  pushSavedMsg(const std::wstring& from, const std::wstring& to,
+                   const std::wstring& text, int type,
+                   const std::wstring& attachPath);
+int   savedMsgCount();
+bool  savedMsgsEnabled();                 // settings flag "saved_msgs_enabled"
+//  v1.8.0: department-targeted message helper (records the dept/route in `to`).
+//  Attachments (image/video/gif/png/jpg/word/…) are copied into a local
+//  attachments folder and the stored path lets the recipient download them.
+std::wstring copyAttachmentLocal(const std::wstring& srcPath);  // returns stored path or L""
 
 // ----------------------------------------------------------- appointment ----
 //  v1.6.0: the نوبت‌دهی (appointment) module lives as a tab inside the reception

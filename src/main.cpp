@@ -61,7 +61,15 @@ static void buildFonts(){
 // ------------------------------------------------------------- frame rects -
 //  v1.3.0 — taller header (LAYER 1) so the centered live clock + Jalali date
 //  fit comfortably; thinner bottom status bar (clock moved up to the header).
-static int topBarH(){ return S(72); }
+//  v1.8.0 — the header now has TWO layers: LAYER 1 (identity + clock + gear /
+//  calculator / exit) and a thinner LAYER 2 "action bar" that, on the reception
+//  screen, hosts the blue navigation buttons (نوبت‌دهی / پذیرش جدید / تب جدید)
+//  RIGHT-aligned. The action bar is only present where it is needed so other
+//  screens keep the original clean single-layer header.
+static int mainBarH(){ return S(64); }                 // LAYER 1 height
+static int actionBarH(){ return S(50); }               // LAYER 2 height
+static bool headerHasActionBar(){ return s_curScreen==SC_RECEPTION; }
+static int topBarH(){ return mainBarH() + (headerHasActionBar()?actionBarH():0); }
 static int botBarH(){ return S(40); }
 RECT frameContentRect(){
     RECT rc; GetClientRect(g_hFrame,&rc);
@@ -251,27 +259,32 @@ HWND createHomeScreen(HWND frame){
 //  on the LEFT, after the gear+calculator, and only while the reception screen
 //  is active (RTL: laid out left→right since they sit on the LEFT side).
 static void updateHeaderButtons(HWND h){
-    bool show = (s_curScreen==SC_RECEPTION);
+    bool show = headerHasActionBar();
     ShowWindow(s_bNewPat, show?SW_SHOW:SW_HIDE);
     ShowWindow(s_bAppt,   show?SW_SHOW:SW_HIDE);
     ShowWindow(s_bNewTab, show?SW_SHOW:SW_HIDE);
     if(!show) return;
-    int bh=S(38), pad=S(14);
-    int y=(topBarH()-bh)/2;
-    // start after the gear (pad) + calculator (pad+bh+gap) cluster
-    int x = pad + bh + S(8) + bh + S(18);
-    int wNew=S(132), wAppt=S(118), wTab=S(108), g=S(8);
-    MoveWindow(s_bNewPat, x,                       y, wNew,  bh, TRUE);
-    MoveWindow(s_bAppt,   x+wNew+g,                 y, wAppt, bh, TRUE);
-    MoveWindow(s_bNewTab, x+wNew+g+wAppt+g,         y, wTab,  bh, TRUE);
-    setFlatButtonBg(s_bNewPat, g_theme.headerTop);
-    setFlatButtonBg(s_bAppt,   g_theme.headerTop);
-    setFlatButtonBg(s_bNewTab, g_theme.headerTop);
+    RECT rc; GetClientRect(h,&rc);
+    int bh=S(38), pad=S(16), g=S(10);
+    // LAYER 2 (action bar) sits directly under LAYER 1.
+    int y = mainBarH() + (actionBarH()-bh)/2;
+    // RIGHT-aligned cluster, order requested by the brief (right → left as the
+    // RTL reading order, so the FIRST item «نوبت‌دهی» is the right-most):
+    //     نوبت‌دهی  |  پذیرش جدید  |  تب جدید
+    int wAppt=S(120), wNew=S(134), wTab=S(112);
+    int x = rc.right - pad - wAppt;            // appointment (right-most)
+    MoveWindow(s_bAppt,   x,                          y, wAppt, bh, TRUE);
+    MoveWindow(s_bNewPat, x-g-wNew,                   y, wNew,  bh, TRUE);
+    MoveWindow(s_bNewTab, x-g-wNew-g-wTab,            y, wTab,  bh, TRUE);
+    // blend the buttons' rounded corners into the LAYER 2 surface colour.
+    setFlatButtonBg(s_bNewPat, g_theme.surface2);
+    setFlatButtonBg(s_bAppt,   g_theme.surface2);
+    setFlatButtonBg(s_bNewTab, g_theme.surface2);
 }
 static void frameLayout(HWND h){
     RECT rc; GetClientRect(h,&rc);
     int bh=S(38), pad=S(14);
-    int y=(topBarH()-bh)/2;
+    int y=(mainBarH()-bh)/2;     // LAYER 1 vertical centre
     // --- RIGHT side (RTL primary): EXIT is the right-most control; the app
     //     identity (logo + name + fullname + access) is painted to its LEFT.
     MoveWindow(s_bExit,  rc.right-pad-bh, y, bh, bh, TRUE);
@@ -297,6 +310,12 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         s_bExit     = createFlatButton(h, ID_FR_EXIT,    L"", ICO_X,      BS_GHOST,0,0,10,10);
         s_bSettings = createFlatButton(h, ID_FR_SETTINGS,L"", ICO_GEAR,   BS_GHOST,0,0,10,10);
         s_bCalc     = createFlatButton(h, ID_FR_CALC,    L"", ICO_CALC,   BS_GHOST,0,0,10,10);
+        // v1.8.0: use the new clean raster gear / calculator icons (white-on-
+        // alpha PNGs tinted to the theme accent) so both buttons read perfectly
+        // on the light AND the dark theme. They gracefully fall back to the
+        // vector ICO_GEAR / ICO_CALC if GDI+ or the resource is unavailable.
+        setFlatButtonImage(s_bSettings, IMG_IC_SETTINGS);
+        setFlatButtonImage(s_bCalc,     IMG_IC_CALC);
         // header action buttons (reception only) — created hidden, shown by
         // updateHeaderButtons() when the reception screen becomes active.
         s_bNewPat   = createFlatButton(h, ID_FR_NEWPAT, L"پذیرش جدید", ICO_PLUS, BS_PRIMARY,0,0,10,10,
@@ -332,7 +351,7 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         if(w==TIMER_CLOCK){
             // repaint only the centered clock/date zone in the top header
             RECT rc; GetClientRect(h,&rc);
-            RECT cz={rc.right/2-S(260), 0, rc.right/2+S(260), topBarH()};
+            RECT cz={rc.right/2-S(260), 0, rc.right/2+S(260), mainBarH()};
             InvalidateRect(h,&cz,FALSE);
         }
         return 0;
@@ -394,8 +413,15 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         // ===================== LAYER 1 — top header bar =====================
         // Soft vertical gradient so the header reads as a distinct, polished
         // surface (not a flat strip).
-        RECT tb={0,0,rc.right,topBarH()};
+        RECT tb={0,0,rc.right,mainBarH()};
         gpGradRoundRect(dc,tb,0,g_theme.headerTop,g_theme.headerBot,CLR_INVALID);
+        // ===================== LAYER 2 — action sub-bar =====================
+        if(headerHasActionBar()){
+            RECT ab={0,mainBarH(),rc.right,mainBarH()+actionBarH()};
+            FillRect(dc,&ab,g_brSurface2);
+            // crisp separator between the two header layers
+            gpLine(dc,0,mainBarH(),rc.right,mainBarH(),g_theme.border,1.0f);
+        }
         // bottom status bar
         RECT bb={0,rc.bottom-botBarH(),rc.right,rc.bottom};
         FillRect(dc,&bb,g_brSurface2);
@@ -417,7 +443,7 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         int exitW = S(38)+S(14);
         int logoR = S(16);
         int logoCx = rc.right - exitW - S(16) - logoR;
-        int logoCy = topBarH()/2;
+        int logoCy = mainBarH()/2;
         RECT lc={logoCx-logoR,logoCy-logoR,logoCx+logoR,logoCy+logoR};
         gpGradRoundRect(dc,lc,logoR,g_theme.accent2,g_theme.accent,CLR_INVALID);
         RECT li={lc.left+S(7),lc.top+S(7),lc.right-S(7),lc.bottom-S(7)};
@@ -439,13 +465,13 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 g_session.user.role==1 ? L"مدیریت درمانگاه" : L"پذیرش درمانگاه";
             std::wstring sub = g_session.user.fullname + L"  •  " + role +
                 (g_session.user.dept.empty()?L"":(L"  •  "+g_session.user.dept));
-            RECT sr={S(160),S(8)+S(24),idRight,topBarH()-S(8)};
+            RECT sr={S(160),S(8)+S(24),idRight,mainBarH()-S(6)};
             DrawTextW(dc,sub.c_str(),-1,&sr,
                 DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
         } else {
             SelectObject(dc,g_fTitle);
             SetTextColor(dc,g_theme.text);
-            RECT nr={S(160),0,idRight,topBarH()};
+            RECT nr={S(160),0,idRight,mainBarH()};
             DrawTextW(dc,APP_NAME_W,-1,&nr,
                 DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
         }
@@ -461,7 +487,7 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         // date — centered just below the clock
         SetTextColor(dc,g_theme.textDim);
         SelectObject(dc,g_fSmall);
-        RECT dr={rc.right/2-S(260),S(6)+S(34),rc.right/2+S(260),topBarH()-S(4)};
+        RECT dr={rc.right/2-S(260),S(6)+S(34),rc.right/2+S(260),mainBarH()-S(2)};
         DrawTextW(dc,jalaliDateStr(st).c_str(),-1,&dr,
             DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
 

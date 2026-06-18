@@ -100,11 +100,16 @@ struct TabPage {
     //   cartHotBtn : which detail-view button is hovered (0=none)
     bool cartDetail;
     int  cartSelDisp, cartSelNF, cartHotBtn;
+    //  v1.8.0: cartShowArchive — when true the cartable shows the locally
+    //  archived (saved) messages instead of the live management inbox. Only
+    //  reachable when «پیام‌های ذخیره‌شده» is enabled in settings.
+    bool cartShowArchive;
     std::wstring lastMsg; COLORREF msgCol;
     TabPage():page(0),kind(TK_RECEPTION),appt(0),total(0),mainShare(0),patientShare(0),
         baseDiff(0),orgShare(0),paid(0),detached(false),autoPrice(false),
         idChecked(false),idVerified(false),
-        cartDetail(false),cartSelDisp(-1),cartSelNF(-1),cartHotBtn(0),msgCol(0){}
+        cartDetail(false),cartSelDisp(-1),cartSelNF(-1),cartHotBtn(0),
+        cartShowArchive(false),msgCol(0){}
 };
 
 struct RecData {
@@ -224,15 +229,24 @@ static void rcMetrics(int W, int& cardL, int& cardR, int& billL, int& billR,
 //  small / low-res monitors (responsive requirement).
 static void rcVMetrics(int H, int& y0, int& step, int& rh){
     // y0 must clear: card top (S16) + header (≈S46) + separator (S52) and then
-    // leave room above the first row for its section caption. Start ~S124.
-    // step must be tall enough that: label(18px) + gap(6) + input(rh) fit with a
-    // small gap before the next label, so nothing overlaps.
-    y0 = S(124); step = S(66); rh = S(34);
-    int need = y0 + 8*step + S(126);
+    // leave room above the first row for its section caption. Start ~S132.
+    //
+    // Per-row anatomy (offsets are measured from the row baseline = y0+row*step):
+    //   section caption .. baseline-S(44)  (only rows 0,3,5,7; height S(20))
+    //   field label ..... baseline-S(20)   (height S(18))
+    //   input ........... baseline         (height rh)
+    //
+    // To guarantee the NEXT row's caption never collides with the CURRENT row's
+    // input we need:   step - S(44) - rh >= S(8)   →   step >= rh + S(52).
+    // With rh=S(34) that means step >= S(86). We honour that on roomy screens and
+    // shrink gracefully (keeping the no-overlap invariant) on short ones.
+    y0 = S(132); rh = S(34); step = rh + S(52);   // = S(86): zero overlap
+    int need = y0 + 8*step + S(132);
     if(H > 0 && need > H){
-        step = (H - y0 - S(126)) / 8;
-        if(step < S(56)) step = S(56);     // keep label+input from overlapping
-        rh = step - S(30); if(rh > S(34)) rh = S(34); if(rh < S(26)) rh = S(26);
+        step = (H - y0 - S(132)) / 8;
+        if(step < S(70)) step = S(70);            // floor keeps things readable
+        // derive rh from step so the invariant step >= rh + S(52) always holds
+        rh = step - S(52); if(rh > S(34)) rh = S(34); if(rh < S(24)) rh = S(24);
     }
 }
 static void tabPageLayout(HWND h, TabPage* t){
@@ -522,6 +536,9 @@ enum { CART_BTN_NONE=0, CART_BTN_MARK=1, CART_BTN_TOGGLEREAD=2,
        CART_BTN_DELETE=3, CART_BTN_BACK=4 };
 struct CartBtn { RECT r; int id; };
 static std::vector<CartBtn> s_cartBtns;      // detail-view button hit map
+// v1.8.0: the archive toggle hotspot in the cartable header (top-LEFT corner).
+// Empty when «پیام‌های ذخیره‌شده» is disabled (it is then not drawn / not hit).
+static RECT s_cartArchiveRect = {0,0,0,0};
 
 // load + sort: pinned first, then by send time (newest first). loadMessages
 // already returns oldest-first, so we reverse for newest-first then stable-
@@ -579,12 +596,14 @@ static void drawCartDetail(HDC dc, const RECT& rc, TabPage* t){
 
     int pad=S(20);
     RECT panel={rc.left+pad, rc.top+pad, rc.right-pad, rc.bottom-pad};
-    { HBRUSH pb=CreateSolidBrush(g_theme.surface); FillRect(dc,&panel,pb); DeleteObject(pb); }
-    gpRoundRect(dc,panel,S(16),CLR_INVALID,g_theme.border,255);
+    // v1.8.0: draw the panel as a real rounded rect (corners patched with the
+    // page background) instead of a square FillRect that left surface-coloured
+    // square corners poking out beyond the rounded border.
+    gpRoundRectBg(dc,panel,S(16),g_theme.surface,g_theme.border,g_theme.bg,255);
 
     // header bar (priority-coloured so status reads at a glance)
     RECT hdr={panel.left,panel.top,panel.right,panel.top+S(52)};
-    gpGradRoundRect(dc,hdr,S(16),sev,sev,CLR_INVALID);
+    gpGradRoundRectBg(dc,hdr,S(16),sev,sev,CLR_INVALID,g_theme.surface);
     RECT hdrB={panel.left,panel.top+S(28),panel.right,panel.top+S(52)};
     gpGradRoundRect(dc,hdrB,0,sev,sev,CLR_INVALID);
     RECT bi={panel.right-S(44),panel.top+S(12),panel.right-S(18),panel.top+S(38)};
@@ -670,30 +689,73 @@ static void drawCartDetail(HDC dc, const RECT& rc, TabPage* t){
 }
 
 static void drawCartList(HDC dc, const RECT& rc, TabPage* t){
-    (void)t;
     // solid dark background — no gradient bleed
     { HBRUSH bg=CreateSolidBrush(g_theme.bg); FillRect(dc,(RECT*)&rc,bg); DeleteObject(bg); }
     SetBkMode(dc,TRANSPARENT);
     int pad=S(20);
     RECT panel={rc.left+pad, rc.top+pad, rc.right-pad, rc.bottom-pad};
-    { HBRUSH pb=CreateSolidBrush(g_theme.surface); FillRect(dc,&panel,pb); DeleteObject(pb); }
-    gpRoundRect(dc,panel,S(16),CLR_INVALID,g_theme.border,255);
+    // v1.8.0: rounded panel with corners patched to the page background.
+    gpRoundRectBg(dc,panel,S(16),g_theme.surface,g_theme.border,g_theme.bg,255);
+
+    bool savedOn = savedMsgsEnabled();
+    bool archive = savedOn && t && t->cartShowArchive;
 
     // header bar
     RECT hdr={panel.left,panel.top,panel.right,panel.top+S(52)};
-    gpGradRoundRect(dc,hdr,S(16),g_theme.accent2,g_theme.accent,CLR_INVALID);
+    gpGradRoundRectBg(dc,hdr,S(16),g_theme.accent2,g_theme.accent,CLR_INVALID,g_theme.surface);
     RECT hdrB={panel.left,panel.top+S(28),panel.right,panel.top+S(52)};
     gpGradRoundRect(dc,hdrB,0,g_theme.accent2,g_theme.accent,CLR_INVALID);
     RECT bi={panel.right-S(44),panel.top+S(12),panel.right-S(18),panel.top+S(38)};
-    drawIcon(dc,ICO_BELL,bi,RGB(255,255,255),S(2));
+    drawIcon(dc,archive?ICO_SAVE:ICO_BELL,bi,RGB(255,255,255),S(2));
     SelectObject(dc,g_fTitle); SetTextColor(dc,RGB(255,255,255));
-    RECT tr={panel.left+S(20),panel.top+S(8),panel.right-S(52),panel.top+S(44)};
-    DrawTextW(dc,L"کارتابل — پیام‌های مدیریت درمانگاه",-1,&tr,
+    RECT tr={panel.left+S(56),panel.top+S(8),panel.right-S(52),panel.top+S(44)};
+    DrawTextW(dc, archive?L"پیام‌های ذخیره‌شده":L"کارتابل — پیام‌های مدیریت درمانگاه",-1,&tr,
         DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
 
-    cartReload();
+    // v1.8.0: archive toggle icon in the TOP-LEFT corner (only when enabled)
+    s_cartArchiveRect = {0,0,0,0};
+    if(savedOn){
+        RECT ab={panel.left+S(12),panel.top+S(12),panel.left+S(40),panel.top+S(40)};
+        if(archive) gpRoundRect(dc,ab,S(8),RGB(255,255,255),CLR_INVALID,60);
+        RECT ai={ab.left+S(4),ab.top+S(4),ab.right-S(4),ab.bottom-S(4)};
+        drawIcon(dc, archive?ICO_BELL:ICO_SAVE, ai, RGB(255,255,255), S(2));
+        s_cartArchiveRect = ab;
+    }
+
     s_cartTiles.clear();
     int topY=panel.top+S(64);
+
+    // ---- ARCHIVE (saved messages) branch -----------------------------------
+    if(archive){
+        auto saved=loadSavedMsgs();
+        if(saved.empty()){
+            SelectObject(dc,g_fUI); SetTextColor(dc,g_theme.textDim);
+            RECT er={panel.left+S(24),topY,panel.right-S(24),topY+S(40)};
+            DrawTextW(dc,L"پیام ذخیره‌شده‌ای وجود ندارد.",-1,&er,
+                DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+            return;
+        }
+        int y=topY;
+        for(int i=0;i<(int)saved.size() && y<panel.bottom-S(20); i++){
+            RECT card={panel.left+S(16),y,panel.right-S(16),y+S(76)};
+            gpRoundRectBg(dc,card,S(10),g_theme.surface2,g_theme.border,g_theme.surface);
+            SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.text);
+            RECT hr={card.left+S(14),card.top+S(8),card.right-S(14),card.top+S(30)};
+            std::wstring head=saved[i].from+L"  ←  "+saved[i].to+L"   ("+toFaDigits(saved[i].time)+L")";
+            DrawTextW(dc,head.c_str(),-1,&hr,
+                DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
+            SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
+            RECT br={card.left+S(14),card.top+S(32),card.right-S(14),card.bottom-S(6)};
+            std::wstring body=saved[i].text;
+            if(!saved[i].attachPath.empty()) body=L"\U0001F4CE "+body;
+            DrawTextW(dc,body.c_str(),-1,&br,
+                DT_RIGHT|DT_WORDBREAK|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS|DT_EDITCONTROL);
+            y += S(76)+S(10);
+        }
+        return;
+    }
+
+    cartReload();
     if(s_cartMsgs.empty()){
         SelectObject(dc,g_fUI); SetTextColor(dc,g_theme.textDim);
         RECT er={panel.left+S(24),topY,panel.right-S(24),topY+S(40)};
@@ -703,8 +765,8 @@ static void drawCartList(HDC dc, const RECT& rc, TabPage* t){
     }
     // a small caption inviting the user to click for details
     SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.accentText);
-    RECT cap={panel.left+S(20),panel.top+S(34),panel.right-S(52),panel.top+S(50)};
-    DrawTextW(dc,L"برای دیدن جزئیات روی پیام کلیک کنید — راست‌کلیک: سنجاق",-1,&cap,
+    RECT cap={panel.left+S(56),panel.top+S(34),panel.right-S(52),panel.top+S(50)};
+    DrawTextW(dc,L"برای دیدن جزئیات روی پیام کلیک کنید — راست‌کلیک: سنجاق / ذخیره",-1,&cap,
         DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
 
     // tile grid metrics — responsive column count
@@ -728,9 +790,11 @@ static void drawCartList(HDC dc, const RECT& rc, TabPage* t){
         const wchar_t* sevLbl = sevLabel(mm.type);
         // tile body: surface2 when unseen, surface when seen — each tile is a
         // distinct card clearly separated from the panel background.
-        gpRoundRect(dc,card,S(10),
+        // v1.8.0: *Bg variant patches the rounded-corner gaps with the panel
+        // surface colour so corners never show a wrong/black artefact.
+        gpRoundRectBg(dc,card,S(10),
             mm.seen?g_theme.surface2:g_theme.surface,
-            mm.seen?g_theme.border:sevCol,255);
+            mm.seen?g_theme.border:sevCol, g_theme.surface, 255);
         // severity stripe down the RIGHT (RTL leading) edge
         RECT stripe={card.right-S(6),card.top+S(4),card.right-S(2),card.bottom-S(4)};
         gpRoundRect(dc,stripe,S(2),sevCol,CLR_INVALID,255);
@@ -1332,12 +1396,27 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 HMENU mnu=CreatePopupMenu();
                 AppendMenuW(mnu,MF_STRING,1,
                     mm.pinned?L"برداشتن سنجاق":L"سنجاق کردن");
+                AppendMenuW(mnu,MF_SEPARATOR,0,NULL);
+                // v1.8.0: «ارسال به پیام‌های ذخیره‌شده» — disabled by default
+                // (greyed out) unless the feature is enabled in settings.
+                AppendMenuW(mnu,MF_STRING|(savedMsgsEnabled()?MF_ENABLED:MF_GRAYED),
+                    2,L"ارسال به پیام‌های ذخیره‌شده");
                 POINT sp=pt; ClientToScreen(h,&sp);
                 int cmd=TrackPopupMenu(mnu,TPM_RETURNCMD|TPM_RIGHTBUTTON,
                     sp.x,sp.y,0,h,NULL);
                 DestroyMenu(mnu);
                 if(cmd==1){ pinMessage(g_session.user.username,nf,!mm.pinned);
                             InvalidateRect(h,NULL,FALSE); }
+                else if(cmd==2 && savedMsgsEnabled()){
+                    // archive a copy locally (text + any attachment preserved)
+                    pushSavedMsg(mm.from.empty()?L"مدیریت":mm.from,
+                                 g_session.user.fullname.empty()?g_session.user.username
+                                                                :g_session.user.fullname,
+                                 mm.text, mm.type, L"");
+                    t->lastMsg=L"پیام به «پیام‌های ذخیره‌شده» منتقل شد.";
+                    t->msgCol=g_theme.success;
+                    InvalidateRect(h,NULL,FALSE);
+                }
             }
             return 0;
         }
@@ -1366,6 +1445,15 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 }
                 return 0;
             }
+            // ----- v1.8.0: archive toggle icon (top-left of the header) -----
+            if(savedMsgsEnabled() && PtInRect(&s_cartArchiveRect,pt)){
+                t->cartShowArchive = !t->cartShowArchive;
+                t->cartDetail=false; t->cartHotBtn=0;
+                InvalidateRect(h,NULL,FALSE);
+                return 0;
+            }
+            // archive view is read-only (no detail/tiles to click)
+            if(savedMsgsEnabled() && t->cartShowArchive){ return 0; }
             // ----- list view: clicking a tile OPENS the full details -----
             int disp=cartHit(pt);
             if(disp>=0 && disp<(int)s_cartMsgs.size() && disp<(int)s_cartNF.size()){
@@ -2152,35 +2240,15 @@ HWND createReceptionScreen(HWND frame){
     HWND h=CreateWindowExW(0,RC_CLASS,L"",
         WS_CHILD|WS_VISIBLE|WS_CLIPCHILDREN,
         rc.left,rc.top,rc.right-rc.left,rc.bottom-rc.top,frame,NULL,g_hInst,NULL);
-    // Tab order (RTL, right→left as displayed):
-    //   نوبت‌دهی → پذیرش بیمار → کارتابل
-    // The نوبت‌دهی (appointment) tab is FIRST (right-most). A ready-to-use
-    // reception tab sits beside it, and the permanent کارتابل (cartable) tab
-    // holds the management messages. On login the cartable is shown first so
-    // the user immediately sees any pending messages.
-    addTabKind(h, TK_APPOINTMENT);
-    addTabKind(h, TK_RECEPTION);
+    // v1.8.0 — default tab behaviour:
+    //   On entering reception, NO previously-open tab is auto-restored. The ONLY
+    //   tab opened by default is the message board (کارتابل / TK_PORTAL), which
+    //   is also the FIRST (right-most, index 0) tab so the user immediately sees
+    //   any pending management messages. Reception / appointment tabs are opened
+    //   on demand from the header action buttons.
     addTabKind(h, TK_PORTAL);
-    // v1.7.0: re-apply the user's saved drag-reorder of the permanent tabs.
     if(s_rd){
-        std::vector<int> ord=loadTabOrder();
-        if(ord.size()==s_rd->tabs.size()){
-            std::vector<TabPage*> reordered;
-            std::vector<bool> used(s_rd->tabs.size(),false);
-            for(int kind : ord){
-                for(size_t i=0;i<s_rd->tabs.size();i++)
-                    if(!used[i] && s_rd->tabs[i]->kind==kind){
-                        reordered.push_back(s_rd->tabs[i]); used[i]=true; break;
-                    }
-            }
-            // append anything not matched (safety) then commit if complete
-            for(size_t i=0;i<s_rd->tabs.size();i++)
-                if(!used[i]) reordered.push_back(s_rd->tabs[i]);
-            if(reordered.size()==s_rd->tabs.size()) s_rd->tabs=reordered;
-        }
-        // focus the cartable tab wherever it now sits
-        for(size_t i=0;i<s_rd->tabs.size();i++)
-            if(s_rd->tabs[i]->kind==TK_PORTAL){ s_rd->active=(int)i; break; }
+        s_rd->active = 0;            // focus the message board tab
         recLayoutTabs(h);
     }
     return h;

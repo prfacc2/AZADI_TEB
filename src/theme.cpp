@@ -6,6 +6,9 @@
 Theme   g_theme;
 bool    g_dark = false;
 HBRUSH  g_brBg=0, g_brSurface=0, g_brSurface2=0, g_brInput=0;
+//  v1.8.0: distinct non-red "attention" accent (violet) for change-requests.
+COLORREF g_infoAccent  = RGB(124, 92, 230);
+COLORREF g_infoAccent2 = RGB(98, 70, 210);
 
 void applyTheme(bool dark){
     g_dark = dark;
@@ -35,6 +38,8 @@ void applyTheme(bool dark){
         g_theme.hover       = RGB(34, 40, 50);
         g_theme.headerTop   = RGB(14, 17, 22);
         g_theme.headerBot   = RGB(6, 8, 11);
+        g_infoAccent  = RGB(150, 120, 245);   // bright violet (stands out, not red)
+        g_infoAccent2 = RGB(120, 92, 225);
     } else {
         // ---- Refined light palette: NOT flat white. A soft cool-grey page,
         //      warm-tinted cards with a gentle top-light gradient, a richer
@@ -65,6 +70,8 @@ void applyTheme(bool dark){
         g_theme.hover       = RGB(228, 237, 250);
         g_theme.headerTop   = RGB(255, 255, 255);
         g_theme.headerBot   = RGB(235, 241, 249);
+        g_infoAccent  = RGB(124, 92, 230);    // violet (distinct, non-red)
+        g_infoAccent2 = RGB(98, 70, 210);
     }
     if(g_brBg)       DeleteObject(g_brBg);
     if(g_brSurface)  DeleteObject(g_brSurface);
@@ -386,6 +393,9 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
         case BS_DANGER:
             fill = dn||hv ? g_theme.dangerHover : g_theme.danger;
             txt  = RGB(255,255,255); break;
+        case BS_INFO:
+            fill = dn||hv ? g_infoAccent2 : g_infoAccent;
+            txt  = RGB(255,255,255); break;
         case BS_OUTLINE:
             fill = hv ? g_theme.hover : g_theme.surface;
             txt  = g_theme.text; bord = g_theme.border; break;
@@ -410,6 +420,9 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
         } else if(st==BS_DANGER){
             COLORREF a = (dn||hv)?g_theme.dangerHover:g_theme.danger;
             gpGradRoundRect(dc, rr, rad, a, g_theme.danger, CLR_INVALID);
+        } else if(st==BS_INFO){
+            COLORREF a = (dn||hv)?g_infoAccent2:g_infoAccent;
+            gpGradRoundRect(dc, rr, rad, a, g_infoAccent2, CLR_INVALID);
         } else if(st==BS_CARD){
             gpGradRoundRect(dc, rr, rad, g_theme.surfaceTop,
                 hv?g_theme.hover:g_theme.surface, bord);
@@ -529,26 +542,29 @@ void setFlatButtonImage(HWND btn, int resId){
 //  with CBS_OWNERDRAWFIXED|CBS_HASSTRINGS and forwarding WM_DRAWITEM here paints
 //  every row with the theme palette and RTL-aligns Persian text.
 // ============================================================================
-// v1.7.0: subclass the combo so its NON-CLIENT frame uses a flat, theme-aware
-// border instead of the system's chunky 3-D edge (which looked like a thick
-// white box in dark mode). We draw our own 1-px rounded border over the frame
-// after the default paint, matching the input wells behind the control.
+// v1.8.0: combo boxes must have NO visible border (redesign brief). We subclass
+// the combo and, after the default non-client paint, overpaint the entire
+// non-client FRAME with the theme input-well colour so the system's chunky 3-D
+// edge / white box disappears completely and the control reads as a clean,
+// borderless, integrated input that matches the wells around it.
 static WNDPROC s_comboOldProc = NULL;
 static LRESULT CALLBACK themedComboProc(HWND h, UINT m, WPARAM w, LPARAM l){
     LRESULT r = CallWindowProcW(s_comboOldProc, h, m, w, l);
     if(m==WM_PAINT || m==WM_NCPAINT){
         HDC dc=GetWindowDC(h);
         if(dc){
-            RECT rc; GetClientRect(h,&rc);
-            // GetClientRect is client-origin; for window DC use window rect size
             RECT wr; GetWindowRect(h,&wr);
             RECT br={0,0,wr.right-wr.left,wr.bottom-wr.top};
-            HPEN pn=CreatePen(PS_SOLID,1,g_theme.border);
-            HGDIOBJ op=SelectObject(dc,pn);
-            HGDIOBJ ob=SelectObject(dc,GetStockObject(NULL_BRUSH));
-            RoundRect(dc,br.left,br.top,br.right-1,br.bottom-1,S(8),S(8));
-            SelectObject(dc,op); SelectObject(dc,ob);
-            DeleteObject(pn);
+            // paint ONLY the 2-px frame ring with the input colour (no border):
+            // top, bottom, left, right strips — the interior is owner-drawn.
+            HBRUSH eb=CreateSolidBrush(g_theme.inputBg);
+            RECT t={br.left,br.top,br.right,br.top+2};
+            RECT b={br.left,br.bottom-2,br.right,br.bottom};
+            RECT lft={br.left,br.top,br.left+2,br.bottom};
+            RECT rt={br.right-2,br.top,br.right,br.bottom};
+            FillRect(dc,&t,eb); FillRect(dc,&b,eb);
+            FillRect(dc,&lft,eb); FillRect(dc,&rt,eb);
+            DeleteObject(eb);
             ReleaseDC(h,dc);
         }
     }
