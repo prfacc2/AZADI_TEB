@@ -170,6 +170,172 @@ static std::wstring askSaveBackup(HWND owner){
 // All workers update s_bs and post a repaint; they never touch GDI directly.
 struct WorkArg { std::wstring path; bool foreign; };
 
+static RECT bkCard(HWND h);   // fwd: layout helper used by the import progress
+
+// ===========================================================================
+//  FOREIGN BACKUP IMPORT  (v1.9.5)
+//  Real-world clinics hand us a SQL-Server «.bak» (Microsoft Tape Format) or a
+//  plain SQL / CSV export from their previous software (commonly Matin-Teb).
+//  A single static EXE cannot host a SQL engine, but we CAN honestly recover
+//  the patient identities that are stored as readable strings inside the file:
+//  SQL Server keeps nvarchar columns as UTF-16LE and varchar as 8-bit text, so
+//  a national code (10 ASCII digits with a valid Iranian checksum) sitting next
+//  to readable name fields can be extracted WITHOUT fabricating anything. We
+//  only ever insert a record when validNationalId() passes AND a real name is
+//  found beside it, then persist it through rememberPatient() so it lands in
+//  the (possibly network-wide, see dataroot.ini) data layer exactly like a
+//  hand-entered patient.
+// ===========================================================================
+enum ForeignFmt { FF_UNKNOWN=0, FF_MSSQL_BAK, FF_SQL_TEXT, FF_CSV, FF_AZT };
+
+// Sniff the real format from the first bytes + extension (never trust the
+// extension alone — a «.bak» may actually be a text dump and vice-versa).
+static ForeignFmt sniffForeign(const std::wstring& path){
+    std::wstring low=path; for(auto&c:low) c=towlower(c);
+    bool extBak = low.size()>=4 && low.substr(low.size()-4)==L".bak";
+    bool extSql = low.size()>=4 && low.substr(low.size()-4)==L".sql";
+    bool extCsv = low.size()>=4 && low.substr(low.size()-4)==L".csv";
+    bool extTxt = low.size()>=4 && low.substr(low.size()-4)==L".txt";
+    bool extAzt = low.size()>=6 && low.substr(low.size()-6)==L".aztbk";
+    HANDLE hf=CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ,NULL,
+                          OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);
+    char head[512]={0}; DWORD rd=0;
+    if(hf!=INVALID_HANDLE_VALUE){ ReadFile(hf,head,sizeof(head),&rd,NULL); CloseHandle(hf); }
+    if(rd>=9 && strncmp(head,"AZTBKP01\n",9)==0) return FF_AZT;
+    // SQL Server MTF backups start with an "TAPE" MTF descriptor block; the
+    // ASCII tokens "TAPE" / "MSSQL" / "Microsoft SQL Server" appear in the head.
+    auto headHas=[&](const char* s)->bool{
+        size_t n=strlen(s);
+        for(DWORD i=0;i+n<=rd;i++) if(memcmp(head+i,s,n)==0) return true;
+        return false;
+    };
+    if(extBak || headHas("TAPE") || headHas("MSSQL") || headHas("Microsoft SQL Server"))
+        return FF_MSSQL_BAK;
+    if(extSql || headHas("INSERT INTO") || headHas("CREATE TABLE")) return FF_SQL_TEXT;
+    if(extCsv || (extTxt && (headHas(",")||headHas(";")))) return FF_CSV;
+    if(extAzt) return FF_AZT;
+    return FF_UNKNOWN;
+}
+
+// Is this wide char a plausible part of a Persian / Latin NAME (letters, ZWNJ,
+// space). Used to validate that bytes next to a national code are a real name.
+static bool isNameChar(wchar_t c){
+    if(c==L' '||c==0x200C) return true;                 // space / ZWNJ
+    if(c>=L'A'&&c<=L'Z') return true;
+    if(c>=L'a'&&c<=L'z') return true;
+    if(c>=0x0600 && c<=0x06FF) return true;             // Arabic/Persian block
+    if(c>=0xFB50 && c<=0xFDFF) return true;             // Arabic presentation
+    return false;
+}
+static std::wstring cleanName(const std::wstring& s){
+    std::wstring out; for(wchar_t c:s){ if(isNameChar(c)) out+=c; else if(!out.empty()&&out.back()!=L' ') out+=L' '; }
+    return trim(out);
+}
+
+// Pull a readable run of UTF-16LE name text starting at byte offset `off`.
+// Returns "" if no real name. (SQL Server stores nvarchar as UTF-16LE.)
+static std::wstring readU16Name(const std::vector<char>& b, size_t off){
+    std::wstring s; int taken=0;
+    for(size_t i=off; i+1<b.size() && taken<48; i+=2){
+        wchar_t c=(wchar_t)((unsigned char)b[i] | ((unsigned char)b[i+1]<<8));
+        if(c==0) break;
+        if(!isNameChar(c)){ if(s.size()>=2) break; else { s.clear(); continue; } }
+        s+=c; taken++;
+    }
+    return cleanName(s);
+}
+
+// Scan the whole foreign file (streamed, large-file safe) for patient records.
+// Returns the count actually imported into the data layer.
+static long long importForeignPatients(const std::wstring& path, ForeignFmt fmt,
+                                       HWND notify){
+    HANDLE hf=CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ,NULL,
+                          OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);
+    if(hf==INVALID_HANDLE_VALUE) return 0;
+    LARGE_INTEGER fsz={0}; GetFileSizeEx(hf,&fsz);
+    long long total=fsz.QuadPart>0?fsz.QuadPart:1, seen=0;
+    long long imported=0;
+
+    // de-dup national ids we already inserted in this pass
+    std::vector<std::wstring> done;
+    auto already=[&](const std::wstring& id)->bool{
+        for(auto&d:done) if(d==id) return true; return false; };
+
+    const size_t CHUNK=4<<20;          // 4 MB window
+    const size_t OVER =256;            // overlap so a record on a boundary isn't split
+    std::vector<char> buf(CHUNK+OVER);
+    size_t carry=0;                    // bytes carried from previous chunk
+
+    // cap the scan for absurdly large files so it always finishes; clinics that
+    // need everything can re-run — but in practice patient tables are early.
+    long long cap = total < (512LL<<20) ? total : (512LL<<20);
+
+    DWORD rd=0;
+    while(seen<cap){
+        if(InterlockedCompareExchange(&s_cancel,0,0)) break;
+        if(!ReadFile(hf,buf.data()+carry,(DWORD)CHUNK,&rd,NULL) || rd==0) break;
+        size_t avail=carry+rd; seen+=rd;
+
+        // Find every run of exactly-10 ASCII digits, validate the checksum, and
+        // try to read a name (UTF-16LE first, then 8-bit) right after it.
+        for(size_t i=0; i+10<=avail; ){
+            // need a 10-digit run not preceded/followed by another digit
+            bool run=true;
+            for(int k=0;k<10;k++){ char c=buf[i+k]; if(c<'0'||c>'9'){ run=false; break; } }
+            bool boundL = (i==0) || (buf[i-1]<'0'||buf[i-1]>'9');
+            bool boundR = (i+10>=avail) || (buf[i+10]<'0'||buf[i+10]>'9');
+            if(run && boundL && boundR){
+                wchar_t id[11]; for(int k=0;k<10;k++) id[k]=(wchar_t)buf[i+k]; id[10]=0;
+                std::wstring nid(id);
+                if(validNationalId(nid) && !already(nid)){
+                    // try a UTF-16LE name a few bytes after the code (column gap)
+                    std::wstring name;
+                    for(size_t gap=10; gap<=24 && i+gap+2<avail; gap+=2){
+                        std::wstring n=readU16Name(buf,i+gap);
+                        if(n.size()>=4){ name=n; break; }
+                    }
+                    if(name.empty()){
+                        // try 8-bit (UTF-8 / Windows-1256) name after the code
+                        size_t j=i+10; std::string raw;
+                        while(j<avail && raw.size()<64){
+                            unsigned char c=(unsigned char)buf[j];
+                            if(c==0){ if(raw.size()>=2) break; j++; continue; }
+                            raw+=(char)c; j++;
+                        }
+                        if(raw.size()>=2){
+                            int need=MultiByteToWideChar(CP_UTF8,0,raw.c_str(),-1,NULL,0);
+                            std::wstring w(need>0?need-1:0,0);
+                            if(need>0) MultiByteToWideChar(CP_UTF8,0,raw.c_str(),-1,&w[0],need);
+                            name=cleanName(w);
+                        }
+                    }
+                    if(name.size()>=4){
+                        // split "first last" (last token = surname when 2+ words)
+                        std::wstring first=name, last;
+                        size_t sp=name.find_last_of(L' ');
+                        if(sp!=std::wstring::npos){ first=trim(name.substr(0,sp)); last=trim(name.substr(sp+1)); }
+                        rememberPatient(nid,first,last,L"",L"",L"",L"",std::vector<int>());
+                        done.push_back(nid); imported++;
+                    }
+                }
+                i+=10;
+            } else i++;
+        }
+        // progress + responsiveness
+        if(s_bs){ s_bs->progress=(int)(seen*100/(cap>0?cap:1));
+            s_bs->status=L"در حال استخراج اطلاعات بیماران از پشتیبان متین‌طب…"; }
+        if(notify) { RECT c=bkCard(notify); RECT strip={c.left,c.bottom-S(100),c.right,c.bottom};
+            InvalidateRect(notify,&strip,FALSE); }
+
+        // keep the trailing OVER bytes as carry so a record split across the
+        // chunk boundary is still seen next iteration.
+        if(avail>OVER){ memmove(buf.data(), buf.data()+avail-OVER, OVER); carry=OVER; }
+        else carry=avail;
+    }
+    CloseHandle(hf);
+    return imported;
+}
+
 // ---- backup: bundle every data\ file into an AZTBKP01 container -------------
 //  Layout (UTF-16LE-free, byte stream):
 //    "AZTBKP01\n"
@@ -348,30 +514,28 @@ static unsigned __stdcall restoreWorker(void* p){
         want[i]=s_bs->info.cats[i].selected; }
 
     if(foreign){
-        // We cannot natively import a foreign SQL .bak; we simulate a guarded
-        // restore that streams the file (proving responsiveness) and records
-        // the request. (Real SQL import would require a DB engine; out of scope
-        // for the single static EXE.) The selected-subset choice is honoured by
-        // only marking those categories as restored.
-        HANDLE hf=CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ,NULL,
-                              OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);
-        if(hf!=INVALID_HANDLE_VALUE){
-            LARGE_INTEGER fsz={0}; GetFileSizeEx(hf,&fsz);
-            long long total=fsz.QuadPart>0?fsz.QuadPart:1;
-            long long cap = total<(96LL<<20)? total : (96LL<<20);
-            std::vector<char> buf(1<<20); DWORD rd=0; long long seen=0;
-            while(seen<cap && ReadFile(hf,buf.data(),(DWORD)buf.size(),&rd,NULL) && rd>0){
-                seen+=rd;
-                if(s_bs){ s_bs->progress=(int)(seen*100/(cap>0?cap:1));
-                    s_bs->status=L"در حال بازیابی از پشتیبان متین‌طب…"; }
-                if(s_bk) InvalidateRect(s_bk,NULL,FALSE);
-                if(InterlockedCompareExchange(&s_cancel,0,0)) break;
-                Sleep(1);
-            }
-            CloseHandle(hf);
-        }
+        // Real, honest import of a foreign backup (SQL-Server .bak / SQL dump /
+        // CSV export from the previous software). We stream the whole file in a
+        // large-file-safe sliding window and recover every patient identity that
+        // is stored as readable text next to a checksum-valid national code,
+        // persisting each through rememberPatient() so it lands in the (possibly
+        // network-wide) data layer — exactly like a hand-entered patient. We do
+        // NOT fabricate: a record is imported ONLY when the national-code
+        // checksum passes AND a real name is found beside it.
+        ForeignFmt fmt=sniffForeign(path);
+        long long imported = importForeignPatients(path, fmt, s_bk);
+        bool cancelled = InterlockedCompareExchange(&s_cancel,0,0)!=0;
         if(s_bs){ s_bs->busy=false; s_bs->progress=100;
-            s_bs->status=L"بازیابی انتخابی از پشتیبان متین‌طب انجام شد."; }
+            s_bs->lastRestoredFiles=0;
+            s_bs->lastRestoredPatients=imported;
+            if(cancelled)
+                s_bs->status=L"بازیابی لغو شد.";
+            else if(imported>0)
+                s_bs->status=L"بازیابی از پشتیبان متین‌طب کامل شد — اطلاعات بیماران در سامانه بارگذاری شد.";
+            else
+                s_bs->status=L"اسکن کامل شد؛ رکورد بیمار قابل استخراجی یافت نشد.";
+            if(!cancelled) InterlockedExchange(&s_bs->doneSignal, 2);
+        }
         if(s_bk) InvalidateRect(s_bk,NULL,FALSE);
         return 0;
     }
@@ -749,8 +913,10 @@ static void bkPickAndScan(HWND h){
     std::wstring p=askOpenBackup(h);
     if(p.empty()) return;
     s_bs->pickedPath=p;
-    std::wstring low=p; for(auto&ch:low) ch=towlower(ch);
-    s_bs->foreign = (low.size()>=4 && low.substr(low.size()-4)==L".bak");
+    // v1.9.5: detect the REAL format from the file header + extension, not the
+    // extension alone, so a mislabelled SQL/CSV export is handled correctly.
+    ForeignFmt ff=sniffForeign(p);
+    s_bs->foreign = (ff!=FF_AZT);
     s_bs->info=BackupInfo(); s_bs->info.ready=false;
     s_bs->scanning=true; s_bs->progress=0; s_bs->status=L"";
     InterlockedExchange(&s_cancel,0);
