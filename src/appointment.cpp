@@ -79,10 +79,18 @@ struct ApptUI {
 };
 
 // ============================================================== metrics =====
-static int apRowH()    { return S(44); }  // v1.8.0: roomier rows so labels,
-                                          // input wells and the next row never
-                                          // overlap (was 30, far too tight)
+static int apRowH()    { return S(58); }  // v1.9.4: must hold input(28) + the
+                                          // well's 4px bottom bleed + air + the
+                                          // NEXT row's label(16) + label gap, so
+                                          // no label is ever overlapped by the
+                                          // control above it.
 static int apHdrH()    { return S(34); }
+// v1.9.4 — vertical rhythm helpers so a group's first field always clears the
+// group-title band and every label sits fully ABOVE (never under) its control.
+// The input "well" drawn in apPaint extends S(4) above the input top, so the
+// label-top must be >= 16(label height) + 4(well) + a little air above the input.
+static int apLblGap()  { return S(22); }  // distance from a row's label-top to its input-top
+static int apGrpPad()  { return S(10); }  // breathing room below the group title before row 1
 
 // ---------------------------------------------------------------- doctors ---
 static void fillDoctors(ApptUI* u, bool todayOnly){
@@ -541,8 +549,10 @@ static void apLayout(HWND h, ApptUI* u){
                       // now so the extra space becomes label gap, not a giant box)
 
     // ---- search group (top) -----------------------------------------------
-    // v1.8.0: first row pushed down so its label clears the group-box title.
-    int y = S(56);
+    // v1.9.2: every group's first row starts BELOW the title band + label gap,
+    // so the label clears the group title and the input clears the label.
+    int searchTop = S(10);
+    int y = searchTop + apHdrH() + apGrpPad() + apLblGap();
     // row1: کد ملی (right) | نام (left)
     MoveWindow(u->sNid,    rightColX, y, colW, fh, TRUE);
     MoveWindow(u->sFirst,  leftColX,  y, colW, fh, TRUE);
@@ -552,14 +562,15 @@ static void apLayout(HWND h, ApptUI* u){
     MoveWindow(u->sLast,   leftColX,  y, colW, fh, TRUE);
     y += apRowH();
     // checkbox (full width)
-    MoveWindow(u->sCancelled, leftColX, y, innerR-innerL, fh, TRUE);
-    y += apRowH();
+    MoveWindow(u->sCancelled, leftColX, y, innerR-innerL, S(22), TRUE);
+    y += S(30);
     // جستجو button (right aligned)
     MoveWindow(u->sGo, innerR-S(120), y, S(120), S(34), TRUE);
-    y += S(46);
+    int searchBottom = y + S(34) + apGrpPad();
 
     // ---- appointment-details group ----------------------------------------
-    int gy = y + S(24);   // leave room for the group title
+    int apptTop = searchBottom + S(12);
+    int gy = apptTop + apHdrH() + apGrpPad() + apLblGap();   // clears the group title
     // پزشک combo + refresh + today
     MoveWindow(u->aDocToday,  innerL, gy, S(96), fh, TRUE);
     MoveWindow(u->aDocRefresh,innerL+S(102), gy, S(34), fh, TRUE);
@@ -578,13 +589,14 @@ static void apLayout(HWND h, ApptUI* u){
     gy += apRowH();
     // ثبت و مرحله بعد
     MoveWindow(u->aNext, innerR-S(150), gy, S(150), S(34), TRUE);
-    gy += S(46);
+    int apptBottom = gy + S(34) + apGrpPad();
 
     // ---- patient-details group --------------------------------------------
-    int py = gy + S(24);
-    // foreign checkbox (full width)
-    MoveWindow(u->pForeign, leftColX, py, innerR-innerL, fh, TRUE);
-    py += apRowH();
+    int patTop = apptBottom + S(12);
+    // foreign checkbox (full width) — its own row right under the title band
+    int pForeignY = patTop + apHdrH() + apGrpPad();
+    MoveWindow(u->pForeign, leftColX, pForeignY, innerR-innerL, S(22), TRUE);
+    int py = pForeignY + S(30) + apLblGap();
     // کد ملی (right) | نام (left)  — actually nid full row for clarity
     MoveWindow(u->pNid, rightColX, py, colW, fh, TRUE);
     MoveWindow(u->pFirst, leftColX, py, colW, fh, TRUE);
@@ -615,7 +627,7 @@ static void apLayout(HWND h, ApptUI* u){
     int tbY=S(14), tbH=S(32), tx=g.right;
     // v1.9.0: widen the layout buttons so «ذخیره چیدمان» / «حذف چیدمان» (icon +
     // text) are never truncated.
-    int wMsg=S(96),wTr=S(96),wPr=S(64),wSv=S(140),wDl=S(132),gp=S(6);
+    int wMsg=S(118),wTr=S(122),wPr=S(76),wSv=S(140),wDl=S(132),gp=S(6);
     MoveWindow(u->tMsg,      tx-wMsg, tbY, wMsg, tbH, TRUE);
     MoveWindow(u->tTransfer, tx-wMsg-gp-wTr, tbY, wTr, tbH, TRUE);
     MoveWindow(u->tPrint,    tx-wMsg-gp-wTr-gp-wPr, tbY, wPr, tbH, TRUE);
@@ -778,40 +790,44 @@ static void apPaint(HWND h, ApptUI* u, HDC dc){
     int colW=(innerR-innerL-S(10))/2;
     int rightColX=innerR-colW, leftColX=innerL;
 
-    // ---- group rects (mirror apLayout y-positions) ----
-    int y=S(56);
-    RECT gSearch={rx+S(6),S(10),rc.right-S(6),0};
-    int searchBottom = y + apRowH()*3 + S(34) + S(8);
-    gSearch.bottom = searchBottom;
+    // ---- group rects (mirror apLayout y-positions EXACTLY) ----
+    int LG=apLblGap();
+    // search group
+    int searchTop = S(10);
+    int y = searchTop + apHdrH() + apGrpPad() + LG;     // == apLayout sNid y
+    int searchBottom = y + apRowH()*2 + S(30) + S(34) + apGrpPad();
+    RECT gSearch={rx+S(6),searchTop,rc.right-S(6),searchBottom};
     drawGroup(dc,gSearch,L"جستجوی بیمار رزرو کرده");
-    // labels for search
-    drawLabel(dc,rightColX,y-S(20),colW,L"کد ملی");
-    drawLabel(dc,leftColX, y-S(20),colW,L"نام");
-    drawLabel(dc,rightColX,y+apRowH()-S(20),colW,L"شماره موبایل");
-    drawLabel(dc,leftColX, y+apRowH()-S(20),colW,L"نام خانوادگی");
+    drawLabel(dc,rightColX,y-LG,colW,L"کد ملی");
+    drawLabel(dc,leftColX, y-LG,colW,L"نام");
+    drawLabel(dc,rightColX,y+apRowH()-LG,colW,L"شماره موبایل");
+    drawLabel(dc,leftColX, y+apRowH()-LG,colW,L"نام خانوادگی");
 
-    int appTop = searchBottom + S(10);
-    int gy = appTop + S(24);
-    RECT gAppt={rx+S(6),appTop,rc.right-S(6),0};
-    int apptBottom = gy + apRowH()*3 + S(34) + S(8);
-    gAppt.bottom=apptBottom;
+    // appointment group
+    int apptTop = searchBottom + S(12);
+    int gy = apptTop + apHdrH() + apGrpPad() + LG;       // == apLayout aDoctor y
+    // rows: doctor, service, date/kind  → then the «ثبت و مرحله بعد» button row.
+    int apptBottom = gy + apRowH()*3 + S(34) + apGrpPad();
+    RECT gAppt={rx+S(6),apptTop,rc.right-S(6),apptBottom};
     drawGroup(dc,gAppt,L"مشخصات نوبت");
-    drawLabel(dc,innerL+S(140),gy-S(20),S(120),L"پزشک");
-    drawLabel(dc,innerL+S(114),gy+apRowH()-S(20),S(120),L"خدمت");
-    drawLabel(dc,rightColX,gy+apRowH()*2-S(20),colW,L"تاریخ نوبت");
-    drawLabel(dc,leftColX, gy+apRowH()*2-S(20),colW,L"نوع دریافت نوبت");
+    drawLabel(dc,innerL+S(140),gy-LG,colW,L"پزشک");
+    drawLabel(dc,innerL+S(114),gy+apRowH()-LG,colW,L"خدمت");
+    drawLabel(dc,rightColX,gy+apRowH()*2-LG,colW,L"تاریخ نوبت");
+    drawLabel(dc,leftColX, gy+apRowH()*2-LG,colW,L"نوع دریافت نوبت");
 
-    int patTop = apptBottom + S(10);
-    int py = patTop + S(24);
+    // patient group
+    int patTop = apptBottom + S(12);
+    int pForeignY = patTop + apHdrH() + apGrpPad();
+    int py = pForeignY + S(30) + LG;                     // == apLayout pNid y
     RECT gPat={rx+S(6),patTop,rc.right-S(6),rc.bottom-S(10)};
     drawGroup(dc,gPat,u->patientOn?L"مشخصات بیمار":L"مشخصات بیمار (غیرفعال)");
-    drawLabel(dc,rightColX,py+apRowH()-S(20),colW,L"کد ملی");
-    drawLabel(dc,leftColX, py+apRowH()-S(20),colW,L"نام");
-    drawLabel(dc,rightColX,py+apRowH()*2-S(20),colW,L"نام پدر");
-    drawLabel(dc,leftColX, py+apRowH()*2-S(20),colW,L"نام خانوادگی");
-    drawLabel(dc,rightColX,py+apRowH()*3-S(20),colW,L"تلفن همراه");
-    drawLabel(dc,leftColX, py+apRowH()*3-S(20),colW,L"جنسیت");
-    drawLabel(dc,leftColX, py+apRowH()*4-S(20),innerR-innerL,L"توضیحات");
+    drawLabel(dc,rightColX,py-LG,colW,L"کد ملی");
+    drawLabel(dc,leftColX, py-LG,colW,L"نام");
+    drawLabel(dc,rightColX,py+apRowH()-LG,colW,L"نام پدر");
+    drawLabel(dc,leftColX, py+apRowH()-LG,colW,L"نام خانوادگی");
+    drawLabel(dc,rightColX,py+apRowH()*2-LG,colW,L"تلفن همراه");
+    drawLabel(dc,leftColX, py+apRowH()*2-LG,colW,L"جنسیت");
+    drawLabel(dc,leftColX, py+apRowH()*3-LG,innerR-innerL,L"توضیحات");
 
     // v1.8.0 UI: framed input wells behind every field (matches the reception
     // form). A focused field gets a THIN soft-red focus ring; unfocused fields
