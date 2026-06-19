@@ -310,8 +310,8 @@ static void computeInfoLayout(int infoL, int infoR, int H, InfoLayout& L){
     L.cardTop=S(16); L.cardBot=H-S(16);
     L.rh2=S(28); L.gp=S(6); L.btnW=S(78); L.lblH=S(16);
     // --- header zone (matches painter) ---
-    L.avR=S(40); L.avCx=(L.iL+L.iR)/2; L.avCy=L.cardTop+S(14)+L.avR;
-    int y=L.avCy+L.avR+S(10);
+    L.avR=S(44); L.avCx=(L.iL+L.iR)/2; L.avCy=L.cardTop+S(14)+L.avR;
+    int y=L.avCy+L.avR+S(12);
     L.chipH=S(26); L.chipY=y;            y+=L.chipH+S(8);
     L.boxH =S(28); L.boxY =y;            y+=L.boxH +S(8);
     L.psH  =S(20); L.psY  =y;            y+=L.psH  +S(14);
@@ -1055,27 +1055,43 @@ static void drawTabPlaceholder(HDC dc, const RECT& rc, int kind, TabPage* t){
 //  counters and the group titles for the search-keys / insurance / doctor
 //  blocks. The actual edit controls are positioned by tabPageLayout.
 static void drawGuestAvatar(HDC dc, int cx, int cy, int r, bool female){
-    // v1.9.0: the placeholder avatar is a calm, neutral GRAY (no blue/pink) so
-    // it reads as a generic "no photo" person, larger and naturally centred.
+    // v1.9.1: the placeholder avatar is a calm, neutral GRAY (no blue/pink) so
+    // it reads as a generic "no photo" person. The silhouette is drawn SMALLER
+    // than the disc and the disc is used as a CLIP region, so the head/shoulders
+    // are perfectly centred and NOTHING ever spills past the rounded edge.
     (void)female;
     COLORREF ring = blendColor(g_theme.textDim, g_theme.border, 35);
     COLORREF fig  = blendColor(g_theme.textDim, g_theme.surface, 20);
-    // disc
+    // --- disc (filled circle + ring) ---
     HBRUSH br=CreateSolidBrush(g_theme.surface2);
     HPEN pn=CreatePen(PS_SOLID,S(2),ring);
     HGDIOBJ ob=SelectObject(dc,br), op=SelectObject(dc,pn);
     Ellipse(dc,cx-r,cy-r,cx+r,cy+r);
-    // head + shoulders (centred guest silhouette in gray)
-    HBRUSH brh=CreateSolidBrush(fig);
-    SelectObject(dc,brh);
-    SelectObject(dc,GetStockObject(NULL_PEN));
-    int hr=r*34/100;            // head radius
-    int hy=cy-r*20/100;         // head center y (slightly above center)
-    Ellipse(dc,cx-hr,hy-hr,cx+hr,hy+hr);
-    // shoulders arc — symmetric, fully centred under the head
-    int sw=r*70/100, sy=cy+r*14/100, sh=r*82/100;
-    Ellipse(dc,cx-sw,sy,cx+sw,sy+sh*2);
     SelectObject(dc,op); SelectObject(dc,ob);
+    // --- clip everything that follows to the inside of the disc ---
+    // (slightly inset so the ring stays clean and crisp)
+    int ci = r - S(2);
+    HRGN clip = CreateEllipticRgn(cx-ci, cy-ci, cx+ci, cy+ci);
+    int savedDC = SaveDC(dc);
+    SelectClipRgn(dc, clip);
+    // --- compact, centred guest silhouette (smaller than the disc) ---
+    HBRUSH brh=CreateSolidBrush(fig);
+    HGDIOBJ ob2=SelectObject(dc,brh);
+    HGDIOBJ op2=SelectObject(dc,GetStockObject(NULL_PEN));
+    int hr = r*30/100;          // head radius (smaller)
+    int hy = cy - r*22/100;     // head centre y (sits in the upper third)
+    Ellipse(dc,cx-hr,hy-hr,cx+hr,hy+hr);
+    // shoulders: a wide, shallow rounded arc tucked under the head. Kept fully
+    // inside the disc — the bottom of the arc stays above the disc edge.
+    int sw = r*60/100;          // half-width of the shoulders
+    int sTop = cy + r*10/100;   // top of the shoulder ellipse
+    int sBot = cy + r*95/100;   // bottom — clip handles any overshoot anyway
+    Ellipse(dc,cx-sw,sTop,cx+sw,sBot);
+    SelectObject(dc,op2); SelectObject(dc,ob2);
+    // --- restore clip + free GDI objects ---
+    RestoreDC(dc, savedDC);
+    SelectClipRgn(dc, NULL);
+    DeleteObject(clip);
     DeleteObject(br); DeleteObject(pn); DeleteObject(brh);
 }
 static void paintInfoGroup(HDC dc, int iL, int iR, int y, const wchar_t* title, int icon){
