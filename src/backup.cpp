@@ -119,6 +119,29 @@ static HWND     s_bk=NULL;
 static BkState* s_bs=NULL;
 static volatile LONG s_cancel=0;        // cooperative cancel for workers
 
+// ---------------------------------------------------------------------------
+//  v1.9.5 PERFORMANCE: cached static background.
+//  The scrim alpha-fill (gpFillAlpha over the WHOLE window), the card drop
+//  shadow (gpShadow) and the card gradient + title/subtitle are by far the
+//  most expensive part of the scene, yet they NEVER change while the user just
+//  moves the mouse. We render them ONCE into an off-screen bitmap and, on every
+//  paint, simply BitBlt the cached strip and draw only the cheap interactive
+//  foreground (cards / rows / ticks / progress) on top. The cache is rebuilt
+//  only when the window size, the theme, or the mode (home/restore) changes.
+//  This removes the per-mouse-move full-window recomposition that caused the
+//  FPS drop / stutter.
+// ---------------------------------------------------------------------------
+static HDC      s_bgDC  = NULL;
+static HBITMAP  s_bgBmp = NULL;
+static HGDIOBJ  s_bgOld = NULL;
+static int      s_bgW=0, s_bgH=0;
+static int      s_bgMode=-1;             // mode the cache was built for
+static void bkFreeBg(){
+    if(s_bgDC){ SelectObject(s_bgDC,s_bgOld); DeleteDC(s_bgDC); s_bgDC=NULL; }
+    if(s_bgBmp){ DeleteObject(s_bgBmp); s_bgBmp=NULL; }
+    s_bgW=s_bgH=0; s_bgMode=-1;
+}
+
 static void bkClose(){ if(s_bk&&IsWindow(s_bk)){ HWND v=s_bk; s_bk=NULL; DestroyWindow(v);} }
 
 // --------------------------------------------------------------- file picker
@@ -480,11 +503,18 @@ static RECT bkBackBtn(HWND h){ RECT c=bkCard(h);
     RECT r={c.left+S(24),c.bottom-S(60),c.left+S(160),c.bottom-S(20)}; return r; }
 
 // ===================================================================== paint
-static void bkPaint(HWND h, HDC dc0){
+// (1) Build the EXPENSIVE, STATIC layers into the cache bitmap. Runs only when
+//     the size / theme / mode changes — never on a mere mouse move.
+static void bkBuildBg(HWND h, HDC ref){
     RECT rc; GetClientRect(h,&rc);
-    HDC dc=CreateCompatibleDC(dc0);
-    HBITMAP bmp=CreateCompatibleBitmap(dc0,rc.right,rc.bottom);
-    HGDIOBJ obm=SelectObject(dc,bmp);
+    if(rc.right<=0||rc.bottom<=0) return;
+    bkFreeBg();
+    s_bgDC=CreateCompatibleDC(ref);
+    s_bgBmp=CreateCompatibleBitmap(ref,rc.right,rc.bottom);
+    s_bgOld=SelectObject(s_bgDC,s_bgBmp);
+    s_bgW=rc.right; s_bgH=rc.bottom; s_bgMode=s_bs?s_bs->mode:0;
+    HDC dc=s_bgDC;
+
     { HBRUSH sb=CreateSolidBrush(g_dark?RGB(6,9,14):RGB(28,36,48));
       FillRect(dc,&rc,sb); DeleteObject(sb); }
     gpFillAlpha(dc,rc,0,g_dark?RGB(0,0,0):RGB(20,28,40),120);
@@ -494,26 +524,34 @@ static void bkPaint(HWND h, HDC dc0){
     gpGradRoundRect(dc,c,S(18),g_theme.surfaceTop,g_theme.surface,g_theme.border);
     SetBkMode(dc,TRANSPARENT);
 
-    // close
+    // close (static)
     { RECT cb=bkCloseRect(h);
       RECT ci={cb.left+S(5),cb.top+S(5),cb.right-S(5),cb.bottom-S(5)};
       drawIcon(dc,ICO_X,ci,g_theme.text,S(2)); }
 
-    // title
+    // title (static)
     SelectObject(dc,g_fTitle); SetTextColor(dc,g_theme.accent);
     RECT tr={c.left+S(24),c.top+S(16),c.right-S(54),c.top+S(54)};
-    DrawTextW(dc, s_bs->mode==BK_MODE_HOME
-        ? L"مدیریت پشتیبان‌گیری اطلاعات بیماران"
-        : L"بازیابی پشتیبان", -1, &tr,
+    DrawTextW(dc, (s_bs&&s_bs->mode==BK_MODE_RESTORE)
+        ? L"بازیابی پشتیبان"
+        : L"مدیریت پشتیبان‌گیری اطلاعات بیماران", -1, &tr,
         DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
 
-    if(s_bs->mode==BK_MODE_HOME){
-        // subtitle
+    // subtitle on the HOME mode is static too
+    if(!s_bs || s_bs->mode==BK_MODE_HOME){
         SelectObject(dc,g_fUI); SetTextColor(dc,g_theme.textDim);
         RECT sr={c.left+S(24),c.top+S(56),c.right-S(24),c.top+S(88)};
         DrawTextW(dc,L"یک گزینه را انتخاب کنید. عملیات سنگین در پس‌زمینه اجرا می‌شود و رابط کاربری متوقف نمی‌گردد.",
             -1,&sr,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
+    }
+}
 
+// (2) Draw the CHEAP interactive foreground on top of the cached background.
+static void bkPaintFg(HWND h, HDC dc){
+    RECT c=bkCard(h);
+    SetBkMode(dc,TRANSPARENT);
+
+    if(s_bs->mode==BK_MODE_HOME){
         const wchar_t* ctitle[2]={L"پشتیبان‌گیری",L"بازیابی پشتیبان"};
         const wchar_t* cdesc [2]={L"تهیهٔ نسخهٔ پشتیبان از تمام اطلاعات بیماران در یک فایل امن.",
                                   L"بازیابی کامل یا انتخابی از یک فایل پشتیبان (شامل فایل‌های حجیم متین‌طب)."};
@@ -660,8 +698,38 @@ static void bkPaint(HWND h, HDC dc0){
         SetTextColor(dc, canRestore?RGB(255,255,255):g_theme.textDim);
         DrawTextW(dc,L"شروع بازیابی",-1,&rb,DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
     }
+}
 
-    BitBlt(dc0,0,0,rc.right,rc.bottom,dc,0,0,SRCCOPY);
+// (3) Composite: ensure the cache is valid, blit it (for the dirty strip only),
+//     overlay the cheap foreground, then copy out. The heavy scrim/shadow/
+//     gradient work in bkBuildBg runs ONCE per size/theme/mode change instead
+//     of on every mouse move.
+static void bkPaint(HWND h, HDC dc0, const RECT* dirty){
+    RECT rc; GetClientRect(h,&rc);
+    if(rc.right<=0||rc.bottom<=0) return;
+    if(!s_bgDC || s_bgW!=rc.right || s_bgH!=rc.bottom ||
+       (s_bs && s_bgMode!=s_bs->mode))
+        bkBuildBg(h,dc0);
+    if(!s_bgDC) return;
+
+    RECT d = (dirty && dirty->right>dirty->left && dirty->bottom>dirty->top)
+             ? *dirty : rc;
+    int dw=d.right-d.left, dh=d.bottom-d.top;
+
+    HDC dc=CreateCompatibleDC(dc0);
+    HBITMAP bmp=CreateCompatibleBitmap(dc0,rc.right,rc.bottom);
+    HGDIOBJ obm=SelectObject(dc,bmp);
+
+    // 1) restore the cached static layers for the dirty region
+    BitBlt(dc,d.left,d.top,dw,dh,s_bgDC,d.left,d.top,SRCCOPY);
+    // 2) draw the interactive foreground, clipped to the dirty strip
+    HRGN clip=CreateRectRgn(d.left,d.top,d.right,d.bottom);
+    SelectClipRgn(dc,clip);
+    if(s_bs) bkPaintFg(h,dc);
+    SelectClipRgn(dc,NULL); DeleteObject(clip);
+    // 3) blit the composited strip to the screen
+    BitBlt(dc0,d.left,d.top,dw,dh,dc,d.left,d.top,SRCCOPY);
+
     SelectObject(dc,obm); DeleteObject(bmp); DeleteDC(dc);
 }
 
@@ -724,12 +792,24 @@ static LRESULT CALLBACK bkProc(HWND h, UINT m, WPARAM w, LPARAM l){
     case WM_NCDESTROY:
         InterlockedExchange(&s_cancel,1);   // ask any worker to stop
         KillTimer(h,1);
+        bkFreeBg();
         if(s_bs){ delete s_bs; s_bs=NULL; } s_bk=NULL;
         if(g_hFrame) InvalidateRect(g_hFrame,NULL,TRUE);
         return 0;
     case WM_ERASEBKGND: return 1;
+    case WM_APP_THEME:                       // theme switched → rebuild cache
+        bkFreeBg(); InvalidateRect(h,NULL,FALSE); return 0;
+    case WM_SIZE:
+        bkFreeBg(); InvalidateRect(h,NULL,FALSE); return 0;
     case WM_TIMER: if(s_bs){ s_bs->anim+=0.04f; if(s_bs->anim>1)s_bs->anim-=1;
-        if(s_bs->busy||s_bs->scanning) InvalidateRect(h,NULL,FALSE);
+        // v1.9.5 perf: while a worker is running, repaint ONLY the progress-bar
+        // strip (where the animated fill + status text live) instead of the
+        // whole window, so the scrim/shadow/gradient are never recomposed.
+        if(s_bs->busy||s_bs->scanning){
+            RECT c=bkCard(h);
+            RECT strip={c.left,bkProgBar(h).top-S(4),c.right,c.bottom};
+            InvalidateRect(h,&strip,FALSE);
+        }
         // a finished restore raises doneSignal==2 → confirm to the operator on
         // the UI thread (workers must never touch GDI / dialogs themselves).
         if(InterlockedCompareExchange(&s_bs->doneSignal,0,0)==2){
@@ -757,7 +837,21 @@ static LRESULT CALLBACK bkProc(HWND h, UINT m, WPARAM w, LPARAM l){
         } else if(s_bs->info.ready){
             for(int i=0;i<CAT_COUNT;i++){ RECT r=bkCatRow(h,i); if(PtInRect(&r,pt)){ s_bs->hot=100+i; break; } }
         }
-        if(oh!=s_bs->hot) InvalidateRect(h,NULL,FALSE);
+        if(oh!=s_bs->hot){
+            // v1.9.5 perf: invalidate ONLY the rect we left + the rect we entered
+            // (each with a small margin for borders), never the whole window. The
+            // cached background means each strip repaint is a cheap blit + a few
+            // rounded rects.
+            auto rectOf=[&](int hid, RECT& out)->bool{
+                if(hid<0) return false;
+                if(hid<100){ if(hid>1) return false; out=bkHomeCard(h,hid); }
+                else { int i=hid-100; if(i<0||i>=CAT_COUNT) return false; out=bkCatRow(h,i); }
+                InflateRect(&out,S(4),S(4)); return true;
+            };
+            RECT ro,rn;
+            if(rectOf(oh,ro)) InvalidateRect(h,&ro,FALSE);
+            if(rectOf(s_bs->hot,rn)) InvalidateRect(h,&rn,FALSE);
+        }
         return 0; }
     case WM_LBUTTONDOWN:{ if(!s_bs) break; POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
         RECT c=bkCard(h);
@@ -789,7 +883,8 @@ static LRESULT CALLBACK bkProc(HWND h, UINT m, WPARAM w, LPARAM l){
         }
         return 0; }
     case WM_KEYDOWN: if(w==VK_ESCAPE){ bkClose(); return 0; } break;
-    case WM_PAINT:{ PAINTSTRUCT ps; HDC dc=BeginPaint(h,&ps); bkPaint(h,dc); EndPaint(h,&ps); return 0; }
+    case WM_PAINT:{ PAINTSTRUCT ps; HDC dc=BeginPaint(h,&ps);
+        RECT dirty=ps.rcPaint; bkPaint(h,dc,&dirty); EndPaint(h,&ps); return 0; }
     }
     return DefWindowProcW(h,m,w,l);
 }
