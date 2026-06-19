@@ -108,8 +108,12 @@ struct BkState {
     bool allTicked;                     // "all patient information" master tick
     int  hot;                           // hovered card/row (-1 none)
     float anim;                         // 0..1 spinner phase
+    volatile LONG doneSignal;           // worker→UI: 1=backup 2=restore done
+    int  lastRestoredFiles;             // files written by last restore
+    long long lastRestoredPatients;     // patient records restored (rows)
     BkState():mode(BK_MODE_HOME),scanning(false),busy(false),progress(0),
-        foreign(false),allTicked(false),hot(-1),anim(0){}
+        foreign(false),allTicked(false),hot(-1),anim(0),
+        doneSignal(0),lastRestoredFiles(0),lastRestoredPatients(0){}
 };
 static HWND     s_bk=NULL;
 static BkState* s_bs=NULL;
@@ -350,6 +354,7 @@ static unsigned __stdcall restoreWorker(void* p){
     }
 
     // Our own container: stream entries; write only selected categories.
+    int    restoredFiles=0;             // how many files we wrote back
     HANDLE hf=CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ,NULL,
                           OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);
     if(hf==INVALID_HANDLE_VALUE){
@@ -396,6 +401,7 @@ static unsigned __stdcall restoreWorker(void* p){
             }
             out=CreateFileW(outPath.c_str(),GENERIC_WRITE,0,NULL,CREATE_ALWAYS,
                             FILE_ATTRIBUTE_NORMAL,NULL);
+            if(out!=INVALID_HANDLE_VALUE) restoredFiles++;
         }
         long long left=fsz2;
         while(left>0){
@@ -411,10 +417,27 @@ static unsigned __stdcall restoreWorker(void* p){
         if(out!=INVALID_HANDLE_VALUE) CloseHandle(out);
     }
     CloseHandle(hf);
+    bool cancelled = InterlockedCompareExchange(&s_cancel,0,0)!=0;
+    // Count the patient records now present in the restored data layer so the UI
+    // can confirm exactly how much patient data is live (one row per patient).
+    long long patientRows=0;
+    if(!cancelled && want[catIndexOf(L"patients")]){
+        std::wstring pall=readFileUtf8(dataDir()+L"\\patients.dat");
+        size_t pp=0;
+        while(pp<pall.size()){
+            size_t e=pall.find(L'\n',pp); if(e==std::wstring::npos) e=pall.size();
+            std::wstring ln=trim(pall.substr(pp,e-pp)); pp=e+1;
+            if(!ln.empty()) patientRows++;
+        }
+    }
     if(s_bs){ s_bs->busy=false; s_bs->progress=100;
-        s_bs->status=InterlockedCompareExchange(&s_cancel,0,0)
+        s_bs->lastRestoredFiles=restoredFiles;
+        s_bs->lastRestoredPatients=patientRows;
+        s_bs->status= cancelled
             ? L"بازیابی لغو شد."
-            : L"بازیابی با موفقیت کامل شد."; }
+            : L"بازیابی با موفقیت کامل شد — اطلاعات بیماران در سامانه بارگذاری شد.";
+        if(!cancelled) InterlockedExchange(&s_bs->doneSignal, 2);
+    }
     if(s_bk) InvalidateRect(s_bk,NULL,FALSE);
     return 0;
 }
@@ -680,7 +703,24 @@ static void bkStartRestore(HWND h){
 
 static LRESULT CALLBACK bkProc(HWND h, UINT m, WPARAM w, LPARAM l){
     switch(m){
-    case WM_CREATE: s_bs=new BkState(); SetTimer(h,1,40,NULL); return 0;
+    case WM_CREATE: s_bs=new BkState(); SetTimer(h,1,40,NULL);
+#ifdef AZ_DEBUG_BUILD
+        { wchar_t dm[16]={0}; GetEnvironmentVariableW(L"AZ_DEBUG_BKMODE",dm,16);
+          if(!wcscmp(dm,L"restore")){
+              s_bs->mode=BK_MODE_RESTORE;
+              // synthesise a ready scan so the restore layout is fully populated
+              s_bs->pickedPath=L"C:\\backups\\AzadiTeb_1405-03-29.aztbk";
+              BackupInfo bi; bi.path=s_bs->pickedPath; bi.totalBytes=58LL*1024*1024;
+              long long demo[4]={32LL*1024*1024,20LL*1024*1024,4LL*1024*1024,2LL*1024*1024};
+              long long recs[4]={1280,0,0,0};
+              for(int i=0;i<CAT_COUNT;i++){ BackupCategory bc; bc.id=CATS[i].id;
+                  bc.name=CATS[i].name; bc.bytes=demo[i]; bc.records=recs[i];
+                  bc.selected=true; bi.cats.push_back(bc); }
+              bi.ready=true; s_bs->info=bi; s_bs->allTicked=true;
+              s_bs->status=L"اسکن کامل شد — دسته‌بندی‌ها آماده انتخاب هستند.";
+          } }
+#endif
+        return 0;
     case WM_NCDESTROY:
         InterlockedExchange(&s_cancel,1);   // ask any worker to stop
         KillTimer(h,1);
@@ -689,7 +729,27 @@ static LRESULT CALLBACK bkProc(HWND h, UINT m, WPARAM w, LPARAM l){
         return 0;
     case WM_ERASEBKGND: return 1;
     case WM_TIMER: if(s_bs){ s_bs->anim+=0.04f; if(s_bs->anim>1)s_bs->anim-=1;
-        if(s_bs->busy||s_bs->scanning) InvalidateRect(h,NULL,FALSE); } return 0;
+        if(s_bs->busy||s_bs->scanning) InvalidateRect(h,NULL,FALSE);
+        // a finished restore raises doneSignal==2 → confirm to the operator on
+        // the UI thread (workers must never touch GDI / dialogs themselves).
+        if(InterlockedCompareExchange(&s_bs->doneSignal,0,0)==2){
+            InterlockedExchange(&s_bs->doneSignal,0);
+            InvalidateRect(h,NULL,FALSE);
+            wchar_t mb[256];
+            if(s_bs->lastRestoredPatients>0)
+                swprintf(mb,256,
+                    L"بازیابی کامل شد.\n%s فایل بازنویسی شد و %s رکورد بیمار در سامانه بارگذاری گردید.",
+                    toFaDigits(std::to_wstring(s_bs->lastRestoredFiles)).c_str(),
+                    toFaDigits(std::to_wstring(s_bs->lastRestoredPatients)).c_str());
+            else
+                swprintf(mb,256,
+                    L"بازیابی کامل شد.\n%s فایل از پشتیبان در سامانه بازنویسی شد.",
+                    toFaDigits(std::to_wstring(s_bs->lastRestoredFiles)).c_str());
+            MessageBoxW(h,mb,L"بازیابی موفق",MB_OK|MB_ICONINFORMATION);
+            // refresh the main frame so any open lists pick up the restored data
+            if(g_hFrame) InvalidateRect(g_hFrame,NULL,TRUE);
+        }
+    } return 0;
     case WM_MOUSEMOVE:{ if(!s_bs) break; POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
         int oh=s_bs->hot; s_bs->hot=-1;
         if(s_bs->mode==BK_MODE_HOME){

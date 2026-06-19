@@ -109,12 +109,16 @@ struct TabPage {
     //  the field-well painter, and draws ONLY a very thin red hairline border
     //  (no glow / double-ring) until the user edits the field.
     int  invalidMask;
+    //  v2: vertical scroll offset (device px) for the reception form when its
+    //  content is taller than the visible tab-page client area. 0 = top.
+    int  scrollY;
+    int  contentH;           // last computed total content height
     std::wstring lastMsg; COLORREF msgCol;
     TabPage():page(0),kind(TK_RECEPTION),appt(0),total(0),mainShare(0),patientShare(0),
         baseDiff(0),orgShare(0),paid(0),detached(false),autoPrice(false),
         idChecked(false),idVerified(false),
         cartDetail(false),cartSelDisp(-1),cartSelNF(-1),cartHotBtn(0),
-        cartShowArchive(false),invalidMask(0),msgCol(0){}
+        cartShowArchive(false),invalidMask(0),scrollY(0),contentH(0),msgCol(0){}
 };
 
 struct RecData {
@@ -249,12 +253,128 @@ static void rcVMetrics(int H, int& y0, int& step, int& rh){
     // (gap 52→56). Invariant step >= rh + S(54) still holds → zero overlap.
     y0 = S(132); rh = S(30); step = rh + S(56);   // = S(86): zero overlap
     int need = y0 + 8*step + S(132);
+    // v2: we now SCROLL instead of over-compressing. Only apply a GENTLE shrink
+    // (down to a comfortable floor) so most screens fit without a scrollbar; if
+    // it still doesn't fit, the page provides a vertical scrollbar so every
+    // field stays reachable and readable (no field disappears below the fold).
     if(H > 0 && need > H){
-        step = (H - y0 - S(132)) / 8;
-        if(step < S(70)) step = S(70);            // floor keeps things readable
-        // derive rh from step so the invariant step >= rh + S(56) always holds
-        rh = step - S(56); if(rh > S(30)) rh = S(30); if(rh < S(22)) rh = S(22);
+        int s2 = (H - y0 - S(132)) / 8;
+        if(s2 < S(78)) s2 = S(78);                // comfortable floor (was 70)
+        if(s2 < step){
+            step = s2;
+            rh = step - S(56); if(rh > S(30)) rh = S(30); if(rh < S(24)) rh = S(24);
+        }
     }
+}
+//  Natural (uncompressed) full height the reception form needs, so the page can
+//  decide whether to show a vertical scrollbar. Includes the submit button and
+//  bottom padding.
+static int rcFormContentH(int H){
+    int y0,step,rh; rcVMetrics(H,y0,step,rh);
+    return y0 + 8*step + S(6) + S(50) + S(24);   // last row + submit + pad
+}
+// ----------------------------------------------------------------------------
+//  Unified RIGHT INFO-PANEL layout.  A SINGLE source of truth shared by the
+//  painter (paintInfoPanel) and the control positioner (tabPageLayout) so the
+//  painted group titles / chips and the real edit controls can NEVER drift
+//  apart and overlap (the v1.9.x right-panel overlap bug).  All y values are in
+//  device pixels and already scaled.  Every row reserves its own vertical band
+//  with a small label line above each control band so labels never sit under or
+//  behind a field.
+struct InfoLayout {
+    int iL, iR, iw;                 // inner padded bounds
+    int cardTop, cardBot;
+    int avCx, avCy, avR;            // avatar centre + radius
+    int chipY, chipH;               // نسخه الکترونیک chip
+    int boxY,  boxH;                // قبض/بارکد box
+    int psY,   psH;                 // P:S counters line
+    // group "کلیدهای جستجو"
+    int g1TitleY;
+    int archiveLblY, archiveY;
+    int fileLblY,    fileY;
+    // group "بیمه"
+    int g2TitleY;
+    int bookLblY,  bookY;
+    int validLblY, validY;
+    int rxLblY,    rxY;
+    int suppLblY,  suppY;
+    // group "پزشک معالج"
+    int g3TitleY;
+    int docCodeLblY, docCodeY;
+    int docNameLblY, docNameY;
+    int rh2, gp, btnW, lblH;
+};
+static void computeInfoLayout(int infoL, int infoR, int H, InfoLayout& L){
+    int ipad=S(16);
+    L.iL=infoL+ipad; L.iR=infoR-ipad; L.iw=L.iR-L.iL;
+    L.cardTop=S(16); L.cardBot=H-S(16);
+    L.rh2=S(28); L.gp=S(6); L.btnW=S(78); L.lblH=S(16);
+    // --- header zone (matches painter) ---
+    L.avR=S(40); L.avCx=(L.iL+L.iR)/2; L.avCy=L.cardTop+S(14)+L.avR;
+    int y=L.avCy+L.avR+S(10);
+    L.chipH=S(26); L.chipY=y;            y+=L.chipH+S(8);
+    L.boxH =S(28); L.boxY =y;            y+=L.boxH +S(8);
+    L.psH  =S(20); L.psY  =y;            y+=L.psH  +S(14);
+    int lblGap=S(2);   // gap between a label line and its control
+    int rowGap=S(8);   // gap between control rows
+    int grpGap=S(16);  // gap before next group title
+    auto labelled=[&](int& lblY,int& ctlY){
+        lblY=y; y+=L.lblH+lblGap; ctlY=y; y+=L.rh2+rowGap;
+    };
+    // group 1
+    L.g1TitleY=y; y+=S(24);
+    labelled(L.archiveLblY,L.archiveY);
+    labelled(L.fileLblY,   L.fileY);
+    y+=grpGap-rowGap;
+    // group 2
+    L.g2TitleY=y; y+=S(24);
+    labelled(L.bookLblY, L.bookY);
+    labelled(L.validLblY,L.validY);
+    labelled(L.rxLblY,   L.rxY);
+    labelled(L.suppLblY, L.suppY);
+    y+=grpGap-rowGap;
+    // group 3
+    L.g3TitleY=y; y+=S(24);
+    labelled(L.docCodeLblY,L.docCodeY);
+    labelled(L.docNameLblY,L.docNameY);
+}
+
+//  v2: the virtual page height — the taller of the visible client area and the
+//  natural content height of the form + the right info-panel. When the content
+//  is taller than the client area the page scrolls; the cards grow to this VH so
+//  their rounded bottom edge is always below the last control.
+static int recPageVH(int W, int H){
+    int cardL,cardR,billL,billR,infoL,infoR,colW,xr,xl; bool stacked;
+    rcMetrics2(W,cardL,cardR,billL,billR,infoL,infoR,colW,xr,xl,stacked);
+    int formH = rcFormContentH(H);
+    int infoH = 0;
+    if(!stacked && infoR>infoL){
+        InfoLayout L; computeInfoLayout(infoL,infoR,H,L);
+        infoH = L.docNameY + L.rh2 + S(40);   // last control + bottom («انجام دهنده») room
+    }
+    int billH = S(16)+S(62)+S(360)+S(214)+S(16);   // billing rows + buttons block
+    int need = formH; if(infoH>need) need=infoH; if(billH>need) need=billH;
+    need += S(16);                                   // top padding mirror
+    return need>H ? need : H;
+}
+//  Clamp & return the current scroll offset for the page.
+static int recClampScroll(HWND h, TabPage* t){
+    RECT rc; GetClientRect(h,&rc);
+    int VH=recPageVH(rc.right,rc.bottom);
+    int maxS = VH - rc.bottom; if(maxS<0) maxS=0;
+    if(t->scrollY<0) t->scrollY=0;
+    if(t->scrollY>maxS) t->scrollY=maxS;
+    t->contentH=VH;
+    return maxS;
+}
+//  Sync the WS_VSCROLL thumb to the current scroll state.
+static void recUpdateScrollbar(HWND h, TabPage* t){
+    RECT rc; GetClientRect(h,&rc);
+    int VH=recPageVH(rc.right,rc.bottom);
+    SCROLLINFO si={sizeof(si)};
+    si.fMask=SIF_RANGE|SIF_PAGE|SIF_POS;
+    si.nMin=0; si.nMax=VH-1; si.nPage=rc.bottom; si.nPos=t->scrollY;
+    SetScrollInfo(h,SB_VERT,&si,TRUE);
 }
 static void tabPageLayout(HWND h, TabPage* t){
     if(!t) return;
@@ -273,6 +393,10 @@ static void tabPageLayout(HWND h, TabPage* t){
     int formLeft = cardL+S(RC_IN);
     int formRight= cardR-S(RC_IN);
     int fw = formRight - formLeft;
+    recClampScroll(h,t);
+    const int sy=t->scrollY;          // scroll offset (subtract from every y)
+    y0 -= sy;                          // shift the whole form up by scroll
+    recUpdateScrollbar(h,t);
 
     // Section 1: هویت بیمار (rows 0..2)
     MoveWindow(t->eFirst, xr, y0,          colW, rh, TRUE);
@@ -302,9 +426,11 @@ static void tabPageLayout(HWND h, TabPage* t){
     // submit
     MoveWindow(t->bSubmit,formLeft, y0+8*step+S(6), fw, S(50), TRUE);
 
-    // billing panel buttons (bottom of billing card)
+    // billing panel buttons (bottom of billing card). Pinned to the virtual
+    // page height so they track the card bottom and scroll with the page.
+    int VH = recPageVH(W,H);
     if(!stacked){
-        int bx = billL + S(16), byy = H - S(214);
+        int bx = billL + S(16), byy = VH - S(214) - sy;
         int bbw = (billR-billL) - S(32);
         MoveWindow(t->bPrtIns, bx, byy,        bbw, S(40), TRUE);
         MoveWindow(t->bPrtRx,  bx, byy+S(48),  bbw, S(40), TRUE);
@@ -331,46 +457,31 @@ static void tabPageLayout(HWND h, TabPage* t){
         for(HWND c: infoCtls) if(c) ShowWindow(c,SW_HIDE);
     } else {
         for(HWND c: infoCtls) if(c) ShowWindow(c,SW_SHOW);
-        int ipad=S(16);
-        int iL=infoL+ipad, iR=infoR-ipad;
-        int iw=iR-iL;
-        int rh2=S(28), gp=S(6);
-        // y starts below: avatar(70) + identity(40) + chips(54) ≈ painted header
-        int y=S(16)+S(74)+S(40)+S(40)+S(8);   // ~ after avatar + نسخه + قبض/بارکد + P:S
-        // --- search keys group ---
-        y += S(26);  // group title
-        int btnW=S(78);
-        MoveWindow(t->bArchiveGo, iL, y, btnW, rh2, TRUE);
-        MoveWindow(t->eArchive,   iL+btnW+gp, y, iw-btnW-gp, rh2, TRUE);
-        y += rh2+gp;
-        MoveWindow(t->bFileGo,    iL, y, btnW, rh2, TRUE);
-        MoveWindow(t->eFile,      iL+btnW+gp, y, iw-btnW-gp, rh2, TRUE);
-        y += rh2+S(16);
+        InfoLayout L; computeInfoLayout(infoL,infoR,H,L);
+        const int iL=L.iL, iw=L.iw, rh2=L.rh2, gp=L.gp, btnW=L.btnW;
+        // --- search keys group ---  (all info-panel controls also scroll)
+        MoveWindow(t->bArchiveGo, iL, L.archiveY-sy, btnW, rh2, TRUE);
+        MoveWindow(t->eArchive,   iL+btnW+gp, L.archiveY-sy, iw-btnW-gp, rh2, TRUE);
+        MoveWindow(t->bFileGo,    iL, L.fileY-sy, btnW, rh2, TRUE);
+        MoveWindow(t->eFile,      iL+btnW+gp, L.fileY-sy, iw-btnW-gp, rh2, TRUE);
         // --- insurance block group ---
-        y += S(26);  // group title
         // ش دفترچه + فعال checkbox
-        MoveWindow(t->chkBookNo, iL, y, S(64), rh2, TRUE);
-        MoveWindow(t->eBookNo,   iL+S(70), y, iw-S(70), rh2, TRUE);
-        y += rh2+gp;
+        MoveWindow(t->chkBookNo, iL, L.bookY-sy, S(64), rh2, TRUE);
+        MoveWindow(t->eBookNo,   iL+S(70), L.bookY-sy, iw-S(70), rh2, TRUE);
         // تاریخ اعتبار + اتوماتیک
-        MoveWindow(t->chkValidAuto, iL, y, S(86), rh2, TRUE);
-        MoveWindow(t->eValid,       iL+S(92), y, iw-S(92), rh2, TRUE);
-        y += rh2+gp;
+        MoveWindow(t->chkValidAuto, iL, L.validY-sy, S(92), rh2, TRUE);
+        MoveWindow(t->eValid,       iL+S(98), L.validY-sy, iw-S(98), rh2, TRUE);
         // تاریخ نسخه + اتوماتیک
-        MoveWindow(t->chkRxAuto, iL, y, S(86), rh2, TRUE);
-        MoveWindow(t->eRxDate,   iL+S(92), y, iw-S(92), rh2, TRUE);
-        y += rh2+gp;
+        MoveWindow(t->chkRxAuto, iL, L.rxY-sy, S(92), rh2, TRUE);
+        MoveWindow(t->eRxDate,   iL+S(98), L.rxY-sy, iw-S(98), rh2, TRUE);
         // بیمه مکمل + درصد + استعلام
-        MoveWindow(t->bSuppGo,    iL, y, btnW, rh2, TRUE);
-        MoveWindow(t->eSuppPct,   iL+btnW+gp, y, S(48), rh2, TRUE);
-        MoveWindow(t->cSuppPanel, iL+btnW+gp+S(54), y, iw-btnW-gp-S(54), rh2, TRUE);
-        y += rh2+S(16);
+        MoveWindow(t->bSuppGo,    iL, L.suppY-sy, btnW, rh2, TRUE);
+        MoveWindow(t->eSuppPct,   iL+btnW+gp, L.suppY-sy, S(48), rh2, TRUE);
+        MoveWindow(t->cSuppPanel, iL+btnW+gp+S(54), L.suppY-sy, iw-btnW-gp-S(54), S(200), TRUE);
         // --- پزشک معالج group ---
-        y += S(26);  // group title
-        MoveWindow(t->eDocCode, iL, y, iw, rh2, TRUE);
-        y += rh2+gp;
-        MoveWindow(t->bDocSearch, iL, y, btnW, rh2, TRUE);
-        MoveWindow(t->eDocName,   iL+btnW+gp, y, iw-btnW-gp, rh2, TRUE);
+        MoveWindow(t->eDocCode, iL, L.docCodeY-sy, iw, rh2, TRUE);
+        MoveWindow(t->bDocSearch, iL, L.docNameY-sy, btnW, rh2, TRUE);
+        MoveWindow(t->eDocName,   iL+btnW+gp, L.docNameY-sy, iw-btnW-gp, rh2, TRUE);
     }
 }
 
@@ -467,6 +578,44 @@ static void doInquiry(TabPage* t, HWND h, bool quiet){
     }
     recalc(t);
     InvalidateRect(h,NULL,FALSE);
+}
+
+// ----- national-id field: Enter triggers a network-wide patient lookup -------
+//  The operator types the 10-digit national code in t->eNid and presses Enter.
+//  Regardless of the «دارای بیمه» state we run the validated, no-fabrication
+//  lookupCitizen() (online registry → local verified store) and auto-fill the
+//  patient identity (name / surname / father / birth date / gender / contact /
+//  insurance + supplementary). Missing/partial records fill only what is known;
+//  invalid/duplicate codes are handled gracefully inside doInquiry(). After the
+//  lookup we hop to the first empty field so data entry stays fast.
+static WNDPROC s_oldNid = NULL;
+static LRESULT CALLBACK nidEditProc(HWND e, UINT m, WPARAM w, LPARAM l){
+    if(m==WM_KEYDOWN && w==VK_RETURN){
+        HWND page = GetParent(e);
+        TabPage* t = page ? (TabPage*)GetWindowLongPtrW(page,GWLP_USERDATA) : NULL;
+        if(t){
+            doInquiry(t, page, false);          // always look up + auto-fill
+            // advance to the first still-empty identity field for fast entry
+            HWND nxt = NULL;
+            auto isEmpty=[](HWND c){ wchar_t b[8]={0}; GetWindowTextW(c,b,2); return b[0]==0; };
+            if(t->idVerified){
+                if(isEmpty(t->eFirst))      nxt=t->eFirst;
+                else if(isEmpty(t->eLast))  nxt=t->eLast;
+                else if(isEmpty(t->eMobile))nxt=t->eMobile;
+                else                        nxt=t->eFirst;
+            } else {
+                nxt = t->eFirst;                // manual entry starts at name
+            }
+            if(nxt){ SetFocus(nxt); SendMessageW(nxt,EM_SETSEL,0,-1); }
+        }
+        return 0;
+    }
+    if(m==WM_CHAR && (w==VK_RETURN||w==VK_TAB)) return 0;   // suppress beep
+    return CallWindowProcW(s_oldNid?s_oldNid:DefWindowProcW, e, m, w, l);
+}
+static void enableNidLookup(HWND e){
+    WNDPROC old=(WNDPROC)SetWindowLongPtrW(e,GWLP_WNDPROC,(LONG_PTR)nidEditProc);
+    if(!s_oldNid) s_oldNid=old;
 }
 
 // gather form into record
@@ -935,27 +1084,37 @@ static void paintInfoGroup(HDC dc, int iL, int iR, int y, const wchar_t* title, 
     MoveToEx(dc,iL,y+S(20),0); LineTo(dc,iR,y+S(20));
     SelectObject(dc,op); DeleteObject(pn);
 }
-static void paintInfoPanel(HDC dc, TabPage* t, int infoL, int infoR, int H){
-    RECT card={infoL,S(16),infoR,H-S(16)};
-    fillRoundRect(dc,card,S(16),g_theme.surface,g_theme.border);
-    int ipad=S(16);
-    int iL=infoL+ipad, iR=infoR-ipad;
+//  Helper: draw a small field caption (right-aligned, dim) above a control.
+static void paintInfoLabel(HDC dc, int iL, int iR, int y, const wchar_t* txt){
+    SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
+    RECT tr={iL,y,iR,y+S(16)};
+    DrawTextW(dc,txt,-1,&tr,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+}
+static void paintInfoPanel(HDC dc, TabPage* t, int infoL, int infoR, int H, int sy){
+    // H here is the VIRTUAL bottom (already had sy subtracted by the caller);
+    // recover the real virtual height for layout, then offset everything by sy.
+    int VH = H + sy;
+    RECT card={infoL,S(16)-sy,infoR,VH-S(16)-sy};
+    // v2: clip the rounded card so nothing bleeds outside the rounded corners,
+    // and patch the corner gaps with the page background so no square shows.
+    gpRoundRectBg(dc,card,S(16),g_theme.surface,g_theme.border,g_theme.bg);
+    InfoLayout L; computeInfoLayout(infoL,infoR,VH,L);
+    // shift the whole computed layout up by the scroll offset
+    #define SY(v) ((v)-sy)
+    const int iL=L.iL, iR=L.iR;
     // gender from the combo
     bool female = (SendMessageW(t->cGender,CB_GETCURSEL,0,0)==1);
-    // --- avatar (v1.9.0: larger, neutral gray, perfectly centred) ---
-    int cx=(iL+iR)/2, cy=card.top+S(54), r=S(44);
-    drawGuestAvatar(dc,cx,cy,r,female);
+    // --- avatar (neutral gray, perfectly centred) ---
+    drawGuestAvatar(dc,L.avCx,SY(L.avCy),L.avR,female);
     // --- نسخه الکترونیک chip ---
-    int y=cy+r+S(10);
-    { RECT chip={iL,y,iR,y+S(26)};
-      fillRoundRect(dc,chip,S(8),g_theme.accent,CLR_INVALID);
+    { RECT chip={iL,SY(L.chipY),iR,SY(L.chipY)+L.chipH};
+      gpRoundRectBg(dc,chip,S(8),g_theme.accent,CLR_INVALID,g_theme.surface);
       SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.accentText);
       DrawTextW(dc,L"نسخه الکترونیک",-1,&chip,
           DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX); }
-    y+=S(32);
     // --- قبض - ماه / بارکد ---
-    { RECT box={iL,y,iR,y+S(30)};
-      fillRoundRect(dc,box,S(8),g_theme.inputBg,g_theme.border);
+    { RECT box={iL,SY(L.boxY),iR,SY(L.boxY)+L.boxH};
+      gpRoundRectBg(dc,box,S(8),g_theme.inputBg,g_theme.border,g_theme.surface);
       SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
       SYSTEMTIME st=iranNow(); int jy,jm,jd;
       gregToJalali(st.wYear,st.wMonth,st.wDay,jy,jm,jd);
@@ -963,22 +1122,25 @@ static void paintInfoPanel(HDC dc, TabPage* t, int infoL, int infoR, int H){
       RECT tr=box; tr.right-=S(8);
       DrawTextW(dc,toFaDigits(b).c_str(),-1,&tr,
           DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX); }
-    y+=S(36);
     // --- P : 0   S : 0 counters ---
     { SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.text);
       int pCount=countTodayReceptions();
       wchar_t b[40]; swprintf(b,40,L"P : %d        S : %d",pCount,detectShift());
-      RECT tr={iL,y,iR,y+S(20)};
+      RECT tr={iL,SY(L.psY),iR,SY(L.psY)+L.psH};
       DrawTextW(dc,toFaDigits(b).c_str(),-1,&tr,
           DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX); }
-    y+=S(28);
-    // group titles align with tabPageLayout's y progression
-    paintInfoGroup(dc,iL,iR,y,L"کلیدهای جستجو",ICO_ID);
-    int rh2=S(28), gp=S(6);
-    y += S(26) + (rh2+gp)*2 + S(16);
-    paintInfoGroup(dc,iL,iR,y,L"بیمه",ICO_SHIELD);
-    y += S(26) + (rh2+gp)*4 + S(16);
-    paintInfoGroup(dc,iL,iR,y,L"پزشک معالج",ICO_CROSS_MED);
+    // group titles + per-row field captions — share the SAME layout as controls
+    paintInfoGroup(dc,iL,iR,SY(L.g1TitleY),L"کلیدهای جستجو",ICO_ID);
+    paintInfoLabel(dc,iL,iR,SY(L.archiveLblY),L"شماره بایگانی");
+    paintInfoLabel(dc,iL,iR,SY(L.fileLblY),   L"شماره پرونده");
+    paintInfoGroup(dc,iL,iR,SY(L.g2TitleY),L"بیمه",ICO_SHIELD);
+    paintInfoLabel(dc,iL,iR,SY(L.bookLblY), L"شماره دفترچه");
+    paintInfoLabel(dc,iL,iR,SY(L.validLblY),L"تاریخ اعتبار");
+    paintInfoLabel(dc,iL,iR,SY(L.rxLblY),   L"تاریخ نسخه");
+    paintInfoLabel(dc,iL,iR,SY(L.suppLblY), L"بیمه مکمل");
+    paintInfoGroup(dc,iL,iR,SY(L.g3TitleY),L"پزشک معالج",ICO_CROSS_MED);
+    paintInfoLabel(dc,iL,iR,SY(L.docCodeLblY),L"کد نظام پزشکی");
+    paintInfoLabel(dc,iL,iR,SY(L.docNameLblY),L"نام پزشک");
     // --- انجام دهنده (current user) at the very bottom ---
     { SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
       std::wstring who=L"انجام دهنده: "+
@@ -986,6 +1148,7 @@ static void paintInfoPanel(HDC dc, TabPage* t, int infoL, int infoR, int H){
       RECT tr={iL,card.bottom-S(26),iR,card.bottom-S(8)};
       DrawTextW(dc,who.c_str(),-1,&tr,
           DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX); }
+    #undef SY
 }
 
 // ----------------------------------------------------------- tab page proc -
@@ -1078,6 +1241,11 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             SendMessageW(eds[i],WM_SETFONT,(WPARAM)g_fUI,TRUE);
             enableEnterNavigation(eds[i]);
         }
+        // national-id field: override the plain Enter-navigation so Enter runs
+        // the network-wide patient lookup + auto-fill (must be applied AFTER the
+        // generic enableEnterNavigation above so it wins for this one field).
+        enableNidLookup(t->eNid);
+        SendMessageW(t->eNid,EM_SETLIMITTEXT,10,0);
         // auto RTL/LTR alignment on the free-text fields (names/address):
         // Persian content aligns right, Latin/digits align left.
         enableAutoDir(t->eFirst); enableAutoDir(t->eLast);
@@ -1144,6 +1312,46 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         recalc(t);
         return 0; }
     case WM_SIZE: if(t) tabPageLayout(h,t); return 0;
+    case WM_VSCROLL: {
+        // vertical scrollbar of the reception form
+        if(!t || t->kind!=TK_RECEPTION) break;
+        int maxS=recClampScroll(h,t);
+        int old=t->scrollY;
+        SCROLLINFO si={sizeof(si)}; si.fMask=SIF_TRACKPOS;
+        GetScrollInfo(h,SB_VERT,&si);
+        RECT rc; GetClientRect(h,&rc);
+        int line=S(40), pageStep=rc.bottom-S(40); if(pageStep<line) pageStep=line;
+        switch(LOWORD(w)){
+            case SB_LINEUP:   t->scrollY-=line; break;
+            case SB_LINEDOWN: t->scrollY+=line; break;
+            case SB_PAGEUP:   t->scrollY-=pageStep; break;
+            case SB_PAGEDOWN: t->scrollY+=pageStep; break;
+            case SB_THUMBTRACK:
+            case SB_THUMBPOSITION: t->scrollY=si.nTrackPos; break;
+            case SB_TOP:      t->scrollY=0; break;
+            case SB_BOTTOM:   t->scrollY=maxS; break;
+        }
+        recClampScroll(h,t);
+        if(t->scrollY!=old){
+            tabPageLayout(h,t);
+            InvalidateRect(h,NULL,FALSE);
+        } else {
+            recUpdateScrollbar(h,t);
+        }
+        return 0; }
+    case WM_MOUSEWHEEL: {
+        if(!t || t->kind!=TK_RECEPTION) break;
+        int maxS=recClampScroll(h,t);
+        if(maxS<=0) return 0;            // nothing to scroll
+        int delta=GET_WHEEL_DELTA_WPARAM(w);
+        int old=t->scrollY;
+        t->scrollY -= (delta/WHEEL_DELTA)*S(60);
+        recClampScroll(h,t);
+        if(t->scrollY!=old){
+            tabPageLayout(h,t);
+            InvalidateRect(h,NULL,FALSE);
+        }
+        return 0; }
     case WM_APP_THEME:
         if(t && t->kind==TK_RECEPTION){
             setFlatButtonBg(t->bSubmit, g_theme.surface);
@@ -1214,11 +1422,16 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             recalc(t); InvalidateRect(h,NULL,FALSE);
         }
         else if(id==(ID_F_FIRST+2) && code==EN_KILLFOCUS){
-            // national-id field lost focus (Enter/Tab navigates away). If the
-            // patient is marked as insured, run the validated inquiry and show an
-            // error on an invalid id; otherwise leave the manual list untouched.
+            // national-id field lost focus (Tab navigates away). Auto-fill the
+            // patient identity from a trusted source whenever a complete code is
+            // present — quietly when not insured (so no error nags the operator),
+            // verbosely when insured (so an invalid code is flagged). Enter on the
+            // field itself is handled by nidEditProc which always looks up.
+            wchar_t nb[16]={0}; GetWindowTextW(t->eNid,nb,16);
+            std::wstring nid=trim(nb);
             bool insured = SendMessageW(t->chkIns,BM_GETCHECK,0,0)==BST_CHECKED;
-            if(insured) doInquiry(t,h,false);   // show invalid-id error
+            if(insured)                doInquiry(t,h,false);  // show invalid-id error
+            else if(nid.size()==10)    doInquiry(t,h,true);   // quiet auto-fill
         }
         else if(id==ID_F_INQUIRY){
             // manual «استعلام بیمه» button — only meaningful when insured
@@ -1534,13 +1747,20 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         int y0,step,rh2; rcVMetrics(rc.bottom,y0,step,rh2);
         int formLeft = cardL+S(RC_IN), formRight = cardR-S(RC_IN);
         int fw = formRight-formLeft;
+        // v2: scroll offset + virtual page height (cards grow to content)
+        recClampScroll(h,t);
+        const int sy=t->scrollY;
+        int VH=recPageVH(rc.right,rc.bottom);
+        int cardTop = S(16)-sy;
+        int cardBot = VH-S(16)-sy;
+        y0 -= sy;
 
         // ============ RIGHT INFO PANEL ============
-        if(!stacked && infoR>infoL) paintInfoPanel(dc,t,infoL,infoR,rc.bottom);
+        if(!stacked && infoR>infoL) paintInfoPanel(dc,t,infoL,infoR,VH-sy,sy);
 
         // ============ FORM CARD (left, wide) ============
-        RECT fcard={cardL,S(16),cardR,rc.bottom-S(16)};
-        fillRoundRect(dc,fcard,S(16),g_theme.surface,g_theme.border);
+        RECT fcard={cardL,cardTop,cardR,cardBot};
+        gpRoundRectBg(dc,fcard,S(16),g_theme.surface,g_theme.border,g_theme.bg);
         // card header bar (vector icon + title — no emoji font dependency).
         // The icon sits flush at the right edge; the title's RIGHT edge stops a
         // clear gap to the LEFT of the icon so they never overlap (RTL layout).
@@ -1657,8 +1877,8 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         // ============ BILLING CARD (pinned to the right edge) ============
         if(!stacked && t){
             recalc(t);
-            RECT card={billL,S(16),billR,rc.bottom-S(16)};
-            fillRoundRect(dc,card,S(16),g_theme.surface,g_theme.border);
+            RECT card={billL,cardTop,billR,cardBot};
+            gpRoundRectBg(dc,card,S(16),g_theme.surface,g_theme.border,g_theme.bg);
             // header (icon flush-right, title to its left — no overlap)
             { int icoW=S(24), gap=S(10);
               RECT bi={card.right-S(16)-icoW,card.top+S(16),card.right-S(16),card.top+S(40)};
@@ -1864,8 +2084,12 @@ static void addTabKind(HWND h, int kind){
     else if(kind==TK_APPOINTMENT) t->title=L"نوبت‌دهی";
     else                        t->title=L"پذیرش بیمار";
     RECT rc; GetClientRect(h,&rc);
+    // Only the reception form scrolls (it has the long right-side form); the
+    // painted portal / appointment / empty pages don't need a scrollbar.
+    DWORD pgStyle = WS_CHILD|WS_CLIPCHILDREN;
+    if(kind==TK_RECEPTION) pgStyle |= WS_VSCROLL;
     HWND pg=CreateWindowExW(0,TABPG_CLASS,L"",
-        WS_CHILD|WS_CLIPCHILDREN,
+        pgStyle,
         0,infoBarH()+tabBarH(),rc.right,rc.bottom-infoBarH()-tabBarH(),
         h,NULL,g_hInst,t);
     if(!pg){ delete t; return; }
@@ -2291,5 +2515,28 @@ HWND createReceptionScreen(HWND frame){
         s_rd->active = 0;            // focus the message board tab
         recLayoutTabs(h);
     }
+#ifdef AZ_DEBUG_BUILD
+    {   // headless screenshot helper: open a specific tab for inspection
+        wchar_t dbg[32]={0};
+        GetEnvironmentVariableW(L"AZ_DEBUG_TAB", dbg, 32);
+        if(dbg[0]){
+            if(!wcscmp(dbg,L"reception")) addTabKind(h, TK_RECEPTION);
+            else if(!wcscmp(dbg,L"appointment")) addTabKind(h, TK_APPOINTMENT);
+            recLayoutTabs(h);
+            InvalidateRect(h,NULL,TRUE);
+            // optional initial scroll offset for screenshot verification
+            wchar_t scr[16]={0};
+            GetEnvironmentVariableW(L"AZ_DEBUG_SCROLL", scr, 16);
+            if(scr[0] && s_rd && !s_rd->tabs.empty()){
+                TabPage* t=s_rd->tabs.back();
+                if(t && t->page){
+                    t->scrollY=_wtoi(scr);
+                    tabPageLayout(t->page,t);
+                    InvalidateRect(t->page,NULL,TRUE);
+                }
+            }
+        }
+    }
+#endif
     return h;
 }

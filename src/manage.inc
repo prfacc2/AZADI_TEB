@@ -1507,6 +1507,17 @@ static RECT mgContentRect(HWND h){
     RECT r={rc.left+S(8), rc.top+S(8), rc.right-mgNavW()-S(8), rc.bottom-S(8)};
     return r;
 }
+// The compose block at the top of the saved-messages page:
+//   caption line  +  editor (multi-line)  +  hint line.
+// A single source of truth so the editor, its buttons, the hint and the note
+// list below them never overlap. Declared early so mgLayout() can use them.
+static int mgSavedComposeTop(HWND h){ RECT a=mgContentRect(h); return a.top+mgHeadH()+S(12); }
+static int mgSavedCaptionH(){ return S(24); }
+static int mgSavedEditorH(){ return S(74); }
+static int mgSavedHintH(){ return S(22); }
+static int mgSavedComposeBottom(HWND h){
+    return mgSavedComposeTop(h)+mgSavedCaptionH()+mgSavedEditorH()+S(8)+mgSavedHintH();
+}
 static RECT mgNavItemRect(HWND h, int i){
     RECT rc; GetClientRect(h,&rc);
     int x=rc.right-mgNavW()+S(12), w=mgNavW()-S(24);
@@ -1603,18 +1614,27 @@ static void mgLayout(HWND h){
         MoveWindow(s_mg->bMsg, a.left+(a.right-a.left)/2-S(110), top+S(30), S(220), S(44), TRUE);
         ShowWindow(s_mg->bMsg,SW_SHOW);
     } else if(s_mg->page==PG_REQS){
-        int y=top;
-        MoveWindow(s_mg->bReqs,     rEdge-S(280), y, S(280), S(42), TRUE);
-        MoveWindow(s_mg->bProfReqs, rEdge-S(280), y+S(54), S(280), S(42), TRUE);
+        // notification banner occupies [top .. top+60], separator at top+76 —
+        // the two action buttons sit BELOW that, never over the banner/title.
+        int y=top+S(60)+S(16)+S(16);   // banner + gap + separator gap
+        int bw=S(300);
+        MoveWindow(s_mg->bReqs,     rEdge-bw, y,        bw, S(46), TRUE);
+        MoveWindow(s_mg->bProfReqs, rEdge-bw, y+S(58),  bw, S(46), TRUE);
         ShowWindow(s_mg->bReqs,SW_SHOW); ShowWindow(s_mg->bProfReqs,SW_SHOW);
     } else if(s_mg->page==PG_SAVED){
-        // compose row at the top: a multiline edit + attach + save buttons.
-        int y=top;
-        int bw=S(96), gap=S(8);
-        int editR=rEdge, editL=a.left+S(12)+bw+gap+bw+gap;
-        MoveWindow(s_mg->eNote, editL, y, editR-editL, S(54), TRUE);
-        MoveWindow(s_mg->bNoteAttach, a.left+S(12)+bw+gap, y+S(8), bw, S(38), TRUE);
-        MoveWindow(s_mg->bNoteSend,   a.left+S(12),        y+S(8), bw, S(38), TRUE);
+        // compose block at the top:  caption (painted)  ▸  multiline editor on
+        // the right, the two action buttons stacked at its left, all sharing one
+        // height so nothing overlaps and the note list starts cleanly below.
+        int edTop = mgSavedComposeTop(h)+mgSavedCaptionH();
+        int edH   = mgSavedEditorH();
+        int bw=S(110), gap=S(10);
+        int editR=rEdge, editL=a.left+S(12)+bw+gap;
+        MoveWindow(s_mg->eNote, editL, edTop, editR-editL, edH, TRUE);
+        // two buttons stacked to the LEFT of the editor, vertically centred
+        int bh=S(34), bgap=S(6);
+        int btnsTop = edTop + (edH-(bh*2+bgap))/2;
+        MoveWindow(s_mg->bNoteSend,   a.left+S(12), btnsTop,            bw, bh, TRUE);
+        MoveWindow(s_mg->bNoteAttach, a.left+S(12), btnsTop+bh+bgap,    bw, bh, TRUE);
         ShowWindow(s_mg->eNote,SW_SHOW);
         ShowWindow(s_mg->bNoteAttach,SW_SHOW);
         ShowWindow(s_mg->bNoteSend,SW_SHOW);
@@ -1832,7 +1852,7 @@ static void mgPaintReqs(HDC dc, HWND h){
 // ---- saved messages (LOCAL notes) page -------------------------------------
 //  Stored locally per machine/user (data\local_notes_<user>.dat) — NEVER sent
 //  over the network. Both staff and management have their own private area.
-static int mgNoteListTop(HWND h){ RECT a=mgContentRect(h); return a.top+mgHeadH()+S(12)+S(70); }
+static int mgNoteListTop(HWND h){ return mgSavedComposeBottom(h)+S(12); }
 static int mgNoteRowH(){ return S(78); }
 static RECT mgNoteRowRect(HWND h,int i){
     RECT a=mgContentRect(h);
@@ -1844,10 +1864,25 @@ static RECT mgNoteDelRect(RECT row){ RECT b={row.left+S(12),row.bottom-S(34),row
 static RECT mgNoteImgRect(RECT row){ int s=S(54); RECT b={row.right-S(12)-s,row.top+S(12),row.right-S(12),row.top+S(12)+s}; return b; }
 static void mgPaintSaved(HDC dc, HWND h){
     RECT a=mgContentRect(h);
-    int top=a.top+mgHeadH()+S(12);
-    // intro / hint card (sits above the compose row controls)
+    int cTop=mgSavedComposeTop(h);
+    // section caption ABOVE the editor (icon flush-right, title to its left)
+    { SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.accent);
+      int icoW=S(18), gap=S(8);
+      RECT ci={a.right-S(12)-icoW,cTop+S(1),a.right-S(12),cTop+S(19)};
+      drawIcon(dc,ICO_SAVE,ci,g_theme.accent,S(2));
+      RECT cr={a.left+S(12),cTop,a.right-S(12)-icoW-gap,cTop+mgSavedCaptionH()};
+      DrawTextW(dc,L"یادداشت جدید",-1,&cr,
+          DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX); }
+    // editor input-well behind eNote (consistent flat field look)
+    { int edTop=cTop+mgSavedCaptionH(), edH=mgSavedEditorH();
+      int bw=S(110), gap=S(10);
+      RECT well={a.left+S(12)+bw+gap-S(6),edTop-S(4),a.right-S(12)+S(0),edTop+edH+S(4)};
+      bool foc=(GetFocus()==s_mg->eNote);
+      fillRoundRect(dc,well,S(8),g_theme.inputBg,foc?g_theme.accent:g_theme.border); }
+    // hint line BELOW the compose block
     SetTextColor(dc,g_theme.textDim); SelectObject(dc,g_fSmall);
-    RECT hint={a.left+S(12),top+S(58),a.right-S(12),top+S(70)};
+    int hintY=mgSavedComposeBottom(h)-mgSavedHintH();
+    RECT hint={a.left+S(12),hintY,a.right-S(12),hintY+mgSavedHintH()};
     std::wstring at = s_mg->noteAttach.empty()? std::wstring() : L"   •   پیوست: ✓";
     DrawTextW(dc,(L"یادداشت‌ها فقط روی همین رایانه ذخیره می‌شوند و در شبکه منتقل نمی‌گردند."+at).c_str(),
         -1,&hint,DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
@@ -1897,7 +1932,7 @@ static void mgPaintSaved(HDC dc, HWND h){
 static RECT mgBackupBtnRect(HWND h){
     RECT a=mgContentRect(h);
     int top=a.top+mgHeadH()+S(120);
-    int w=S(320);
+    int w=S(380);
     RECT r={ (a.left+a.right)/2-w/2, top, (a.left+a.right)/2+w/2, top+S(56) };
     return r;
 }
@@ -1917,14 +1952,16 @@ static void mgPaintBackup(HDC dc, HWND h){
     RECT t2={ib.left+S(16),ib.top+S(40),ib.right-S(70),ib.bottom-S(8)};
     DrawTextW(dc,L"تهیهٔ نسخهٔ پشتیبان کامل، یا بازیابی کامل/انتخابی از فایل‌های پشتیبان (شامل پشتیبان‌های حجیم متین‌طب). عملیات سنگین در پس‌زمینه اجرا می‌شود.",
         -1,&t2,DT_RIGHT|DT_WORDBREAK|DT_RTLREADING|DT_NOPREFIX);
-    // big open button
+    // big open button — icon flush-right (RTL leading edge), the label centred
+    // in the area to its LEFT so the two never overlap or get clipped.
     RECT r=mgBackupBtnRect(h);
     bool hot=(s_mg&&s_mg->hot==MG_BACKUP);
     gpRoundRect(dc,r,S(10), hot?g_theme.accentHover:g_theme.accent, g_theme.accent,255);
-    RECT bi={r.left+S(16),r.top+S(14),r.left+S(44),r.bottom-S(14)};
+    int icoW=S(28), igap=S(10);
+    RECT bi={r.right-S(16)-icoW,r.top+S(14),r.right-S(16),r.bottom-S(14)};
     drawIcon(dc,ICO_SAVE,bi,g_theme.accentText,S(2));
     SetTextColor(dc,g_theme.accentText); SelectObject(dc,g_fBig);
-    RECT bl={r.left+S(48),r.top,r.right-S(12),r.bottom};
+    RECT bl={r.left+S(12),r.top,r.right-S(16)-icoW-igap,r.bottom};
     DrawTextW(dc,L"باز کردن مدیریت پشتیبان",-1,&bl,
         DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
 }
@@ -2089,6 +2126,22 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         g_hManage=h;
         mgLoadCats(); mgUpdateAutoIdPreview();
         mgGoPage(h,PG_DASH);
+#ifdef AZ_DEBUG_BUILD
+        {   // headless screenshot helper: jump straight to a named sub-page
+            wchar_t dbgp[24]={0};
+            GetEnvironmentVariableW(L"AZ_DEBUG_PAGE", dbgp, 24);
+            if(dbgp[0]){
+                int pg=-1;
+                if(!wcscmp(dbgp,L"saved"))   pg=PG_SAVED;
+                else if(!wcscmp(dbgp,L"reqs"))   pg=PG_REQS;
+                else if(!wcscmp(dbgp,L"backup")) pg=PG_BACKUP;
+                else if(!wcscmp(dbgp,L"msg"))    pg=PG_MSG;
+                else if(!wcscmp(dbgp,L"emps"))   pg=PG_EMPS;
+                else if(!wcscmp(dbgp,L"sects"))  pg=PG_SECTS;
+                if(pg>=0){ mgGoPage(h,pg); InvalidateRect(h,NULL,TRUE); }
+            }
+        }
+#endif
         return 0; }
     case WM_NCDESTROY: if(g_hManage==h) g_hManage=NULL;
         if(s_mg){ delete s_mg; s_mg=NULL; } break;

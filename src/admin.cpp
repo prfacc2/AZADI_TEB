@@ -186,12 +186,32 @@ static LRESULT CALLBACK adminProc(HWND h, UINT m, WPARAM w, LPARAM l){
         RECT card={fx-S(0),fy-S(20),fx+fw,fy+S(28)+5*S(64)+S(76)};
         fillRoundRect(dc,card,S(14),g_theme.surface,g_theme.border);
 
+        // input wells behind each editable field (consistent flat look + clear
+        // separation between a caption and the control beneath it)
+        {
+            HWND foc=GetFocus();
+            HWND fields[5]={d?d->eFull:0,d?d->eUser:0,d?d->ePass:0,
+                            d?d->eDept:0,d?d->cRole:0};
+            for(int i=0;i<5;i++){
+                if(!fields[i]) continue;
+                RECT wr; GetWindowRect(fields[i],&wr);
+                POINT a={wr.left,wr.top}, b={wr.right,wr.bottom};
+                ScreenToClient(h,&a); ScreenToClient(h,&b);
+                if(b.y<=a.y) continue;
+                int minH=a.y+S(40);
+                RECT well={a.x-S(6),a.y-S(4),b.x+S(6),(b.y<minH)?minH:b.y+S(4)};
+                bool focused=(fields[i]==foc);
+                fillRoundRect(dc,well,S(8),g_theme.inputBg,
+                    focused?g_theme.accent:g_theme.border);
+            }
+        }
+
         SelectObject(dc,g_fSmall);
         SetTextColor(dc,g_theme.textDim);
         const wchar_t* labels[5]={L"نام شخص (استفاده‌کننده)",L"نام کاربری (برای ورود)",
             L"رمز عبور",L"بخش (مثلاً دندانپزشکی)",L"نوع دسترسی"};
         for(int i=0;i<5;i++){
-            RECT lr={fx+S(20),fy+i*S(64)+S(2),fx+fw-S(20),fy+i*S(64)+S(26)};
+            RECT lr={fx+S(20),fy+i*S(64)+S(2),fx+fw-S(20),fy+i*S(64)+S(24)};
             DrawTextW(dc,labels[i],-1,&lr,
                 DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
         }

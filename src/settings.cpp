@@ -40,7 +40,7 @@ enum {
     ROW_LOGOUT
 };
 
-struct RowDef { int id; const wchar_t* label; int icon; const wchar_t* hint; bool toggle; };
+struct RowDef { int id; const wchar_t* label; int icon; const wchar_t* hint; bool toggle; bool disabled; };
 
 struct SetState {
     HWND owner;
@@ -68,7 +68,7 @@ static void freeBgCache(){
 
 // ---- geometry: a centered card -------------------------------------------
 static int cardW(){ return S(460); }
-static int headerH(){ return S(176); }   // cover + avatar + identity
+static int headerH(){ return S(204); }   // cover + avatar + name + role (own lines)
 static int rowH(){ return S(58); }
 static int cardH(){
     int n = s_st ? (int)s_st->rows.size() : 5;
@@ -171,15 +171,15 @@ static bool settingsRequestGate(HWND h, const std::wstring& title,
 }
 
 static void doThemeToggle(HWND h){
+    // v1.9.2: the theme is a LOCAL, preference-only setting. It is never routed
+    // to management for approval and never travels to the server — every
+    // workstation keeps its own appearance. Applied instantly.
     bool wantDark=!g_dark;
-    if(!settingsRequestGate(h,L"تغییر پوستهٔ نمایش",
-            std::wstring(L"تغییر تم به ")+(wantDark?L"تیره":L"روشن"),
-            std::wstring(L"theme=")+(wantDark?L"dark":L"light"),
-            wantDark?L"پوستهٔ تیره":L"پوستهٔ روشن"))
-        return;
     applyTheme(wantDark);
+    setSetting(L"theme", wantDark?L"dark":L"light");
     if(s_st) s_st->dark=g_dark;
     broadcastThemeChange();
+    freeBgCache();                 // theme colours changed → rebuild cached layers
     InvalidateRect(h,NULL,FALSE);
 }
 static void doDensityToggle(HWND h){
@@ -296,12 +296,21 @@ static void buildBgCache(HWND h, HDC ref){
 
     SetBkMode(dc,TRANSPARENT);
 
-    // cover gradient (rounded top)
-    RECT cover={card.left,card.top,card.right,card.top+S(96)};
-    gpGradRoundRect(dc,cover,S(20),g_theme.accent2,g_theme.accent,CLR_INVALID);
-    // re-square the cover bottom so it meets the card body cleanly
-    RECT coverBot={card.left,card.top+S(60),card.right,card.top+S(96)};
-    gpGradRoundRect(dc,coverBot,0,g_theme.accent2,g_theme.accent,CLR_INVALID);
+    // cover gradient — v1.9.2: clip ALL header drawing to the card's rounded
+    // path so the blue band can never bleed a square past the rounded top
+    // corners. The clip region is the rounded card itself; everything painted
+    // while it is active is guaranteed to stay inside the radius.
+    {
+        int rad=S(20);
+        HRGN cardRgn=CreateRoundRectRgn(card.left,card.top,
+                                        card.right+1,card.bottom+1,rad*2,rad*2);
+        SelectClipRgn(dc,cardRgn);
+        // top blue band: square is fine now because the clip rounds it for us
+        RECT cover={card.left,card.top,card.right,card.top+S(96)};
+        gpGradRoundRect(dc,cover,0,g_theme.accent2,g_theme.accent,CLR_INVALID);
+        SelectClipRgn(dc,NULL);
+        DeleteObject(cardRgn);
+    }
 
     // close (×) icon top-left (the hover highlight is drawn live on top)
     { RECT cb={card.left+S(14),card.top+S(14),card.left+S(40),card.top+S(40)};
@@ -330,9 +339,11 @@ static void buildBgCache(HWND h, HDC ref){
         drawIcon(dc,ICO_USER,ui,RGB(255,255,255),S(3));
     }
 
-    // identity
+    // identity — name and role each get their OWN vertical line, both fully
+    // inside the (now taller) header so neither is clipped by the first row.
     SelectObject(dc,g_fTitle); SetTextColor(dc,g_theme.text);
-    RECT nr={card.left+S(16),avCy+avR+S(6),card.right-S(16),avCy+avR+S(38)};
+    int nameTop = avCy+avR+S(8);
+    RECT nr={card.left+S(16),nameTop,card.right-S(16),nameTop+S(30)};
     DrawTextW(dc, guest?L"کاربر مهمان":(fn.empty()?L"کاربر":fn.c_str()),-1,&nr,
         DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
     SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
@@ -341,7 +352,7 @@ static void buildBgCache(HWND h, HDC ref){
         s_st->role==1 ? L"مدیریت درمانگاه" : L"پذیرش درمانگاه";
     std::wstring sub=std::wstring(role)+
         (guest||g_session.user.dept.empty()?L"":(L"  •  "+g_session.user.dept));
-    RECT srr={card.left+S(16),nr.bottom,card.right-S(16),nr.bottom+S(22)};
+    RECT srr={card.left+S(16),nr.bottom+S(2),card.right-S(16),nr.bottom+S(22)};
     DrawTextW(dc,sub.c_str(),-1,&srr,
         DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
 }
@@ -362,15 +373,16 @@ static void paintRows(HWND h, HDC dc){
         for(size_t i=0;i<s_st->rows.size();i++){
             RowDef& rd=s_st->rows[i];
             RECT r=rowRect(card,(int)i);
-            bool hov=(s_st->hot==rd.id);
+            bool dis=rd.disabled;
+            bool hov=(!dis && s_st->hot==rd.id);
             bool danger=(rd.id==ROW_LOGOUT);
             gpRoundRect(dc,r,S(11),hov?g_theme.hover:g_theme.surface,
                 hov?g_theme.accent:g_theme.border,255);
-            COLORREF ic=danger?g_theme.danger:g_theme.accent;
+            COLORREF ic= dis ? g_theme.textDim : (danger?g_theme.danger:g_theme.accent);
             RECT ir={r.right-S(38),r.top+S(10),r.right-S(14),r.top+S(34)};
             drawIcon(dc,rd.icon,ir,ic,S(2));
             SelectObject(dc,g_fUIB);
-            SetTextColor(dc,danger?g_theme.danger:g_theme.text);
+            SetTextColor(dc, dis ? g_theme.textDim : (danger?g_theme.danger:g_theme.text));
             // v1.9.0: the server-address row carries an inline edit box, so its
             // label sits at the TOP of the row (never vertically centred under
             // the box) to avoid the old overlap where the box covered the label.
@@ -387,7 +399,12 @@ static void paintRows(HWND h, HDC dc){
                     DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
             }
             int lcx=r.left+S(34), lcy=(r.top+r.bottom)/2;
-            if(rd.id==ROW_THEME)        drawValueChip(dc,r, s_st->dark?L"تیره":L"روشن");
+            if(dis){
+                // disabled control: show a small «غیرفعال» chip instead of a
+                // chevron so it never looks clickable.
+                drawValueChip(dc,r, L"غیرفعال");
+            }
+            else if(rd.id==ROW_THEME)        drawValueChip(dc,r, s_st->dark?L"تیره":L"روشن");
             else if(rd.id==ROW_DENSITY) drawValueChip(dc,r, s_st->compact?L"فشرده":L"متعارف");
             else if(rd.id==ROW_AUTOPRINT) drawToggle(dc,lcx,lcy,s_st->autoPrint);
             else if(rd.id==ROW_NOTIFY)  drawToggle(dc,lcx,lcy,s_st->notify);
@@ -476,9 +493,15 @@ static LRESULT CALLBACK setProc(HWND h, UINT m, WPARAM w, LPARAM l){
         if(PtInRect(&cb,pt)){ closeSettingsPanel(); return 0; }
         int id=hitRow(h,pt);
         if(id==-1){ closeSettingsPanel(); return 0; }   // scrim
+        // ignore clicks on any disabled row (e.g. the update-check, off until a
+        // server exists) so the dialog never fakes an action.
+        if(s_st){
+            for(auto& rd:s_st->rows)
+                if(rd.id==id && rd.disabled) return 0;
+        }
         switch(id){
             case ROW_THEME:       doThemeToggle(h); break;
-            case ROW_UPDATE:      saveServerUrl(); checkRemoteUpdate(h); break;
+            case ROW_UPDATE:      /* disabled — no server yet */ break;
             case ROW_NOTIFY:      doNotifyToggle(h); break;
             case ROW_SAVEDMSGS:   doSavedMsgsToggle(h); break;
             case ROW_PRINTER:     closeSettingsPanel(); openPrinterSettings(g_hFrame); break;
@@ -511,32 +534,29 @@ static LRESULT CALLBACK setProc(HWND h, UINT m, WPARAM w, LPARAM l){
 }
 
 // ----- build the row list for the current role -----------------------------
+//  v1.9.2 — Honest, minimal settings:
+//    • The ONLY user-changeable preference is the LOCAL theme (light/dark).
+//      It is never sent to the server / management.
+//    • «بررسی به‌روزرسانی» is shown but DISABLED (greyed out) because there is
+//      no update server yet — it must not look clickable or fake success.
+//    • «درباره برنامه» (read-only info) and «خروج از حساب» (the only way to
+//      sign out) remain for every signed-in role.
+//  Notification / printer / profile / saved-msgs / density / auto-print /
+//  server-address rows were removed from this dialog so nothing here pretends
+//  to be a synced/management-side control.
 static void buildRows(SetState* st){
     st->rows.clear();
     bool guest = st->role<0;
-    if(guest){
-        // ONLY update + theme before login
-        st->rows.push_back({ROW_UPDATE,L"بررسی به‌روزرسانی",ICO_UPDATE,L"دریافت آخرین نسخه",false});
-        st->rows.push_back({ROW_THEME, L"تغییر پوسته (تم)",  ICO_MOON,  NULL,false});
-        return;
-    }
-    // reception + management
-    st->rows.push_back({ROW_THEME,   L"تغییر پوسته (تم)",   ICO_MOON,  NULL,false});
-    st->rows.push_back({ROW_UPDATE,  L"بررسی به‌روزرسانی",  ICO_UPDATE,L"دریافت آخرین نسخه",false});
-    st->rows.push_back({ROW_NOTIFY,  L"تنظیمات اعلان",      ICO_BELL,  L"صدا و هشدار پیام جدید",false});
-    st->rows.push_back({ROW_SAVEDMSGS,L"پیام‌های ذخیره‌شده", ICO_SAVE, L"بایگانی محلی پیام‌ها (به‌صورت پیش‌فرض غیرفعال)",true});
-    st->rows.push_back({ROW_PRINTER, L"تنظیمات چاپگر",      ICO_PRINT, L"پرینتر، اندازه و طراحی چاپ",false});
-    if(st->role==0){
-        // reception can request a profile change (needs approval)
-        st->rows.push_back({ROW_PROFILE, L"پروفایل کاربر",  ICO_USER,  L"نام و عکس (نیازمند تأیید مدیریت)",false});
-        st->rows.push_back({ROW_AUTOPRINT,L"چاپ خودکار قبض",ICO_RECEIPT,NULL,false});
-    }
-    if(st->role>=1){
-        st->rows.push_back({ROW_AUTOPRINT,L"چاپ خودکار قبض",ICO_RECEIPT,NULL,false});
-        st->rows.push_back({ROW_SERVER,  L"آدرس سامانهٔ مدیریت",ICO_SHIELD,NULL,false});
-    }
-    st->rows.push_back({ROW_ABOUT,   L"درباره برنامه",      ICO_BELL,  L"نسخه و اطلاعات",false});
-    st->rows.push_back({ROW_LOGOUT,  L"خروج از حساب",       ICO_LOGOUT,NULL,false});
+    // theme — the single live, local preference
+    st->rows.push_back({ROW_THEME,  L"تغییر پوستهٔ نمایش",  ICO_MOON,
+                        L"ظاهر این رایانه — محلی و بدون نیاز به تأیید",false,false});
+    // update — visible but disabled (no server yet)
+    st->rows.push_back({ROW_UPDATE, L"بررسی به‌روزرسانی", ICO_UPDATE,
+                        L"در حال حاضر غیرفعال (سرور به‌روزرسانی موجود نیست)",false,true});
+    if(guest) return;
+    st->rows.push_back({ROW_ABOUT,  L"درباره برنامه",     ICO_BELL,
+                        L"نسخه و اطلاعات",false,false});
+    st->rows.push_back({ROW_LOGOUT, L"خروج از حساب",      ICO_LOGOUT,NULL,false,false});
 }
 
 // ------------------------------------------------------------------ public -
