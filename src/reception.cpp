@@ -104,12 +104,17 @@ struct TabPage {
     //  archived (saved) messages instead of the live management inbox. Only
     //  reachable when «پیام‌های ذخیره‌شده» is enabled in settings.
     bool cartShowArchive;
+    //  v1.9.0: bitmask of REQUIRED fields that were empty on the last submit
+    //  attempt. Each set bit maps to an index in the `inputs[]` array used by
+    //  the field-well painter, and draws ONLY a very thin red hairline border
+    //  (no glow / double-ring) until the user edits the field.
+    int  invalidMask;
     std::wstring lastMsg; COLORREF msgCol;
     TabPage():page(0),kind(TK_RECEPTION),appt(0),total(0),mainShare(0),patientShare(0),
         baseDiff(0),orgShare(0),paid(0),detached(false),autoPrice(false),
         idChecked(false),idVerified(false),
         cartDetail(false),cartSelDisp(-1),cartSelNF(-1),cartHotBtn(0),
-        cartShowArchive(false),msgCol(0){}
+        cartShowArchive(false),invalidMask(0),msgCol(0){}
 };
 
 struct RecData {
@@ -240,13 +245,15 @@ static void rcVMetrics(int H, int& y0, int& step, int& rh){
     // input we need:   step - S(44) - rh >= S(8)   →   step >= rh + S(52).
     // With rh=S(34) that means step >= S(86). We honour that on roomy screens and
     // shrink gracefully (keeping the no-overlap invariant) on short ones.
-    y0 = S(132); rh = S(34); step = rh + S(52);   // = S(86): zero overlap
+    // v1.9.0: slightly SHORTER inputs (rh 34→30) + MORE label breathing room
+    // (gap 52→56). Invariant step >= rh + S(54) still holds → zero overlap.
+    y0 = S(132); rh = S(30); step = rh + S(56);   // = S(86): zero overlap
     int need = y0 + 8*step + S(132);
     if(H > 0 && need > H){
         step = (H - y0 - S(132)) / 8;
         if(step < S(70)) step = S(70);            // floor keeps things readable
-        // derive rh from step so the invariant step >= rh + S(52) always holds
-        rh = step - S(52); if(rh > S(34)) rh = S(34); if(rh < S(24)) rh = S(24);
+        // derive rh from step so the invariant step >= rh + S(56) always holds
+        rh = step - S(56); if(rh > S(30)) rh = S(30); if(rh < S(22)) rh = S(22);
     }
 }
 static void tabPageLayout(HWND h, TabPage* t){
@@ -303,14 +310,15 @@ static void tabPageLayout(HWND h, TabPage* t){
         MoveWindow(t->bPrtRx,  bx, byy+S(48),  bbw, S(40), TRUE);
         MoveWindow(t->bPrtLast,bx, byy+S(96),  bbw, S(40), TRUE);
         MoveWindow(t->bClose,  bx, byy+S(152), bbw, S(42), TRUE);
-        MoveWindow(t->bInquiry,bx, byy-S(48),  bbw, S(40), TRUE);
         ShowWindow(t->bPrtIns,SW_SHOW); ShowWindow(t->bPrtRx,SW_SHOW);
         ShowWindow(t->bPrtLast,SW_SHOW); ShowWindow(t->bClose,SW_SHOW);
-        ShowWindow(t->bInquiry,SW_SHOW);
+        // v1.9.0: the «استعلام بیمه» button is removed from the invoice panel —
+        // it overlapped the final-amount field. Identity/insurance inquiry is
+        // still available by entering the national code and pressing Enter.
+        ShowWindow(t->bInquiry,SW_HIDE);
     } else {
-        // stacked: place inquiry under the submit button
-        MoveWindow(t->bInquiry,formLeft, y0+8*step+S(62), fw, S(40), TRUE);
-        ShowWindow(t->bInquiry,SW_SHOW);
+        // stacked: inquiry button also hidden (see note above).
+        ShowWindow(t->bInquiry,SW_HIDE);
         ShowWindow(t->bPrtIns,SW_HIDE); ShowWindow(t->bPrtRx,SW_HIDE);
         ShowWindow(t->bPrtLast,SW_HIDE); ShowWindow(t->bClose,SW_HIDE);
     }
@@ -892,21 +900,25 @@ static void drawTabPlaceholder(HDC dc, const RECT& rc, int kind, TabPage* t){
 //  counters and the group titles for the search-keys / insurance / doctor
 //  blocks. The actual edit controls are positioned by tabPageLayout.
 static void drawGuestAvatar(HDC dc, int cx, int cy, int r, bool female){
-    COLORREF ring = female? RGB(0xE8,0x6A,0xA6) : RGB(0x4F,0x8E,0xF7);
+    // v1.9.0: the placeholder avatar is a calm, neutral GRAY (no blue/pink) so
+    // it reads as a generic "no photo" person, larger and naturally centred.
+    (void)female;
+    COLORREF ring = blendColor(g_theme.textDim, g_theme.border, 35);
+    COLORREF fig  = blendColor(g_theme.textDim, g_theme.surface, 20);
     // disc
     HBRUSH br=CreateSolidBrush(g_theme.surface2);
     HPEN pn=CreatePen(PS_SOLID,S(2),ring);
     HGDIOBJ ob=SelectObject(dc,br), op=SelectObject(dc,pn);
     Ellipse(dc,cx-r,cy-r,cx+r,cy+r);
-    // head + shoulders (guest silhouette)
-    HBRUSH brh=CreateSolidBrush(ring);
+    // head + shoulders (centred guest silhouette in gray)
+    HBRUSH brh=CreateSolidBrush(fig);
     SelectObject(dc,brh);
     SelectObject(dc,GetStockObject(NULL_PEN));
-    int hr=r*38/100;            // head radius
-    int hy=cy-r*22/100;         // head center y
+    int hr=r*34/100;            // head radius
+    int hy=cy-r*20/100;         // head center y (slightly above center)
     Ellipse(dc,cx-hr,hy-hr,cx+hr,hy+hr);
-    // shoulders arc
-    int sw=r*78/100, sy=cy+r*10/100, sh=r*90/100;
+    // shoulders arc — symmetric, fully centred under the head
+    int sw=r*70/100, sy=cy+r*14/100, sh=r*82/100;
     Ellipse(dc,cx-sw,sy,cx+sw,sy+sh*2);
     SelectObject(dc,op); SelectObject(dc,ob);
     DeleteObject(br); DeleteObject(pn); DeleteObject(brh);
@@ -930,8 +942,8 @@ static void paintInfoPanel(HDC dc, TabPage* t, int infoL, int infoR, int H){
     int iL=infoL+ipad, iR=infoR-ipad;
     // gender from the combo
     bool female = (SendMessageW(t->cGender,CB_GETCURSEL,0,0)==1);
-    // --- avatar ---
-    int cx=(iL+iR)/2, cy=card.top+S(46), r=S(34);
+    // --- avatar (v1.9.0: larger, neutral gray, perfectly centred) ---
+    int cx=(iL+iR)/2, cy=card.top+S(54), r=S(44);
     drawGuestAvatar(dc,cx,cy,r,female);
     // --- نسخه الکترونیک chip ---
     int y=cy+r+S(10);
@@ -1182,6 +1194,11 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
            code==CBN_SETFOCUS || code==CBN_KILLFOCUS){
             InvalidateRect(h,NULL,FALSE);
         }
+        // v1.9.0: editing any field clears the empty-field red markers so they
+        // never linger after the operator starts correcting the form.
+        if((code==EN_CHANGE || code==CBN_SELCHANGE) && t->invalidMask){
+            t->invalidMask=0; InvalidateRect(h,NULL,FALSE);
+        }
         if((id==ID_F_INS||id==ID_F_SUPP) && code==CBN_SELCHANGE){
             recalc(t); InvalidateRect(h,NULL,FALSE);
         }
@@ -1231,6 +1248,16 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             ReceptionRecord r; collect(t,r);
             // v1.4.0 validation: REQUIRED = first/last name, national id, mobile,
             // birth date.  OPTIONAL (may be empty) = landline, address, discount.
+            // v1.9.0: compute the empty-field mask so every missing REQUIRED
+            // field gets a thin red hairline (indices match inputs[] order).
+            int mask=0;
+            if(r.firstName.empty())  mask|=(1<<0);
+            if(r.lastName.empty())   mask|=(1<<1);
+            if(r.nationalId.empty()) mask|=(1<<2);
+            if(r.birthDate.empty())  mask|=(1<<4);
+            if(r.mobile.empty())     mask|=(1<<6);
+            if(r.total<=0)           mask|=(1<<13);
+            t->invalidMask=mask;
             if(r.firstName.empty()||r.lastName.empty()){
                 t->lastMsg=L"نام و نام خانوادگی بیمار الزامی است.";
                 t->msgCol=g_theme.danger;
@@ -1247,6 +1274,7 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 t->lastMsg=L"مبلغ ویزیت/خدمت را وارد کنید.";
                 t->msgCol=g_theme.danger;
             } else {
+                t->invalidMask=0;   // all required fields present
                 int q=saveReception(r);
                 // v1.7.0: remember this REAL (operator-confirmed) identity so the
                 // same national code recalls the same patient next time — never
@@ -1566,18 +1594,19 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 // v1.7.0: when an inquiry could NOT verify the identity, the
                 // name (i==0) and surname (i==1) wells show a danger border so
                 // the operator clearly sees they must enter/check them by hand.
-                bool invalid = (t->idChecked && !t->idVerified && (i==0||i==1));
+                // v1.9.0: also mark any REQUIRED field that was left empty on the
+                // last submit attempt (invalidMask).
+                bool invalid = (t->idChecked && !t->idVerified && (i==0||i==1))
+                             || (t->invalidMask & (1<<i));
                 // v1.8.0 UI: a focused field gets a THIN, soft-RED hairline ring
                 // (never the harsh default black EDIT border). When the field is
                 // not focused the ring fades back to the normal subtle border.
+                // v1.9.0: an INVALID field shows ONLY a single very-thin red
+                // hairline — no glow, no second/brighter ring.
                 COLORREF focusRing = blendColor(g_theme.danger, g_theme.inputBg, 60);
                 COLORREF bord = invalid ? g_theme.danger
                               : focused ? focusRing : g_theme.border;
                 fillRoundRect(dc,well,S(8),g_theme.inputBg,bord);
-                if(invalid){   // a second, brighter ring to make it unmistakable
-                    RECT w2={well.left-1,well.top-1,well.right+1,well.bottom+1};
-                    fillRoundRect(dc,w2,S(9),CLR_INVALID,g_theme.danger);
-                }
             }
         }
 

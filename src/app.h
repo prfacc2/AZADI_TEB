@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.8.0"
+#define APP_VERSION_W   L"1.9.0"
 #define APP_NAME_W      L"\u0622\u0632\u0627\u062f\u06cc \u0637\u0628"   // آزادی طب
 #define APP_CLASS_W     L"AzadiTebFrame"
 
@@ -345,13 +345,40 @@ void  markMessagesSeen(const std::wstring& forUser);
 //  v1.4.1: when a reception workstation changes printer / design settings, a
 //  change-request record is written so management sees who / which system /
 //  what changed (with date+time) under a red notification badge.
-//  data\setreq.dat:  user|system|change|profile|time|seen
-struct SetReq { std::wstring user, system, change, profile, time; bool seen; };
+//  v1.9.0: the request now carries an APPROVAL workflow. Settings are NOT
+//  applied immediately — they are queued here and only applied after management
+//  approves. Fields:
+//    user|system|change|profile|time|seen|status|payload|title
+//  status: 0=pending 1=approved 2=rejected.  payload = the pending setting(s)
+//  (key=value;key=value) that are applied verbatim on approval. title = short
+//  human title (e.g. «تغییر نوع چاپگر»). preview = optional preview text/path.
+struct SetReq {
+    std::wstring user, system, change, profile, time, payload, title, preview;
+    bool seen;
+    int  status;
+    SetReq():seen(false),status(0){}
+};
 std::vector<SetReq> loadSetReqs();
+//  legacy 4-arg push (kept for source compatibility — queues with no payload).
 void  pushSetReq(const std::wstring& user, const std::wstring& system,
                  const std::wstring& change, const std::wstring& profile);
+//  v1.9.0: full approval-aware push. Returns nothing; the change is applied
+//  ONLY when management later approves it (setSetReqStatus).
+void  pushSetReqEx(const std::wstring& user, const std::wstring& system,
+                   const std::wstring& title, const std::wstring& change,
+                   const std::wstring& payload, const std::wstring& preview);
+//  Approve (1) / reject (2) the i-th request (newest-first). On approval the
+//  payload key=value pairs are written to settings; on rejection an inbox
+//  message «درخواست شما توسط مدیریت رد شد.» is delivered to the requester.
+void  setSetReqStatus(int indexNewestFirst, int status, const std::wstring& reason);
+void  markOneSetReqSeen(int indexNewestFirst);   // mark a single request read
+void  deleteSetReq(int indexNewestFirst);        // remove a request entirely
 int   unseenSetReqCount();
+int   pendingSetReqCount();
 void  markSetReqsSeen();
+//  v1.9.0: the local network/system identity used to stamp requests (computer
+//  name; falls back to a stored id). Shown to management as the request source.
+std::wstring systemSourceName();
 
 // ------------------------------------------------- saved (archived) messages --
 //  v1.8.0: when «پیام‌های ذخیره‌شده» (Saved Messages) is enabled in settings, a
@@ -370,6 +397,51 @@ bool  savedMsgsEnabled();                 // settings flag "saved_msgs_enabled"
 //  Attachments (image/video/gif/png/jpg/word/…) are copied into a local
 //  attachments folder and the stored path lets the recipient download them.
 std::wstring copyAttachmentLocal(const std::wstring& srcPath);  // returns stored path or L""
+//  v1.9.0: a SECOND, always-on saved-messages store that is strictly LOCAL to
+//  this machine/user and is NEVER transmitted across the network. Both the
+//  employee and the management side keep their own personal note board here:
+//  the user can type text notes and attach images. Stored per-user in
+//  data\local_notes_<user>.dat:  time|attachPath|text
+struct LocalNote { std::wstring time, attachPath, text; };
+std::vector<LocalNote> loadLocalNotes(const std::wstring& forUser);
+void  pushLocalNote(const std::wstring& forUser, const std::wstring& text,
+                    const std::wstring& attachPath);
+void  deleteLocalNote(const std::wstring& forUser, int indexNewestFirst);
+int   localNoteCount(const std::wstring& forUser);
+
+// ------------------------------------------------------------- notifications --
+//  v1.9.0: a lightweight Windows toast/balloon notification. Used so that ONLY
+//  the recipients of a management message see «شما یک پیام جدید دارید.» — the
+//  manager who sent it does NOT get the notification back.
+void  showWindowsNotification(const std::wstring& title, const std::wstring& body);
+//  Deliver a message AND fire the recipient notification on every recipient
+//  workstation (but not the sender). Returns recipients count.
+void  notifyNewMessageRecipients();   // checks the pending flag for THIS user
+
+// ----------------------------------------------------------------- backup -----
+//  v1.9.0: management backup / restore of patient data. Designed to read very
+//  large (~15 GB) Matin-Teb (.bak) backups WITHOUT freezing the UI by scanning
+//  in a background thread and streaming. A scan returns a category breakdown
+//  with estimated sizes; restore can apply the full backup or a selected
+//  subset (e.g. only patient information).
+struct BackupCategory {
+    std::wstring id;        // stable id ("patients","images",...)
+    std::wstring name;      // Persian display name
+    long long    bytes;     // estimated size in bytes
+    long long    records;   // estimated record count (0 if N/A)
+    bool         selected;  // user tick for selective restore
+    BackupCategory():bytes(0),records(0),selected(false){}
+};
+//  Opaque scan result. Filled by the background scanner.
+struct BackupInfo {
+    std::wstring path;
+    long long    totalBytes;
+    std::vector<BackupCategory> cats;
+    bool         ready;     // scan complete
+    BackupInfo():totalBytes(0),ready(false){}
+};
+//  Open the full management backup manager page (modal over the frame).
+void  openBackupManager(HWND owner);
 
 // ----------------------------------------------------------- appointment ----
 //  v1.6.0: the نوبت‌دهی (appointment) module lives as a tab inside the reception

@@ -320,9 +320,11 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         // updateHeaderButtons() when the reception screen becomes active.
         s_bNewPat   = createFlatButton(h, ID_FR_NEWPAT, L"پذیرش جدید", ICO_PLUS, BS_PRIMARY,0,0,10,10,
                           L"ثبت پذیرش بیمار جدید");
-        s_bAppt     = createFlatButton(h, ID_FR_APPT,   L"نوبت‌دهی",   ICO_CAL,  BS_OUTLINE,0,0,10,10,
+        // v1.9.0: appointment + new-tab buttons are also blue (BS_PRIMARY) for
+        // a consistent header action style alongside «پذیرش جدید».
+        s_bAppt     = createFlatButton(h, ID_FR_APPT,   L"نوبت‌دهی",   ICO_CAL,  BS_PRIMARY,0,0,10,10,
                           L"باز کردن صفحهٔ نوبت‌دهی");
-        s_bNewTab   = createFlatButton(h, ID_FR_NEWTAB, L"تب جدید",    ICO_TAB,  BS_OUTLINE,0,0,10,10,
+        s_bNewTab   = createFlatButton(h, ID_FR_NEWTAB, L"تب جدید",    ICO_TAB,  BS_PRIMARY,0,0,10,10,
                           L"باز کردن یک تب خالی");
         ShowWindow(s_bNewPat,SW_HIDE);
         ShowWindow(s_bAppt,  SW_HIDE);
@@ -353,6 +355,9 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
             RECT rc; GetClientRect(h,&rc);
             RECT cz={rc.right/2-S(260), 0, rc.right/2+S(260), mainBarH()};
             InvalidateRect(h,&cz,FALSE);
+            // v1.9.0: poll for an incoming-message notification for THIS user
+            // (employees only — managers never get notified of their own send).
+            notifyNewMessageRecipients();
         }
         return 0;
     case WM_COMMAND: {

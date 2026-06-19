@@ -133,13 +133,51 @@ static void layoutServerEdit(HWND h){
     if(idx<0){ ShowWindow(s_st->eServer,SW_HIDE); return; }
     RECT card=cardRect(h);
     RECT r=rowRect(card,idx);
-    MoveWindow(s_st->eServer, r.left+S(14), r.top+S(28), (r.right-r.left)-S(28), S(24), TRUE);
+    // v1.9.0: sit the edit box on its own line BELOW the label (which is drawn
+    // at the top of the row) so the two never overlap. Leave room for the row
+    // icon at the right edge.
+    MoveWindow(s_st->eServer, r.left+S(14), r.top+S(28),
+               (r.right-r.left)-S(28), S(22), TRUE);
     ShowWindow(s_st->eServer, SW_SHOW);
 }
 
 // ---------------------------------------------------------------- actions --
+// ---------------------------------------------------------------------------
+//  v1.9.0 — settings CHANGE-REQUEST workflow.
+//  For reception / staff (role < 1) a settings or printer-type change must NOT
+//  be applied immediately. Instead:
+//    1) a confirm dialog «آیا از ذخیرهٔ این تنظیمات اطمینان دارید؟»
+//    2) on confirm, the change is QUEUED for management (pushSetReqEx) — never
+//       applied locally — and a notice «این تنظیمات برای مدیریت ارسال شد. پس از
+//       تأیید اعمال خواهد شد.» is shown.
+//  Management (role >= 1) keeps applying changes instantly.
+//  Returns TRUE when the caller should apply the change directly (manager), or
+//  FALSE when the change was routed to management for approval.
+static bool settingsRequestGate(HWND h, const std::wstring& title,
+                                const std::wstring& detail,
+                                const std::wstring& payload,
+                                const std::wstring& preview){
+    if(!s_st) return true;
+    if(s_st->role>=1) return true;   // managers apply directly
+    if(MessageBoxW(h,L"آیا از ذخیرهٔ این تنظیمات اطمینان دارید؟",
+        L"تأیید ذخیره", MB_ICONQUESTION|MB_YESNO|MB_DEFBUTTON2)!=IDYES)
+        return false;                // user cancelled — do nothing
+    pushSetReqEx(g_session.user.fullname.empty()?g_session.user.username
+                                                :g_session.user.fullname,
+                 systemSourceName(), title, detail, payload, preview);
+    MessageBoxW(h,L"این تنظیمات برای مدیریت ارسال شد. پس از تأیید اعمال خواهد شد.",
+        L"ارسال برای تأیید", MB_OK|MB_ICONINFORMATION);
+    return false;
+}
+
 static void doThemeToggle(HWND h){
-    applyTheme(!g_dark);
+    bool wantDark=!g_dark;
+    if(!settingsRequestGate(h,L"تغییر پوستهٔ نمایش",
+            std::wstring(L"تغییر تم به ")+(wantDark?L"تیره":L"روشن"),
+            std::wstring(L"theme=")+(wantDark?L"dark":L"light"),
+            wantDark?L"پوستهٔ تیره":L"پوستهٔ روشن"))
+        return;
+    applyTheme(wantDark);
     if(s_st) s_st->dark=g_dark;
     broadcastThemeChange();
     InvalidateRect(h,NULL,FALSE);
@@ -154,20 +192,35 @@ static void doDensityToggle(HWND h){
 }
 static void doAutoPrintToggle(HWND h){
     if(!s_st) return;
-    s_st->autoPrint=!s_st->autoPrint;
+    bool want=!s_st->autoPrint;
+    if(!settingsRequestGate(h,L"چاپ خودکار قبض",
+            std::wstring(L"چاپ خودکار قبض: ")+(want?L"روشن":L"خاموش"),
+            std::wstring(L"auto_print=")+(want?L"1":L"0"),L""))
+        return;
+    s_st->autoPrint=want;
     setSetting(L"auto_print", s_st->autoPrint?L"1":L"0");
     InvalidateRect(h,NULL,FALSE);
 }
 static void doNotifyToggle(HWND h){
     if(!s_st) return;
-    s_st->notify=!s_st->notify;
+    bool want=!s_st->notify;
+    if(!settingsRequestGate(h,L"تنظیمات اعلان",
+            std::wstring(L"اعلان پیام جدید: ")+(want?L"روشن":L"خاموش"),
+            std::wstring(L"notify=")+(want?L"1":L"0"),L""))
+        return;
+    s_st->notify=want;
     setSetting(L"notify", s_st->notify?L"1":L"0");
     InvalidateRect(h,NULL,FALSE);
 }
 // v1.8.0: enable/disable the locally-stored «پیام‌های ذخیره‌شده» archive.
 static void doSavedMsgsToggle(HWND h){
     if(!s_st) return;
-    s_st->savedMsgs=!s_st->savedMsgs;
+    bool want=!s_st->savedMsgs;
+    if(!settingsRequestGate(h,L"پیام‌های ذخیره‌شده",
+            std::wstring(L"بایگانی محلی پیام‌ها: ")+(want?L"فعال":L"غیرفعال"),
+            std::wstring(L"saved_msgs_enabled=")+(want?L"1":L"0"),L""))
+        return;
+    s_st->savedMsgs=want;
     setSetting(L"saved_msgs_enabled", s_st->savedMsgs?L"1":L"0");
     InvalidateRect(h,NULL,FALSE);
     // repaint any open reception so the archive icon appears/disappears live
@@ -318,9 +371,13 @@ static void paintRows(HWND h, HDC dc){
             drawIcon(dc,rd.icon,ir,ic,S(2));
             SelectObject(dc,g_fUIB);
             SetTextColor(dc,danger?g_theme.danger:g_theme.text);
+            // v1.9.0: the server-address row carries an inline edit box, so its
+            // label sits at the TOP of the row (never vertically centred under
+            // the box) to avoid the old overlap where the box covered the label.
             bool hasHint=rd.hint!=NULL;
-            RECT lr={r.left+S(14),r.top+(hasHint?S(7):S(0)),r.right-S(46),
-                     r.top+(hasHint?S(30):rowH()-S(8))};
+            bool serverRow=(rd.id==ROW_SERVER);
+            RECT lr={r.left+S(14),r.top+((hasHint||serverRow)?S(6):S(0)),r.right-S(46),
+                     r.top+((hasHint||serverRow)?S(26):rowH()-S(8))};
             DrawTextW(dc,rd.label,-1,&lr,
                 DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
             if(hasHint){

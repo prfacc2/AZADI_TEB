@@ -32,6 +32,26 @@ static void logSettingsChange(const std::wstring& change){
     std::wstring prof = g_session.user.dept.empty() ? L"پذیرش" : g_session.user.dept;
     pushSetReq(who, currentSystemName(), change, prof);
 }
+// v1.9.0: printer settings change gate. Managers (role>=1) apply directly; for
+// reception/staff the change is NOT applied — it is confirmed, then queued for
+// management approval with a key=value payload + a preview string, exactly like
+// the settings.cpp workflow. Returns true if the caller may apply directly.
+static bool printerRequestGate(HWND h, const std::wstring& title,
+                               const std::wstring& change,
+                               const std::wstring& payload,
+                               const std::wstring& preview){
+    if(g_session.user.username.empty()) return true;   // not signed in → local
+    if(g_session.user.role>=1) return true;            // manager/admin → direct
+    if(MessageBoxW(h,L"آیا از ذخیرهٔ این تنظیمات اطمینان دارید؟",
+        L"تأیید ذخیره", MB_ICONQUESTION|MB_YESNO|MB_DEFBUTTON2)!=IDYES)
+        return false;
+    std::wstring who = g_session.user.fullname.empty()
+                     ? g_session.user.username : g_session.user.fullname;
+    pushSetReqEx(who, systemSourceName(), title, change, payload, preview);
+    MessageBoxW(h,L"این تنظیمات برای مدیریت ارسال شد. پس از تأیید اعمال خواهد شد.",
+        L"ارسال برای تأیید", MB_OK|MB_ICONINFORMATION);
+    return false;
+}
 
 // ------------------------------------------------------------- sections -----
 const wchar_t* PRINT_SECTIONS[] = {
@@ -678,22 +698,37 @@ static LRESULT CALLBACK prnProc(HWND h, UINT m, WPARAM w, LPARAM l){
         if(id>=PSB_PRINTER_BASE){
             int i=id-PSB_PRINTER_BASE;
             if(i<(int)s_ps->printers.size()){
-                s_ps->sel=s_ps->printers[i];
-                setSetting(L"printer_name",s_ps->sel);
-                logSettingsChange(L"تغییر چاپگر پیش‌فرض به «"+s_ps->sel+L"»");
-                InvalidateRect(h,NULL,FALSE);
+                std::wstring want=s_ps->printers[i];
+                std::wstring chg=L"تغییر چاپگر پیش‌فرض به «"+want+L"»";
+                if(printerRequestGate(h,L"تغییر نوع/چاپگر پیش‌فرض",chg,
+                        L"printer_name="+want, L"چاپگر: "+want)){
+                    s_ps->sel=want; setSetting(L"printer_name",want);
+                    InvalidateRect(h,NULL,FALSE);
+                }
             }
             return 0;
         }
         switch(id){
-        case PSB_A4: s_ps->paper=0; setSetting(L"paper_size",L"A4");
-            logSettingsChange(L"تغییر اندازه کاغذ به A4"); InvalidateRect(h,NULL,FALSE); break;
-        case PSB_A5: s_ps->paper=1; setSetting(L"paper_size",L"A5");
-            logSettingsChange(L"تغییر اندازه کاغذ به A5"); InvalidateRect(h,NULL,FALSE); break;
-        case PSB_FIT: s_ps->mode=0; setSetting(L"print_mode",L"fit");
-            logSettingsChange(L"تغییر حالت چاپ به «متناسب»"); InvalidateRect(h,NULL,FALSE); break;
-        case PSB_FILL:s_ps->mode=1; setSetting(L"print_mode",L"fill");
-            logSettingsChange(L"تغییر حالت چاپ به «پرکننده»"); InvalidateRect(h,NULL,FALSE); break;
+        case PSB_A4:
+            if(printerRequestGate(h,L"تغییر اندازهٔ کاغذ",L"تغییر اندازه کاغذ به A4",
+                    L"paper_size=A4",L"اندازهٔ کاغذ: A4")){
+                s_ps->paper=0; setSetting(L"paper_size",L"A4"); InvalidateRect(h,NULL,FALSE); }
+            break;
+        case PSB_A5:
+            if(printerRequestGate(h,L"تغییر اندازهٔ کاغذ",L"تغییر اندازه کاغذ به A5",
+                    L"paper_size=A5",L"اندازهٔ کاغذ: A5")){
+                s_ps->paper=1; setSetting(L"paper_size",L"A5"); InvalidateRect(h,NULL,FALSE); }
+            break;
+        case PSB_FIT:
+            if(printerRequestGate(h,L"تغییر حالت چاپ",L"تغییر حالت چاپ به «متناسب»",
+                    L"print_mode=fit",L"حالت چاپ: متناسب")){
+                s_ps->mode=0; setSetting(L"print_mode",L"fit"); InvalidateRect(h,NULL,FALSE); }
+            break;
+        case PSB_FILL:
+            if(printerRequestGate(h,L"تغییر حالت چاپ",L"تغییر حالت چاپ به «پرکننده»",
+                    L"print_mode=fill",L"حالت چاپ: پرکننده")){
+                s_ps->mode=1; setSetting(L"print_mode",L"fill"); InvalidateRect(h,NULL,FALSE); }
+            break;
         case PSB_TEST: doTestPrint(h); break;
         case PSB_ADV:  doAdvanced(h); break;
         case PSB_DESIGN:{ int sec=s_ps->section; prnClose();

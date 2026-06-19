@@ -120,9 +120,16 @@ void drawIcon(HDC dc, int icon, RECT rc, COLORREF col, int thick){
     int cx=(rc.left+rc.right)/2, cy=(rc.top+rc.bottom)/2;
     int r = ((rc.right-rc.left) < (rc.bottom-rc.top) ? (rc.right-rc.left)
                                                      : (rc.bottom-rc.top)) / 2;
-    HPEN pen  = CreatePen(PS_SOLID, thick, col);
+    // v1.9.0: a GEOMETRIC pen with ROUND end-caps + ROUND joins renders every
+    // line-art glyph with smooth, professional terminations (no hard "childish"
+    // corners). Falls back to a plain cosmetic pen if creation fails.
+    LOGBRUSH lb={ BS_SOLID, col, 0 };
+    HPEN pen = ExtCreatePen(PS_GEOMETRIC|PS_SOLID|PS_ENDCAP_ROUND|PS_JOIN_ROUND,
+                            thick<1?1:thick, &lb, 0, NULL);
+    if(!pen) pen = CreatePen(PS_SOLID, thick, col);
     HGDIOBJ op = SelectObject(dc, pen);
     HGDIOBJ ob = SelectObject(dc, GetStockObject(NULL_BRUSH));
+    int oldBk = SetBkMode(dc, TRANSPARENT);
     switch(icon){
     case ICO_X: {
         int d=(r*60)/100;
@@ -303,6 +310,7 @@ void drawIcon(HDC dc, int icon, RECT rc, COLORREF col, int thick){
         MoveToEx(dc,cx-r/2,cy-r/2,0); LineTo(dc,cx+r/3,cy); LineTo(dc,cx-r/2,cy+r/2);
         break; }
     }
+    SetBkMode(dc, oldBk);
     SelectObject(dc, op); SelectObject(dc, ob);
     DeleteObject(pen);
 }

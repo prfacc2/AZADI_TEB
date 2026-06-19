@@ -169,6 +169,38 @@ std::vector<KMsg> loadMessages(const std::wstring& forUser){
     }
     return out;
 }
+//  v1.9.0: per-user "new message" notify flag. The recipient workstation's
+//  frame timer polls this and raises the Windows notification, then clears it.
+//  The SENDER never sets a flag for themselves, so management does not get its
+//  own message notification back.
+static std::wstring notifyFlagPath(const std::wstring& u){
+    std::wstring safe=u.empty()?L"_all":u;
+    for(auto&c:safe) if(c==L'\\'||c==L'/'||c==L':'||c==L'*') c=L'_';
+    return dataDir()+L"\\notify_"+safe+L".flag";
+}
+static void setNotifyFlag(const std::wstring& forUser){
+    writeFileUtf8(notifyFlagPath(forUser),L"1",false);
+}
+//  Called from the frame timer for the CURRENT user. If a flag is set, fire the
+//  Windows notification and clear it. Managers (role>=1) never receive it.
+void notifyNewMessageRecipients(){
+    if(g_session.user.username.empty()) return;
+    if(g_session.user.role>=1) return;            // managers don't get notified
+    std::wstring p=notifyFlagPath(g_session.user.username);
+    std::wstring bp=notifyFlagPath(L"*");
+    bool any=false;
+    if(!trim(readFileUtf8(p)).empty()){ any=true; DeleteFileW(p.c_str()); }
+    // broadcast flag: consume per-user marker so it only fires once here
+    if(!trim(readFileUtf8(bp)).empty()){
+        std::wstring seenP=dataDir()+L"\\notify_seen_"+g_session.user.username+L".flag";
+        std::wstring tag=readFileUtf8(bp);
+        if(trim(readFileUtf8(seenP))!=trim(tag)){
+            any=true; writeFileUtf8(seenP,tag,false);
+        }
+    }
+    if(any) showWindowsNotification(L"آزادی طب", L"شما یک پیام جدید دارید.");
+}
+
 void pushMessageT(const std::wstring& from, const std::wstring& to,
                   const std::wstring& text, int type){
     SYSTEMTIME st=iranNow();
@@ -178,6 +210,16 @@ void pushMessageT(const std::wstring& from, const std::wstring& to,
                      std::wstring(ty)+L"|"+pipeEsc(text)+L"\r\n";
     writeFileUtf8(msgPath(),row,true);
     logLine(L"message pushed to "+to+L" type "+ty);
+    // v1.9.0: notify the recipient (never the sender). For broadcast (*) we
+    // stamp a unique tag so each recipient fires it exactly once.
+    if(to!=from){
+        if(to==L"*"){
+            wchar_t tag[32]; swprintf(tag,32,L"%lu",(unsigned long)GetTickCount());
+            writeFileUtf8(notifyFlagPath(L"*"),tag,false);
+        } else {
+            setNotifyFlag(to);
+        }
+    }
 }
 void pushMessage(const std::wstring& from, const std::wstring& to, const std::wstring& text){
     pushMessageT(from,to,text,KMSG_NORMAL);
@@ -204,8 +246,20 @@ void markMessagesSeen(const std::wstring& forUser){
 }
 
 // =============================================== settings-change requests ====
-//  data\setreq.dat:  user|system|change|profile|time|seen
+//  v1.9.0 APPROVAL workflow. data\setreq.dat (newest appended last):
+//    user|system|change|profile|time|seen|status|payload|title|preview
+//  Older 6-field rows are read with status=0 / empty payload (pending).
 static std::wstring setReqPath(){ return dataDir()+L"\\setreq.dat"; }
+
+std::wstring systemSourceName(){
+    wchar_t name[256]={0}; DWORD sz=256;
+    if(GetComputerNameW(name,&sz) && name[0]) return name;
+    std::wstring s=getSetting(L"system_id",L"");
+    if(s.empty()){ s=L"WS-"+std::to_wstring((unsigned)GetTickCount()%100000);
+        setSetting(L"system_id",s); }
+    return s;
+}
+
 std::vector<SetReq> loadSetReqs(){
     std::vector<SetReq> out;
     std::wstring all=readFileUtf8(setReqPath());
@@ -218,38 +272,143 @@ std::vector<SetReq> loadSetReqs(){
         if(f.size()<6) continue;
         SetReq r; r.user=f[0]; r.system=f[1]; r.change=f[2]; r.profile=f[3];
         r.time=f[4]; r.seen=(f[5]==L"1");
+        r.status =(f.size()>=7)?_wtoi(f[6].c_str()):0;
+        r.payload=(f.size()>=8)?f[7]:L"";
+        r.title  =(f.size()>=9)?f[8]:r.change;
+        r.preview=(f.size()>=10)?f[9]:L"";
         out.push_back(r);
     }
     // newest first
     std::reverse(out.begin(),out.end());
     return out;
 }
+static std::wstring serializeSetReq(const SetReq& r){
+    wchar_t sb[8]; swprintf(sb,8,L"%d",r.status);
+    return pipeEsc(r.user)+L"|"+pipeEsc(r.system)+L"|"+pipeEsc(r.change)+L"|"+
+           pipeEsc(r.profile)+L"|"+pipeEsc(r.time)+L"|"+(r.seen?L"1":L"0")+L"|"+
+           std::wstring(sb)+L"|"+pipeEsc(r.payload)+L"|"+pipeEsc(r.title)+L"|"+
+           pipeEsc(r.preview);
+}
+static void saveAllSetReqs_newestFirst(const std::vector<SetReq>& v){
+    std::wstring out;
+    for(int i=(int)v.size()-1;i>=0;i--) out+=serializeSetReq(v[i])+L"\r\n";
+    writeFileUtf8(setReqPath(),out,false);
+}
+void pushSetReqEx(const std::wstring& user, const std::wstring& system,
+                  const std::wstring& title, const std::wstring& change,
+                  const std::wstring& payload, const std::wstring& preview){
+    SYSTEMTIME st=iranNow();
+    wchar_t tb[40]; swprintf(tb,40,L"%s %02d:%02d",jalaliDateShort(st).c_str(),st.wHour,st.wMinute);
+    SetReq r; r.user=user; r.system=system; r.change=change; r.profile=L"";
+    r.time=tb; r.seen=false; r.status=0; r.payload=payload;
+    r.title=title.empty()?change:title; r.preview=preview;
+    writeFileUtf8(setReqPath(),serializeSetReq(r)+L"\r\n",true);
+    logLine(L"settings change request (pending approval) from "+user);
+}
 void pushSetReq(const std::wstring& user, const std::wstring& system,
                 const std::wstring& change, const std::wstring& profile){
     SYSTEMTIME st=iranNow();
-    wchar_t tb[32]; swprintf(tb,32,L"%s %02d:%02d",jalaliDateShort(st).c_str(),st.wHour,st.wMinute);
-    std::wstring row=pipeEsc(user)+L"|"+pipeEsc(system)+L"|"+pipeEsc(change)+L"|"+
-                     pipeEsc(profile)+L"|"+std::wstring(tb)+L"|0\r\n";
-    writeFileUtf8(setReqPath(),row,true);
+    wchar_t tb[40]; swprintf(tb,40,L"%s %02d:%02d",jalaliDateShort(st).c_str(),st.wHour,st.wMinute);
+    SetReq r; r.user=user; r.system=system; r.change=change; r.profile=profile;
+    r.time=tb; r.seen=false; r.status=0; r.title=change;
+    writeFileUtf8(setReqPath(),serializeSetReq(r)+L"\r\n",true);
     logLine(L"settings change request from "+user);
+}
+//  apply "key=value;key=value" pairs to settings
+static void applyPayload(const std::wstring& payload){
+    size_t pos=0;
+    while(pos<payload.size()){
+        size_t semi=payload.find(L';',pos);
+        std::wstring pair=(semi==std::wstring::npos)?payload.substr(pos):payload.substr(pos,semi-pos);
+        pos=(semi==std::wstring::npos)?payload.size():semi+1;
+        size_t eq=pair.find(L'=');
+        if(eq==std::wstring::npos) continue;
+        std::wstring k=trim(pair.substr(0,eq)), v=trim(pair.substr(eq+1));
+        if(!k.empty()) setSetting(k,v);
+    }
+}
+void setSetReqStatus(int indexNewestFirst, int status, const std::wstring& reason){
+    auto v=loadSetReqs();   // newest first
+    if(indexNewestFirst<0||indexNewestFirst>=(int)v.size()) return;
+    SetReq& r=v[indexNewestFirst];
+    if(r.status!=0) { r.seen=true; saveAllSetReqs_newestFirst(v); return; }
+    r.status=status; r.seen=true;
+    if(status==1){
+        if(!r.payload.empty()) applyPayload(r.payload);
+        pushMessageT(L"مدیریت", r.user,
+            L"درخواست تغییر تنظیمات شما تأیید و اعمال شد.", KMSG_NORMAL);
+    } else if(status==2){
+        std::wstring t=L"درخواست شما توسط مدیریت رد شد. ✕";
+        if(!reason.empty()) t+=L"  دلیل: "+reason;
+        pushMessageT(L"مدیریت", r.user, t, KMSG_CRITICAL);
+    }
+    saveAllSetReqs_newestFirst(v);
+}
+void markOneSetReqSeen(int indexNewestFirst){
+    auto v=loadSetReqs();
+    if(indexNewestFirst<0||indexNewestFirst>=(int)v.size()) return;
+    v[indexNewestFirst].seen=true;
+    saveAllSetReqs_newestFirst(v);
+}
+void deleteSetReq(int indexNewestFirst){
+    auto v=loadSetReqs();
+    if(indexNewestFirst<0||indexNewestFirst>=(int)v.size()) return;
+    v.erase(v.begin()+indexNewestFirst);
+    saveAllSetReqs_newestFirst(v);
 }
 int unseenSetReqCount(){
     int n=0; for(auto&r:loadSetReqs()) if(!r.seen) n++; return n;
 }
+int pendingSetReqCount(){
+    int n=0; for(auto&r:loadSetReqs()) if(r.status==0) n++; return n;
+}
 void markSetReqsSeen(){
-    std::wstring all=readFileUtf8(setReqPath()), out;
+    auto v=loadSetReqs();
+    for(auto& r:v) r.seen=true;
+    saveAllSetReqs_newestFirst(v);
+}
+
+// ================================================= local saved notes (v1.9.0) =
+//  Strictly LOCAL to this machine/user (never sent over the network).
+//  data\local_notes_<user>.dat:  time|attachPath|text  (newest appended last)
+static std::wstring localNotesPath(const std::wstring& u){
+    std::wstring safe=u.empty()?L"_local":u;
+    for(auto&c:safe) if(c==L'\\'||c==L'/'||c==L':') c=L'_';
+    return dataDir()+L"\\local_notes_"+safe+L".dat";
+}
+std::vector<LocalNote> loadLocalNotes(const std::wstring& forUser){
+    std::vector<LocalNote> out;
+    std::wstring all=readFileUtf8(localNotesPath(forUser));
     size_t pos=0;
     while(pos<all.size()){
         size_t e=all.find(L'\n',pos); if(e==std::wstring::npos) e=all.size();
         std::wstring line=all.substr(pos,e-pos); pos=e+1;
         if(trim(line).empty()) continue;
         auto f=splitPipe(line);
-        if(f.size()<6){ out+=line+L"\r\n"; continue; }
-        f[5]=L"1";
-        out+=f[0]+L"|"+f[1]+L"|"+f[2]+L"|"+f[3]+L"|"+f[4]+L"|"+f[5]+L"\r\n";
+        if(f.size()<3) continue;
+        LocalNote n; n.time=f[0]; n.attachPath=f[1]; n.text=f[2];
+        out.push_back(n);
     }
-    writeFileUtf8(setReqPath(),out,false);
+    std::reverse(out.begin(),out.end());   // newest first
+    return out;
 }
+void pushLocalNote(const std::wstring& forUser, const std::wstring& text,
+                   const std::wstring& attachPath){
+    SYSTEMTIME st=iranNow();
+    wchar_t tb[40]; swprintf(tb,40,L"%s %02d:%02d",jalaliDateShort(st).c_str(),st.wHour,st.wMinute);
+    std::wstring row=std::wstring(tb)+L"|"+pipeEsc(attachPath)+L"|"+pipeEsc(text)+L"\r\n";
+    writeFileUtf8(localNotesPath(forUser),row,true);
+}
+void deleteLocalNote(const std::wstring& forUser, int indexNewestFirst){
+    auto v=loadLocalNotes(forUser);   // newest first
+    if(indexNewestFirst<0||indexNewestFirst>=(int)v.size()) return;
+    v.erase(v.begin()+indexNewestFirst);
+    std::wstring out;
+    for(int i=(int)v.size()-1;i>=0;i--)
+        out+=v[i].time+L"|"+pipeEsc(v[i].attachPath)+L"|"+pipeEsc(v[i].text)+L"\r\n";
+    writeFileUtf8(localNotesPath(forUser),out,false);
+}
+int localNoteCount(const std::wstring& forUser){ return (int)loadLocalNotes(forUser).size(); }
 
 // ============================================== saved (archived) messages ====
 //  data\saved_msgs.dat:  from|to|time|type|attachPath|text
@@ -307,4 +466,24 @@ std::wstring copyAttachmentLocal(const std::wstring& srcPath){
     std::wstring dst=dir+L"\\"+std::wstring(pre)+base;
     if(CopyFileW(srcPath.c_str(),dst.c_str(),FALSE)) return dst;
     return L"";
+}
+
+// ============================================== Windows notification (v1.9.0) =
+//  A lightweight tray balloon notification. Only the message RECIPIENTS see
+//  «شما یک پیام جدید دارید.» — the sending manager never gets it back.
+void showWindowsNotification(const std::wstring& title, const std::wstring& body){
+    if(getSetting(L"notify",L"1")!=L"1") return;     // user disabled notifications
+    NOTIFYICONDATAW nid={0};
+    nid.cbSize=sizeof(nid);
+    nid.hWnd=g_hFrame;
+    nid.uID=0xA2A2;
+    nid.uFlags=NIF_INFO|NIF_ICON;
+    nid.hIcon=LoadIconW(g_hInst,MAKEINTRESOURCEW(1));
+    if(!nid.hIcon) nid.hIcon=LoadIconW(NULL,IDI_APPLICATION);
+    nid.dwInfoFlags=NIIF_INFO;
+    wcsncpy(nid.szInfoTitle,title.c_str(),63); nid.szInfoTitle[63]=0;
+    wcsncpy(nid.szInfo,body.c_str(),255);       nid.szInfo[255]=0;
+    // add (idempotent) then modify to fire the balloon, leave it resident briefly
+    Shell_NotifyIconW(NIM_ADD,&nid);
+    Shell_NotifyIconW(NIM_MODIFY,&nid);
 }

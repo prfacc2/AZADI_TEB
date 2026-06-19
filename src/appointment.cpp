@@ -601,15 +601,21 @@ static void apLayout(HWND h, ApptUI* u){
     MoveWindow(u->pDesc, leftColX, py, innerR-innerL, fh, TRUE);
     py += apRowH()+S(2);
     // buttons: رزرو عادی نوبت | جدید | انصراف
-    int bw=(innerR-innerL-S(16))/3;
-    MoveWindow(u->pReserve, innerR-bw,            py, bw, S(34), TRUE);
-    MoveWindow(u->pNew,     innerR-bw*2-S(8),     py, bw, S(34), TRUE);
-    MoveWindow(u->pCancel,  innerR-bw*3-S(16),    py, bw, S(34), TRUE);
+    // v1.9.0: give the primary «رزرو عادی نوبت» (icon + long text) extra width
+    // so it is never truncated; the two short buttons share the remainder.
+    int totalBW=innerR-innerL-S(16);
+    int bwR=(int)(totalBW*0.46);              // reserve (wide)
+    int bwS=(totalBW-bwR-S(8))/2;             // جدید / انصراف
+    MoveWindow(u->pReserve, innerR-bwR,            py, bwR, S(34), TRUE);
+    MoveWindow(u->pNew,     innerR-bwR-S(8)-bwS,   py, bwS, S(34), TRUE);
+    MoveWindow(u->pCancel,  innerL,                py, bwS, S(34), TRUE);
 
     // ---- grid toolbar (top-left) ------------------------------------------
     RECT g = apGridRect(h);
     int tbY=S(14), tbH=S(32), tx=g.right;
-    int wMsg=S(96),wTr=S(96),wPr=S(64),wSv=S(108),wDl=S(108),gp=S(6);
+    // v1.9.0: widen the layout buttons so «ذخیره چیدمان» / «حذف چیدمان» (icon +
+    // text) are never truncated.
+    int wMsg=S(96),wTr=S(96),wPr=S(64),wSv=S(140),wDl=S(132),gp=S(6);
     MoveWindow(u->tMsg,      tx-wMsg, tbY, wMsg, tbH, TRUE);
     MoveWindow(u->tTransfer, tx-wMsg-gp-wTr, tbY, wTr, tbH, TRUE);
     MoveWindow(u->tPrint,    tx-wMsg-gp-wTr-gp-wPr, tbY, wPr, tbH, TRUE);
@@ -839,10 +845,9 @@ static void apPaint(HWND h, ApptUI* u, HDC dc){
             POINT a={wr.left,wr.top}, b={wr.right,wr.bottom};
             ScreenToClient(h,&a); ScreenToClient(h,&b);
             if(b.y<=a.y) continue;
-            RECT fr={a.x-S(3),a.y-S(3),b.x+S(3),b.y+S(3)};
-            fillRoundRect(dc,fr,S(6),CLR_INVALID,g_theme.danger);
-            RECT fr2={fr.left-1,fr.top-1,fr.right+1,fr.bottom+1};
-            fillRoundRect(dc,fr2,S(7),CLR_INVALID,g_theme.danger);
+            // v1.9.0: a single, very thin red hairline only — no glow / second ring.
+            RECT fr={a.x-S(6),a.y-S(4),b.x+S(6),b.y+S(4)};
+            fillRoundRect(dc,fr,S(8),g_theme.inputBg,g_theme.danger);
         }
     }
 

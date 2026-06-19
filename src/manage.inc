@@ -23,14 +23,16 @@
 #define MG_CLASS L"AzManage"
 
 // navigation pages
-enum { PG_DASH=0, PG_SECTS=1, PG_EMPS=2, PG_MSG=3, PG_REQS=4, PG_SAVED=5, PG_COUNT=6 };
+enum { PG_DASH=0, PG_SECTS=1, PG_EMPS=2, PG_MSG=3, PG_REQS=4, PG_SAVED=5,
+       PG_BACKUP=6, PG_COUNT=7 };
 
 // control ids
 enum {
     MG_ADD_CAT=2001, MG_E_NAME, MG_E_MGR, MG_E_ID, MG_CB_AUTOID,
     MG_FILTER_ABC, MG_FILTER_NEW, MG_FILTER_CREATED, MG_BACK,
     MG_ADD_EMP, MG_DESIGN,
-    MG_MSG, MG_REQS, MG_PROFREQS,
+    MG_MSG, MG_REQS, MG_PROFREQS, MG_BACKUP,
+    MG_NOTE_ADD, MG_E_NOTE, MG_NOTE_ATTACH, MG_NOTE_SEND,   // saved messages
     MG_CB_DEPT,            // department filter combo (employees page)
     MG_DESIGN_SEC,         // print-design for the selected section
     MG_NAV_BASE=2100,      // sidebar nav buttons (MG_NAV_BASE+page)
@@ -63,6 +65,10 @@ struct ManageState {
     HWND bAbc, bNew, bCreated, bAddEmp, cDept;
     // messages / requests buttons (page bodies use owner-draw)
     HWND bMsg, bReqs, bProfReqs;
+    // saved messages (local notes) page
+    HWND eNote, bNoteAdd, bNoteAttach, bNoteSend;
+    std::wstring noteAttach;    // pending attachment path for the next note
+    int  noteHot;               // hot-tracked local-note row (-1 none)
     std::wstring curCatName;    // for personnel card "section" line
     std::wstring msg; COLORREF msgCol;
 };
@@ -293,29 +299,109 @@ static void openEmpDetails(HWND owner, const EmpRow& r){
     BringWindowToTop(s_mgd); SetFocus(s_mgd);
 }
 // ============== «درخواست‌های تغییر تنظیمات» (settings-change requests) =======
+//  v1.9.0 redesign — a clean, interactive request centre:
+//    • each card shows title, detailed action, employee, network/system source,
+//      time, and (if present) a preview string.
+//    • clicking a card SELECTS it → a VERY THIN GREEN border (the whole card,
+//      including its «جزئیات» detail area, shares this selected state).
+//    • a selected request is automatically marked READ → it turns GRAY.
+//    • per-card actions: تأیید (approve+apply) / رد (reject) / حذف (delete with
+//      confirmation).
+//    • «علامت‌گذاری همه به‌عنوان خوانده‌شده» works; the unread counter and the
+//      nav badge update live and immediately.
 #define MGREQ_CLASS L"AzMgReq"
-struct ReqState { std::vector<SetReq> reqs; int hot; };
+//  v1.9.0: a thin green selection border colour.
+static COLORREF mrGreen(){ return RGB(0x2E,0xB8,0x6B); }
+struct ReqState { std::vector<SetReq> reqs; int hot; int sel; int scroll; };
 static HWND s_mr=NULL; static ReqState* s_rs=NULL;
 static void mrClose(){ if(s_mr&&IsWindow(s_mr)){ HWND v=s_mr; s_mr=NULL; DestroyWindow(v);} }
 static RECT mrCard(HWND h){ RECT rc; GetClientRect(h,&rc);
-    int w=S(760),hh=S(560);
+    int w=S(780),hh=S(600);
     RECT c={(rc.right-w)/2,(rc.bottom-hh)/2,(rc.right+w)/2,(rc.bottom+hh)/2}; return c; }
+static int  mrRowH(){ return S(104); }
+static int  mrListTop(HWND h){ RECT c=mrCard(h); return c.top+S(62); }
+static int  mrListBot(HWND h){ RECT c=mrCard(h); return c.bottom-S(60); }
+static RECT mrRowRect(HWND h,int i){
+    RECT c=mrCard(h); int y=mrListTop(h)+i*(mrRowH()+S(8));
+    RECT r={c.left+S(20),y,c.right-S(20),y+mrRowH()}; return r; }
+// per-row action buttons (LEFT side)
+static RECT mrApprove(RECT row){ RECT b={row.left+S(12),row.bottom-S(40),row.left+S(98),row.bottom-S(10)}; return b; }
+static RECT mrReject (RECT row){ RECT b={row.left+S(106),row.bottom-S(40),row.left+S(176),row.bottom-S(10)}; return b; }
+static RECT mrDelete (RECT row){ RECT b={row.left+S(184),row.bottom-S(40),row.left+S(254),row.bottom-S(10)}; return b; }
+static void mrRefreshLive(HWND h){
+    if(s_rs) s_rs->reqs=loadSetReqs();
+    mgRefreshReqBadge();
+    InvalidateRect(h,NULL,FALSE);
+    if(g_hManage) InvalidateRect(g_hManage,NULL,FALSE);
+}
 static LRESULT CALLBACK mrProc(HWND h, UINT m, WPARAM w, LPARAM l){
     switch(m){
-    case WM_CREATE: s_rs=new ReqState(); s_rs->reqs=loadSetReqs(); s_rs->hot=0; return 0;
+    case WM_CREATE: s_rs=new ReqState(); s_rs->reqs=loadSetReqs();
+        s_rs->hot=-1; s_rs->sel=-1; s_rs->scroll=0; return 0;
     case WM_NCDESTROY: if(s_rs){ delete s_rs; s_rs=NULL; } s_mr=NULL;
         if(g_hFrame) InvalidateRect(g_hFrame,NULL,TRUE); return 0;
     case WM_ERASEBKGND: return 1;
-    case WM_LBUTTONDOWN:{ POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
+    case WM_MOUSEMOVE:{ if(!s_rs) break; POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
+        int oh=s_rs->hot; s_rs->hot=-1;
+        for(int i=0;i<(int)s_rs->reqs.size();i++){ RECT r=mrRowRect(h,i);
+            if(r.top>=mrListBot(h)) break;
+            if(PtInRect(&r,pt)){ s_rs->hot=i; break; } }
+        if(oh!=s_rs->hot) InvalidateRect(h,NULL,FALSE);
+        return 0; }
+    case WM_LBUTTONDOWN:{ if(!s_rs) break; POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
         RECT c=mrCard(h);
         RECT cb={c.left+S(14),c.top+S(14),c.left+S(40),c.top+S(40)};
-        if(!PtInRect(&c,pt)||PtInRect(&cb,pt)){ mrClose(); return 0; }
-        // «علامت‌گذاری همه به‌عنوان دیده‌شده» button
-        int by=c.bottom-S(54), bw=S(220);
-        RECT mb={c.left+S(24),by,c.left+S(24)+bw,by+S(40)};
-        if(PtInRect(&mb,pt)){ markSetReqsSeen(); if(s_rs) s_rs->reqs=loadSetReqs();
-            mgRefreshReqBadge(); InvalidateRect(h,NULL,FALSE);
-            if(g_hManage) InvalidateRect(g_hManage,NULL,FALSE); }
+        if(!PtInRect(&c,pt)){ mrClose(); return 0; }
+        if(PtInRect(&cb,pt)){ mrClose(); return 0; }
+        // «علامت‌گذاری همه به‌عنوان خوانده‌شده»
+        int by=c.bottom-S(50), bw=S(250);
+        RECT mb={c.left+S(24),by,c.left+S(24)+bw,by+S(36)};
+        if(PtInRect(&mb,pt)){ markSetReqsSeen(); mrRefreshLive(h); return 0; }
+        // per-row hit testing
+        for(int i=0;i<(int)s_rs->reqs.size();i++){
+            RECT r=mrRowRect(h,i); if(r.top>=mrListBot(h)) break;
+            if(!PtInRect(&r,pt)) continue;
+            SetReq& q=s_rs->reqs[i];
+            RECT ap=mrApprove(r), rj=mrReject(r), dl=mrDelete(r);
+            if(q.status==0 && PtInRect(&ap,pt)){ setSetReqStatus(i,1,L""); mrRefreshLive(h); return 0; }
+            if(q.status==0 && PtInRect(&rj,pt)){ setSetReqStatus(i,2,L""); mrRefreshLive(h); return 0; }
+            if(PtInRect(&dl,pt)){
+                if(MessageBoxW(h,L"این درخواست حذف شود؟",L"حذف درخواست",
+                    MB_ICONQUESTION|MB_YESNO|MB_DEFBUTTON2)==IDYES){
+                    deleteSetReq(i); if(s_rs->sel==i) s_rs->sel=-1; mrRefreshLive(h); }
+                return 0; }
+            // clicking the card body (incl. details area) selects + marks read
+            s_rs->sel=i;
+            if(!q.seen){ markOneSetReqSeen(i); }
+            mrRefreshLive(h);
+            return 0;
+        }
+        return 0; }
+    case WM_RBUTTONDOWN:{ if(!s_rs) break; POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
+        for(int i=0;i<(int)s_rs->reqs.size();i++){
+            RECT r=mrRowRect(h,i); if(r.top>=mrListBot(h)) break;
+            if(!PtInRect(&r,pt)) continue;
+            s_rs->sel=i; InvalidateRect(h,NULL,FALSE);
+            HMENU pm=CreatePopupMenu();
+            AppendMenuW(pm,MF_STRING,1,L"ارسال به پیام‌های ذخیره‌شده");
+            POINT sp=pt; ClientToScreen(h,&sp);
+            int cmd=TrackPopupMenu(pm,TPM_RIGHTBUTTON|TPM_RETURNCMD,sp.x,sp.y,0,h,NULL);
+            DestroyMenu(pm);
+            if(cmd==1){
+                SetReq& q=s_rs->reqs[i];
+                std::wstring title=q.title.empty()?q.change:q.title;
+                std::wstring body=title+L"\r\nاقدام: "+q.change+
+                    L"\r\nکارمند: "+(q.user.empty()?std::wstring(L"—"):q.user)+
+                    L"   سامانه: "+(q.system.empty()?std::wstring(L"—"):q.system)+
+                    L"   زمان: "+q.time;
+                if(!q.preview.empty()) body+=L"\r\nپیش‌نمایش: "+q.preview;
+                pushLocalNote(g_session.user.username,body,L"");
+                MessageBoxW(h,L"درخواست به «پیام‌های ذخیره‌شده» شما اضافه شد.",
+                    L"پیام‌های ذخیره‌شده",MB_ICONINFORMATION|MB_OK);
+                if(g_hManage) InvalidateRect(g_hManage,NULL,FALSE);
+            }
+            return 0;
+        }
         return 0; }
     case WM_KEYDOWN: if(w==VK_ESCAPE){ mrClose(); return 0; } break;
     case WM_PAINT:{ PAINTSTRUCT ps; HDC dc0=BeginPaint(h,&ps);
@@ -336,48 +422,98 @@ static LRESULT CALLBACK mrProc(HWND h, UINT m, WPARAM w, LPARAM l){
           RECT ci={cb.left+S(5),cb.top+S(5),cb.right-S(5),cb.bottom-S(5)};
           drawIcon(dc,ICO_X,ci,g_theme.text,S(2)); }
         SelectObject(dc,g_fTitle); SetTextColor(dc,g_infoAccent);
-        RECT tr={c.left+S(24),c.top+S(16),c.right-S(54),c.top+S(50)};
+        RECT tr={c.left+S(24),c.top+S(14),c.right-S(150),c.top+S(48)};
         DrawTextW(dc,L"درخواست‌های تغییر تنظیمات کارکنان",-1,&tr,
             DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+        // live unread counter chip (top-left)
+        { int unread=0; for(auto&q:s_rs->reqs) if(!q.seen) unread++;
+          RECT cc={c.left+S(50),c.top+S(18),c.left+S(140),c.top+S(44)};
+          gpRoundRect(dc,cc,(cc.bottom-cc.top)/2, unread>0?g_infoAccent:g_theme.surface2,
+              unread>0?g_infoAccent:g_theme.border,255);
+          SelectObject(dc,g_fSmall); SetTextColor(dc, unread>0?RGB(255,255,255):g_theme.textDim);
+          std::wstring ct=L"خوانده‌نشده: "+toFaDigits(std::to_wstring(unread));
+          DrawTextW(dc,ct.c_str(),-1,&cc,DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX); }
         // list
-        int y=c.top+S(64);
         if(!s_rs || s_rs->reqs.empty()){
             SelectObject(dc,g_fUI); SetTextColor(dc,g_theme.textDim);
-            RECT er={c.left+S(24),y,c.right-S(24),y+S(40)};
+            RECT er={c.left+S(24),mrListTop(h)+S(20),c.right-S(24),mrListTop(h)+S(60)};
             DrawTextW(dc,L"درخواستی ثبت نشده است.",-1,&er,
-                DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+                DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
         } else {
-            for(size_t i=0;i<s_rs->reqs.size() && y<c.bottom-S(80);i++){
+            for(int i=0;i<(int)s_rs->reqs.size();i++){
+                RECT row=mrRowRect(h,i); if(row.top>=mrListBot(h)) break;
                 SetReq& q=s_rs->reqs[i];
-                int ch=S(76);
-                RECT row={c.left+S(20),y,c.right-S(20),y+ch};
-                gpRoundRectBg(dc,row,S(10),q.seen?g_theme.surface:g_theme.surface2,
-                    q.seen?g_theme.border:g_infoAccent, g_theme.surface,255);
-                if(!q.seen){ RECT dot={row.right-S(24),row.top+S(10),row.right-S(12),row.top+S(22)};
+                bool seld=(s_rs->sel==i), hot=(s_rs->hot==i);
+                // body: GRAY when read; subtle attention tint when unread.
+                COLORREF body = q.seen ? blendColor(g_theme.surface,g_theme.textDim,8)
+                                       : g_theme.surface2;
+                COLORREF bord = seld ? mrGreen()
+                              : hot  ? g_infoAccent : g_theme.border;
+                gpRoundRectBg(dc,row,S(11),body,bord,g_theme.surface,255);
+                // VERY THIN green selection border: draw a single hairline inset
+                if(seld){ RECT in={row.left+1,row.top+1,row.right-1,row.bottom-1};
+                    gpRoundRect(dc,in,S(10),CLR_INVALID,mrGreen(),255); }
+                // unread dot
+                if(!q.seen){ RECT dot={row.right-S(26),row.top+S(12),row.right-S(14),row.top+S(24)};
                     gpRoundRect(dc,dot,S(6),g_infoAccent,CLR_INVALID,255); }
+                // status badge (approved/rejected) top-left of card
+                if(q.status!=0){
+                    RECT sb2={row.left+S(12),row.top+S(10),row.left+S(110),row.top+S(34)};
+                    bool ok=(q.status==1);
+                    gpRoundRect(dc,sb2,(sb2.bottom-sb2.top)/2, ok?mrGreen():g_theme.danger,
+                        ok?mrGreen():g_theme.danger,255);
+                    SelectObject(dc,g_fSmall); SetTextColor(dc,RGB(255,255,255));
+                    DrawTextW(dc, ok?L"✓ تأیید شد":L"✕ رد شد",-1,&sb2,
+                        DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+                }
+                // title (bold)
                 SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.text);
-                RECT l1={row.left+S(14),row.top+S(8),row.right-S(30),row.top+S(30)};
-                std::wstring head=L"کاربر: "+(q.user.empty()?std::wstring(L"—"):q.user)+
-                    L"   •   سیستم: "+(q.system.empty()?std::wstring(L"—"):q.system)+
-                    L"   •   "+q.time;
-                DrawTextW(dc,head.c_str(),-1,&l1,
+                RECT l1={row.left+S(14),row.top+S(8),row.right-S(34),row.top+S(30)};
+                std::wstring title=q.title.empty()?q.change:q.title;
+                DrawTextW(dc,title.c_str(),-1,&l1,
                     DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
+                // detailed action
                 SelectObject(dc,g_fUI); SetTextColor(dc,g_theme.textDim);
-                RECT l2={row.left+S(14),row.top+S(32),row.right-S(14),row.top+S(54)};
-                DrawTextW(dc,(L"تغییر: "+q.change).c_str(),-1,&l2,
+                RECT l2={row.left+S(14),row.top+S(30),row.right-S(14),row.top+S(50)};
+                DrawTextW(dc,(L"اقدام: "+q.change).c_str(),-1,&l2,
                     DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
-                RECT l3={row.left+S(14),row.top+S(52),row.right-S(14),row.bottom-S(4)};
-                DrawTextW(dc,(L"پروفایل: "+(q.profile.empty()?std::wstring(L"—"):q.profile)).c_str(),
-                    -1,&l3,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
-                y+=ch+S(8);
+                // employee • system • time
+                SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
+                RECT l3={row.left+S(14),row.top+S(50),row.right-S(14),row.top+S(68)};
+                std::wstring meta=L"کارمند: "+(q.user.empty()?std::wstring(L"—"):q.user)+
+                    L"   •   سامانه: "+(q.system.empty()?std::wstring(L"—"):q.system)+
+                    L"   •   "+q.time;
+                DrawTextW(dc,meta.c_str(),-1,&l3,
+                    DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
+                // preview (if any) — right side above the action buttons
+                if(!q.preview.empty()){
+                    SelectObject(dc,g_fSmall); SetTextColor(dc,g_infoAccent2);
+                    RECT pv={row.left+S(270),row.bottom-S(38),row.right-S(14),row.bottom-S(12)};
+                    DrawTextW(dc,(L"پیش‌نمایش: "+q.preview).c_str(),-1,&pv,
+                        DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
+                }
+                // action buttons (only when pending)
+                if(q.status==0){
+                    RECT ap=mrApprove(row), rj=mrReject(row);
+                    gpRoundRect(dc,ap,S(8),mrGreen(),mrGreen(),255);
+                    SelectObject(dc,g_fSmall); SetTextColor(dc,RGB(255,255,255));
+                    DrawTextW(dc,L"تأیید",-1,&ap,DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+                    gpRoundRect(dc,rj,S(8),g_theme.danger,g_theme.danger,255);
+                    DrawTextW(dc,L"رد",-1,&rj,DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+                }
+                // delete (always)
+                RECT dl=mrDelete(row);
+                gpRoundRect(dc,dl,S(8),g_theme.surface2,g_theme.border,255);
+                SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.danger);
+                DrawTextW(dc,L"حذف",-1,&dl,DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
             }
         }
         // mark-all button
-        int by=c.bottom-S(54), bw=S(220);
-        RECT mb={c.left+S(24),by,c.left+S(24)+bw,by+S(40)};
+        int by=c.bottom-S(50), bw=S(250);
+        RECT mb={c.left+S(24),by,c.left+S(24)+bw,by+S(36)};
         gpRoundRect(dc,mb,S(9),g_theme.accent,g_theme.accent,255);
         SetTextColor(dc,g_theme.accentText); SelectObject(dc,g_fUIB);
-        DrawTextW(dc,L"علامت‌گذاری همه به‌عنوان دیده‌شده",-1,&mb,
+        DrawTextW(dc,L"علامت‌گذاری همه به‌عنوان خوانده‌شده",-1,&mb,
             DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
         BitBlt(dc0,0,0,rc.right,rc.bottom,dc,0,0,SRCCOPY);
         SelectObject(dc,obm); DeleteObject(bmp); DeleteDC(dc);
@@ -422,6 +558,16 @@ static RECT prRowRect(HWND h, int i){
 // the two action buttons live on the LEFT side of each row
 static RECT prApproveRect(RECT row){ RECT b={row.left+S(12),row.top+S(20),row.left+S(120),row.bottom-S(20)}; return b; }
 static RECT prRejectRect (RECT row){ RECT b={row.left+S(128),row.top+S(20),row.left+S(220),row.bottom-S(20)}; return b; }
+//  v1.9.0: a square photo thumbnail on the RIGHT edge of each profile request
+//  row — clicking it enlarges the photo (system viewer, where it can be saved).
+static RECT prPhotoRect(RECT row){ int s2=S(64); RECT b={row.right-S(14)-s2,row.top+(row.bottom-row.top-s2)/2,row.right-S(14),row.top+(row.bottom-row.top+s2)/2}; return b; }
+//  Look up an employee's department from the user store (by full name or login).
+static std::wstring prEmpDept(const std::wstring& who){
+    if(who.empty()) return L"";
+    for(auto& u:loadUsers())
+        if(u.fullname==who || u.username==who) return u.dept;
+    return L"";
+}
 static void prLayoutReason(HWND h){
     if(!s_prs||!s_prs->eReason) return;
     RECT c=prCard(h);
@@ -479,6 +625,14 @@ static LRESULT CALLBACK prProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 RECT ab=prApproveRect(row), rb=prRejectRect(row);
                 if(PtInRect(&ab,pt)){ prDoApprove(h,i); return 0; }
                 if(PtInRect(&rb,pt)){ s_prs->sel=i; prDoReject(h,i); return 0; }
+                // photo thumbnail → enlarge / download in the system viewer
+                RECT prr=prPhotoRect(row);
+                std::wstring photo = !s_prs->reqs[i].newPhoto.empty()
+                                   ? s_prs->reqs[i].newPhoto : s_prs->reqs[i].oldPhoto;
+                if(!photo.empty() && PtInRect(&prr,pt)){
+                    ShellExecuteW(h,L"open",photo.c_str(),NULL,NULL,SW_SHOWNORMAL);
+                    s_prs->sel=i; InvalidateRect(h,NULL,FALSE); return 0;
+                }
                 if(PtInRect(&row,pt)){ s_prs->sel=i; SetFocus(s_prs->eReason);
                     InvalidateRect(h,NULL,FALSE); return 0; }
             }
@@ -522,21 +676,44 @@ static LRESULT CALLBACK prProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 bool selected=(s_prs->sel==i);
                 gpRoundRectBg(dc,row,S(10),selected?g_theme.surface2:g_theme.surface,
                     selected?g_theme.accent:g_infoAccent, g_theme.surface,255);
+                // photo thumbnail (RIGHT edge) — prefer the NEW photo, else old.
+                std::wstring photo = !q.newPhoto.empty()? q.newPhoto : q.oldPhoto;
+                int txtR = row.right-S(14);
+                if(!photo.empty()){
+                    RECT pr=prPhotoRect(row);
+                    gpRoundRectBg(dc,pr,S(8),g_theme.surface2,g_infoAccent,g_theme.surface,255);
+                    if(!gpDrawImageFileCircle(dc,photo,pr)){
+                        RECT ii={pr.left+S(16),pr.top+S(16),pr.right-S(16),pr.bottom-S(16)};
+                        drawIcon(dc,ICO_USER,ii,g_theme.textDim,S(2));
+                    }
+                    // tiny "enlarge" hint glyph
+                    SelectObject(dc,g_fSmall); SetTextColor(dc,g_infoAccent2);
+                    RECT eh={pr.left,pr.bottom+S(1),pr.right,pr.bottom+S(15)};
+                    DrawTextW(dc,L"بزرگ‌نمایی",-1,&eh,DT_CENTER|DT_SINGLELINE|DT_NOPREFIX);
+                    txtR = pr.left-S(10);
+                }
+                int txtL = row.left+S(230);
                 // text (RIGHT side)
                 SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.text);
-                RECT l1={row.left+S(230),row.top+S(8),row.right-S(14),row.top+S(32)};
-                std::wstring head=L"کاربر: "+(q.user.empty()?std::wstring(L"—"):q.user)+
-                    L"   •   "+q.time;
+                RECT l1={txtL,row.top+S(6),txtR,row.top+S(28)};
+                std::wstring head=L"کارمند: "+(q.user.empty()?std::wstring(L"—"):q.user);
+                std::wstring dep=prEmpDept(q.user);
+                if(!dep.empty()) head+=L"   •   بخش: "+dep;
                 DrawTextW(dc,head.c_str(),-1,&l1,
                     DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
+                SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
+                RECT lm={txtL,row.top+S(28),txtR,row.top+S(46)};
+                std::wstring meta=L"سامانه: "+systemSourceName()+L"   •   "+q.time;
+                DrawTextW(dc,meta.c_str(),-1,&lm,
+                    DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
                 SelectObject(dc,g_fUI); SetTextColor(dc,g_theme.textDim);
-                RECT l2={row.left+S(230),row.top+S(32),row.right-S(14),row.top+S(56)};
+                RECT l2={txtL,row.top+S(46),txtR,row.top+S(68)};
                 std::wstring nm=L"نام: "+q.oldName+L"  ←  "+q.newName;
                 DrawTextW(dc,nm.c_str(),-1,&l2,
                     DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
-                RECT l3={row.left+S(230),row.top+S(54),row.right-S(14),row.bottom-S(6)};
+                RECT l3={txtL,row.top+S(66),txtR,row.bottom-S(6)};
                 std::wstring ph = q.newPhoto.empty()? std::wstring(L"عکس: بدون تغییر")
-                                                    : std::wstring(L"عکس: جدید پیوست شد");
+                                                    : std::wstring(L"عکس: جدید پیوست شد (برای بزرگ‌نمایی/دانلود کلیک کنید)");
                 DrawTextW(dc,ph.c_str(),-1,&l3,
                     DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
                 // action buttons (LEFT)
@@ -593,8 +770,11 @@ static void openProfReqs(HWND owner){
 #define MM_B_ATTACH 3208
 #define MM_LB_SUG   3209
 #define MM_B_SAVE   3210
+#define MM_B_VIEWEMP 3211   // «مشاهدهٔ کارکنان» toggle for the right-side panel
+#define MM_E_EMPSRCH 3212   // employee-panel search box
 struct MsgState {
     HWND eSearch, eText, rNormal, rUrgent, rCrit, bSend, bCancel, bAttach, lbSug, bSave;
+    HWND bViewEmp, eEmpSrch;          // employee panel toggle + its search box
     std::vector<User> users;          // all users (recipient pool)
     std::vector<EmpProfile> profs;    // parallel profiles (for id/uid match)
     std::vector<int> matchIdx;        // current search matches → users index
@@ -604,12 +784,28 @@ struct MsgState {
     std::wstring attachPath;          // local copied attachment path
     std::wstring attachName;          // display name
     bool sendToSaved;                 // also archive to saved messages?
+    // right-side employee panel (CLOSED by default)
+    bool empPanelOpen;
+    std::wstring empQuery;            // filter text for the panel
+    int empHot;                       // hot-tracked panel row (-1 none)
+    int empScroll;                    // vertical scroll offset (px)
+    struct PRow { int kind; int idx; std::wstring name; }; // 0=dept header,1=emp
+    std::vector<PRow> empRows;
 };
 static HWND s_mm=NULL; static MsgState* s_ms=NULL;
 static void mmClose(){ if(s_mm&&IsWindow(s_mm)){ HWND v=s_mm; s_mm=NULL; DestroyWindow(v);} }
-static RECT mmCard(HWND h){ RECT rc; GetClientRect(h,&rc);
-    int w=S(640),hh=S(620);
+static int  mmPanelW(){ return S(280); }
+static RECT mmCardOuter(HWND h){ RECT rc; GetClientRect(h,&rc);
+    bool pan = s_ms && s_ms->empPanelOpen;
+    int w=S(640)+(pan?mmPanelW()+S(12):0), hh=S(620);
     RECT c={(rc.right-w)/2,(rc.bottom-hh)/2,(rc.right+w)/2,(rc.bottom+hh)/2}; return c; }
+// the compose card (right part) — fixed width; the panel sits to its LEFT.
+static RECT mmCard(HWND h){ RECT o=mmCardOuter(h);
+    RECT c={o.right-S(640),o.top,o.right,o.bottom}; return c; }
+static RECT mmPanelRect(HWND h){ RECT o=mmCardOuter(h);
+    RECT p={o.left,o.top,o.left+mmPanelW(),o.bottom}; return p; }
+static int  mmPanelListTop(HWND h){ RECT p=mmPanelRect(h); return p.top+S(96); }
+static int  mmPanelRowH(){ return S(40); }
 // dept chip geometry (left→right wrap inside the card)
 static int  mmChipsTop(HWND h){ RECT c=mmCard(h); return c.top+S(150); }
 static RECT mmChipRect(HWND h, int i){
@@ -651,6 +847,43 @@ static void mmRunSearch(HWND h){
         }
     }
     ShowWindow(s_ms->lbSug, s_ms->matchIdx.empty()?SW_HIDE:SW_SHOW);
+}
+// Rebuild the grouped employee list for the right-side panel:
+//   • grouped by department; ONLINE first (green dot) then OFFLINE (gray dot)
+//   • honours the panel search box (name / username / dept).
+static void mmBuildEmpRows(HWND h){
+    if(!s_ms) return;
+    s_ms->empRows.clear();
+    std::wstring q=s_ms->empQuery; for(auto&ch:q) ch=towlower(ch);
+    auto deptNameOf=[&](int i)->std::wstring{
+        std::wstring did=s_ms->profs[i].deptId;
+        for(auto&d:s_ms->depts) if(d.id==did) return d.name;
+        return s_ms->users[i].dept.empty()?L"بدون بخش":s_ms->users[i].dept;
+    };
+    std::vector<std::wstring> groups;
+    for(auto&d:s_ms->depts) groups.push_back(d.name);
+    groups.push_back(L"بدون بخش");
+    auto matches=[&](int i)->bool{
+        if(q.empty()) return true;
+        std::wstring nm=s_ms->users[i].fullname; for(auto&ch:nm) ch=towlower(ch);
+        std::wstring un=s_ms->users[i].username; for(auto&ch:un) ch=towlower(ch);
+        std::wstring dn=deptNameOf(i);            for(auto&ch:dn) ch=towlower(ch);
+        return nm.find(q)!=std::wstring::npos||un.find(q)!=std::wstring::npos
+             ||dn.find(q)!=std::wstring::npos;
+    };
+    for(auto&g:groups){
+        std::vector<int> on, off;
+        for(int i=0;i<(int)s_ms->users.size();i++){
+            if(deptNameOf(i)!=g) continue;
+            if(!matches(i)) continue;
+            if(isUserOnline(s_ms->users[i].username)) on.push_back(i);
+            else off.push_back(i);
+        }
+        if(on.empty()&&off.empty()) continue;
+        s_ms->empRows.push_back({0,-1,g});
+        for(int i:on)  s_ms->empRows.push_back({1,i,L""});
+        for(int i:off) s_ms->empRows.push_back({1,i,L""});
+    }
 }
 static void mmLayout(HWND h){
     if(!s_ms) return; RECT c=mmCard(h);
@@ -758,6 +991,7 @@ static LRESULT CALLBACK mmProc(HWND h, UINT m, WPARAM w, LPARAM l){
     switch(m){
     case WM_CREATE:{
         s_ms=new MsgState(); s_ms->selUser=-1; s_ms->sendToSaved=false;
+        s_ms->empPanelOpen=false; s_ms->empHot=-1; s_ms->empScroll=0;
         DWORD es=WS_CHILD|WS_VISIBLE|WS_TABSTOP|ES_AUTOHSCROLL;
         s_ms->eSearch=CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)MM_E_SEARCH,g_hInst,0);
         SendMessageW(s_ms->eSearch,EM_SETCUEBANNER,TRUE,
@@ -776,6 +1010,11 @@ static LRESULT CALLBACK mmProc(HWND h, UINT m, WPARAM w, LPARAM l){
             WS_CHILD|BS_AUTOCHECKBOX|BS_RIGHTBUTTON|BS_RIGHT,0,0,10,10,h,(HMENU)MM_B_SAVE,g_hInst,0);
         s_ms->bSend  =createFlatButton(h,MM_B_SEND,L"ارسال پیام",ICO_BELL,BS_PRIMARY,0,0,10,10);
         s_ms->bCancel=createFlatButton(h,MM_B_CANCEL,L"انصراف",ICO_X,BS_OUTLINE,0,0,10,10);
+        s_ms->bViewEmp=createFlatButton(h,MM_B_VIEWEMP,L"مشاهدهٔ کارکنان",ICO_USER,BS_OUTLINE,0,0,10,10);
+        s_ms->eEmpSrch=CreateWindowExW(0,L"EDIT",L"",
+            WS_CHILD|WS_TABSTOP|ES_AUTOHSCROLL,0,0,10,10,h,(HMENU)MM_E_EMPSRCH,g_hInst,0);
+        SendMessageW(s_ms->eEmpSrch,EM_SETCUEBANNER,TRUE,(LPARAM)L"جستجوی کارمند…");
+        SendMessageW(s_ms->eEmpSrch,WM_SETFONT,(WPARAM)g_fUI,TRUE);
         s_ms->users=loadUsers();
         for(auto&u:s_ms->users) s_ms->profs.push_back(loadEmpProfile(u.username));
         s_ms->depts=loadDepts();
@@ -799,6 +1038,29 @@ static LRESULT CALLBACK mmProc(HWND h, UINT m, WPARAM w, LPARAM l){
     case WM_LBUTTONDOWN:{ POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
         RECT c=mmCard(h);
         RECT cb={c.left+S(14),c.top+S(14),c.left+S(40),c.top+S(40)};
+        // employee panel: pick a recipient by clicking a row
+        if(s_ms && s_ms->empPanelOpen){
+            RECT p=mmPanelRect(h);
+            if(PtInRect(&p,pt)){
+                int top=mmPanelListTop(h)-s_ms->empScroll, rh=mmPanelRowH();
+                for(int i=0;i<(int)s_ms->empRows.size();i++){
+                    if(s_ms->empRows[i].kind!=1) continue;
+                    int ry=top+i*rh; RECT rr={p.left+S(8),ry,p.right-S(8),ry+rh};
+                    if(PtInRect(&rr,pt)){
+                        int u=s_ms->empRows[i].idx;
+                        s_ms->selUser=u;
+                        std::wstring nm=s_ms->users[u].fullname.empty()
+                            ?s_ms->users[u].username:s_ms->users[u].fullname;
+                        SetWindowTextW(s_ms->eSearch,nm.c_str());
+                        for(size_t d=0;d<s_ms->deptOn.size();d++) s_ms->deptOn[d]=false;
+                        ShowWindow(s_ms->lbSug,SW_HIDE);
+                        InvalidateRect(h,NULL,FALSE);
+                        return 0;
+                    }
+                }
+                return 0;   // clicks inside the panel never close the modal
+            }
+        }
         if(!PtInRect(&c,pt)){ mmClose(); return 0; }
         if(PtInRect(&cb,pt)){ mmClose(); return 0; }
         // dept chip toggles
@@ -809,8 +1071,39 @@ static LRESULT CALLBACK mmProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 InvalidateRect(h,NULL,FALSE); return 0; }
         }
         return 0; }
+    case WM_MOUSEMOVE:{ if(!s_ms||!s_ms->empPanelOpen) break;
+        POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
+        int oh=s_ms->empHot; s_ms->empHot=-1;
+        RECT p=mmPanelRect(h);
+        int top=mmPanelListTop(h)-s_ms->empScroll, rh=mmPanelRowH();
+        for(int i=0;i<(int)s_ms->empRows.size();i++){
+            if(s_ms->empRows[i].kind!=1) continue;
+            int ry=top+i*rh; RECT rr={p.left+S(8),ry,p.right-S(8),ry+rh};
+            if(PtInRect(&rr,pt)){ s_ms->empHot=i; break; }
+        }
+        if(oh!=s_ms->empHot) InvalidateRect(h,NULL,FALSE);
+        return 0; }
+    case WM_MOUSEWHEEL:{ if(!s_ms||!s_ms->empPanelOpen) break;
+        int d=GET_WHEEL_DELTA_WPARAM(w);
+        s_ms->empScroll-=d/2; if(s_ms->empScroll<0) s_ms->empScroll=0;
+        int contentH=(int)s_ms->empRows.size()*mmPanelRowH();
+        RECT p=mmPanelRect(h); int viewH=p.bottom-mmPanelListTop(h)-S(12);
+        int maxS=contentH-viewH; if(maxS<0) maxS=0;
+        if(s_ms->empScroll>maxS) s_ms->empScroll=maxS;
+        InvalidateRect(h,NULL,FALSE); return 0; }
     case WM_COMMAND:{ int id=LOWORD(w), code=HIWORD(w);
         if(id==MM_E_SEARCH && code==EN_CHANGE){ mmRunSearch(h); }
+        else if(id==MM_E_EMPSRCH && code==EN_CHANGE){
+            wchar_t b[128]={0}; GetWindowTextW(s_ms->eEmpSrch,b,128);
+            s_ms->empQuery=trim(b); s_ms->empScroll=0;
+            mmBuildEmpRows(h); InvalidateRect(h,NULL,FALSE);
+        }
+        else if(id==MM_B_VIEWEMP){
+            s_ms->empPanelOpen=!s_ms->empPanelOpen;
+            SetWindowTextW(s_ms->bViewEmp, s_ms->empPanelOpen?L"بستن کارکنان":L"مشاهدهٔ کارکنان");
+            if(s_ms->empPanelOpen){ s_ms->empScroll=0; mmBuildEmpRows(h); }
+            mmLayout(h); InvalidateRect(h,NULL,TRUE);
+        }
         else if(id==MM_LB_SUG && code==LBN_SELCHANGE){
             int sel=(int)SendMessageW(s_ms->lbSug,LB_GETCURSEL,0,0);
             if(sel>=0 && sel<(int)s_ms->matchIdx.size()){
@@ -860,6 +1153,56 @@ static LRESULT CALLBACK mmProc(HWND h, UINT m, WPARAM w, LPARAM l){
             SetTextColor(dc,on?g_theme.accentText:g_theme.text); SelectObject(dc,g_fSmall);
             DrawTextW(dc,s_ms->depts[i].name.c_str(),-1,&r,
                 DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
+        }
+        // selected single recipient indicator (top, under title)
+        if(s_ms && s_ms->selUser>=0){
+            SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.accent);
+            RECT sr={c.left+S(190),c.top+S(20),c.right-S(54),c.top+S(44)};
+            std::wstring nm=s_ms->users[s_ms->selUser].fullname.empty()
+                ?s_ms->users[s_ms->selUser].username:s_ms->users[s_ms->selUser].fullname;
+            DrawTextW(dc,(L"گیرنده: "+nm).c_str(),-1,&sr,
+                DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
+        }
+        // ---- right-side employee panel (when open) ----
+        if(s_ms && s_ms->empPanelOpen){
+            RECT p=mmPanelRect(h);
+            gpGradRoundRectBg(dc,p,S(16),g_theme.surfaceTop,g_theme.surface,g_theme.border,
+                g_dark?RGB(6,9,14):RGB(28,36,48));
+            SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.text);
+            RECT ph={p.left+S(14),p.top+S(14),p.right-S(14),p.top+S(40)};
+            DrawTextW(dc,L"کارکنان",-1,&ph,DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+            RECT clip={p.left+S(2),mmPanelListTop(h),p.right-S(2),p.bottom-S(8)};
+            HRGN rgn=CreateRectRgn(clip.left,clip.top,clip.right,clip.bottom);
+            SelectClipRgn(dc,rgn);
+            int top=mmPanelListTop(h)-s_ms->empScroll, rh=mmPanelRowH();
+            for(int i=0;i<(int)s_ms->empRows.size();i++){
+                int ry=top+i*rh;
+                if(ry+rh<clip.top||ry>clip.bottom) continue;
+                auto& row=s_ms->empRows[i];
+                if(row.kind==0){
+                    SelectObject(dc,g_fSmall); SetTextColor(dc,g_infoAccent2);
+                    RECT hr={p.left+S(14),ry+S(6),p.right-S(14),ry+rh-S(4)};
+                    DrawTextW(dc,row.name.c_str(),-1,&hr,
+                        DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
+                    gpLine(dc,p.left+S(14),ry+rh-S(2),p.right-S(14),ry+rh-S(2),g_theme.border,1);
+                } else {
+                    int u=row.idx; bool online=isUserOnline(s_ms->users[u].username);
+                    bool sel=(s_ms->selUser==u), hot=(s_ms->empHot==i);
+                    RECT rr={p.left+S(8),ry+S(2),p.right-S(8),ry+rh-S(2)};
+                    if(sel) gpRoundRectBg(dc,rr,S(9),blendColor(g_theme.surface,g_theme.accent,18),g_theme.accent,g_theme.surface);
+                    else if(hot) gpRoundRectBg(dc,rr,S(9),g_theme.surface2,g_theme.border,g_theme.surface);
+                    RECT dot={rr.right-S(22),rr.top+S(13),rr.right-S(10),rr.top+S(25)};
+                    gpRoundRect(dc,dot,S(6), online?RGB(0x2E,0xB8,0x6B):blendColor(g_theme.textDim,g_theme.surface,30),
+                        CLR_INVALID,255);
+                    SelectObject(dc,g_fUI); SetTextColor(dc, sel?g_theme.accent:(online?g_theme.text:g_theme.textDim));
+                    RECT nr={rr.left+S(10),rr.top,rr.right-S(30),rr.bottom};
+                    std::wstring nm=s_ms->users[u].fullname.empty()
+                        ?s_ms->users[u].username:s_ms->users[u].fullname;
+                    DrawTextW(dc,nm.c_str(),-1,&nr,
+                        DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
+                }
+            }
+            SelectClipRgn(dc,NULL); DeleteObject(rgn);
         }
         BitBlt(dc0,0,0,rc.right,rc.bottom,dc,0,0,SRCCOPY);
         SelectObject(dc,obm); DeleteObject(bmp); DeleteDC(dc);
@@ -1153,10 +1496,10 @@ static int  mgNavW(){ return S(220); }     // sidebar width
 static int  mgHeadH(){ return S(64); }      // content header height
 static const wchar_t* MG_NAV_LABELS[PG_COUNT] = {
     L"داشبورد", L"بخش‌ها", L"کارکنان", L"پیام به کارکنان",
-    L"درخواست‌ها", L"پیام‌های ذخیره‌شده"
+    L"درخواست‌ها", L"پیام‌های ذخیره‌شده", L"پشتیبان‌گیری"
 };
 static int MG_NAV_ICONS[PG_COUNT] = {
-    ICO_TAB, ICO_SHIELD, ICO_USER, ICO_BELL, ICO_GEAR, ICO_SAVE
+    ICO_TAB, ICO_SHIELD, ICO_USER, ICO_BELL, ICO_GEAR, ICO_SAVE, ICO_REFRESH
 };
 //  content area to the LEFT of the RTL nav rail (rail is on the RIGHT)
 static RECT mgContentRect(HWND h){
@@ -1218,7 +1561,8 @@ static void mgLayout(HWND h){
     // hide everything first
     HWND all[]={s_mg->eName,s_mg->eMgr,s_mg->eId,s_mg->bAdd,s_mg->bAutoId,
         s_mg->bSecNew,s_mg->bSecBack,s_mg->bAbc,s_mg->bNew,s_mg->bCreated,
-        s_mg->bAddEmp,s_mg->cDept,s_mg->bMsg,s_mg->bReqs,s_mg->bProfReqs};
+        s_mg->bAddEmp,s_mg->cDept,s_mg->bMsg,s_mg->bReqs,s_mg->bProfReqs,
+        s_mg->eNote,s_mg->bNoteAttach,s_mg->bNoteSend};
     for(HWND w:all) if(w) ShowWindow(w,SW_HIDE);
 
     if(s_mg->page==PG_SECTS){
@@ -1263,6 +1607,17 @@ static void mgLayout(HWND h){
         MoveWindow(s_mg->bReqs,     rEdge-S(280), y, S(280), S(42), TRUE);
         MoveWindow(s_mg->bProfReqs, rEdge-S(280), y+S(54), S(280), S(42), TRUE);
         ShowWindow(s_mg->bReqs,SW_SHOW); ShowWindow(s_mg->bProfReqs,SW_SHOW);
+    } else if(s_mg->page==PG_SAVED){
+        // compose row at the top: a multiline edit + attach + save buttons.
+        int y=top;
+        int bw=S(96), gap=S(8);
+        int editR=rEdge, editL=a.left+S(12)+bw+gap+bw+gap;
+        MoveWindow(s_mg->eNote, editL, y, editR-editL, S(54), TRUE);
+        MoveWindow(s_mg->bNoteAttach, a.left+S(12)+bw+gap, y+S(8), bw, S(38), TRUE);
+        MoveWindow(s_mg->bNoteSend,   a.left+S(12),        y+S(8), bw, S(38), TRUE);
+        ShowWindow(s_mg->eNote,SW_SHOW);
+        ShowWindow(s_mg->bNoteAttach,SW_SHOW);
+        ShowWindow(s_mg->bNoteSend,SW_SHOW);
     }
 }
 
@@ -1301,6 +1656,7 @@ static const wchar_t* mgCardTitle(int page){
         case PG_MSG:   return L"پیام به کارکنان";
         case PG_REQS:  return L"درخواست‌های تغییر";
         case PG_SAVED: return L"پیام‌های ذخیره‌شده";
+        case PG_BACKUP:return L"پشتیبان‌گیری و بازیابی";
     }
     return L"";
 }
@@ -1473,40 +1829,104 @@ static void mgPaintReqs(HDC dc, HWND h){
     // starts at top so we push them with the layout — here we just label hints.
 }
 
+// ---- saved messages (LOCAL notes) page -------------------------------------
+//  Stored locally per machine/user (data\local_notes_<user>.dat) — NEVER sent
+//  over the network. Both staff and management have their own private area.
+static int mgNoteListTop(HWND h){ RECT a=mgContentRect(h); return a.top+mgHeadH()+S(12)+S(70); }
+static int mgNoteRowH(){ return S(78); }
+static RECT mgNoteRowRect(HWND h,int i){
+    RECT a=mgContentRect(h);
+    int y=mgNoteListTop(h)+i*(mgNoteRowH()+S(8));
+    RECT r={a.left+S(12),y,a.right-S(12),y+mgNoteRowH()}; return r;
+}
+// delete button + thumbnail rects within a note row
+static RECT mgNoteDelRect(RECT row){ RECT b={row.left+S(12),row.bottom-S(34),row.left+S(82),row.bottom-S(10)}; return b; }
+static RECT mgNoteImgRect(RECT row){ int s=S(54); RECT b={row.right-S(12)-s,row.top+S(12),row.right-S(12),row.top+S(12)+s}; return b; }
 static void mgPaintSaved(HDC dc, HWND h){
     RECT a=mgContentRect(h);
     int top=a.top+mgHeadH()+S(12);
-    if(!savedMsgsEnabled()){
-        gpRoundRectBg(dc,(RECT){a.left+S(12),top,a.right-S(12),top+S(70)},S(12),
-                      g_theme.surface,g_theme.border,g_theme.bg);
+    // intro / hint card (sits above the compose row controls)
+    SetTextColor(dc,g_theme.textDim); SelectObject(dc,g_fSmall);
+    RECT hint={a.left+S(12),top+S(58),a.right-S(12),top+S(70)};
+    std::wstring at = s_mg->noteAttach.empty()? std::wstring() : L"   •   پیوست: ✓";
+    DrawTextW(dc,(L"یادداشت‌ها فقط روی همین رایانه ذخیره می‌شوند و در شبکه منتقل نمی‌گردند."+at).c_str(),
+        -1,&hint,DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+    auto notes=loadLocalNotes(g_session.user.username);
+    if(notes.empty()){
         SetTextColor(dc,g_theme.textDim); SelectObject(dc,g_fUI);
-        RECT er={a.left+S(24),top,a.right-S(24),top+S(70)};
-        DrawTextW(dc,L"قابلیت «پیام‌های ذخیره‌شده» غیرفعال است. آن را از تنظیمات فعال کنید.",-1,&er,
-            DT_CENTER|DT_WORDBREAK|DT_RTLREADING|DT_NOPREFIX);
+        RECT er={a.left,mgNoteListTop(h)+S(30),a.right,mgNoteListTop(h)+S(70)};
+        DrawTextW(dc,L"یادداشت ذخیره‌شده‌ای وجود ندارد.",-1,&er,
+            DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
         return;
     }
-    auto msgs=loadSavedMsgs();
-    if(msgs.empty()){
-        SetTextColor(dc,g_theme.textDim); SelectObject(dc,g_fUI);
-        RECT er={a.left,top+S(40),a.right,top+S(80)};
-        DrawTextW(dc,L"پیام ذخیره‌شده‌ای وجود ندارد.",-1,&er,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
-        return;
+    for(int i=0;i<(int)notes.size();i++){
+        RECT r=mgNoteRowRect(h,i); if(r.top>=a.bottom-S(16)) break;
+        bool hot=(s_mg->noteHot==i);
+        gpRoundRectBg(dc,r,S(12),g_theme.surface, hot?g_infoAccent:g_theme.border, g_theme.bg);
+        // time header
+        SetTextColor(dc,g_infoAccent2); SelectObject(dc,g_fSmall);
+        RECT hr={r.left+S(14),r.top+S(8),r.right-S(80),r.top+S(28)};
+        DrawTextW(dc,notes[i].time.c_str(),-1,&hr,
+            DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+        // body text
+        SetTextColor(dc,g_theme.text); SelectObject(dc,g_fUI);
+        bool hasImg=!notes[i].attachPath.empty();
+        int bodyR = hasImg ? r.right-S(80) : r.right-S(14);
+        RECT br={r.left+S(90),r.top+S(28),bodyR,r.bottom-S(8)};
+        std::wstring body=notes[i].text;
+        DrawTextW(dc,body.c_str(),-1,&br,
+            DT_RIGHT|DT_WORDBREAK|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS|DT_EDITCONTROL);
+        // image thumbnail (click → open/enlarge)
+        if(hasImg){
+            RECT ir=mgNoteImgRect(r);
+            if(!gpDrawImageFileCircle(dc,notes[i].attachPath,ir)){
+                gpRoundRectBg(dc,ir,S(8),g_theme.surface2,g_theme.border,g_theme.surface);
+                RECT ic={ir.left+S(12),ir.top+S(12),ir.right-S(12),ir.bottom-S(12)};
+                drawIcon(dc,ICO_ID,ic,g_theme.textDim,S(2));
+            }
+        }
+        // delete button
+        RECT dl=mgNoteDelRect(r);
+        gpRoundRect(dc,dl,S(8),g_theme.surface2,g_theme.border,255);
+        SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.danger);
+        DrawTextW(dc,L"حذف",-1,&dl,DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
     }
-    int y=top;
-    for(int i=0;i<(int)msgs.size() && y<a.bottom-S(20);i++){
-        RECT r={a.left+S(12),y,a.right-S(12),y+S(72)};
-        gpRoundRectBg(dc,r,S(12),g_theme.surface,g_theme.border,g_theme.bg);
-        SetTextColor(dc,g_theme.text); SelectObject(dc,g_fUIB);
-        RECT hr={r.left+S(14),r.top+S(8),r.right-S(14),r.top+S(30)};
-        std::wstring head=msgs[i].from+L"  ←  "+msgs[i].to+L"   ("+msgs[i].time+L")";
-        DrawTextW(dc,head.c_str(),-1,&hr,DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_WORD_ELLIPSIS|DT_NOPREFIX);
-        SetTextColor(dc,g_theme.textDim); SelectObject(dc,g_fSmall);
-        RECT br={r.left+S(14),r.top+S(32),r.right-S(14),r.bottom-S(6)};
-        std::wstring body=msgs[i].text;
-        if(!msgs[i].attachPath.empty()) body=L"📎 "+body;
-        DrawTextW(dc,body.c_str(),-1,&br,DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_WORD_ELLIPSIS|DT_NOPREFIX);
-        y+=S(72)+S(8);
-    }
+}
+
+// ---- backup page: an intro + a big «باز کردن مدیریت پشتیبان» action --------
+static RECT mgBackupBtnRect(HWND h){
+    RECT a=mgContentRect(h);
+    int top=a.top+mgHeadH()+S(120);
+    int w=S(320);
+    RECT r={ (a.left+a.right)/2-w/2, top, (a.left+a.right)/2+w/2, top+S(56) };
+    return r;
+}
+static void mgPaintBackup(HDC dc, HWND h){
+    RECT a=mgContentRect(h);
+    int top=a.top+mgHeadH()+S(16);
+    // intro card
+    RECT ib={a.left+S(16),top,a.right-S(16),top+S(84)};
+    gpRoundRectBg(dc,ib,S(14),g_theme.surface,g_theme.border,g_theme.bg);
+    RECT ic={ib.right-S(60),ib.top+S(24),ib.right-S(20),ib.top+S(64)};
+    drawIcon(dc,ICO_REFRESH,ic,g_theme.accent,S(2));
+    SetTextColor(dc,g_theme.text); SelectObject(dc,g_fUIB);
+    RECT t1={ib.left+S(16),ib.top+S(12),ib.right-S(70),ib.top+S(40)};
+    DrawTextW(dc,L"پشتیبان‌گیری و بازیابی اطلاعات بیماران",-1,&t1,
+        DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+    SetTextColor(dc,g_theme.textDim); SelectObject(dc,g_fSmall);
+    RECT t2={ib.left+S(16),ib.top+S(40),ib.right-S(70),ib.bottom-S(8)};
+    DrawTextW(dc,L"تهیهٔ نسخهٔ پشتیبان کامل، یا بازیابی کامل/انتخابی از فایل‌های پشتیبان (شامل پشتیبان‌های حجیم متین‌طب). عملیات سنگین در پس‌زمینه اجرا می‌شود.",
+        -1,&t2,DT_RIGHT|DT_WORDBREAK|DT_RTLREADING|DT_NOPREFIX);
+    // big open button
+    RECT r=mgBackupBtnRect(h);
+    bool hot=(s_mg&&s_mg->hot==MG_BACKUP);
+    gpRoundRect(dc,r,S(10), hot?g_theme.accentHover:g_theme.accent, g_theme.accent,255);
+    RECT bi={r.left+S(16),r.top+S(14),r.left+S(44),r.bottom-S(14)};
+    drawIcon(dc,ICO_SAVE,bi,g_theme.accentText,S(2));
+    SetTextColor(dc,g_theme.accentText); SelectObject(dc,g_fBig);
+    RECT bl={r.left+S(48),r.top,r.right-S(12),r.bottom};
+    DrawTextW(dc,L"باز کردن مدیریت پشتیبان",-1,&bl,
+        DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
 }
 
 // ---- the dashboard shell: nav rail (right) + content card (left) -----------
@@ -1562,6 +1982,7 @@ static void mgPaintShell(HDC dc, HWND h){
             case PG_MSG:   mgPaintMsg(dc,h);   break;
             case PG_REQS:  mgPaintReqs(dc,h);  break;
             case PG_SAVED: mgPaintSaved(dc,h); break;
+            case PG_BACKUP:mgPaintBackup(dc,h);break;
         }
         if(!s_mg->msg.empty()){
             SetTextColor(dc,s_mg->msgCol); SelectObject(dc,g_fSmall);
@@ -1587,6 +2008,8 @@ static int mgHit(HWND h, POINT pt){
         for(int i=0;i<(int)s_mg->cats.size();i++){ RECT r=mgSecCardRect(h,i); if(PtInRect(&r,pt)) return MG_CARD_BASE+i; }
     } else if(s_mg->page==PG_EMPS){
         for(int i=0;i<(int)s_mg->emps.size();i++){ RECT r=mgEmpRowRect(h,i); if(PtInRect(&r,pt)) return MG_DETAIL_BASE+i; }
+    } else if(s_mg->page==PG_BACKUP){
+        RECT r=mgBackupBtnRect(h); if(PtInRect(&r,pt)) return MG_BACKUP;
     }
     return 0;
 }
@@ -1653,6 +2076,14 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         s_mg->bMsg =createFlatButton(h,MG_MSG,L"نوشتن پیام",ICO_BELL,BS_PRIMARY,0,0,10,10);
         s_mg->bReqs=createFlatButton(h,MG_REQS,L"درخواست‌های تغییر تنظیمات",ICO_GEAR,BS_INFO,0,0,10,10);
         s_mg->bProfReqs=createFlatButton(h,MG_PROFREQS,L"درخواست‌های تغییر پروفایل",ICO_USER,BS_INFO,0,0,10,10);
+        // saved messages (local notes) controls
+        s_mg->eNote=CreateWindowExW(0,L"EDIT",L"",
+            WS_CHILD|WS_TABSTOP|ES_AUTOVSCROLL|ES_MULTILINE|WS_VSCROLL,
+            0,0,10,10,h,(HMENU)MG_E_NOTE,g_hInst,0);
+        s_mg->bNoteAttach=createFlatButton(h,MG_NOTE_ATTACH,L"تصویر",ICO_ID,BS_OUTLINE,0,0,10,10);
+        s_mg->bNoteSend=createFlatButton(h,MG_NOTE_SEND,L"ذخیره",ICO_SAVE,BS_PRIMARY,0,0,10,10);
+        s_mg->noteHot=-1;
+        SendMessageW(s_mg->eNote,WM_SETFONT,(WPARAM)g_fUI,TRUE);
         HWND eds[3]={s_mg->eName,s_mg->eMgr,s_mg->eId};
         for(HWND e:eds){ SendMessageW(e,WM_SETFONT,(WPARAM)g_fUI,TRUE); enableEnterNavigation(e); }
         g_hManage=h;
@@ -1695,6 +2126,33 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         case MG_MSG:  openMsgCompose(h); break;
         case MG_REQS: openSetReqs(h); break;
         case MG_PROFREQS: openProfReqs(h); break;
+        case MG_NOTE_ATTACH:{
+            wchar_t file[1024]={0};
+            OPENFILENAMEW ofn={0}; ofn.lStructSize=sizeof(ofn); ofn.hwndOwner=h;
+            ofn.lpstrFilter=L"تصاویر\0*.jpg;*.jpeg;*.png;*.gif;*.bmp\0همهٔ فایل‌ها\0*.*\0\0";
+            ofn.lpstrFile=file; ofn.nMaxFile=1024;
+            ofn.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST;
+            if(GetOpenFileNameW(&ofn)){
+                std::wstring stored=copyAttachmentLocal(file);
+                s_mg->noteAttach = stored.empty()? std::wstring(file) : stored;
+                SetWindowTextW(s_mg->bNoteAttach,L"تصویر ✓");
+                InvalidateRect(h,NULL,FALSE);
+            }
+            break; }
+        case MG_NOTE_SEND:{
+            wchar_t buf[4096]={0}; GetWindowTextW(s_mg->eNote,buf,4096);
+            std::wstring txt=trim(buf);
+            if(txt.empty() && s_mg->noteAttach.empty()){
+                MessageBoxW(h,L"متن یادداشت یا تصویری وارد کنید.",L"پیام‌های ذخیره‌شده",
+                    MB_ICONINFORMATION|MB_OK);
+                break;
+            }
+            pushLocalNote(g_session.user.username,txt,s_mg->noteAttach);
+            s_mg->noteAttach.clear();
+            SetWindowTextW(s_mg->eNote,L"");
+            SetWindowTextW(s_mg->bNoteAttach,L"تصویر");
+            InvalidateRect(h,NULL,TRUE);
+            break; }
         }
         return 0; }
     case WM_MOUSEMOVE:{ POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
@@ -1704,11 +2162,39 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         bool ch=false;
         if(s_mg){ if(s_mg->hot!=hr){ s_mg->hot=hr; ch=true; }
                   if(s_mg->navHot!=nh){ s_mg->navHot=nh; ch=true; } }
+        if(s_mg && s_mg->page==PG_SAVED){
+            int onh=s_mg->noteHot; s_mg->noteHot=-1;
+            int cnt=localNoteCount(g_session.user.username);
+            for(int i=0;i<cnt;i++){ RECT r=mgNoteRowRect(h,i);
+                if(PtInRect(&r,pt)){ s_mg->noteHot=i; break; } }
+            if(onh!=s_mg->noteHot) ch=true;
+        }
         if(ch) InvalidateRect(h,NULL,FALSE);
         return 0; }
     case WM_LBUTTONDOWN:{ POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
+        // saved-messages page: note delete / image-open hit-tests first
+        if(s_mg && s_mg->page==PG_SAVED){
+            auto notes=loadLocalNotes(g_session.user.username);
+            for(int i=0;i<(int)notes.size();i++){
+                RECT r=mgNoteRowRect(h,i);
+                RECT dl=mgNoteDelRect(r), im=mgNoteImgRect(r);
+                if(PtInRect(&dl,pt)){
+                    if(MessageBoxW(h,L"این یادداشت حذف شود؟",L"حذف یادداشت",
+                        MB_ICONQUESTION|MB_YESNO|MB_DEFBUTTON2)==IDYES){
+                        deleteLocalNote(g_session.user.username,i);
+                        InvalidateRect(h,NULL,TRUE);
+                    }
+                    return 0;
+                }
+                if(!notes[i].attachPath.empty() && PtInRect(&im,pt)){
+                    ShellExecuteW(h,L"open",notes[i].attachPath.c_str(),NULL,NULL,SW_SHOWNORMAL);
+                    return 0;
+                }
+            }
+        }
         int id=mgHit(h,pt);
-        if(id>=MG_NAV_BASE && id<MG_NAV_BASE+PG_COUNT){ mgGoPage(h,id-MG_NAV_BASE); }
+        if(id==MG_BACKUP){ openBackupManager(h); }
+        else if(id>=MG_NAV_BASE && id<MG_NAV_BASE+PG_COUNT){ mgGoPage(h,id-MG_NAV_BASE); }
         else if(id>=MG_QA_BASE && id<MG_QA_BASE+4){
             int i=id-MG_QA_BASE;
             if(i==0){ mgGoPage(h,PG_SECTS); s_mg->secAddMode=true; mgUpdateAutoIdPreview(); mgLayout(h); InvalidateRect(h,NULL,TRUE); }
