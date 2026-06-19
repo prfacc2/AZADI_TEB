@@ -690,7 +690,7 @@ static std::vector<KMsg>     s_cartMsgs;      // the list shown (sorted)
 static std::vector<int>      s_cartNF;        // display-pos → plain newest-first idx
 // v1.7.0 detail-view buttons (rebuilt each paint of the details screen)
 enum { CART_BTN_NONE=0, CART_BTN_MARK=1, CART_BTN_TOGGLEREAD=2,
-       CART_BTN_DELETE=3, CART_BTN_BACK=4 };
+       CART_BTN_DELETE=3, CART_BTN_BACK=4, CART_BTN_SAVE=5 };
 struct CartBtn { RECT r; int id; };
 static std::vector<CartBtn> s_cartBtns;      // detail-view button hit map
 // v1.8.0: the archive toggle hotspot in the cartable header (top-LEFT corner).
@@ -819,13 +819,19 @@ static void drawCartDetail(HDC dc, const RECT& rc, TabPage* t){
     int by=panel.bottom-S(54), bh=S(38);
     int bx=panel.left+S(24);            // RTL: lay out from LEFT going right
     struct Btn{int id; const wchar_t* lbl; COLORREF fill; COLORREF txt;};
-    Btn defs[]={
+    std::vector<Btn> defs={
         {CART_BTN_BACK,       L"بازگشت",            g_theme.surface2, g_theme.text},
         {CART_BTN_DELETE,     L"حذف پیام",          g_theme.danger,   RGB(255,255,255)},
         {CART_BTN_TOGGLEREAD, mm.seen?L"خوانده":L"علامت خوانده‌شده",
                               g_theme.surface2, g_theme.text},
         {CART_BTN_MARK,       L"خواندن",            g_theme.accent,   g_theme.accentText},
     };
+    // v1.9.5: when «پیام‌های ذخیره‌شده» is enabled, the message viewer offers a
+    // SAVE button that archives this exact message into the saved-messages store
+    // (data\saved_msgs.dat). Hidden in the archive view itself (already saved).
+    if(savedMsgsEnabled() && !(t && t->cartShowArchive)){
+        defs.push_back({CART_BTN_SAVE, L"ذخیره در پیام‌ها", g_theme.success, RGB(255,255,255)});
+    }
     for(auto& d : defs){
         SelectObject(dc,g_fUIB);
         SIZE sz; GetTextExtentPoint32W(dc,d.lbl,(int)wcslen(d.lbl),&sz);
@@ -1690,6 +1696,25 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
                         t->cartDetail=false; t->cartHotBtn=0;
                         InvalidateRect(h,NULL,FALSE);
                     }
+                } else if(bid==CART_BTN_SAVE){
+                    // archive THIS message into the saved-messages store so it is
+                    // kept even after it is deleted from the live inbox.
+                    int sel=-1;
+                    for(int i=0;i<(int)s_cartNF.size();i++)
+                        if(s_cartNF[i]==t->cartSelNF){ sel=i; break; }
+                    if(sel<0 && t->cartSelDisp>=0 && t->cartSelDisp<(int)s_cartMsgs.size())
+                        sel=t->cartSelDisp;
+                    if(savedMsgsEnabled() && sel>=0 && sel<(int)s_cartMsgs.size()){
+                        KMsg& mm=s_cartMsgs[sel];
+                        std::wstring from=mm.from.empty()?std::wstring(L"مدیریت درمانگاه"):mm.from;
+                        pushSavedMsg(from, mm.to, mm.text, mm.type, L"");
+                        MessageBoxW(h,L"پیام در «پیام‌های ذخیره‌شده» بایگانی شد.",
+                            L"ذخیره شد",MB_OK|MB_ICONINFORMATION);
+                    } else {
+                        MessageBoxW(h,L"بایگانی پیام‌ها در تنظیمات غیرفعال است.",
+                            L"غیرفعال",MB_OK|MB_ICONWARNING);
+                    }
+                    InvalidateRect(h,NULL,FALSE);
                 }
                 return 0;
             }
