@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.9.6"
+#define APP_VERSION_W   L"1.9.7"
 #define APP_NAME_W      L"\u0622\u0632\u0627\u062f\u06cc \u0637\u0628"   // آزادی طب
 #define APP_CLASS_W     L"AzadiTebFrame"
 
@@ -301,6 +301,9 @@ void openPrintDesigner(HWND owner, int sectionIdx);
 //  Render the saved design for a section onto a printer DC for a real receipt.
 //  Returns false if no design exists (caller falls back to the classic layout).
 bool printDesignedReceipt(const ReceptionRecord& r, int sectionIdx, HWND owner);
+//  Pulse the cash drawer connected to the configured printer (ESC/POS kick),
+//  but only when the «باز کردن کشوی پول» option is enabled in printer settings.
+void kickCashDrawer();
 
 // --------------------------------------------------------------- employees --
 //  Department categories + employee directory (management panel).

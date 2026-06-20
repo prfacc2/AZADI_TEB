@@ -1528,6 +1528,7 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 // back to the classic GDI receipt if no design exists.
                 auto doPrint=[&](const ReceptionRecord& rec){
                     if(!printDesignedReceipt(rec,0,h)) printReceipt(rec,2,h);
+                    kickCashDrawer();   // pulse drawer if enabled in printer settings
                 };
                 if(getSetting(L"auto_print",L"0")==L"1"){
                     doPrint(r);

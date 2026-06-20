@@ -456,11 +456,39 @@ static std::wstring currentPrinter(){
     return L"";
 }
 
+// Send the standard ESC/POS «kick drawer» pulse (ESC p m t1 t2) straight to the
+// configured printer via the spooler RAW data type. Only fires when the cash
+// drawer option is enabled in the printer settings; silently no-ops otherwise.
+void kickCashDrawer(){
+    if(getSetting(L"cash_drawer",L"0")!=L"1") return;
+    std::wstring prn=currentPrinter();
+    if(prn.empty()) return;
+    HANDLE hp=NULL;
+    if(!OpenPrinterW((LPWSTR)prn.c_str(),&hp,NULL) || !hp) return;
+    DOC_INFO_1W di; di.pDocName=(LPWSTR)L"AzadiTeb-Drawer";
+    di.pOutputFile=NULL; di.pDatatype=(LPWSTR)L"RAW";
+    if(StartDocPrinterW(hp,1,(LPBYTE)&di)){
+        StartPagePrinter(hp);
+        // ESC p 0 25 250  — pulse pin 2 (most common); a 2nd kick for pin 5.
+        BYTE kick[]={0x1B,0x70,0x00,0x19,0xFA, 0x1B,0x70,0x01,0x19,0xFA};
+        DWORD wr=0; WritePrinter(hp,kick,sizeof(kick),&wr);
+        EndPagePrinter(hp); EndDocPrinter(hp);
+    }
+    ClosePrinter(hp);
+}
+
 // =================================================== printer settings dialog =
 #define PS_CLASS L"AzPrinterCfg"
 enum {
     PSB_CLOSE=1, PSB_TEST, PSB_ADV, PSB_DESIGN, PSB_A4, PSB_A5,
-    PSB_FIT, PSB_FILL, PSB_SEC_PREV, PSB_SEC_NEXT, PSB_PRINTER_BASE=200
+    PSB_P80, PSB_P58,                 // 80mm / 58mm thermal roll
+    PSB_FIT, PSB_FILL, PSB_SEC_PREV, PSB_SEC_NEXT,
+    PSB_COPIES_DN, PSB_COPIES_UP,     // copies − / +
+    PSB_SECEN,                        // per-section enable toggle
+    PSB_AUTOPRINT,                    // auto-print receipt on save
+    PSB_DRAWER,                       // open cash drawer after print
+    PSB_LOGO,                         // print clinic logo/header
+    PSB_PRINTER_BASE=200
 };
 
 struct PrnState {
@@ -468,15 +496,19 @@ struct PrnState {
     int  hot;
     std::vector<std::wstring> printers;
     std::wstring sel;       // selected printer
-    int  paper;             // 0 A4 / 1 A5
+    int  paper;             // 0 A4 / 1 A5 / 2 80mm / 3 58mm
     int  mode;              // 0 fit / 1 fill
     int  section;           // section being edited (for the design button)
+    int  copies;           // number of copies per print (1..5)
+    bool autoPrint;        // auto-print receipt right after admission/save
+    bool drawer;           // pulse the cash drawer after a successful print
+    bool logo;             // print the clinic header/logo band
 };
 static HWND s_prn=NULL;
 static PrnState* s_ps=NULL;
 
-static int prnCardW(){ return S(560); }
-static int prnCardH(){ return S(620); }
+static int prnCardW(){ return S(580); }
+static int prnCardH(){ return S(820); }
 static RECT prnCard(HWND h){
     RECT rc; GetClientRect(h,&rc);
     int w=prnCardW(), hh=prnCardH();
@@ -594,6 +626,37 @@ static void prnPaint(HWND h, HDC dc0){
     }
 
     int by=ly+maxRows*lh+S(8);
+    // shared chip drawer used across all option rows
+    auto chip=[&](int id,const wchar_t* t,RECT r,bool on){
+        bool hov=(s_ps->hot==id);
+        gpRoundRect(dc,r,S(9),on?g_theme.accent:(hov?g_theme.hover:g_theme.surface2),
+            on?g_theme.accent:g_theme.border,255);
+        SetTextColor(dc,on?g_theme.accentText:g_theme.text);
+        SelectObject(dc,g_fUIB);
+        DrawTextW(dc,t,-1,&r,DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+    };
+    // a labelled on/off pill toggle (RTL: label on the right, pill on the left)
+    auto toggleRow=[&](int id,const wchar_t* label,bool on,int yy){
+        SetTextColor(dc,g_theme.text); SelectObject(dc,g_fUI);
+        RECT lr={c.left+S(96),yy,c.right-S(20),yy+S(30)};
+        DrawTextW(dc,label,-1,&lr,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+        RECT pill={c.left+S(20),yy+S(2),c.left+S(86),yy+S(28)};
+        bool hov=(s_ps->hot==id);
+        gpRoundRect(dc,pill,(pill.bottom-pill.top)/2,
+            on?g_theme.success:(hov?g_theme.hover:g_theme.surface2),
+            on?g_theme.success:g_theme.border,255);
+        int kr=(pill.bottom-pill.top)/2-S(3);
+        int kcx= on? (pill.right-S(3)-kr) : (pill.left+S(3)+kr);
+        int kcy=(pill.top+pill.bottom)/2;
+        RECT kn={kcx-kr,kcy-kr,kcx+kr,kcy+kr};
+        gpRoundRect(dc,kn,kr,RGB(255,255,255),CLR_INVALID,255);
+        SetTextColor(dc,on?g_theme.accentText:g_theme.textDim);
+        SelectObject(dc,g_fSmall);
+        RECT tt={pill.left+(on?S(6):S(20)),pill.top,pill.right-(on?S(20):S(6)),pill.bottom};
+        DrawTextW(dc,on?L"روشن":L"خاموش",-1,&tt,
+            DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+    };
+
     // ---- section selector (each section keeps its OWN print design) ----
     SetTextColor(dc,g_theme.textDim); SelectObject(dc,g_fSmall);
     { RECT sl={c.left+S(20),by,c.right-S(20),by+S(20)};
@@ -618,29 +681,68 @@ static void prnPaint(HWND h, HDC dc0){
             DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
     }
     by+=S(44);
-    // paper toggles
+
+    // ---- paper sizes (A4 / A5 / 80mm / 58mm thermal) ----
     SetTextColor(dc,g_theme.textDim); SelectObject(dc,g_fSmall);
-    RECT pl={c.left+S(20),by,c.right-S(20),by+S(20)};
-    DrawTextW(dc,L"اندازهٔ کاغذ و حالت تطبیق:",-1,&pl,
-        DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+    { RECT pl={c.left+S(20),by,c.right-S(20),by+S(20)};
+      DrawTextW(dc,L"اندازهٔ کاغذ:",-1,&pl,
+        DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX); }
     by+=S(24);
-    auto chip=[&](int id,const wchar_t* t,RECT r,bool on){
-        bool hov=(s_ps->hot==id);
-        gpRoundRect(dc,r,S(9),on?g_theme.accent:(hov?g_theme.hover:g_theme.surface2),
-            on?g_theme.accent:g_theme.border,255);
-        SetTextColor(dc,on?g_theme.accentText:g_theme.text);
-        SelectObject(dc,g_fUIB);
-        DrawTextW(dc,t,-1,&r,DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
-    };
-    int cw4=(c.right-c.left-S(52))/4, cx=c.right-S(20)-cw4;
-    RECT rA4={cx,by,cx+cw4,by+S(34)};            chip(PSB_A4,L"A4",rA4,s_ps->paper==0);
-    cx-=cw4+S(4);
-    RECT rA5={cx,by,cx+cw4,by+S(34)};            chip(PSB_A5,L"A5",rA5,s_ps->paper==1);
-    cx-=cw4+S(4);
-    RECT rFit={cx,by,cx+cw4,by+S(34)};           chip(PSB_FIT,L"متناسب",rFit,s_ps->mode==0);
-    cx-=cw4+S(4);
-    RECT rFill={cx,by,cx+cw4,by+S(34)};          chip(PSB_FILL,L"پرکردن",rFill,s_ps->mode==1);
+    {
+        int n=4, gap=S(4);
+        int cwN=(c.right-c.left-S(40)-gap*(n-1))/n;
+        int cx=c.right-S(20)-cwN;
+        RECT rA4 ={cx,by,cx+cwN,by+S(34)}; chip(PSB_A4 ,L"A4",rA4 ,s_ps->paper==0); cx-=cwN+gap;
+        RECT rA5 ={cx,by,cx+cwN,by+S(34)}; chip(PSB_A5 ,L"A5",rA5 ,s_ps->paper==1); cx-=cwN+gap;
+        RECT r80 ={cx,by,cx+cwN,by+S(34)}; chip(PSB_P80,L"رول ۸۰",r80,s_ps->paper==2); cx-=cwN+gap;
+        RECT r58 ={cx,by,cx+cwN,by+S(34)}; chip(PSB_P58,L"رول ۵۸",r58,s_ps->paper==3);
+    }
+    by+=S(44);
+
+    // ---- fit / fill ----
+    SetTextColor(dc,g_theme.textDim); SelectObject(dc,g_fSmall);
+    { RECT pl={c.left+S(20),by,c.right-S(20),by+S(20)};
+      DrawTextW(dc,L"حالت تطبیق با کاغذ:",-1,&pl,
+        DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX); }
+    by+=S(24);
+    {
+        int cwH=(c.right-c.left-S(44))/2;
+        int cx=c.right-S(20)-cwH;
+        RECT rFit ={cx,by,cx+cwH,by+S(34)}; chip(PSB_FIT ,L"متناسب",rFit ,s_ps->mode==0); cx-=cwH+S(4);
+        RECT rFill={cx,by,cx+cwH,by+S(34)}; chip(PSB_FILL,L"پرکردن",rFill,s_ps->mode==1);
+    }
+    by+=S(44);
+
+    // ---- number of copies (− N +) ----
+    SetTextColor(dc,g_theme.text); SelectObject(dc,g_fUI);
+    { RECT lr={c.left+S(150),by,c.right-S(20),by+S(34)};
+      DrawTextW(dc,L"تعداد نسخهٔ چاپ:",-1,&lr,
+        DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX); }
+    {
+        int bwn=S(40);
+        RECT rDn={c.left+S(20),by,c.left+S(20)+bwn,by+S(34)};
+        RECT rUp={c.left+S(20)+bwn+S(46)+S(4),by,c.left+S(20)+bwn+S(46)+S(4)+bwn,by+S(34)};
+        RECT rNum={rDn.right+S(2),by,rUp.left-S(2),by+S(34)};
+        bool hd=(s_ps->hot==PSB_COPIES_DN), hu=(s_ps->hot==PSB_COPIES_UP);
+        gpRoundRect(dc,rDn,S(9),hd?g_theme.hover:g_theme.surface2,g_theme.border,255);
+        gpRoundRect(dc,rUp,S(9),hu?g_theme.hover:g_theme.surface2,g_theme.border,255);
+        gpRoundRect(dc,rNum,S(9),g_theme.inputBg,g_theme.accent,255);
+        SetTextColor(dc,g_theme.text); SelectObject(dc,g_fUIB);
+        DrawTextW(dc,L"−",-1,&rDn,DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX);
+        DrawTextW(dc,L"+",-1,&rUp,DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX);
+        wchar_t nb[8]; swprintf(nb,8,L"%d",s_ps->copies);
+        SetTextColor(dc,g_theme.accent);
+        DrawTextW(dc,toFaDigits(nb).c_str(),-1,&rNum,
+            DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+    }
     by+=S(46);
+
+    // ---- toggles: section-enabled / auto-print / cash drawer / logo ----
+    bool secOn = getSetting(L"sec_enabled_"+std::to_wstring(s_ps->section),L"1")!=L"0";
+    toggleRow(PSB_SECEN,    L"چاپ این بخش فعال باشد",            secOn,         by); by+=S(36);
+    toggleRow(PSB_AUTOPRINT,L"چاپ خودکار قبض پس از ثبت",         s_ps->autoPrint, by); by+=S(36);
+    toggleRow(PSB_DRAWER,   L"باز کردن کشوی پول پس از چاپ",       s_ps->drawer,  by); by+=S(36);
+    toggleRow(PSB_LOGO,     L"چاپ سربرگ/لوگوی درمانگاه",         s_ps->logo,    by); by+=S(42);
 
     // action buttons
     auto btn=[&](int id,const wchar_t* t,int icon,RECT r,bool primary){
@@ -655,23 +757,16 @@ static void prnPaint(HWND h, HDC dc0){
         RECT nr={r.left+S(10),r.top,r.right-S(40),r.bottom};
         DrawTextW(dc,t,-1,&nr,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
     };
-    int bw=(c.right-c.left-S(52))/2;
+    int bw=(c.right-c.left-S(44))/2;
     RECT rTest={c.right-S(20)-bw,by,c.right-S(20),by+S(44)};
     btn(PSB_TEST,L"تست اتصال و چاپ",ICO_PRINT,rTest,false);
     RECT rAdv={c.left+S(20),by,c.left+S(20)+bw,by+S(44)};
     btn(PSB_ADV,L"تنظیمات پیشرفتهٔ درایور",ICO_GEAR,rAdv,false);
-    by+=S(54);
-    RECT rDes={c.left+S(20),by,c.right-S(20),by+S(48)};
+    by+=S(52);
+    RECT rDes={c.left+S(20),by,c.right-S(20),by+S(46)};
     std::wstring dl=std::wstring(L"طراحی و تنظیم چاپ بخش: ")+
         PRINT_SECTIONS[s_ps->section<N_PRINT_SECTIONS?s_ps->section:0];
     btn(PSB_DESIGN,dl.c_str(),ICO_RECEIPT,rDes,true);
-    by+=S(58);
-
-    // hint
-    SetTextColor(dc,g_theme.textDim); SelectObject(dc,g_fSmall);
-    RECT hr={c.left+S(20),by,c.right-S(20),by+S(40)};
-    DrawTextW(dc,L"چاپگر انتخاب‌شده حتی اگر پیش‌فرض ویندوز تغییر کند، ثابت می‌ماند.",
-        -1,&hr,DT_RIGHT|DT_WORDBREAK|DT_RTLREADING|DT_NOPREFIX);
 
     BitBlt(dc0,0,0,rc.right,rc.bottom,dc,0,0,SRCCOPY);
     SelectObject(dc,obm); DeleteObject(bmp); DeleteDC(dc);
@@ -689,7 +784,7 @@ static int prnHit(HWND h, POINT pt){
         if(PtInRect(&r,pt)) return PSB_PRINTER_BASE+i;
     }
     int by=ly+maxRows*lh+S(8);
-    // section selector row
+    // section selector row (label +24, controls 34h)
     by+=S(24);
     { int navW=S(40);
       RECT rPrev={c.left+S(20),by,c.left+S(20)+navW,by+S(34)};
@@ -697,18 +792,46 @@ static int prnHit(HWND h, POINT pt){
       if(PtInRect(&rPrev,pt)) return PSB_SEC_PREV;
       if(PtInRect(&rNext,pt)) return PSB_SEC_NEXT; }
     by+=S(44);
+    // paper sizes (label +24, then 4 chips)
     by+=S(24);
-    int cw4=(c.right-c.left-S(52))/4, cx=c.right-S(20)-cw4;
-    RECT rA4={cx,by,cx+cw4,by+S(34)};   if(PtInRect(&rA4,pt)) return PSB_A4;
-    cx-=cw4+S(4); RECT rA5={cx,by,cx+cw4,by+S(34)}; if(PtInRect(&rA5,pt)) return PSB_A5;
-    cx-=cw4+S(4); RECT rFit={cx,by,cx+cw4,by+S(34)}; if(PtInRect(&rFit,pt)) return PSB_FIT;
-    cx-=cw4+S(4); RECT rFill={cx,by,cx+cw4,by+S(34)}; if(PtInRect(&rFill,pt)) return PSB_FILL;
+    {
+        int n=4, gap=S(4);
+        int cwN=(c.right-c.left-S(40)-gap*(n-1))/n;
+        int cx=c.right-S(20)-cwN;
+        RECT rA4 ={cx,by,cx+cwN,by+S(34)}; if(PtInRect(&rA4 ,pt)) return PSB_A4;  cx-=cwN+gap;
+        RECT rA5 ={cx,by,cx+cwN,by+S(34)}; if(PtInRect(&rA5 ,pt)) return PSB_A5;  cx-=cwN+gap;
+        RECT r80 ={cx,by,cx+cwN,by+S(34)}; if(PtInRect(&r80 ,pt)) return PSB_P80; cx-=cwN+gap;
+        RECT r58 ={cx,by,cx+cwN,by+S(34)}; if(PtInRect(&r58 ,pt)) return PSB_P58;
+    }
+    by+=S(44);
+    // fit / fill (label +24, then 2 chips)
+    by+=S(24);
+    {
+        int cwH=(c.right-c.left-S(44))/2;
+        int cx=c.right-S(20)-cwH;
+        RECT rFit ={cx,by,cx+cwH,by+S(34)}; if(PtInRect(&rFit ,pt)) return PSB_FIT;  cx-=cwH+S(4);
+        RECT rFill={cx,by,cx+cwH,by+S(34)}; if(PtInRect(&rFill,pt)) return PSB_FILL;
+    }
+    by+=S(44);
+    // copies − N +
+    {
+        int bwn=S(40);
+        RECT rDn={c.left+S(20),by,c.left+S(20)+bwn,by+S(34)};
+        RECT rUp={c.left+S(20)+bwn+S(46)+S(4),by,c.left+S(20)+bwn+S(46)+S(4)+bwn,by+S(34)};
+        if(PtInRect(&rDn,pt)) return PSB_COPIES_DN;
+        if(PtInRect(&rUp,pt)) return PSB_COPIES_UP;
+    }
     by+=S(46);
-    int bw=(c.right-c.left-S(52))/2;
+    // four toggle rows (each pill is c.left+20 .. c.left+86, 28h, +36 step)
+    { RECT p1={c.left+S(20),by+S(2),c.left+S(86),by+S(28)};   if(PtInRect(&p1,pt)) return PSB_SECEN;     by+=S(36);
+      RECT p2={c.left+S(20),by+S(2),c.left+S(86),by+S(28)};   if(PtInRect(&p2,pt)) return PSB_AUTOPRINT; by+=S(36);
+      RECT p3={c.left+S(20),by+S(2),c.left+S(86),by+S(28)};   if(PtInRect(&p3,pt)) return PSB_DRAWER;    by+=S(36);
+      RECT p4={c.left+S(20),by+S(2),c.left+S(86),by+S(28)};   if(PtInRect(&p4,pt)) return PSB_LOGO;      by+=S(42); }
+    int bw=(c.right-c.left-S(44))/2;
     RECT rTest={c.right-S(20)-bw,by,c.right-S(20),by+S(44)}; if(PtInRect(&rTest,pt)) return PSB_TEST;
     RECT rAdv={c.left+S(20),by,c.left+S(20)+bw,by+S(44)};    if(PtInRect(&rAdv,pt)) return PSB_ADV;
-    by+=S(54);
-    RECT rDes={c.left+S(20),by,c.right-S(20),by+S(48)};       if(PtInRect(&rDes,pt)) return PSB_DESIGN;
+    by+=S(52);
+    RECT rDes={c.left+S(20),by,c.right-S(20),by+S(46)};       if(PtInRect(&rDes,pt)) return PSB_DESIGN;
     return 0;
 }
 
@@ -768,11 +891,48 @@ static LRESULT CALLBACK prnProc(HWND h, UINT m, WPARAM w, LPARAM l){
                     L"print_mode=fill",L"حالت چاپ: پرکننده")){
                 s_ps->mode=1; setSetting(L"print_mode",L"fill"); InvalidateRect(h,NULL,FALSE); }
             break;
+        case PSB_P80:
+            if(printerRequestGate(h,L"تغییر اندازهٔ کاغذ",L"تغییر اندازه کاغذ به رول حرارتی ۸۰ میلی‌متر",
+                    L"paper_size=80MM",L"اندازهٔ کاغذ: رول ۸۰")){
+                s_ps->paper=2; setSetting(L"paper_size",L"80MM"); InvalidateRect(h,NULL,FALSE); }
+            break;
+        case PSB_P58:
+            if(printerRequestGate(h,L"تغییر اندازهٔ کاغذ",L"تغییر اندازه کاغذ به رول حرارتی ۵۸ میلی‌متر",
+                    L"paper_size=58MM",L"اندازهٔ کاغذ: رول ۵۸")){
+                s_ps->paper=3; setSetting(L"paper_size",L"58MM"); InvalidateRect(h,NULL,FALSE); }
+            break;
         case PSB_SEC_PREV:
             s_ps->section=(s_ps->section+N_PRINT_SECTIONS-1)%N_PRINT_SECTIONS;
             InvalidateRect(h,NULL,FALSE); break;
         case PSB_SEC_NEXT:
             s_ps->section=(s_ps->section+1)%N_PRINT_SECTIONS;
+            InvalidateRect(h,NULL,FALSE); break;
+        case PSB_COPIES_DN:
+            if(s_ps->copies>1){ s_ps->copies--;
+                setSetting(L"print_copies",std::to_wstring(s_ps->copies));
+                InvalidateRect(h,NULL,FALSE); }
+            break;
+        case PSB_COPIES_UP:
+            if(s_ps->copies<5){ s_ps->copies++;
+                setSetting(L"print_copies",std::to_wstring(s_ps->copies));
+                InvalidateRect(h,NULL,FALSE); }
+            break;
+        case PSB_SECEN: {
+            std::wstring key=L"sec_enabled_"+std::to_wstring(s_ps->section);
+            bool now=getSetting(key,L"1")!=L"0";
+            setSetting(key, now?L"0":L"1");
+            InvalidateRect(h,NULL,FALSE); break; }
+        case PSB_AUTOPRINT:
+            s_ps->autoPrint=!s_ps->autoPrint;
+            setSetting(L"auto_print",s_ps->autoPrint?L"1":L"0");
+            InvalidateRect(h,NULL,FALSE); break;
+        case PSB_DRAWER:
+            s_ps->drawer=!s_ps->drawer;
+            setSetting(L"cash_drawer",s_ps->drawer?L"1":L"0");
+            InvalidateRect(h,NULL,FALSE); break;
+        case PSB_LOGO:
+            s_ps->logo=!s_ps->logo;
+            setSetting(L"print_logo",s_ps->logo?L"1":L"0");
             InvalidateRect(h,NULL,FALSE); break;
         case PSB_TEST: doTestPrint(h); break;
         case PSB_ADV:  doAdvanced(h); break;
@@ -801,9 +961,15 @@ void openPrinterSettings(HWND owner){
     s_ps->owner=owner; s_ps->hot=0;
     s_ps->printers=enumPrinters();
     s_ps->sel=currentPrinter();
-    s_ps->paper=(getSetting(L"paper_size",L"A5")==L"A4")?0:1;
+    { std::wstring ps=getSetting(L"paper_size",L"A5");
+      s_ps->paper = ps==L"A4"?0 : ps==L"80MM"?2 : ps==L"58MM"?3 : 1; }
     s_ps->mode =(getSetting(L"print_mode",L"fit")==L"fill")?1:0;
     s_ps->section=0;
+    { int cp=_wtoi(getSetting(L"print_copies",L"1").c_str());
+      if(cp<1)cp=1; if(cp>5)cp=5; s_ps->copies=cp; }
+    s_ps->autoPrint=getSetting(L"auto_print",L"0")==L"1";
+    s_ps->drawer   =getSetting(L"cash_drawer",L"0")==L"1";
+    s_ps->logo     =getSetting(L"print_logo",L"1")!=L"0";
     s_prn=CreateWindowExW(WS_EX_TOPMOST,PS_CLASS,L"",
         WS_POPUP|WS_VISIBLE|WS_CLIPCHILDREN,
         org.x,org.y,rc.right,rc.bottom,owner,NULL,g_hInst,NULL);
@@ -852,6 +1018,9 @@ static std::wstring itemText(const ReceptionRecord& r, const DItem& it){
 }
 
 bool printDesignedReceipt(const ReceptionRecord& r, int sectionIdx, HWND owner){
+    // honour the per-section enable toggle from the printer-settings dialog
+    if(getSetting(L"sec_enabled_"+std::to_wstring(sectionIdx),L"1")==L"0")
+        return false;
     Design d;
     if(!loadDesignFile(sectionIdx,d)){
         // try the per-section default if the user never saved one
@@ -888,6 +1057,12 @@ bool printDesignedReceipt(const ReceptionRecord& r, int sectionIdx, HWND owner){
         PRINT_SECTIONS[sectionIdx<N_PRINT_SECTIONS?sectionIdx:0];
     di.lpszDocName=docName.c_str();
     if(StartDocW(dc,&di)<=0){ DeleteDC(dc); return false; }
+
+    // number of copies (1..5) configured in the printer-settings dialog
+    int copies=_wtoi(getSetting(L"print_copies",L"1").c_str());
+    if(copies<1) copies=1; if(copies>5) copies=5;
+
+    for(int copy=0; copy<copies; ++copy){
     StartPage(dc);
     SetBkMode(dc,TRANSPARENT);
 
@@ -942,8 +1117,10 @@ bool printDesignedReceipt(const ReceptionRecord& r, int sectionIdx, HWND owner){
             SelectObject(dc,ob); SelectObject(dc,o); DeleteObject(p);
         }
     }
-
-    EndPage(dc); EndDoc(dc); DeleteDC(dc);
-    logLine(L"designed receipt printed for section "+std::to_wstring(sectionIdx));
+    EndPage(dc);
+    }  // end copies loop
+    EndDoc(dc); DeleteDC(dc);
+    logLine(L"designed receipt printed for section "+std::to_wstring(sectionIdx)
+            +L" ×"+std::to_wstring(copies));
     return true;
 }
