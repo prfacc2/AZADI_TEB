@@ -56,6 +56,12 @@ static bool printerRequestGate(HWND h, const std::wstring& title,
 // ------------------------------------------------------------- sections -----
 const wchar_t* PRINT_SECTIONS[] = {
     L"پذیرش درمانگاه",
+    L"نوبت‌دهی",
+    L"قبض / صورتحساب",
+    L"بیمه",
+    L"بیمه مکمل",
+    L"مبلغ نهایی",
+    L"نسخه پزشک",
     L"تزریقات",
     L"آزمایشگاه",
     L"داروخانه",
@@ -454,7 +460,7 @@ static std::wstring currentPrinter(){
 #define PS_CLASS L"AzPrinterCfg"
 enum {
     PSB_CLOSE=1, PSB_TEST, PSB_ADV, PSB_DESIGN, PSB_A4, PSB_A5,
-    PSB_FIT, PSB_FILL, PSB_PRINTER_BASE=200
+    PSB_FIT, PSB_FILL, PSB_SEC_PREV, PSB_SEC_NEXT, PSB_PRINTER_BASE=200
 };
 
 struct PrnState {
@@ -470,7 +476,7 @@ static HWND s_prn=NULL;
 static PrnState* s_ps=NULL;
 
 static int prnCardW(){ return S(560); }
-static int prnCardH(){ return S(560); }
+static int prnCardH(){ return S(620); }
 static RECT prnCard(HWND h){
     RECT rc; GetClientRect(h,&rc);
     int w=prnCardW(), hh=prnCardH();
@@ -588,6 +594,30 @@ static void prnPaint(HWND h, HDC dc0){
     }
 
     int by=ly+maxRows*lh+S(8);
+    // ---- section selector (each section keeps its OWN print design) ----
+    SetTextColor(dc,g_theme.textDim); SelectObject(dc,g_fSmall);
+    { RECT sl={c.left+S(20),by,c.right-S(20),by+S(20)};
+      DrawTextW(dc,L"بخش/دپارتمان چاپ (هر بخش طراحی مستقل دارد):",-1,&sl,
+          DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX); }
+    by+=S(24);
+    {
+        int navW=S(40);
+        RECT rPrev={c.left+S(20),by,c.left+S(20)+navW,by+S(34)};
+        RECT rNext={c.right-S(20)-navW,by,c.right-S(20),by+S(34)};
+        RECT rMid ={rPrev.right+S(6),by,rNext.left-S(6),by+S(34)};
+        bool hp=(s_ps->hot==PSB_SEC_PREV), hn=(s_ps->hot==PSB_SEC_NEXT);
+        gpRoundRect(dc,rPrev,S(9),hp?g_theme.hover:g_theme.surface2,g_theme.border,255);
+        gpRoundRect(dc,rNext,S(9),hn?g_theme.hover:g_theme.surface2,g_theme.border,255);
+        SetTextColor(dc,g_theme.text); SelectObject(dc,g_fUIB);
+        DrawTextW(dc,L"‹",-1,&rPrev,DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX);
+        DrawTextW(dc,L"›",-1,&rNext,DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX);
+        gpRoundRect(dc,rMid,S(9),g_theme.inputBg,g_theme.accent,255);
+        SetTextColor(dc,g_theme.accent); SelectObject(dc,g_fUIB);
+        int sc=s_ps->section; if(sc<0||sc>=N_PRINT_SECTIONS) sc=0;
+        DrawTextW(dc,PRINT_SECTIONS[sc],-1,&rMid,
+            DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+    }
+    by+=S(44);
     // paper toggles
     SetTextColor(dc,g_theme.textDim); SelectObject(dc,g_fSmall);
     RECT pl={c.left+S(20),by,c.right-S(20),by+S(20)};
@@ -658,7 +688,16 @@ static int prnHit(HWND h, POINT pt){
         RECT r={c.left+S(20),ly+i*lh,c.right-S(20),ly+i*lh+lh-S(6)};
         if(PtInRect(&r,pt)) return PSB_PRINTER_BASE+i;
     }
-    int by=ly+maxRows*lh+S(8)+S(24);
+    int by=ly+maxRows*lh+S(8);
+    // section selector row
+    by+=S(24);
+    { int navW=S(40);
+      RECT rPrev={c.left+S(20),by,c.left+S(20)+navW,by+S(34)};
+      RECT rNext={c.right-S(20)-navW,by,c.right-S(20),by+S(34)};
+      if(PtInRect(&rPrev,pt)) return PSB_SEC_PREV;
+      if(PtInRect(&rNext,pt)) return PSB_SEC_NEXT; }
+    by+=S(44);
+    by+=S(24);
     int cw4=(c.right-c.left-S(52))/4, cx=c.right-S(20)-cw4;
     RECT rA4={cx,by,cx+cw4,by+S(34)};   if(PtInRect(&rA4,pt)) return PSB_A4;
     cx-=cw4+S(4); RECT rA5={cx,by,cx+cw4,by+S(34)}; if(PtInRect(&rA5,pt)) return PSB_A5;
@@ -729,6 +768,12 @@ static LRESULT CALLBACK prnProc(HWND h, UINT m, WPARAM w, LPARAM l){
                     L"print_mode=fill",L"حالت چاپ: پرکننده")){
                 s_ps->mode=1; setSetting(L"print_mode",L"fill"); InvalidateRect(h,NULL,FALSE); }
             break;
+        case PSB_SEC_PREV:
+            s_ps->section=(s_ps->section+N_PRINT_SECTIONS-1)%N_PRINT_SECTIONS;
+            InvalidateRect(h,NULL,FALSE); break;
+        case PSB_SEC_NEXT:
+            s_ps->section=(s_ps->section+1)%N_PRINT_SECTIONS;
+            InvalidateRect(h,NULL,FALSE); break;
         case PSB_TEST: doTestPrint(h); break;
         case PSB_ADV:  doAdvanced(h); break;
         case PSB_DESIGN:{ int sec=s_ps->section; prnClose();

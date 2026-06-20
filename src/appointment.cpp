@@ -462,6 +462,17 @@ static void doSearch(ApptUI* u){
 // ---------------------------------------------------- print one slip --------
 //  Real GDI print of an appointment slip on the default (or chosen) printer.
 static bool printApptSlip(HWND owner, const Appointment& a){
+    // First honour any per-section design the user saved/customised for the
+    // "نوبت‌دهی" (appointment) section [index 1]; this realises the per-section
+    // print-design mapping. If no usable design exists we fall back to the
+    // built-in clean slip below.
+    {
+        ReceptionRecord r;
+        r.firstName=a.firstName; r.lastName=a.lastName; r.nationalId=a.nationalId;
+        r.apptDate=a.apptDate;   r.apptTime=a.apptTime; r.shift=a.shift;
+        r.dept=a.doctor;         r.userName=a.user;     r.queueNo=a.queueNo;
+        if(printDesignedReceipt(r,1,owner)) return true;
+    }
     // Use the configured reception printer if set, otherwise the system default.
     std::wstring printer = getSetting(L"printer_name",L"");
     HDC dc=NULL;

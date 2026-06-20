@@ -1234,18 +1234,21 @@ enum {
     NE_E_FULL=3401, NE_E_USER, NE_E_PASS, NE_E_NID, NE_E_FATHER, NE_E_POS,
     NE_E_MOBILE, NE_E_LAND, NE_E_EMAIL, NE_E_SFROM, NE_E_STO, NE_E_HOURS,
     NE_E_HIRE, NE_E_ADDR, NE_E_EMPID, NE_E_UID, NE_CB_DEPT, NE_CB_ROLE,
-    NE_B_OK, NE_B_CANCEL, NE_CB_AUTOID
+    NE_B_OK, NE_B_CANCEL, NE_CB_AUTOID, NE_B_PHOTO, NE_B_IDCARD
 };
 struct NewEmpState {
     HWND eFull,eUser,ePass,eNid,eFather,ePos,eMobile,eLand,eEmail,
-         eSfrom,eSto,eHours,eHire,eAddr,eEmpId,eUid,cDept,cRole,bOk,bCancel,bAutoId;
+         eSfrom,eSto,eHours,eHire,eAddr,eEmpId,eUid,cDept,cRole,bOk,bCancel,bAutoId,
+         bPhoto,bIdCard;
     std::vector<DeptCat> depts;
     bool autoId;
+    std::wstring photoPath, idCardPath;   // chosen image files (copied on save)
 };
 static HWND s_ne=NULL; static NewEmpState* s_nes=NULL;
 static void neClose(){ if(s_ne&&IsWindow(s_ne)){ HWND v=s_ne; s_ne=NULL; DestroyWindow(v);} }
 static RECT neCard(HWND h){ RECT rc; GetClientRect(h,&rc);
-    int w=S(760),hh=S(640);
+    int w=S(760),hh=S(688);
+    if(hh>rc.bottom-S(20)) hh=rc.bottom-S(20);
     RECT c={(rc.right-w)/2,(rc.bottom-hh)/2,(rc.right+w)/2,(rc.bottom+hh)/2}; return c; }
 static std::wstring neGenEmpId(){
     auto users=loadUsers(); int n=(int)users.size()+1;
@@ -1299,6 +1302,13 @@ static void neLayout(HWND h){
       yL += lh+fh+gap; }
     row(s_nes->eHours, yL, lColR, lColL, fh);
     row(s_nes->eHire,  yL, lColR, lColL, fh);
+    // image-upload buttons (national-id card + personal photo) share one full
+    // width row just above the address field. They never overlap any label.
+    int upY=c.bottom-S(156);
+    { int half=(rCol-lColL-S(8))/2;
+      MoveWindow(s_nes->bIdCard, lColL,            upY, half, S(34), TRUE);
+      MoveWindow(s_nes->bPhoto,  lColL+half+S(8),  upY, half, S(34), TRUE);
+      ShowWindow(s_nes->bIdCard,SW_SHOW); ShowWindow(s_nes->bPhoto,SW_SHOW); }
     // address spans full width near the bottom
     int addrY=c.bottom-S(108);
     MoveWindow(s_nes->eAddr, lColL, addrY, rCol-lColL, S(40), TRUE);
@@ -1354,6 +1364,7 @@ static void neDoCreate(HWND h){
     p.hireDate=trim(hire); p.address=trim(addr);
     p.empId   = s_nes->autoId? neGenEmpId() : trim(empId);
     p.uniqueId= s_nes->autoId? neGenUid()   : trim(uid);
+    p.photoPath=s_nes->photoPath; p.idCardPath=s_nes->idCardPath;
     saveEmpProfile(p);
     if(s_mg){ s_mg->msg=L"کارمند «"+fn+L"» با کد پرسنلی "+toFaDigits(p.empId)+L" ساخته شد.";
         s_mg->msgCol=g_theme.success; mgLoadEmps(); }
@@ -1402,6 +1413,8 @@ static LRESULT CALLBACK neProc(HWND h, UINT m, WPARAM w, LPARAM l){
             WS_CHILD|BS_AUTOCHECKBOX|BS_RIGHTBUTTON|BS_RIGHT,0,0,10,10,h,(HMENU)NE_CB_AUTOID,g_hInst,0);
         SendMessageW(s_nes->bAutoId,WM_SETFONT,(WPARAM)g_fUI,TRUE);
         SendMessageW(s_nes->bAutoId,BM_SETCHECK,BST_CHECKED,0);
+        s_nes->bIdCard=createFlatButton(h,NE_B_IDCARD,L"بارگذاری تصویر کارت ملی",ICO_ID,BS_OUTLINE,0,0,10,10);
+        s_nes->bPhoto =createFlatButton(h,NE_B_PHOTO, L"بارگذاری عکس پرسنلی",ICO_USER,BS_OUTLINE,0,0,10,10);
         s_nes->bOk=createFlatButton(h,NE_B_OK,L"ثبت کارمند",ICO_PLUS,BS_PRIMARY,0,0,10,10);
         s_nes->bCancel=createFlatButton(h,NE_B_CANCEL,L"انصراف",ICO_X,BS_OUTLINE,0,0,10,10);
         neLayout(h);
@@ -1421,6 +1434,21 @@ static LRESULT CALLBACK neProc(HWND h, UINT m, WPARAM w, LPARAM l){
         else if(id==NE_B_CANCEL) neClose();
         else if(id==NE_CB_AUTOID){ s_nes->autoId=!s_nes->autoId; neLayout(h);
             InvalidateRect(h,NULL,FALSE); }
+        else if(id==NE_B_PHOTO || id==NE_B_IDCARD){
+            wchar_t fn[MAX_PATH]={0};
+            OPENFILENAMEW ofn={sizeof(ofn)}; ofn.hwndOwner=h;
+            ofn.lpstrFilter=L"تصویر\0*.png;*.jpg;*.jpeg;*.bmp;*.gif\0همه\0*.*\0";
+            ofn.lpstrFile=fn; ofn.nMaxFile=MAX_PATH;
+            ofn.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST;
+            if(GetOpenFileNameW(&ofn)){
+                std::wstring stored=copyAttachmentLocal(fn);
+                if(stored.empty()) stored=fn;
+                if(id==NE_B_PHOTO){ s_nes->photoPath=stored;
+                    SetWindowTextW(s_nes->bPhoto,L"عکس پرسنلی ✓"); }
+                else { s_nes->idCardPath=stored;
+                    SetWindowTextW(s_nes->bIdCard,L"تصویر کارت ملی ✓"); }
+            }
+        }
         return 0; }
     case WM_KEYDOWN: if(w==VK_ESCAPE){ neClose(); return 0; } break;
     case WM_PAINT:{ PAINTSTRUCT ps; HDC dc0=BeginPaint(h,&ps);
