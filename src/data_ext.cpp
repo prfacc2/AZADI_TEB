@@ -121,6 +121,49 @@ void rememberPatient(const std::wstring& nationalId,
     writeFileUtf8(patientsPath(),out,false);
 }
 
+//  v1.10.0: enumerate every locally-stored patient. Newest record is written
+//  last by rememberPatient(), so we reverse to present newest first.
+std::vector<PatientRow> loadAllPatients(){
+    std::vector<PatientRow> out;
+    std::wstring all=readFileUtf8(patientsPath());
+    size_t pos=0;
+    while(pos<all.size()){
+        size_t e=all.find(L'\n',pos); if(e==std::wstring::npos) e=all.size();
+        std::wstring line=trim(all.substr(pos,e-pos)); pos=e+1;
+        if(line.empty()) continue;
+        auto f=dx_split(line,L'|');
+        if(f.size()<7) continue;
+        PatientRow r;
+        r.nid=trim(f[0]); r.first=f[1]; r.last=f[2]; r.father=f[3];
+        r.gender=f[4]; r.birth=f[5]; r.mobile=f[6];
+        if(f.size()>=8) parseInsCsv(f[7],r.insurances);
+        out.push_back(std::move(r));
+    }
+    std::reverse(out.begin(),out.end());   // newest first
+    return out;
+}
+
+//  v1.10.0: remove one patient record by national code.
+bool deletePatient(const std::wstring& nationalId){
+    if(nationalId.empty()) return false;
+    std::wstring all=readFileUtf8(patientsPath());
+    std::vector<std::wstring> kept; bool removed=false;
+    size_t pos=0;
+    while(pos<all.size()){
+        size_t e=all.find(L'\n',pos); if(e==std::wstring::npos) e=all.size();
+        std::wstring line=trim(all.substr(pos,e-pos)); pos=e+1;
+        if(line.empty()) continue;
+        auto f=dx_split(line,L'|');
+        if(f.size()>=1 && trim(f[0])==nationalId){ removed=true; continue; }
+        kept.push_back(line);
+    }
+    if(removed){
+        std::wstring out; for(auto& l:kept) out+=l+L"\r\n";
+        writeFileUtf8(patientsPath(),out,false);
+    }
+    return removed;
+}
+
 // ----------------------------------------------------------------------------
 //  ONLINE REGISTRY WEB-SERVICE (optional). Configure `registry_url` in
 //  data\settings.ini, e.g.  https://host/api/citizen?nid={NID}

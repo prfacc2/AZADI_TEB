@@ -96,6 +96,12 @@ static void enumDataFiles(const std::wstring& dir,
 #define BK_CLASS L"AzBackupMgr"
 enum { BK_MODE_HOME=0, BK_MODE_RESTORE=1 };
 
+// v1.10.0 — hidden backup ANALYZER page (reachable ONLY via Ctrl+B).
+#include "backup_analyzer.h"
+#include "ui_kit.h"
+#include <thread>
+#include <atomic>
+
 struct BkState {
     int  mode;                          // BK_MODE_*
     BackupInfo info;                    // scan result (restore mode)
@@ -111,9 +117,20 @@ struct BkState {
     volatile LONG doneSignal;           // worker→UI: 1=backup 2=restore done
     int  lastRestoredFiles;             // files written by last restore
     long long lastRestoredPatients;     // patient records restored (rows)
+
+    // ---- hidden analyzer page (Ctrl+B) ----
+    bool  anPage=false;                  // analyzer page visible
+    bool  anBusy=false;                  // analysis worker running
+    std::atomic<int>  anProgress{0};     // 0..100 (real, bytes-based)
+    std::wstring anStatus;               // live status line
+    std::wstring anPath;                 // chosen file
+    BkAnalysis*  anResult=nullptr;       // owned; built on worker, shown on UI
+    int   anScroll=0;                    // vertical scroll of the report
+
     BkState():mode(BK_MODE_HOME),scanning(false),busy(false),progress(0),
         foreign(false),allTicked(false),hot(-1),anim(0),
         doneSignal(0),lastRestoredFiles(0),lastRestoredPatients(0){}
+    ~BkState(){ delete anResult; }
 };
 static HWND     s_bk=NULL;
 static BkState* s_bs=NULL;
@@ -935,6 +952,239 @@ static void bkStartRestore(HWND h){
     InvalidateRect(h,NULL,FALSE);
 }
 
+// ===========================================================================
+//  HIDDEN BACKUP ANALYZER PAGE  (v1.10.0)
+//  Activated ONLY by Ctrl+B inside the backup window. No menu / button reveals
+//  it. Ctrl+B again or Esc hides it. It runs a REAL multi-format analysis on a
+//  background thread with a determinate (bytes-based) progress bar, then shows
+//  a sectioned report with per-section «کپی» buttons and a global copy button.
+// ===========================================================================
+#define WM_BK_ANALYSIS_DONE (WM_APP+72)
+#define WM_BK_ANALYSIS_PROG (WM_APP+73)
+
+//  progress trampoline: worker → UI thread (no GDI off-thread)
+static void bkAnProgCb(int pct, const std::wstring& status, void* user){
+    HWND h=(HWND)user;
+    if(!h||!IsWindow(h)) return;
+    if(s_bs){ s_bs->anProgress.store(pct); s_bs->anStatus=status; }
+    PostMessageW(h,WM_BK_ANALYSIS_PROG,(WPARAM)pct,0);
+}
+
+static std::wstring bkAnPickFile(HWND owner){
+    wchar_t buf[1024]={0};
+    OPENFILENAMEW ofn={0}; ofn.lStructSize=sizeof(ofn); ofn.hwndOwner=owner;
+    ofn.lpstrFilter=L"فایل‌های پشتیبان\0*.db;*.sqlite;*.bak;*.zip;*.azb;*.aztbk;*.json;*.sql\0همه فایل‌ها\0*.*\0";
+    ofn.lpstrFile=buf; ofn.nMaxFile=1024;
+    ofn.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST|OFN_EXPLORER;
+    if(GetOpenFileNameW(&ofn)) return buf;
+    return L"";
+}
+
+static void bkAnStart(HWND h){
+    if(!s_bs||s_bs->anBusy) return;
+    std::wstring path=bkAnPickFile(h);
+    if(path.empty()) return;
+    s_bs->anPath=path;
+    s_bs->anBusy=true; s_bs->anProgress.store(0);
+    s_bs->anStatus=L"آماده‌سازی…";
+    delete s_bs->anResult; s_bs->anResult=nullptr;
+    s_bs->anScroll=0;
+    InvalidateRect(h,NULL,FALSE);
+    HWND target=h;
+    std::wstring p=path;
+    std::thread([target,p](){
+        BkAnalysis* r=new BkAnalysis(analyzeBackupFile(p,bkAnProgCb,(void*)target));
+        if(IsWindow(target)) PostMessageW(target,WM_BK_ANALYSIS_DONE,0,(LPARAM)r);
+        else delete r;
+    }).detach();
+}
+
+//  Copy a UTF-16 string to the clipboard (CF_UNICODETEXT).
+static void bkAnCopy(HWND owner, const std::wstring& text){
+    if(!OpenClipboard(owner)) return;
+    EmptyClipboard();
+    size_t bytes=(text.size()+1)*sizeof(wchar_t);
+    HGLOBAL hg=GlobalAlloc(GMEM_MOVEABLE,bytes);
+    if(hg){
+        void* p=GlobalLock(hg);
+        if(p){ memcpy(p,text.c_str(),bytes); GlobalUnlock(hg);
+               SetClipboardData(CF_UNICODETEXT,hg); }
+    }
+    CloseClipboard();
+}
+static std::wstring bkAnFullReport(){
+    std::wstring out;
+    if(s_bs && s_bs->anResult){
+        out+=L"گزارش تحلیل پشتیبان آزادی‌طب\r\n";
+        out+=L"فایل: "+s_bs->anPath+L"\r\n\r\n";
+        for(auto& s:s_bs->anResult->sections){
+            out+=L"■ "+s.title+L"\r\n"+s.body+L"\r\n\r\n";
+        }
+    }
+    return out;
+}
+
+//  Geometry of the analyzer page (covers the whole backup card client area).
+static RECT bkAnPageRect(HWND h){ RECT rc; GetClientRect(h,&rc); return rc; }
+static RECT bkAnBtnAnalyze(HWND h){
+    RECT rc=bkAnPageRect(h);
+    int w=S(220), hh=S(48);
+    RECT r={(rc.right-w)/2, S(96), (rc.right+w)/2, S(96)+hh};
+    return r;
+}
+static RECT bkAnBtnCopyAll(HWND h){
+    RECT rc=bkAnPageRect(h);
+    int w=S(200), hh=S(40);
+    RECT r={(rc.right-w)/2, rc.bottom-S(56), (rc.right+w)/2, rc.bottom-S(56)+hh};
+    return r;
+}
+static RECT bkAnCloseRect(HWND h){
+    RECT rc=bkAnPageRect(h);
+    RECT r={rc.right-S(44),S(12),rc.right-S(12),S(44)};
+    return r;
+}
+//  Hit-rect for a per-section copy button, given the section index & its title y.
+static RECT bkAnSecCopyRect(int rightX, int titleY){
+    RECT r={rightX-S(56),titleY-S(2),rightX-S(8),titleY+S(22)};
+    return r;
+}
+
+//  Paint the analyzer page (called from bkPaint when anPage is on).
+static void bkAnPaint(HWND h, HDC dc){
+    RECT rc=bkAnPageRect(h);
+    // dim card surface backdrop
+    gpRoundRectBg(dc,rc,S(2),g_theme.surface,g_theme.border,g_theme.bg);
+    SetBkMode(dc,TRANSPARENT);
+
+    // title
+    SelectObject(dc,g_fTitle);
+    SetTextColor(dc,g_theme.text);
+    RECT tr={S(24),S(14),rc.right-S(56),S(52)};
+    DrawTextW(dc,L"آنالیز بکاپ (صفحهٔ مخفی)",-1,&tr,
+        DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+
+    // close (X)
+    { RECT x=bkAnCloseRect(h);
+      gpRoundRectBg(dc,x,S(8),g_theme.surface2,g_theme.border,g_theme.surface);
+      drawIcon(dc,ICO_X,x,g_theme.textDim,S(2)); }
+
+    // big primary button
+    { RECT b=bkAnBtnAnalyze(h);
+      gpGradRoundRectBg(dc,b,S(10),g_theme.accent,g_theme.accent2,g_theme.accent,g_theme.surface);
+      SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.accentText);
+      DrawTextW(dc,L"آنالیز بکاپ",-1,&b,
+        DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX); }
+
+    int y=S(160);
+
+    // chosen file
+    if(s_bs && !s_bs->anPath.empty()){
+        SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
+        RECT fr={S(24),y,rc.right-S(24),y+S(22)};
+        DrawTextW(dc,(L"فایل: "+s_bs->anPath).c_str(),-1,&fr,
+            DT_RIGHT|DT_SINGLELINE|DT_PATH_ELLIPSIS|DT_NOPREFIX);
+        y+=S(28);
+    }
+
+    // progress bar (determinate, bytes-based)
+    if(s_bs && (s_bs->anBusy || s_bs->anProgress.load()>0)){
+        int pct=s_bs->anProgress.load();
+        RECT bar={S(24),y,rc.right-S(24),y+S(16)};
+        gpRoundRectBg(dc,bar,S(8),g_theme.surface2,g_theme.border,g_theme.surface);
+        RECT fill=bar; fill.left=bar.right-(int)((bar.right-bar.left)*(pct/100.0));
+        if(fill.left<bar.left) fill.left=bar.left;
+        gpRoundRectBg(dc,fill,S(8),g_theme.accent,g_theme.accent,g_theme.surface2);
+        SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
+        RECT sr={S(24),y+S(20),rc.right-S(24),y+S(42)};
+        std::wstring st=toFaDigits(std::to_wstring(pct))+L"%   —   "+s_bs->anStatus;
+        DrawTextW(dc,st.c_str(),-1,&sr,DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+        y+=S(48);
+    }
+
+    // report sections
+    if(s_bs && s_bs->anResult){
+        if(!s_bs->anResult->ok && !s_bs->anResult->error.empty()){
+            RECT er={S(24),y,rc.right-S(24),y+S(80)};
+            gpRoundRectBg(dc,er,S(10),blendColor(g_theme.surface,g_theme.danger,12),
+                g_theme.danger,g_theme.surface);
+            SelectObject(dc,g_fUI); SetTextColor(dc,g_theme.danger);
+            InflateRect(&er,-S(12),-S(8));
+            DrawTextW(dc,s_bs->anResult->error.c_str(),-1,&er,
+                DT_RIGHT|DT_WORDBREAK|DT_RTLREADING|DT_NOPREFIX);
+        } else {
+            int top = y - s_bs->anScroll;
+            int bottomLimit = bkAnBtnCopyAll(h).top - S(8);
+            for(auto& s:s_bs->anResult->sections){
+                if(top>bottomLimit) break;
+                // section title + per-section copy button
+                SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.accent);
+                RECT trS={S(24),top,rc.right-S(80),top+S(22)};
+                DrawTextW(dc,s.title.c_str(),-1,&trS,
+                    DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+                RECT cb=bkAnSecCopyRect(rc.right-S(24),top);
+                gpRoundRectBg(dc,cb,S(6),g_theme.surface2,g_theme.border,g_theme.surface);
+                SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
+                DrawTextW(dc,L"کپی",-1,&cb,
+                    DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+                top+=S(26);
+                // body
+                SelectObject(dc,g_fUI); SetTextColor(dc,g_theme.text);
+                RECT br={S(24),top,rc.right-S(24),bottomLimit};
+                int bh=DrawTextW(dc,s.body.c_str(),-1,&br,
+                    DT_RIGHT|DT_WORDBREAK|DT_RTLREADING|DT_NOPREFIX|DT_CALCRECT);
+                RECT br2={S(24),top,rc.right-S(24),top+bh};
+                DrawTextW(dc,s.body.c_str(),-1,&br2,
+                    DT_RIGHT|DT_WORDBREAK|DT_RTLREADING|DT_NOPREFIX);
+                top+=bh+S(14);
+            }
+        }
+        // global copy button
+        RECT cab=bkAnBtnCopyAll(h);
+        gpRoundRectBg(dc,cab,S(10),g_theme.surface2,g_theme.accent,g_theme.surface);
+        SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.accent);
+        DrawTextW(dc,L"کپی کامل گزارش",-1,&cab,
+            DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+    } else if(!(s_bs && s_bs->anBusy)){
+        SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
+        RECT hint={S(24),y+S(8),rc.right-S(24),y+S(60)};
+        DrawTextW(dc,L"برای شروع، روی «آنالیز بکاپ» بزنید و فایل پشتیبان را انتخاب کنید.",
+            -1,&hint,DT_RIGHT|DT_WORDBREAK|DT_RTLREADING|DT_NOPREFIX);
+    }
+}
+
+//  Hit-test clicks on the analyzer page. Returns true if the click was handled.
+static bool bkAnClick(HWND h, POINT pt){
+    if(!s_bs||!s_bs->anPage) return false;
+    RECT x=bkAnCloseRect(h);
+    if(PtInRect(&x,pt)){ s_bs->anPage=false; InvalidateRect(h,NULL,FALSE); return true; }
+    RECT b=bkAnBtnAnalyze(h);
+    if(PtInRect(&b,pt)){ bkAnStart(h); return true; }
+    if(s_bs->anResult && s_bs->anResult->ok){
+        RECT cab=bkAnBtnCopyAll(h);
+        if(PtInRect(&cab,pt)){ bkAnCopy(h,bkAnFullReport()); return true; }
+        // per-section copy buttons — recompute their y positions like the painter
+        RECT rc=bkAnPageRect(h);
+        int y=S(160);
+        if(!s_bs->anPath.empty()) y+=S(28);
+        if(s_bs->anBusy || s_bs->anProgress.load()>0) y+=S(48);
+        int top=y - s_bs->anScroll;
+        int bottomLimit=cab.top-S(8);
+        uikit::WindowDC wdc(h);
+        for(auto& s:s_bs->anResult->sections){
+            if(top>bottomLimit) break;
+            RECT cb=bkAnSecCopyRect(rc.right-S(24),top);
+            if(PtInRect(&cb,pt)){ bkAnCopy(h,s.title+L"\r\n"+s.body); return true; }
+            top+=S(26);
+            SelectObject(wdc.dc,g_fUI);
+            RECT br={S(24),top,rc.right-S(24),bottomLimit};
+            int bh=DrawTextW(wdc.dc,s.body.c_str(),-1,&br,
+                DT_RIGHT|DT_WORDBREAK|DT_RTLREADING|DT_NOPREFIX|DT_CALCRECT);
+            top+=bh+S(14);
+        }
+    }
+    return true;   // swallow clicks while the page is up
+}
+
 static LRESULT CALLBACK bkProc(HWND h, UINT m, WPARAM w, LPARAM l){
     switch(m){
     case WM_CREATE: s_bs=new BkState(); SetTimer(h,1,40,NULL);
@@ -968,6 +1218,10 @@ static LRESULT CALLBACK bkProc(HWND h, UINT m, WPARAM w, LPARAM l){
     case WM_SIZE:
         bkFreeBg(); InvalidateRect(h,NULL,FALSE); return 0;
     case WM_TIMER: if(s_bs){ s_bs->anim+=0.04f; if(s_bs->anim>1)s_bs->anim-=1;
+        // analyzer page: keep the determinate progress bar live while working
+        if(s_bs->anPage && s_bs->anBusy){
+            RECT rc=bkAnPageRect(h); InvalidateRect(h,&rc,FALSE);
+        }
         // v1.9.5 perf: while a worker is running, repaint ONLY the progress-bar
         // strip (where the animated fill + status text live) instead of the
         // whole window, so the scrim/shadow/gradient are never recomposed.
@@ -1019,7 +1273,18 @@ static LRESULT CALLBACK bkProc(HWND h, UINT m, WPARAM w, LPARAM l){
             if(rectOf(s_bs->hot,rn)) InvalidateRect(h,&rn,FALSE);
         }
         return 0; }
+    case WM_BK_ANALYSIS_PROG:
+        if(s_bs && s_bs->anPage){ RECT rc=bkAnPageRect(h); InvalidateRect(h,&rc,FALSE); }
+        return 0;
+    case WM_BK_ANALYSIS_DONE:{
+        BkAnalysis* r=(BkAnalysis*)l;
+        if(s_bs){ delete s_bs->anResult; s_bs->anResult=r; s_bs->anBusy=false;
+                  s_bs->anProgress.store(100); InvalidateRect(h,NULL,FALSE); }
+        else delete r;
+        return 0; }
     case WM_LBUTTONDOWN:{ if(!s_bs) break; POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
+        // hidden analyzer page (if up) intercepts ALL clicks
+        if(s_bs->anPage){ bkAnClick(h,pt); return 0; }
         RECT c=bkCard(h);
         if(!PtInRect(&c,pt)){ bkClose(); return 0; }
         RECT cb=bkCloseRect(h); if(PtInRect(&cb,pt)){ bkClose(); return 0; }
@@ -1048,9 +1313,32 @@ static LRESULT CALLBACK bkProc(HWND h, UINT m, WPARAM w, LPARAM l){
             RECT rb=bkRestoreBtn(h); if(PtInRect(&rb,pt)){ bkStartRestore(h); return 0; }
         }
         return 0; }
-    case WM_KEYDOWN: if(w==VK_ESCAPE){ bkClose(); return 0; } break;
+    case WM_KEYDOWN:
+        if(!s_bs) break;
+        // Ctrl+B toggles the hidden analyzer page (no menu/button reveals it).
+        if(w=='B' && (GetKeyState(VK_CONTROL)&0x8000)){
+            s_bs->anPage=!s_bs->anPage;
+            InvalidateRect(h,NULL,FALSE);
+            return 0;
+        }
+        if(w==VK_ESCAPE){
+            if(s_bs->anPage){ s_bs->anPage=false; InvalidateRect(h,NULL,FALSE); return 0; }
+            bkClose(); return 0;
+        }
+        break;
+    case WM_MOUSEWHEEL:
+        if(s_bs && s_bs->anPage && s_bs->anResult){
+            int delta=GET_WHEEL_DELTA_WPARAM(w);
+            s_bs->anScroll -= (delta/WHEEL_DELTA)*S(40);
+            if(s_bs->anScroll<0) s_bs->anScroll=0;
+            RECT rc=bkAnPageRect(h); InvalidateRect(h,&rc,FALSE);
+            return 0;
+        }
+        break;
     case WM_PAINT:{ PAINTSTRUCT ps; HDC dc=BeginPaint(h,&ps);
-        RECT dirty=ps.rcPaint; bkPaint(h,dc,&dirty); EndPaint(h,&ps); return 0; }
+        RECT dirty=ps.rcPaint; bkPaint(h,dc,&dirty);
+        if(s_bs && s_bs->anPage) bkAnPaint(h,dc);   // overlay the analyzer page
+        EndPaint(h,&ps); return 0; }
     }
     return DefWindowProcW(h,m,w,l);
 }

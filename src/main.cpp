@@ -784,6 +784,33 @@ void enableAutoDir(HWND ctl){
 int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
     g_hInst = hInst;
 
+    // v1.10.0: declare per-monitor v2 DPI awareness as early as possible so the
+    // manifest's PerMonitorV2 hint is honoured and crisp on mixed-DPI setups.
+    // Done by dynamic lookup so the single EXE still loads on Windows 7/8
+    // (where these entry points do not exist).
+    {
+        HMODULE u32=GetModuleHandleW(L"user32.dll");
+        typedef BOOL (WINAPI* SetCtxFn)(HANDLE);
+        if(u32){
+            auto setCtx=(SetCtxFn)(void*)GetProcAddress(u32,"SetProcessDpiAwarenessContext");
+            // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 == (HANDLE)-4
+            if(!setCtx || !setCtx((HANDLE)-4)){
+                // fall back to per-monitor v1 via shcore, then system-DPI
+                HMODULE sh=LoadLibraryW(L"shcore.dll");
+                if(sh){
+                    typedef HRESULT (WINAPI* SetAwFn)(int);
+                    auto setAw=(SetAwFn)(void*)GetProcAddress(sh,"SetProcessDpiAwareness");
+                    if(setAw) setAw(2 /*PROCESS_PER_MONITOR_DPI_AWARE*/);
+                    FreeLibrary(sh);
+                } else {
+                    SetProcessDPIAware();   // legacy system-DPI fallback
+                }
+            }
+        } else {
+            SetProcessDPIAware();
+        }
+    }
+
     installCrashHandler();           // crash handler
     detectSpec();                    // speed handler
     logLine(L"=== Azadi-Teb start v" APP_VERSION_W L" ===");

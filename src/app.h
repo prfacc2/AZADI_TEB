@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.9.7"
+#define APP_VERSION_W   L"1.10.0"
 #define APP_NAME_W      L"\u0622\u0632\u0627\u062f\u06cc \u0637\u0628"   // آزادی طب
 #define APP_CLASS_W     L"AzadiTebFrame"
 
@@ -502,6 +502,20 @@ void         rememberPatient(const std::wstring& nationalId,
                  const std::wstring& fatherName, const std::wstring& gender,
                  const std::wstring& birthDate, const std::wstring& mobile,
                  const std::vector<int>& insurances);
+
+//  v1.10.0: a flat, read-only view of one row in the local patient store, used
+//  by the admin «بیماران» (patients) tab. Mirrors the data\patients.dat schema:
+//      nid | first | last | father | gender | birth | mobile | insCsv
+struct PatientRow {
+    std::wstring nid, first, last, father, gender, birth, mobile;
+    std::vector<int> insurances;
+};
+//  Load every patient stored locally (newest first — same order the store is
+//  written: appended records last, so we reverse to show newest on top).
+std::vector<PatientRow> loadAllPatients();
+//  Delete a patient record by national code from the local store. Returns true
+//  if a row was removed.
+bool                    deletePatient(const std::wstring& nationalId);
 
 // ----------------------------------------------------------- doctors --------
 //  Doctors & their services for the appointment screen (file-backed, seeded

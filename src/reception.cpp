@@ -141,7 +141,12 @@ struct RecData {
 static RecData* s_rd = NULL;             // single reception screen at a time
 
 // metrics
-static int infoBarH(){ return S(54); }
+// v1.10.0 — the old "میز پذیرش بیمار" header row was empty (the user/role/clock
+// already live in the frame's Layer-1 header), so it only wasted ~54px of
+// vertical space and forced the reception form to scroll. We collapse it to a
+// thin spacer so the tabs + form shift up and the whole form fits at 1024×600
+// without any scrollbar. (See requirement 3.1.)
+static int infoBarH(){ return S(6); }
 static int tabBarH(){ return S(40); }
 static int tabW()    { return S(210); }
 
@@ -251,18 +256,19 @@ static void rcVMetrics(int H, int& y0, int& step, int& rh){
     // shrink gracefully (keeping the no-overlap invariant) on short ones.
     // v1.9.0: slightly SHORTER inputs (rh 34→30) + MORE label breathing room
     // (gap 52→56). Invariant step >= rh + S(54) still holds → zero overlap.
-    y0 = S(132); rh = S(30); step = rh + S(56);   // = S(86): zero overlap
-    int need = y0 + 8*step + S(132);
-    // v2: we now SCROLL instead of over-compressing. Only apply a GENTLE shrink
-    // (down to a comfortable floor) so most screens fit without a scrollbar; if
-    // it still doesn't fit, the page provides a vertical scrollbar so every
-    // field stays reachable and readable (no field disappears below the fold).
+    // v1.10.0: compact metrics so the whole reception form fits at 1024×600
+    // WITHOUT scrolling. Slimmer inputs (26px) and tighter row spacing. The
+    // no-overlap invariant is  step >= rh + S(40)  (caption band S(44)→S(40),
+    // label band stays). We start tight and only shrink further on very short
+    // screens — never grow a scrollbar in the common resolutions.
+    y0 = S(104); rh = S(26); step = rh + S(40);    // = S(66)
+    int need = y0 + 8*step + S(96);
     if(H > 0 && need > H){
-        int s2 = (H - y0 - S(132)) / 8;
-        if(s2 < S(78)) s2 = S(78);                // comfortable floor (was 70)
+        int s2 = (H - y0 - S(96)) / 8;
+        if(s2 < S(58)) s2 = S(58);                 // hard floor (still readable)
         if(s2 < step){
             step = s2;
-            rh = step - S(56); if(rh > S(30)) rh = S(30); if(rh < S(24)) rh = S(24);
+            rh = step - S(36); if(rh > S(26)) rh = S(26); if(rh < S(22)) rh = S(22);
         }
     }
 }
@@ -271,7 +277,7 @@ static void rcVMetrics(int H, int& y0, int& step, int& rh){
 //  bottom padding.
 static int rcFormContentH(int H){
     int y0,step,rh; rcVMetrics(H,y0,step,rh);
-    return y0 + 8*step + S(6) + S(50) + S(24);   // last row + submit + pad
+    return y0 + 8*step + S(6) + S(46) + S(16);   // last row + submit + pad
 }
 // ----------------------------------------------------------------------------
 //  Unified RIGHT INFO-PANEL layout.  A SINGLE source of truth shared by the
@@ -424,7 +430,7 @@ static void tabPageLayout(HWND h, TabPage* t){
     MoveWindow(t->ePrice, xr, y0+7*step,   colW, rh, TRUE);
     MoveWindow(t->eDiscount,xl,y0+7*step,  colW, rh, TRUE);
     // submit
-    MoveWindow(t->bSubmit,formLeft, y0+8*step+S(6), fw, S(50), TRUE);
+    MoveWindow(t->bSubmit,formLeft, y0+8*step+S(6), fw, S(46), TRUE);
 
     // billing panel buttons (bottom of billing card). Pinned to the virtual
     // page height so they track the card bottom and scroll with the page.
@@ -1828,7 +1834,7 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
                       {L"مبلغ و تخفیف",7,ICO_RECEIPT} };
         SelectObject(dc,g_fUIB);
         for(int i=0;i<4;i++){
-            int sy=y0+secs[i].row*step-S(44);
+            int sy=y0+secs[i].row*step-S(40);
             // icon flush-right, caption text stops well to its LEFT (no overlap)
             int icoW=S(18), gap=S(8);
             RECT si={formRight-icoW,sy+S(1),formRight,sy+S(19)};
@@ -2418,23 +2424,16 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
         FillRect(dc,&bd,g_brBg);
         HPEN pen=CreatePen(PS_SOLID,1,g_theme.border);
         HGDIOBJ op=SelectObject(dc,pen);
-        MoveToEx(dc,0,infoBarH()-1,0); LineTo(dc,rc.right,infoBarH()-1);
+        // v1.10.0: only the tab-bar bottom separator remains (the collapsed
+        // info bar no longer needs its own divider line).
         MoveToEx(dc,0,infoBarH()+tabBarH()-1,0); LineTo(dc,rc.right,infoBarH()+tabBarH()-1);
         SelectObject(dc,op); DeleteObject(pen);
 
         SetBkMode(dc,TRANSPARENT);
-        // ---- info bar texts (anchored to the RIGHT edge, RTL) ----
-        // NO username is shown here (privacy). The logged-in person's full name
-        // and role already live in the frame's Layer-1 header. Here we only show
-        // a friendly section title + the live shift, so the action buttons on
-        // the right (Layer-2) have room.
-        SYSTEMTIME st=iranNow();
-        SelectObject(dc,g_fUIB);
-        SetTextColor(dc,g_theme.text);
-        std::wstring info = L"میز پذیرش بیمار";
-        RECT ir={rc.right-S(420),0,rc.right-S(14),infoBarH()};
-        DrawTextW(dc,info.c_str(),-1,&ir,
-            DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+        // v1.10.0: the old "میز پذیرش بیمار" title row was removed — it was an
+        // empty header that only pushed the form down and caused scrolling. The
+        // logged-in person's name/role and the live clock already live in the
+        // frame's Layer-1 header, so nothing is lost here.
 
         // ---- tabs ----
         if(s_rd){

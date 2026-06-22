@@ -1402,9 +1402,10 @@ static LRESULT CALLBACK neProc(HWND h, UINT m, WPARAM w, LPARAM l){
         s_nes->depts=loadDepts();
         for(auto&d:s_nes->depts) SendMessageW(s_nes->cDept,CB_ADDSTRING,0,(LPARAM)d.name.c_str());
         // preselect current section if any
-        if(s_mg && !s_mg->curCatName.empty())
+        if(s_mg && !s_mg->curCatName.empty()){
             for(int i=0;i<(int)s_nes->depts.size();i++)
                 if(s_nes->depts[i].name==s_mg->curCatName){ SendMessageW(s_nes->cDept,CB_SETCURSEL,i,0); break; }
+        }
         else if(!s_nes->depts.empty()) SendMessageW(s_nes->cDept,CB_SETCURSEL,0,0);
         SendMessageW(s_nes->cRole,CB_ADDSTRING,0,(LPARAM)L"پذیرش");
         SendMessageW(s_nes->cRole,CB_ADDSTRING,0,(LPARAM)L"مدیریت");

@@ -3,9 +3,12 @@
 //              + management panel placeholder (extensible)
 // ============================================================================
 #include "app.h"
+#include "ui_kit.h"
 #include <commctrl.h>
 #include <stdio.h>
 #include <algorithm>
+#include <thread>
+#include <atomic>
 
 // ================================================================ ADMIN ====
 #define AD_CLASS L"AzAdmin"
@@ -17,11 +20,88 @@
 #define ID_AD_CREATE  406
 #define ID_AD_LIST    407
 #define ID_AD_DELETE  408
+// v1.10.0 — patients tab controls
+#define ID_AD_PSEARCH 410
+#define ID_AD_PLIST   411
+#define ID_AD_PDEL    412
+
+// custom messages posted by the background patient loader thread
+#define WM_AD_PATIENTS_READY (WM_APP+71)
+
+//  Two tabs: 0 = کاربران (users), 1 = بیماران (patients).
+enum { AD_TAB_USERS = 0, AD_TAB_PATIENTS = 1, AD_TAB_COUNT = 2 };
 
 struct AdminData {
     HWND eFull, eUser, ePass, eDept, cRole, bCreate, list, bDelete;
     std::wstring msg; COLORREF msgCol;
+
+    // ---- patients tab ----
+    int   tab = AD_TAB_USERS;
+    HWND  pSearch = nullptr;       // search box
+    HWND  pList   = nullptr;       // LVS_OWNERDATA virtual list
+    HWND  bPDel   = nullptr;       // delete-patient button
+    RECT  tabRects[AD_TAB_COUNT] = {};
+
+    // full data set (loaded once on a worker thread) + current filtered view
+    std::vector<PatientRow>* allPatients = nullptr;   // owned, heap (large)
+    std::vector<int>         view;                    // indices into allPatients
+    std::wstring             query;                   // last applied search
+    bool   loading = false;
+    bool   loaded  = false;
+
+    // debounce timer id for the search box
+    static const UINT_PTR TIMER_SEARCH = 1;
 };
+
+// ====================================================== PATIENTS TAB =======
+//  A virtualized (LVS_OWNERDATA) ListView over the local patient store. The
+//  data is loaded ONCE on a background thread (never blocks the UI) and the
+//  search box filters the in-memory set with debounced 250 ms input. Because
+//  the list is owner-data, only the visible rows are ever materialized — it
+//  stays responsive with 100k+ rows.
+static const wchar_t* genderText(const std::wstring& g){
+    if(g==L"1"||g==L"مرد"||g==L"M"||g==L"m") return L"مرد";
+    if(g==L"0"||g==L"زن"||g==L"F"||g==L"f")  return L"زن";
+    return L"—";
+}
+//  Recompute d->view from d->query (applied against the full set).
+static void adPatientsFilter(AdminData* d){
+    d->view.clear();
+    if(!d->allPatients) return;
+    std::wstring q = uikit::NormalizeFa(d->query);
+    const auto& all = *d->allPatients;
+    d->view.reserve(all.size());
+    if(q.empty()){
+        for(int i=0;i<(int)all.size();++i) d->view.push_back(i);
+    } else {
+        for(int i=0;i<(int)all.size();++i){
+            const PatientRow& p = all[i];
+            std::wstring name = uikit::NormalizeFa(p.first+L" "+p.last);
+            std::wstring nid  = uikit::NormalizeFa(p.nid);
+            std::wstring mob  = uikit::NormalizeFa(p.mobile);
+            if(name.find(q)!=std::wstring::npos ||
+               nid.find(q)!=std::wstring::npos  ||
+               mob.find(q)!=std::wstring::npos)
+                d->view.push_back(i);
+        }
+    }
+    if(d->pList){
+        ListView_SetItemCountEx(d->pList,(int)d->view.size(),
+            LVSICF_NOINVALIDATEALL|LVSICF_NOSCROLL);
+        InvalidateRect(d->pList,NULL,FALSE);
+    }
+}
+//  Kick off the one-time background load (idempotent).
+static void adPatientsLoadAsync(HWND h, AdminData* d){
+    if(d->loaded || d->loading) return;
+    d->loading = true;
+    HWND target = h;
+    std::thread([target](){
+        auto* vec = new std::vector<PatientRow>(loadAllPatients());
+        // marshal back to the UI thread — never touch HWND data off-thread
+        PostMessageW(target, WM_AD_PATIENTS_READY, 0, (LPARAM)vec);
+    }).detach();
+}
 
 static void adRefreshList(AdminData* d){
     ListView_DeleteAllItems(d->list);
@@ -38,12 +118,46 @@ static void adRefreshList(AdminData* d){
         i++;
     }
 }
+//  The tab strip sits just under the title. Returns the y of its bottom edge.
+static int adTabStripBottom(){ return S(56)+S(38); }
+static void adComputeTabRects(HWND h, AdminData* d){
+    RECT rc; GetClientRect(h,&rc);
+    int pad=S(24), y=S(56), th=S(34);
+    const wchar_t* labels[AD_TAB_COUNT]={L"کاربران",L"بیماران"};
+    // RTL: first tab starts at the right edge and grows leftwards.
+    int x = rc.right - pad;
+    uikit::WindowDC wdc(h);
+    uikit::SelectScope sf(wdc.dc,(HGDIOBJ)g_fUIB);
+    for(int i=0;i<AD_TAB_COUNT;i++){
+        SIZE sz{0,0};
+        GetTextExtentPoint32W(wdc.dc,labels[i],(int)wcslen(labels[i]),&sz);
+        int tw = sz.cx + S(36);
+        d->tabRects[i].right  = x;
+        d->tabRects[i].left   = x - tw;
+        d->tabRects[i].top    = y;
+        d->tabRects[i].bottom = y + th;
+        x -= tw + S(8);
+    }
+}
+static void adApplyTabVisibility(AdminData* d){
+    bool users   = (d->tab==AD_TAB_USERS);
+    bool pts     = (d->tab==AD_TAB_PATIENTS);
+    int su = users?SW_SHOW:SW_HIDE, sp = pts?SW_SHOW:SW_HIDE;
+    HWND ucl[]={d->eFull,d->eUser,d->ePass,d->eDept,d->cRole,d->bCreate,
+                d->list,d->bDelete};
+    for(HWND c:ucl) if(c) ShowWindow(c,su);
+    HWND pcl[]={d->pSearch,d->pList,d->bPDel};
+    for(HWND c:pcl) if(c) ShowWindow(c,sp);
+}
 static void adLayout(HWND h, AdminData* d){
     RECT rc; GetClientRect(h,&rc);
     int W=rc.right;
-    // form card on the right (RTL), list on the left
+    adComputeTabRects(h,d);
+    int top = adTabStripBottom() + S(12);
+
+    // ---------- users tab ----------
     int fw=S(360), pad=S(24);
-    int fx=W-pad-fw, fy=S(90);
+    int fx=W-pad-fw, fy=top+S(30);
     int ew=fw-S(40), ex=fx+S(20);
     int rh=S(40), gap=S(64);
     MoveWindow(d->eFull, ex, fy+S(28),        ew, rh, TRUE);
@@ -54,8 +168,15 @@ static void adLayout(HWND h, AdminData* d){
     MoveWindow(d->bCreate, ex, fy+S(28)+5*gap+S(8), ew, S(46), TRUE);
 
     int lx=pad, lw=W-3*pad-fw;
-    MoveWindow(d->list, lx, S(118), lw, rc.bottom-S(180), TRUE);
+    MoveWindow(d->list, lx, fy, lw, rc.bottom-fy-S(62), TRUE);
     MoveWindow(d->bDelete, lx, rc.bottom-S(54), S(180), S(40), TRUE);
+
+    // ---------- patients tab ----------
+    int py = top + S(2);
+    if(d->pSearch) MoveWindow(d->pSearch, pad, py, W-2*pad, S(34), TRUE);
+    if(d->pList)   MoveWindow(d->pList, pad, py+S(44), W-2*pad,
+                              rc.bottom-(py+S(44))-S(62), TRUE);
+    if(d->bPDel)   MoveWindow(d->bPDel, pad, rc.bottom-S(54), S(200), S(40), TRUE);
 }
 static LRESULT CALLBACK adminProc(HWND h, UINT m, WPARAM w, LPARAM l){
     AdminData* d=(AdminData*)GetWindowLongPtrW(h,GWLP_USERDATA);
@@ -102,15 +223,99 @@ static LRESULT CALLBACK adminProc(HWND h, UINT m, WPARAM w, LPARAM l){
         }
         SendMessageW(d->cRole,WM_SETFONT,(WPARAM)g_fUI,TRUE);
         adRefreshList(d);
+
+        // ---------- patients tab controls ----------
+        d->pSearch=CreateWindowExW(WS_EX_CLIENTEDGE|WS_EX_RTLREADING,L"EDIT",L"",
+            WS_CHILD|WS_TABSTOP|ES_AUTOHSCROLL,0,0,10,10,h,(HMENU)ID_AD_PSEARCH,g_hInst,0);
+        SendMessageW(d->pSearch,WM_SETFONT,(WPARAM)g_fUI,TRUE);
+        SendMessageW(d->pSearch,EM_SETCUEBANNER,TRUE,
+            (LPARAM)L"جستجوی نام، کد ملی یا موبایل…");
+        d->pList=CreateWindowExW(WS_EX_LAYOUTRTL|WS_EX_RTLREADING,WC_LISTVIEWW,L"",
+            WS_CHILD|WS_TABSTOP|LVS_REPORT|LVS_SINGLESEL|LVS_SHOWSELALWAYS|LVS_OWNERDATA,
+            0,0,10,10,h,(HMENU)ID_AD_PLIST,g_hInst,0);
+        ListView_SetExtendedListViewStyle(d->pList,
+            LVS_EX_FULLROWSELECT|LVS_EX_DOUBLEBUFFER);
+        {
+            const wchar_t* pc[6]={L"کد ملی",L"نام",L"نام خانوادگی",
+                                  L"جنسیت",L"تولد",L"موبایل"};
+            int pw[6]={S(120),S(140),S(160),S(80),S(110),S(130)};
+            for(int i=0;i<6;i++){
+                LVCOLUMNW c={0}; c.mask=LVCF_TEXT|LVCF_WIDTH;
+                c.pszText=(LPWSTR)pc[i]; c.cx=pw[i];
+                ListView_InsertColumn(d->pList,i,&c);
+            }
+        }
+        SendMessageW(d->pList,WM_SETFONT,(WPARAM)g_fUI,TRUE);
+        ListView_SetBkColor(d->pList,g_theme.surface);
+        ListView_SetTextBkColor(d->pList,g_theme.surface);
+        ListView_SetTextColor(d->pList,g_theme.text);
+        d->bPDel=createFlatButton(h,ID_AD_PDEL,L"حذف بیمار انتخابی",ICO_TRASH,BS_DANGER,0,0,10,10);
+
+        adApplyTabVisibility(d);
         return 0; }
-    case WM_NCDESTROY: delete d; break;
-    case WM_SIZE: if(d) adLayout(h,d); return 0;
+    case WM_NCDESTROY:
+        if(d){ delete d->allPatients; delete d; }
+        return 0;
+    case WM_SIZE: if(d){ adLayout(h,d); adApplyTabVisibility(d); } return 0;
+
+    case WM_AD_PATIENTS_READY: {
+        if(!d){ delete (std::vector<PatientRow>*)l; return 0; }
+        delete d->allPatients;
+        d->allPatients=(std::vector<PatientRow>*)l;
+        d->loading=false; d->loaded=true;
+        adPatientsFilter(d);
+        return 0; }
+
+    case WM_TIMER:
+        if(d && w==AdminData::TIMER_SEARCH){
+            KillTimer(h,AdminData::TIMER_SEARCH);
+            if(d->pSearch){
+                wchar_t buf[256]={0};
+                GetWindowTextW(d->pSearch,buf,256);
+                d->query=buf;
+                adPatientsFilter(d);
+            }
+        }
+        return 0;
+
+    case WM_NOTIFY: {
+        if(!d) break;
+        LPNMHDR nh=(LPNMHDR)l;
+        if(nh->hwndFrom==d->pList){
+            if(nh->code==LVN_GETDISPINFOW){
+                NMLVDISPINFOW* di=(NMLVDISPINFOW*)l;
+                int vi=di->item.iItem;
+                if(d->allPatients && vi>=0 && vi<(int)d->view.size()
+                   && (di->item.mask & LVIF_TEXT)){
+                    const PatientRow& p=(*d->allPatients)[d->view[vi]];
+                    const wchar_t* val=L"";
+                    switch(di->item.iSubItem){
+                        case 0: val=p.nid.c_str();    break;
+                        case 1: val=p.first.c_str();  break;
+                        case 2: val=p.last.c_str();   break;
+                        case 3: val=genderText(p.gender); break;
+                        case 4: val=p.birth.c_str();  break;
+                        case 5: val=p.mobile.c_str(); break;
+                    }
+                    // ListView keeps the pointer only until the next call; a
+                    // static thread-local buffer keeps the value valid safely.
+                    static thread_local wchar_t cell[128];
+                    lstrcpynW(cell,val,128);
+                    di->item.pszText=cell;
+                }
+                return 0;
+            }
+        }
+        break; }
     case WM_APP_THEME:        // v1.1.0: re-color ListView on theme switch
-        if(d && d->list){
-            ListView_SetBkColor(d->list,g_theme.surface);
-            ListView_SetTextBkColor(d->list,g_theme.surface);
-            ListView_SetTextColor(d->list,g_theme.text);
-            InvalidateRect(d->list,NULL,TRUE);
+        if(d){
+            HWND lists[2]={d->list,d->pList};
+            for(HWND lv:lists){ if(!lv) continue;
+                ListView_SetBkColor(lv,g_theme.surface);
+                ListView_SetTextBkColor(lv,g_theme.surface);
+                ListView_SetTextColor(lv,g_theme.text);
+                InvalidateRect(lv,NULL,TRUE);
+            }
         }
         return 0;
     case WM_CTLCOLOREDIT: {
@@ -128,6 +333,31 @@ static LRESULT CALLBACK adminProc(HWND h, UINT m, WPARAM w, LPARAM l){
     case WM_COMMAND: {
         if(!d) return 0;
         int id=LOWORD(w);
+        if(id==ID_AD_PSEARCH && HIWORD(w)==EN_CHANGE){
+            // debounce 250 ms — restart the timer on every keystroke
+            SetTimer(h,AdminData::TIMER_SEARCH,250,NULL);
+            return 0;
+        }
+        if(id==ID_AD_PDEL){
+            int sel=ListView_GetNextItem(d->pList,-1,LVNI_SELECTED);
+            if(sel>=0 && d->allPatients && sel<(int)d->view.size()){
+                const PatientRow& p=(*d->allPatients)[d->view[sel]];
+                std::wstring q=L"بیمار «"+p.first+L" "+p.last+L"» («"+p.nid+
+                               L"») حذف شود؟";
+                std::wstring nid=p.nid;
+                if(MessageBoxW(h,q.c_str(),L"حذف بیمار",
+                    MB_YESNO|MB_ICONWARNING)==IDYES){
+                    if(deletePatient(nid) && d->allPatients){
+                        for(auto it=d->allPatients->begin();
+                            it!=d->allPatients->end();++it){
+                            if(it->nid==nid){ d->allPatients->erase(it); break; }
+                        }
+                        adPatientsFilter(d);
+                    }
+                }
+            }
+            return 0;
+        }
         if(id==ID_AD_CREATE){
             wchar_t fb[128],ub[128],pb[128],db[128];
             GetWindowTextW(d->eFull,fb,128); GetWindowTextW(d->eUser,ub,128);
@@ -164,6 +394,22 @@ static LRESULT CALLBACK adminProc(HWND h, UINT m, WPARAM w, LPARAM l){
             }
         }
         return 0; }
+    case WM_LBUTTONDOWN: {
+        if(!d) return 0;
+        POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
+        for(int i=0;i<AD_TAB_COUNT;i++){
+            if(PtInRect(&d->tabRects[i],pt)){
+                if(d->tab!=i){
+                    d->tab=i;
+                    adApplyTabVisibility(d);
+                    if(i==AD_TAB_PATIENTS) adPatientsLoadAsync(h,d);
+                    adLayout(h,d);
+                    InvalidateRect(h,NULL,TRUE);
+                }
+                break;
+            }
+        }
+        return 0; }
     case WM_ERASEBKGND: return 1;
     case WM_PAINT: {
         PAINTSTRUCT ps; HDC dc0=BeginPaint(h,&ps);
@@ -176,13 +422,52 @@ static LRESULT CALLBACK adminProc(HWND h, UINT m, WPARAM w, LPARAM l){
 
         SetTextColor(dc,g_theme.text);
         SelectObject(dc,g_fTitle);
-        RECT tr={S(24),S(18),rc.right-S(24),S(56)};
-        DrawTextW(dc,L"پنل مخفی ادمین — مدیریت کاربران",-1,&tr,
+        RECT tr={S(24),S(14),rc.right-S(24),S(50)};
+        DrawTextW(dc,L"پنل مخفی ادمین",-1,&tr,
             DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
 
+        // ---- tab strip ----
+        adComputeTabRects(h,d);
+        const wchar_t* tabLabels[AD_TAB_COUNT]={L"کاربران",L"بیماران"};
+        SelectObject(dc,g_fUIB);
+        for(int i=0;i<AD_TAB_COUNT;i++){
+            bool active=(d->tab==i);
+            RECT t=d->tabRects[i];
+            uikit::RoundedPanel(dc,t,S(8),
+                active?g_theme.accent:g_theme.surface,
+                active?g_theme.accent:g_theme.border, g_theme.bg);
+            SetTextColor(dc,active?g_theme.accentText:g_theme.textDim);
+            DrawTextW(dc,tabLabels[i],-1,&t,
+                DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+        }
+
+        if(d->tab==AD_TAB_PATIENTS){
+            // patients tab is mostly native controls; just a hint line + count
+            SelectObject(dc,g_fSmall);
+            SetTextColor(dc,g_theme.textDim);
+            std::wstring info;
+            if(d->loading) info=L"در حال بارگذاری بیماران…";
+            else {
+                wchar_t b[96];
+                swprintf(b,96,L"%d بیمار نمایش داده می‌شود",(int)d->view.size());
+                info=toFaDigits(b);
+            }
+            int py=adTabStripBottom()+S(12)+S(44)+
+                   (rc.bottom-(adTabStripBottom()+S(12)+S(44))-S(62))+S(8);
+            RECT ir={S(24),py,rc.right-S(24),py+S(22)};
+            DrawTextW(dc,info.c_str(),-1,&ir,
+                DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+            BitBlt(dc0,0,0,rc.right,rc.bottom,dc,0,0,SRCCOPY);
+            SelectObject(dc,obm); DeleteObject(bmp); DeleteDC(dc);
+            EndPaint(h,&ps);
+            return 0;
+        }
+
+        // ============ USERS TAB ============
+        int topU = adTabStripBottom()+S(12);
         // form card frame
         int fw=S(360), pad=S(24);
-        int fx=rc.right-pad-fw, fy=S(90);
+        int fx=rc.right-pad-fw, fy=topU+S(30);
         RECT card={fx-S(0),fy-S(20),fx+fw,fy+S(28)+5*S(64)+S(76)};
         fillRoundRect(dc,card,S(14),g_theme.surface,g_theme.border);
 
@@ -225,7 +510,7 @@ static LRESULT CALLBACK adminProc(HWND h, UINT m, WPARAM w, LPARAM l){
         // list title
         SetTextColor(dc,g_theme.text);
         SelectObject(dc,g_fUIB);
-        RECT lt={pad,S(88),rc.right-2*pad-fw,S(114)};
+        RECT lt={pad,topU,rc.right-2*pad-fw,topU+S(26)};
         DrawTextW(dc,L"لیست کاربران",-1,&lt,
             DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
 
