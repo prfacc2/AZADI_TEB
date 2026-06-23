@@ -98,6 +98,7 @@ enum { BK_MODE_HOME=0, BK_MODE_RESTORE=1 };
 
 // v1.10.0 — hidden backup ANALYZER page (reachable ONLY via Ctrl+B).
 #include "backup_analyzer.h"
+#include "backup_log.h"
 #include "ui_kit.h"
 #include <thread>
 #include <atomic>
@@ -126,6 +127,8 @@ struct BkState {
     std::wstring anPath;                 // chosen file
     BkAnalysis*  anResult=nullptr;       // owned; built on worker, shown on UI
     int   anScroll=0;                    // vertical scroll of the report
+    bool  anErrExpanded=false;           // B.4: error card "technical details" open
+    std::wstring anErrPayload;           // B.4: full BackupLog payload for failed run
 
     BkState():mode(BK_MODE_HOME),scanning(false),busy(false),progress(0),
         foreign(false),allTicked(false),hot(-1),anim(0),
@@ -967,6 +970,9 @@ static void bkAnProgCb(int pct, const std::wstring& status, void* user){
     HWND h=(HWND)user;
     if(!h||!IsWindow(h)) return;
     if(s_bs){ s_bs->anProgress.store(pct); s_bs->anStatus=status; }
+    // forensic breadcrumb so a later failure can reconstruct the last 16 steps.
+    { wchar_t b[128]; swprintf(b,128,L"ANALYZE_PROGRESS %d%% %s",pct,status.c_str());
+      BackupLog_Breadcrumb(b); }
     PostMessageW(h,WM_BK_ANALYSIS_PROG,(WPARAM)pct,0);
 }
 
@@ -1052,7 +1058,11 @@ static RECT bkAnSecCopyRect(int rightX, int titleY){
 //  Paint the analyzer page (called from bkPaint when anPage is on).
 static void bkAnPaint(HWND h, HDC dc){
     RECT rc=bkAnPageRect(h);
-    // dim card surface backdrop
+    // B.1: SOLID full-client background covers the ENTIRE client area so no
+    // control from the underlying backup page can ever bleed through (kills the
+    // "ghost controls" artifact). Paint a solid page-bg rectangle first.
+    { HBRUSH bg=CreateSolidBrush(g_theme.bg); FillRect(dc,&rc,bg); DeleteObject(bg); }
+    // card surface backdrop on top of the solid fill
     gpRoundRectBg(dc,rc,S(2),g_theme.surface,g_theme.border,g_theme.bg);
     SetBkMode(dc,TRANSPARENT);
 
@@ -1086,14 +1096,20 @@ static void bkAnPaint(HWND h, HDC dc){
         y+=S(28);
     }
 
-    // progress bar (determinate, bytes-based)
+    // progress bar (determinate, bytes-based) — B.3: rounded track + gradient
+    // fill; never shows 100% before the worker actually reports it.
     if(s_bs && (s_bs->anBusy || s_bs->anProgress.load()>0)){
         int pct=s_bs->anProgress.load();
+        if(pct>100) pct=100; if(pct<0) pct=0;
+        // do not paint a full bar while still busy unless 100% was reported
+        if(s_bs->anBusy && pct>=100) pct=99;
         RECT bar={S(24),y,rc.right-S(24),y+S(16)};
-        gpRoundRectBg(dc,bar,S(8),g_theme.surface2,g_theme.border,g_theme.surface);
+        gpRoundRectBg(dc,bar,bar.bottom-bar.top,g_theme.surface2,g_theme.border,g_theme.surface);
         RECT fill=bar; fill.left=bar.right-(int)((bar.right-bar.left)*(pct/100.0));
         if(fill.left<bar.left) fill.left=bar.left;
-        gpRoundRectBg(dc,fill,S(8),g_theme.accent,g_theme.accent,g_theme.surface2);
+        if(fill.left<fill.right-S(2))
+            gpGradRoundRectBg(dc,fill,fill.bottom-fill.top,
+                g_theme.accent,g_theme.accent2,g_theme.accent,g_theme.surface2);
         SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
         RECT sr={S(24),y+S(20),rc.right-S(24),y+S(42)};
         std::wstring st=toFaDigits(std::to_wstring(pct))+L"%   —   "+s_bs->anStatus;
@@ -1104,13 +1120,57 @@ static void bkAnPaint(HWND h, HDC dc){
     // report sections
     if(s_bs && s_bs->anResult){
         if(!s_bs->anResult->ok && !s_bs->anResult->error.empty()){
-            RECT er={S(24),y,rc.right-S(24),y+S(80)};
-            gpRoundRectBg(dc,er,S(10),blendColor(g_theme.surface,g_theme.danger,12),
+            // B.4: compact, centered inline error CARD (max width 720px) with a
+            // warning icon, title, one-line summary, an expander revealing the
+            // full BackupLog payload, and a "copy details" button. NOT a giant
+            // full-page red banner.
+            int cardW=S(720); if(cardW>rc.right-S(48)) cardW=rc.right-S(48);
+            int cardX=(rc.right-cardW)/2;
+            bool open=s_bs->anErrExpanded;
+            int cardH = open ? S(320) : S(120);
+            RECT er={cardX,y,cardX+cardW,y+cardH};
+            gpRoundRectBg(dc,er,S(10),blendColor(g_theme.surface,g_theme.danger,10),
                 g_theme.danger,g_theme.surface);
-            SelectObject(dc,g_fUI); SetTextColor(dc,g_theme.danger);
-            InflateRect(&er,-S(12),-S(8));
-            DrawTextW(dc,s_bs->anResult->error.c_str(),-1,&er,
-                DT_RIGHT|DT_WORDBREAK|DT_RTLREADING|DT_NOPREFIX);
+            // warning icon
+            RECT ic={er.right-S(40),er.top+S(14),er.right-S(12),er.top+S(42)};
+            drawIcon(dc,ICO_X,ic,g_theme.danger,S(2));
+            // title
+            SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.danger);
+            RECT tt={er.left+S(14),er.top+S(12),er.right-S(48),er.top+S(36)};
+            DrawTextW(dc,L"تحلیل بکاپ ناموفق بود",-1,&tt,
+                DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+            // one-line summary
+            SelectObject(dc,g_fUI); SetTextColor(dc,g_theme.text);
+            RECT su={er.left+S(14),er.top+S(40),er.right-S(14),er.top+S(64)};
+            DrawTextW(dc,s_bs->anResult->error.c_str(),-1,&su,
+                DT_RIGHT|DT_SINGLELINE|DT_END_ELLIPSIS|DT_RTLREADING|DT_NOPREFIX);
+            // expander + copy buttons
+            RECT exb={er.left+S(14),er.top+S(74),er.left+S(174),er.top+S(102)};
+            gpRoundRectBg(dc,exb,S(6),g_theme.surface2,g_theme.border,g_theme.surface);
+            SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.accent);
+            DrawTextW(dc,open?L"بستن جزئیات فنی":L"نمایش جزئیات فنی",-1,&exb,
+                DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+            RECT cpb={er.left+S(184),er.top+S(74),er.left+S(294),er.top+S(102)};
+            gpRoundRectBg(dc,cpb,S(6),g_theme.surface2,g_theme.border,g_theme.surface);
+            SetTextColor(dc,g_theme.textDim);
+            DrawTextW(dc,L"کپی جزئیات",-1,&cpb,
+                DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+            // details box (monospace) when expanded
+            if(open){
+                RECT db={er.left+S(14),er.top+S(110),er.right-S(14),er.bottom-S(12)};
+                gpRoundRectBg(dc,db,S(6),g_theme.bg,g_theme.border,g_theme.surface);
+                SelectObject(dc,g_fMono?g_fMono:g_fSmall); SetTextColor(dc,g_theme.text);
+                RECT dbi=db; InflateRect(&dbi,-S(8),-S(6));
+                DrawTextW(dc,s_bs->anErrPayload.c_str(),-1,&dbi,
+                    DT_LEFT|DT_WORDBREAK|DT_NOPREFIX|DT_EDITCONTROL);
+            }
+            // global copy button still drawn below by the shared code path
+            RECT cab=bkAnBtnCopyAll(h);
+            gpRoundRectBg(dc,cab,S(10),g_theme.surface2,g_theme.accent,g_theme.surface);
+            SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.accent);
+            DrawTextW(dc,L"کپی کامل گزارش",-1,&cab,
+                DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+            return;   // error path complete
         } else {
             int top = y - s_bs->anScroll;
             int bottomLimit = bkAnBtnCopyAll(h).top - S(8);
@@ -1159,6 +1219,23 @@ static bool bkAnClick(HWND h, POINT pt){
     if(PtInRect(&x,pt)){ s_bs->anPage=false; InvalidateRect(h,NULL,FALSE); return true; }
     RECT b=bkAnBtnAnalyze(h);
     if(PtInRect(&b,pt)){ bkAnStart(h); return true; }
+    // B.4: error-card buttons (expander + copy details)
+    if(s_bs->anResult && !s_bs->anResult->ok && !s_bs->anResult->error.empty()){
+        RECT rc=bkAnPageRect(h);
+        int y=S(160);
+        if(!s_bs->anPath.empty()) y+=S(28);
+        if(s_bs->anBusy || s_bs->anProgress.load()>0) y+=S(48);
+        int cardW=S(720); if(cardW>rc.right-S(48)) cardW=rc.right-S(48);
+        int cardX=(rc.right-cardW)/2;
+        RECT exb={cardX+S(14),y+S(74),cardX+S(174),y+S(102)};
+        if(PtInRect(&exb,pt)){ s_bs->anErrExpanded=!s_bs->anErrExpanded;
+            InvalidateRect(h,NULL,FALSE); return true; }
+        RECT cpb={cardX+S(184),y+S(74),cardX+S(294),y+S(102)};
+        if(PtInRect(&cpb,pt)){ bkAnCopy(h,s_bs->anErrPayload); return true; }
+        RECT cab=bkAnBtnCopyAll(h);
+        if(PtInRect(&cab,pt)){ bkAnCopy(h,bkAnFullReport()); return true; }
+        return true;
+    }
     if(s_bs->anResult && s_bs->anResult->ok){
         RECT cab=bkAnBtnCopyAll(h);
         if(PtInRect(&cab,pt)){ bkAnCopy(h,bkAnFullReport()); return true; }
@@ -1279,7 +1356,11 @@ static LRESULT CALLBACK bkProc(HWND h, UINT m, WPARAM w, LPARAM l){
     case WM_BK_ANALYSIS_DONE:{
         BkAnalysis* r=(BkAnalysis*)l;
         if(s_bs){ delete s_bs->anResult; s_bs->anResult=r; s_bs->anBusy=false;
-                  s_bs->anProgress.store(100); InvalidateRect(h,NULL,FALSE); }
+                  s_bs->anProgress.store(100);
+                  s_bs->anErrExpanded=false;
+                  // B.4: snapshot the full BackupLog payload for the failed run
+                  if(r && !r->ok) s_bs->anErrPayload=BackupLog_LastPayload();
+                  InvalidateRect(h,NULL,FALSE); }
         else delete r;
         return 0; }
     case WM_LBUTTONDOWN:{ if(!s_bs) break; POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
@@ -1316,9 +1397,19 @@ static LRESULT CALLBACK bkProc(HWND h, UINT m, WPARAM w, LPARAM l){
     case WM_KEYDOWN:
         if(!s_bs) break;
         // Ctrl+B toggles the hidden analyzer page (no menu/button reveals it).
+        // B.6: guard against key auto-repeat so a held Ctrl+B does not "stack"
+        // toggles — only the first WM_KEYDOWN of a press is honored.
         if(w=='B' && (GetKeyState(VK_CONTROL)&0x8000)){
-            s_bs->anPage=!s_bs->anPage;
-            InvalidateRect(h,NULL,FALSE);
+            bool wasDown=(l & (1<<30))!=0;   // previous key-state bit
+            if(!wasDown){
+                s_bs->anPage=!s_bs->anPage;
+                if(!s_bs->anPage){
+                    // closing: cancel any running worker cooperatively
+                    InterlockedExchange(&s_cancel,1);
+                }
+                InvalidateRect(h,NULL,TRUE);
+                UpdateWindow(h);
+            }
             return 0;
         }
         if(w==VK_ESCAPE){

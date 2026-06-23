@@ -20,7 +20,15 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.10.0"
+#define APP_VERSION_W   L"1.2.0"
+
+// ----------------------------------------------------------- logging policy -
+//  RELEASE 1.2.0 (Section A): all general user-behavior logging is gated behind
+//  AZ_DEBUG_LOGS, which is OFF (0) in release. The only log channels that remain
+//  active are the dedicated Backup Log (backup_log.h) and the crash dump.
+#ifndef AZ_DEBUG_LOGS
+#define AZ_DEBUG_LOGS 0
+#endif
 #define APP_NAME_W      L"\u0622\u0632\u0627\u062f\u06cc \u0637\u0628"   // آزادی طب
 #define APP_CLASS_W     L"AzadiTebFrame"
 

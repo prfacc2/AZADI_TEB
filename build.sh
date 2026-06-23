@@ -20,7 +20,8 @@ SRCS="src/main.cpp src/util.cpp src/handlers.cpp src/theme.cpp src/users.cpp \
       src/billing.cpp src/calculator.cpp src/dialogs.cpp src/update.cpp \
       src/admin.cpp src/reception.cpp src/gdiplus.cpp src/settings.cpp \
       src/printer.cpp src/employees.cpp src/data_ext.cpp src/appointment.cpp \
-      src/backup.cpp src/ui_kit.cpp src/backup_analyzer.cpp"
+      src/backup.cpp src/ui_kit.cpp src/backup_analyzer.cpp \
+      src/backup_log.cpp"
 
 $CXX -std=c++17 -O2 -municode -mwindows \
     -DUNICODE -D_UNICODE -D_WIN32_IE=0x0700 \
@@ -32,7 +33,7 @@ $CXX -std=c++17 -O2 -municode -mwindows \
     -o build/AzadiTeb.exe \
     -lcomctl32 -lcomdlg32 -lgdi32 -lgdiplus -lmsimg32 -ldwmapi -luxtheme \
     -luser32 -lshlwapi -lwininet -ladvapi32 -lshell32 -lwinspool \
-    -lole32 -luuid -lversion -lwinmm
+    -lole32 -luuid -lversion -lwinmm -ldbghelp
 
 echo "[3/3] Stripping..."
 i686-w64-mingw32-strip build/AzadiTeb.exe

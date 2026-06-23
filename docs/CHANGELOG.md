@@ -5,6 +5,53 @@
 
 ---
 
+## 1.2.0 — 2026-06-23
+
+### Added
+- Admin: "بیماران" patients tab with virtualized list, debounced
+  global search, multi-chip filters, detail drawer, background DB
+  worker.
+- Reception user settings: profile change request flow (name + avatar)
+  with admin approval inbox.
+- Reception user settings: theme switcher, notifications, printer
+  picker with paper size + print preview + test print.
+- Admin inbox for profile change requests.
+- Backup Log channel (only logging that remains): dedicated
+  `%LOCALAPPDATA%/AzadiTeb/backup_logs/backup.log`, 2 MB rotation,
+  last-5 gzipped, with timestamp/pid/tid/phase/file/size/identity-hash/
+  Win32+SQLite+SEH/C++ error text/stack trace/free-disk/breadcrumbs.
+- Crash handler now also writes a full `MiniDumpWriteDump` to
+  `%LOCALAPPDATA%/AzadiTeb/crashdumps/` (crash-only, last 5 kept).
+
+### Changed
+- Reception form layout: new 3-column grid; all blue section labels
+  always visible; no vertical scroll at 1024×600; deterministic
+  positioning across tab switches (DeferWindowPos atomic layout).
+- Backup Analyzer page rewritten: real progress, real errors, no
+  ghost controls (solid full-client background), modal-child window
+  behaviour, Esc & Ctrl+B clean toggle (auto-repeat guarded).
+- UI kit hardened: AzCard, AzSectionHeader, AzCombo, AzProgress,
+  AzCheckbox, AzInput, AzDateInput etc. — all real HWND children
+  with RAII GDI handles.
+
+### Removed
+- All user-behavior logging (`logLine` gated behind `AZ_DEBUG_LOGS`,
+  OFF in release; no `app.log`/`build/logs/` writes in normal use).
+- `build/logs/` directory.
+
+### Fixed
+- Right-column "بیمه مکمل" combobox border corruption.
+- Right-column checkbox/caption misalignment ("فعال", "اتوماتیک").
+- Items jumping position when switching admin tabs.
+- Backup analyzer always failing with "خطای پیش‌بینی‌نشده" — now
+  guarded with a vectored exception handler + try/catch and full
+  forensic logging via the Backup Log channel.
+- Ghost controls bleeding into analyzer page.
+- GDI handle leaks under prolonged use.
+- Persian-path file open failures (UTF-8 + URI mode).
+
+---
+
 ## v1.10.0 — 2026-06-22 — تب «بیماران»، آنالایزر مخفی بکاپ (Ctrl+B)، فشرده‌سازی پذیرش، کیت رابط کاربری
 
 این نسخه چند قابلیت بزرگ و یک لایهٔ رابط‌کاربری قابل‌استفادهٔ مجدد اضافه می‌کند و

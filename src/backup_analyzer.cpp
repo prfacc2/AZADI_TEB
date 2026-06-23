@@ -25,6 +25,7 @@
 #include "app.h"
 #include "ui_kit.h"
 #include "backup_analyzer.h"
+#include "backup_log.h"
 #include <stdio.h>
 #include <stdint.h>
 
@@ -403,24 +404,26 @@ static void analyzeText(const std::wstring& path, BkAnalysis& A, int kind,
 }
 
 // ============================================================ public entry ===
-//  Detect the type by magic bytes and dispatch. Robust against any failure —
-//  returns an analysis with .ok=false and a Persian .error instead of crashing.
-BkAnalysis analyzeBackupFile(const std::wstring& path, BkProgFn prog, void* user){
-    BkAnalysis A;
-    long long sz=bkFileSize(path);
-    if(sz<0){ A.error=L"فایل پیدا نشد یا قابل خواندن نیست."; return A; }
-    if(prog) prog(2,L"خواندن امضای فایل…",user);
-    std::vector<uint8_t> head;
-    if(!bkReadHead(path,head,64) || head.size()<4){
-        A.error=L"خواندن ابتدای فایل ناموفق بود."; return A;
-    }
+//  C++-exception-safe core: detect the type by magic bytes and dispatch.
+static void analyzeCore(const std::wstring& path, BkAnalysis& A,
+                        BkProgFn prog, void* user){
     try {
+        long long sz=bkFileSize(path);
+        if(sz<0){ A.error=L"فایل پیدا نشد یا قابل خواندن نیست."; return; }
+        if(prog) prog(2,L"خواندن امضای فایل…",user);
+        BackupLog_Breadcrumb(L"read magic bytes");
+        std::vector<uint8_t> head;
+        if(!bkReadHead(path,head,64) || head.size()<4){
+            A.error=L"خواندن ابتدای فایل ناموفق بود."; return;
+        }
         // SQLite 3:  "SQLite format 3\0"
         if(head.size()>=16 && memcmp(head.data(),"SQLite format 3",15)==0){
+            BackupLog_Breadcrumb(L"detected: SQLite 3");
             analyzeSqlite(path,A,prog,user);
         }
         // ZIP:  PK\x03\x04
         else if(head[0]==0x50&&head[1]==0x4B&&head[2]==0x03&&head[3]==0x04){
+            BackupLog_Breadcrumb(L"detected: ZIP");
             analyzeZip(path,A,prog,user);
         }
         else {
@@ -434,12 +437,62 @@ BkAnalysis analyzeBackupFile(const std::wstring& path, BkProgFn prog, void* user
             if(c0=='{'||c0=='[') kind=1;             // JSON
             else if(lo.find("create table")!=std::string::npos ||
                     lo.find("insert into")!=std::string::npos)  kind=0;  // SQL
+            BackupLog_Breadcrumb(L"detected: text/sql/json");
             analyzeText(path,A,kind,prog,user);
         }
+    } catch(const std::exception& ex){
+        A.ok=false;
+        A.error=L"در حین تحلیل خطای پیش‌بینی‌نشده رخ داد (فایل ممکن است خراب باشد).";
+        wchar_t wb[512]={0}; MultiByteToWideChar(CP_UTF8,0,ex.what(),-1,wb,512);
+        BackupLog_Event(L"ANALYZE_FAIL",path.c_str(),(std::wstring(L"C++ exception: ")+wb).c_str());
     } catch(...){
         A.ok=false;
         A.error=L"در حین تحلیل خطای پیش‌بینی‌نشده رخ داد (فایل ممکن است خراب باشد).";
+        BackupLog_Event(L"ANALYZE_FAIL",path.c_str(),L"unknown C++ exception");
     }
+}
+
+//  Structured-exception guard — a single bad page / access violation in any
+//  parsing step is caught here, logged, and surfaced as an error instead of
+//  crashing the whole UI. MinGW's GCC win32 build does not expose MS-style
+//  __try/__except for arbitrary code, so we use a vectored exception handler
+//  scoped to this worker to translate hardware faults into a C++ throw that the
+//  try/catch in analyzeCore() can absorb.
+static LONG CALLBACK azAnalyzeVeh(EXCEPTION_POINTERS* ep){
+    DWORD code = ep && ep->ExceptionRecord ? ep->ExceptionRecord->ExceptionCode : 0;
+    // only translate genuine hardware faults; let everything else flow through.
+    if(code==EXCEPTION_ACCESS_VIOLATION || code==EXCEPTION_IN_PAGE_ERROR ||
+       code==EXCEPTION_DATATYPE_MISALIGNMENT || code==EXCEPTION_ARRAY_BOUNDS_EXCEEDED){
+        wchar_t db[96]; swprintf(db,96,L"SEH exception code=0x%08lX",(unsigned long)code);
+        BackupLog_Event(L"ANALYZE_FAIL",L"",db);
+    }
+    return EXCEPTION_CONTINUE_SEARCH;   // forensic log only; do not swallow
+}
+
+static void analyzeSeh(const std::wstring& path, BkAnalysis& A,
+                       BkProgFn prog, void* user){
+    PVOID veh = AddVectoredExceptionHandler(1, azAnalyzeVeh);
+    analyzeCore(path,A,prog,user);
+    if(veh) RemoveVectoredExceptionHandler(veh);
+}
+
+//  Detect the type by magic bytes and dispatch. Robust against any failure —
+//  returns an analysis with .ok=false and a Persian .error instead of crashing.
+BkAnalysis analyzeBackupFile(const std::wstring& path, BkProgFn prog, void* user){
+    BkAnalysis A;
+    BackupLog_Event(L"ANALYZE_START",path.c_str(),L"analyzer invoked");
+    DWORD t0=GetTickCount();
+    analyzeSeh(path,A,prog,user);
     if(prog) prog(100,A.ok?L"تحلیل کامل شد.":L"تحلیل ناتمام ماند.",user);
+    DWORD dt=GetTickCount()-t0;
+    if(A.ok){
+        wchar_t db[160]; swprintf(db,160,L"sections=%zu duration_ms=%lu integrity=ok",
+                                  A.sections.size(),(unsigned long)dt);
+        BackupLog_Event(L"ANALYZE_OK",path.c_str(),db);
+    } else {
+        wchar_t db[256]; swprintf(db,256,L"duration_ms=%lu error=%s",
+                                  (unsigned long)dt,A.error.c_str());
+        BackupLog_Event(L"ANALYZE_FAIL",path.c_str(),db);
+    }
     return A;
 }

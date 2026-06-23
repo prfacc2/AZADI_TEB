@@ -11,8 +11,56 @@
 #include <stdio.h>
 #include <signal.h>
 #include <exception>
+#include <shlobj.h>
+#include <dbghelp.h>
 
 bool g_lowSpec = false;
+
+// ---------------------------------------------------------- crash dumps ----
+//  RELEASE 1.2.0 (F.4): write a MiniDumpWriteDump alongside the existing crash
+//  log. Dumps go to %LOCALAPPDATA%/AzadiTeb/crashdumps/azaditeb-<utc>.dmp and
+//  the last 5 are kept (crash-only — exempt from the "no user logs" rule).
+static void crashRotateDumps(const wchar_t* dir){
+    // collect *.dmp, delete all but the newest 4 (so adding 1 keeps 5)
+    wchar_t pat[MAX_PATH]; wsprintfW(pat,L"%s\\azaditeb-*.dmp",dir);
+    WIN32_FIND_DATAW fd; HANDLE h=FindFirstFileW(pat,&fd);
+    if(h==INVALID_HANDLE_VALUE) return;
+    // simple: gather names + write-times, keep newest 4
+    struct E { wchar_t name[MAX_PATH]; FILETIME ft; };
+    static E ents[256]; int n=0;
+    do {
+        if(n<256){ lstrcpynW(ents[n].name,fd.cFileName,MAX_PATH);
+                   ents[n].ft=fd.ftLastWriteTime; n++; }
+    } while(FindNextFileW(h,&fd));
+    FindClose(h);
+    // bubble-sort by time ascending (oldest first) — n is tiny
+    for(int i=0;i<n;i++) for(int j=i+1;j<n;j++)
+        if(CompareFileTime(&ents[j].ft,&ents[i].ft)<0){ E t=ents[i]; ents[i]=ents[j]; ents[j]=t; }
+    for(int i=0;i<n-4;i++){
+        wchar_t full[MAX_PATH]; wsprintfW(full,L"%s\\%s",dir,ents[i].name);
+        DeleteFileW(full);
+    }
+}
+static void crashWriteMiniDump(EXCEPTION_POINTERS* ep){
+    wchar_t local[MAX_PATH]={0};
+    if(SHGetFolderPathW(NULL,CSIDL_LOCAL_APPDATA,NULL,0,local)!=S_OK) return;
+    wchar_t dir[MAX_PATH]; wsprintfW(dir,L"%s\\AzadiTeb\\crashdumps",local);
+    SHCreateDirectoryExW(NULL,dir,NULL);
+    crashRotateDumps(dir);
+    SYSTEMTIME ut; GetSystemTime(&ut);
+    wchar_t path[MAX_PATH];
+    wsprintfW(path,L"%s\\azaditeb-%04d%02d%02dT%02d%02d%02dZ.dmp",
+        dir,ut.wYear,ut.wMonth,ut.wDay,ut.wHour,ut.wMinute,ut.wSecond);
+    HANDLE hf=CreateFileW(path,GENERIC_WRITE,0,NULL,CREATE_ALWAYS,
+                          FILE_ATTRIBUTE_NORMAL,NULL);
+    if(hf==INVALID_HANDLE_VALUE) return;
+    MINIDUMP_EXCEPTION_INFORMATION mei; ZeroMemory(&mei,sizeof(mei));
+    mei.ThreadId=GetCurrentThreadId(); mei.ExceptionPointers=ep; mei.ClientPointers=FALSE;
+    MiniDumpWriteDump(GetCurrentProcess(),GetCurrentProcessId(),hf,
+        (MINIDUMP_TYPE)(MiniDumpWithIndirectlyReferencedMemory|MiniDumpScanMemory),
+        ep?&mei:NULL,NULL,NULL);
+    CloseHandle(hf);
+}
 
 // ============================================================== CRASH ======
 static volatile LONG s_inCrash = 0;          // recursion / double-fault guard
@@ -115,6 +163,7 @@ static void crashCore(DWORD code, void* addr, CONTEXT* c){
 }
 
 static LONG WINAPI crashFilter(EXCEPTION_POINTERS* ep){
+    crashWriteMiniDump(ep);             // F.4: full MiniDumpWriteDump first
     crashCore(ep ? ep->ExceptionRecord->ExceptionCode : 0,
               ep ? ep->ExceptionRecord->ExceptionAddress : 0,
               ep ? ep->ContextRecord : NULL);

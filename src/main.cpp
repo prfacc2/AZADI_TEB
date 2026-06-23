@@ -4,6 +4,7 @@
 //  global F8 = print last receipt
 // ============================================================================
 #include "app.h"
+#include "backup_log.h"
 #include <stdio.h>
 
 HINSTANCE g_hInst = NULL;
@@ -813,6 +814,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
 
     installCrashHandler();           // crash handler
     detectSpec();                    // speed handler
+    BackupLog_Init();                // dedicated Backup Log channel (A.3)
     logLine(L"=== Azadi-Teb start v" APP_VERSION_W L" ===");
 
     // single instance
@@ -910,6 +912,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
         DispatchMessageW(&msg);
     }
     gdipShutdown();
+    BackupLog_Shutdown();
     logLine(L"=== Azadi-Teb exit ===");
     return 0;
 }

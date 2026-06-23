@@ -2,6 +2,7 @@ obj/
 *.log
 build/data/
 build/logs/
+backup_logs/
 build/AzadiTeb_dbg.exe
 shot_*.png
 shots/

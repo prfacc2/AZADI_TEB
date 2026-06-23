@@ -86,12 +86,23 @@ std::wstring readFileUtf8(const std::wstring& path){
 }
 
 // ---------------------------------------------------------------- logging --
+//  RELEASE 1.2.0 — user-behavior logging policy overhaul (Section A.2).
+//  The general-purpose app.log channel is DISABLED in release builds. The only
+//  remaining log channels are the dedicated Backup Log (src/backup_log.cpp) and
+//  the crash handler dump. logLine() is now a no-op unless AZ_DEBUG_LOGS is
+//  explicitly defined at compile time (it is OFF in release). Call sites are
+//  left intact so debug builds can still trace, but nothing is written to disk
+//  during normal operation.
 void logLine(const std::wstring& s){
+#if AZ_DEBUG_LOGS
     SYSTEMTIME st = iranNow();
     wchar_t pre[64];
     swprintf(pre,64,L"[%04d-%02d-%02d %02d:%02d:%02d] ",
         st.wYear,st.wMonth,st.wDay,st.wHour,st.wMinute,st.wSecond);
-    writeFileUtf8(logsDir()+L"\\app.log", std::wstring(pre)+s+L"\r\n", true);
+    writeFileUtf8(logsDir()+L"\\logs\\app.log", std::wstring(pre)+s+L"\r\n", true);
+#else
+    (void)s;   // release: do not write any user-behavior telemetry
+#endif
 }
 
 // --------------------------------------------------------------- settings --
