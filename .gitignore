@@ -3,6 +3,7 @@ obj/
 build/data/
 build/logs/
 backup_logs/
+crashdumps/
 build/AzadiTeb_dbg.exe
 shot_*.png
 shots/

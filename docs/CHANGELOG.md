@@ -5,6 +5,63 @@
 
 ---
 
+## 1.3.0 — 2026-06-23
+
+### Added
+- **Clinic-management panel: «بیماران» (Patients) page** (`src/manage.inc`)
+  — a virtualized `LVS_OWNERDATA` ListView placed as the second nav item
+  (index 1, right after the dashboard). Reuses the existing patient data
+  layer (`loadAllPatients`) loaded ONCE on a background worker thread so
+  the UI never blocks; only visible rows are materialized via
+  `LVN_GETDISPINFO`. Includes a debounced (250 ms) global search box that
+  filters the whole set with Persian/Arabic normalization
+  (`uikit::NormalizeFa`), plus a live "showing N of M" status line.
+- **Reception-user profile entry in Settings** (`src/settings.cpp`) — the
+  already-implemented profile change request flow (edit display name +
+  avatar, queued for management approval via `showProfileDialog`) is now
+  surfaced as the «پروفایل من» row for every signed-in user.
+- **Backup analyzer: per-table + patients-domain analysis**
+  (`src/backup_analyzer.cpp`) — the SQLite path now extracts the table
+  list and per-table column counts straight from the recovered
+  `CREATE TABLE` statements (no `sqlite3` link needed) and detects a
+  `patients` table by name or by its signature columns, reporting a real
+  domain summary taken from the on-disk schema.
+
+### Changed
+- **Reception form: hardened section-header / input no-overlap invariant**
+  (`src/reception.cpp`) — row pitch raised to `step = rh + S(46)` and the
+  blue section caption is now drawn `S(42)` above the input baseline with
+  its band cleared to the card surface first, guaranteeing a strictly
+  positive gap so a blue section label («اطلاعات تماس», «نوبت و بیمه»،
+  «مبلغ و تخفیف») can never sit behind/under an input at any DPI rounding.
+- Patients moved off the developer surface: the hidden-admin panel no
+  longer exposes a patients tab; operational patient data lives in the
+  clinic-management panel where it belongs.
+
+### Removed
+- **Patients tab from the hidden-admin panel** (`src/admin.cpp`) —
+  `AD_TAB_COUNT` reduced to 1 (only «کاربران»); the patients tab is no
+  longer reachable from the owner/developer backdoor surface.
+
+### Fixed
+- Blue reception section labels could visually touch/overlap the input
+  directly beneath them at certain DPI roundings — eliminated by the
+  larger clearance band and the per-caption background clear.
+- Backup analyzer error card already shows the full rich diagnostic
+  payload (breadcrumbs, stack, file identity, free disk) verbatim and the
+  progress bar never reaches 100% before the worker reports it — verified
+  and retained.
+
+### Notes
+- Logging policy re-verified: the only on-disk logs are the dedicated
+  Backup Log (`%LOCALAPPDATA%/AzadiTeb/backup_logs/backup.log`) and crash
+  dumps; the general `logLine()` channel is a compile-time no-op in
+  release. `.gitignore` extended with `crashdumps/`.
+- Build remains a single static PE32 exe via `build.sh`
+  (`i686-w64-mingw32-g++`), compiling cleanly.
+
+---
+
 ## 1.2.0 — 2026-06-23
 
 ### Added

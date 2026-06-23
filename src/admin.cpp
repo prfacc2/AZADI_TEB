@@ -28,8 +28,13 @@
 // custom messages posted by the background patient loader thread
 #define WM_AD_PATIENTS_READY (WM_APP+71)
 
-//  Two tabs: 0 = کاربران (users), 1 = بیماران (patients).
-enum { AD_TAB_USERS = 0, AD_TAB_PATIENTS = 1, AD_TAB_COUNT = 2 };
+//  v1.3.0: the «بیماران» (patients) tab was MOVED OUT of this hidden-admin
+//  (owner/developer backdoor) surface and into the clinic-management panel,
+//  where day-to-day operational data belongs (see manage.inc, PG_PATIENTS).
+//  AD_TAB_COUNT is therefore 1 (only «کاربران») so the patients tab is no
+//  longer reachable from this surface. The internal AD_TAB_PATIENTS id is kept
+//  only so the legacy (now-unreachable) code paths still compile cleanly.
+enum { AD_TAB_USERS = 0, AD_TAB_PATIENTS = 1, AD_TAB_COUNT = 1 };
 
 struct AdminData {
     HWND eFull, eUser, ePass, eDept, cRole, bCreate, list, bDelete;
@@ -123,7 +128,7 @@ static int adTabStripBottom(){ return S(56)+S(38); }
 static void adComputeTabRects(HWND h, AdminData* d){
     RECT rc; GetClientRect(h,&rc);
     int pad=S(24), y=S(56), th=S(34);
-    const wchar_t* labels[AD_TAB_COUNT]={L"کاربران",L"بیماران"};
+    const wchar_t* labels[AD_TAB_COUNT]={L"کاربران"};
     // RTL: first tab starts at the right edge and grows leftwards.
     int x = rc.right - pad;
     uikit::WindowDC wdc(h);
@@ -428,7 +433,7 @@ static LRESULT CALLBACK adminProc(HWND h, UINT m, WPARAM w, LPARAM l){
 
         // ---- tab strip ----
         adComputeTabRects(h,d);
-        const wchar_t* tabLabels[AD_TAB_COUNT]={L"کاربران",L"بیماران"};
+        const wchar_t* tabLabels[AD_TAB_COUNT]={L"کاربران"};
         SelectObject(dc,g_fUIB);
         for(int i=0;i<AD_TAB_COUNT;i++){
             bool active=(d->tab==i);

@@ -554,6 +554,11 @@ static void buildRows(SetState* st){
     st->rows.push_back({ROW_UPDATE, L"بررسی به‌روزرسانی", ICO_UPDATE,
                         L"در حال حاضر غیرفعال (سرور به‌روزرسانی موجود نیست)",false,true});
     if(guest) return;
+    // v1.3.0: surface the (already-implemented) profile change request flow —
+    // edit display name + avatar, queued for management approval. This is the
+    // reception-user "settings/profile" entry point requested for this release.
+    st->rows.push_back({ROW_PROFILE, L"پروفایل من",        ICO_USER,
+                        L"تغییر نام و عکس — ارسال درخواست برای تأیید مدیریت",false,false});
     st->rows.push_back({ROW_ABOUT,  L"درباره برنامه",     ICO_BELL,
                         L"نسخه و اطلاعات",false,false});
     st->rows.push_back({ROW_LOGOUT, L"خروج از حساب",      ICO_LOGOUT,NULL,false,false});

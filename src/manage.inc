@@ -23,8 +23,12 @@
 #define MG_CLASS L"AzManage"
 
 // navigation pages
-enum { PG_DASH=0, PG_SECTS=1, PG_EMPS=2, PG_MSG=3, PG_REQS=4, PG_SAVED=5,
-       PG_BACKUP=6, PG_COUNT=7 };
+// v1.3.0: the «بیماران» (patients) page now lives in the clinic-management
+// panel — index 1, right after the dashboard (RTL: visually first after it).
+// It was previously only reachable from the hidden-admin panel, which was the
+// wrong surface. The hidden-admin patients tab is removed (see admin.cpp).
+enum { PG_DASH=0, PG_PATIENTS=1, PG_SECTS=2, PG_EMPS=3, PG_MSG=4, PG_REQS=5,
+       PG_SAVED=6, PG_BACKUP=7, PG_COUNT=8 };
 
 // control ids
 enum {
@@ -35,6 +39,8 @@ enum {
     MG_NOTE_ADD, MG_E_NOTE, MG_NOTE_ATTACH, MG_NOTE_SEND,   // saved messages
     MG_CB_DEPT,            // department filter combo (employees page)
     MG_DESIGN_SEC,         // print-design for the selected section
+    MG_PT_SEARCH=2050,     // patients page: search box
+    MG_PT_LIST,            // patients page: virtualized ListView
     MG_NAV_BASE=2100,      // sidebar nav buttons (MG_NAV_BASE+page)
     MG_CARD_BASE=2200,     // clicking a section card
     MG_DETAIL_BASE=2400,   // clicking an employee row
@@ -71,12 +77,70 @@ struct ManageState {
     int  noteHot;               // hot-tracked local-note row (-1 none)
     std::wstring curCatName;    // for personnel card "section" line
     std::wstring msg; COLORREF msgCol;
+    // ---- patients page (v1.3.0): moved here from the hidden-admin panel ----
+    HWND ptSearch=nullptr;      // debounced search box
+    HWND ptList=nullptr;        // LVS_OWNERDATA virtualized list
+    std::vector<PatientRow>* ptAll=nullptr;   // owned full set (heap)
+    std::vector<int> ptView;    // indices into *ptAll after filtering
+    std::wstring ptQuery;       // last applied search text
+    bool ptLoading=false, ptLoaded=false;
 };
+// background patient loader → UI thread marshal (no HWND access off-thread)
+#define WM_MG_PATIENTS_READY (WM_APP+74)
 static ManageState* s_mg=NULL;
 static HWND g_hManage=NULL;
 static void mgRefreshReqBadge();
 static void openProfReqs(HWND owner);
 static void mgGoPage(HWND h, int page);
+
+// ====================================================== PATIENTS PAGE =======
+//  v1.3.0 — a virtualized (LVS_OWNERDATA) patient list in the clinic-management
+//  panel. Reuses the SAME data layer as the (now-removed) hidden-admin tab:
+//  loadAllPatients() + uikit::NormalizeFa search. Loaded ONCE on a worker
+//  thread so the UI never blocks; only visible rows are materialized so it
+//  stays smooth with very large datasets.
+static const wchar_t* mgGenderText(const std::wstring& g){
+    if(g==L"1"||g==L"مرد"||g==L"M"||g==L"m") return L"مرد";
+    if(g==L"0"||g==L"زن"||g==L"F"||g==L"f")  return L"زن";
+    return L"—";
+}
+static void mgPatientsFilter(){
+    if(!s_mg) return;
+    s_mg->ptView.clear();
+    if(!s_mg->ptAll) return;
+    std::wstring q=uikit::NormalizeFa(s_mg->ptQuery);
+    const auto& all=*s_mg->ptAll;
+    s_mg->ptView.reserve(all.size());
+    if(q.empty()){
+        for(int i=0;i<(int)all.size();++i) s_mg->ptView.push_back(i);
+    } else {
+        for(int i=0;i<(int)all.size();++i){
+            const PatientRow& p=all[i];
+            std::wstring name=uikit::NormalizeFa(p.first+L" "+p.last);
+            std::wstring nid =uikit::NormalizeFa(p.nid);
+            std::wstring mob =uikit::NormalizeFa(p.mobile);
+            if(name.find(q)!=std::wstring::npos ||
+               nid.find(q)!=std::wstring::npos  ||
+               mob.find(q)!=std::wstring::npos)
+                s_mg->ptView.push_back(i);
+        }
+    }
+    if(s_mg->ptList){
+        ListView_SetItemCountEx(s_mg->ptList,(int)s_mg->ptView.size(),
+            LVSICF_NOINVALIDATEALL|LVSICF_NOSCROLL);
+        InvalidateRect(s_mg->ptList,NULL,FALSE);
+    }
+}
+static void mgPatientsLoadAsync(HWND h){
+    if(!s_mg || s_mg->ptLoaded || s_mg->ptLoading) return;
+    s_mg->ptLoading=true;
+    HWND target=h;
+    std::thread([target](){
+        auto* vec=new std::vector<PatientRow>(loadAllPatients());
+        if(IsWindow(target)) PostMessageW(target,WM_MG_PATIENTS_READY,0,(LPARAM)vec);
+        else delete vec;
+    }).detach();
+}
 
 // ---- data refresh ----------------------------------------------------------
 static std::wstring deptNameById(const std::wstring& id){
@@ -1524,11 +1588,11 @@ static void openNewEmployee(HWND owner){
 static int  mgNavW(){ return S(220); }     // sidebar width
 static int  mgHeadH(){ return S(64); }      // content header height
 static const wchar_t* MG_NAV_LABELS[PG_COUNT] = {
-    L"داشبورد", L"بخش‌ها", L"کارکنان", L"پیام به کارکنان",
+    L"داشبورد", L"بیماران", L"بخش‌ها", L"کارکنان", L"پیام به کارکنان",
     L"درخواست‌ها", L"پیام‌های ذخیره‌شده", L"پشتیبان‌گیری"
 };
 static int MG_NAV_ICONS[PG_COUNT] = {
-    ICO_TAB, ICO_SHIELD, ICO_USER, ICO_BELL, ICO_GEAR, ICO_SAVE, ICO_REFRESH
+    ICO_TAB, ICO_ID, ICO_SHIELD, ICO_USER, ICO_BELL, ICO_GEAR, ICO_SAVE, ICO_REFRESH
 };
 //  content area to the LEFT of the RTL nav rail (rail is on the RIGHT)
 static RECT mgContentRect(HWND h){
@@ -1602,10 +1666,20 @@ static void mgLayout(HWND h){
     HWND all[]={s_mg->eName,s_mg->eMgr,s_mg->eId,s_mg->bAdd,s_mg->bAutoId,
         s_mg->bSecNew,s_mg->bSecBack,s_mg->bAbc,s_mg->bNew,s_mg->bCreated,
         s_mg->bAddEmp,s_mg->cDept,s_mg->bMsg,s_mg->bReqs,s_mg->bProfReqs,
-        s_mg->eNote,s_mg->bNoteAttach,s_mg->bNoteSend};
+        s_mg->eNote,s_mg->bNoteAttach,s_mg->bNoteSend,
+        s_mg->ptSearch,s_mg->ptList};
     for(HWND w:all) if(w) ShowWindow(w,SW_HIDE);
 
-    if(s_mg->page==PG_SECTS){
+    if(s_mg->page==PG_PATIENTS){
+        // search box (full width, right-aligned RTL) then the list fills the rest
+        int y=top;
+        MoveWindow(s_mg->ptSearch, a.left+S(12), y, (a.right-a.left)-S(24), fh, TRUE);
+        int ly=y+fh+S(10);
+        MoveWindow(s_mg->ptList, a.left+S(12), ly,
+                   (a.right-a.left)-S(24), a.bottom-ly-S(8), TRUE);
+        ShowWindow(s_mg->ptSearch,SW_SHOW);
+        ShowWindow(s_mg->ptList,SW_SHOW);
+    } else if(s_mg->page==PG_SECTS){
         if(s_mg->secAddMode){
             // «ایجاد بخش» add form: name • manager • id • auto-checkbox • add
             int y=top, lh=S(22);
@@ -1700,6 +1774,7 @@ static void mgDoAddCat(HWND h){
 static const wchar_t* mgCardTitle(int page){
     switch(page){
         case PG_DASH:  return L"داشبورد مدیریت";
+        case PG_PATIENTS: return L"مدیریت بیماران";
         case PG_SECTS: return L"مدیریت بخش‌ها";
         case PG_EMPS:  return L"فهرست کارکنان";
         case PG_MSG:   return L"پیام به کارکنان";
@@ -1995,6 +2070,24 @@ static void mgPaintBackup(HDC dc, HWND h){
         DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
 }
 
+// ---- patients page: a small status line under the (real-HWND) list ----------
+static void mgPaintPatients(HDC dc, HWND h){
+    if(!s_mg) return;
+    RECT a=mgContentRect(h);
+    SetTextColor(dc,g_theme.textDim); SelectObject(dc,g_fSmall);
+    RECT sr={a.left+S(24),a.bottom-S(28),a.right-S(24),a.bottom-S(6)};
+    std::wstring s;
+    if(s_mg->ptLoading)      s=L"در حال بارگذاری بیماران…";
+    else if(!s_mg->ptLoaded) s=L"—";
+    else {
+        size_t tot = s_mg->ptAll? s_mg->ptAll->size():0;
+        size_t shown = s_mg->ptView.size();
+        s=L"نمایش "+toFaDigits(std::to_wstring(shown))+L" از "+
+          toFaDigits(std::to_wstring(tot))+L" بیمار";
+    }
+    DrawTextW(dc,s.c_str(),-1,&sr,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+}
+
 // ---- the dashboard shell: nav rail (right) + content card (left) -----------
 static void mgPaintShell(HDC dc, HWND h){
     RECT rc; GetClientRect(h,&rc);
@@ -2043,6 +2136,7 @@ static void mgPaintShell(HDC dc, HWND h){
     if(s_mg){
         switch(s_mg->page){
             case PG_DASH:  mgPaintDash(dc,h);  break;
+            case PG_PATIENTS: mgPaintPatients(dc,h); break;
             case PG_SECTS: mgPaintSects(dc,h); break;
             case PG_EMPS:  mgPaintEmps(dc,h);  break;
             case PG_MSG:   mgPaintMsg(dc,h);   break;
@@ -2104,6 +2198,7 @@ static void mgGoPage(HWND h, int page){
     s_mg->page=page; s_mg->secAddMode=false; s_mg->msg.clear();
     if(page==PG_SECTS){ mgLoadCats(); mgUpdateAutoIdPreview(); }
     else if(page==PG_EMPS){ mgLoadEmps(); mgFillDeptCombo(); }
+    else if(page==PG_PATIENTS){ mgPatientsLoadAsync(h); }
     mgLayout(h);
     InvalidateRect(h,NULL,TRUE);
 }
@@ -2149,6 +2244,24 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         s_mg->bNoteAttach=createFlatButton(h,MG_NOTE_ATTACH,L"تصویر",ICO_ID,BS_OUTLINE,0,0,10,10);
         s_mg->bNoteSend=createFlatButton(h,MG_NOTE_SEND,L"ذخیره",ICO_SAVE,BS_PRIMARY,0,0,10,10);
         s_mg->noteHot=-1;
+        // ---- patients page controls (v1.3.0) ----
+        s_mg->ptSearch=CreateWindowExW(0,L"EDIT",L"",
+            WS_CHILD|WS_TABSTOP|ES_AUTOHSCROLL,0,0,10,10,h,(HMENU)MG_PT_SEARCH,g_hInst,0);
+        SendMessageW(s_mg->ptSearch,WM_SETFONT,(WPARAM)g_fUI,TRUE);
+        s_mg->ptList=CreateWindowExW(WS_EX_CLIENTEDGE,WC_LISTVIEWW,L"",
+            WS_CHILD|WS_TABSTOP|LVS_OWNERDATA|LVS_REPORT|LVS_SHOWSELALWAYS|LVS_SINGLESEL,
+            0,0,10,10,h,(HMENU)MG_PT_LIST,g_hInst,0);
+        ListView_SetExtendedListViewStyle(s_mg->ptList,
+            LVS_EX_FULLROWSELECT|LVS_EX_DOUBLEBUFFER|LVS_EX_GRIDLINES);
+        SendMessageW(s_mg->ptList,WM_SETFONT,(WPARAM)g_fUI,TRUE);
+        {   // RTL report columns (rightmost first): #, name, nid, mobile, gender, ...
+            struct { const wchar_t* t; int w; } cols[]={
+                {L"#",S(44)},{L"نام و نام خانوادگی",S(220)},{L"کد ملی",S(130)},
+                {L"تلفن همراه",S(140)},{L"جنسیت",S(80)},{L"تاریخ تولد",S(120)} };
+            LVCOLUMNW lc={0}; lc.mask=LVCF_TEXT|LVCF_WIDTH|LVCF_FMT; lc.fmt=LVCFMT_RIGHT;
+            for(int i=0;i<6;i++){ lc.pszText=(LPWSTR)cols[i].t; lc.cx=cols[i].w;
+                ListView_InsertColumn(s_mg->ptList,i,&lc); }
+        }
         SendMessageW(s_mg->eNote,WM_SETFONT,(WPARAM)g_fUI,TRUE);
         HWND eds[3]={s_mg->eName,s_mg->eMgr,s_mg->eId};
         for(HWND e:eds){ SendMessageW(e,WM_SETFONT,(WPARAM)g_fUI,TRUE); enableEnterNavigation(e); }
@@ -2173,7 +2286,8 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
 #endif
         return 0; }
     case WM_NCDESTROY: if(g_hManage==h) g_hManage=NULL;
-        if(s_mg){ delete s_mg; s_mg=NULL; } break;
+        if(s_mg){ delete s_mg->ptAll; s_mg->ptAll=nullptr;
+                  delete s_mg; s_mg=NULL; } break;
     case WM_SIZE: if(s_mg) mgLayout(h); return 0;
     case WM_APP_THEME: InvalidateRect(h,NULL,TRUE); return 0;
     case WM_CTLCOLOREDIT:{ HDC dc=(HDC)w; SetTextColor(dc,g_theme.inputText);
@@ -2182,9 +2296,55 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         SetBkColor(dc,g_theme.inputBg); return (LRESULT)g_brInput; }
     case WM_CTLCOLORSTATIC:{ HDC dc=(HDC)w; SetTextColor(dc,g_theme.inputText);
         SetBkColor(dc,g_theme.inputBg); return (LRESULT)g_brInput; }
+    case WM_MG_PATIENTS_READY:{
+        auto* vec=(std::vector<PatientRow>*)l;
+        if(!s_mg){ delete vec; return 0; }
+        delete s_mg->ptAll; s_mg->ptAll=vec;
+        s_mg->ptLoaded=true; s_mg->ptLoading=false;
+        mgPatientsFilter();
+        if(s_mg->page==PG_PATIENTS) InvalidateRect(h,NULL,TRUE);
+        return 0; }
+    case WM_TIMER:
+        if(s_mg && w==0xB1 /*patients search debounce*/){
+            KillTimer(h,0xB1);
+            wchar_t b[256]={0}; if(s_mg->ptSearch) GetWindowTextW(s_mg->ptSearch,b,256);
+            s_mg->ptQuery=b; mgPatientsFilter();
+            return 0;
+        }
+        break;
+    case WM_NOTIFY:{
+        if(!s_mg) break;
+        NMHDR* nh=(NMHDR*)l;
+        if(nh && nh->hwndFrom==s_mg->ptList){
+            if(nh->code==LVN_GETDISPINFOW){
+                NMLVDISPINFOW* di=(NMLVDISPINFOW*)l;
+                int vi=di->item.iItem;
+                if(s_mg->ptAll && vi>=0 && vi<(int)s_mg->ptView.size() &&
+                   (di->item.mask & LVIF_TEXT)){
+                    const PatientRow& p=(*s_mg->ptAll)[s_mg->ptView[vi]];
+                    static wchar_t cell[256];
+                    switch(di->item.iSubItem){
+                        case 0: wcsncpy(cell,toFaDigits(std::to_wstring(vi+1)).c_str(),255); break;
+                        case 1: wcsncpy(cell,(p.first+L" "+p.last).c_str(),255); break;
+                        case 2: wcsncpy(cell,toFaDigits(p.nid).c_str(),255); break;
+                        case 3: wcsncpy(cell,toFaDigits(p.mobile).c_str(),255); break;
+                        case 4: wcsncpy(cell,mgGenderText(p.gender),255); break;
+                        case 5: wcsncpy(cell,toFaDigits(p.birth).c_str(),255); break;
+                        default: cell[0]=0; break;
+                    }
+                    cell[255]=0; di->item.pszText=cell;
+                }
+                return 0;
+            }
+        }
+        break; }
     case WM_COMMAND:{
         if(!s_mg) return 0;
         int id=LOWORD(w);
+        if(id==MG_PT_SEARCH && HIWORD(w)==EN_CHANGE){
+            SetTimer(h,0xB1,250,NULL);  // debounce 250 ms
+            return 0;
+        }
         if(id==MG_CB_DEPT && HIWORD(w)==CBN_SELCHANGE){
             int sel=(int)SendMessageW(s_mg->cDept,CB_GETCURSEL,0,0);
             auto cats=loadDepts();
