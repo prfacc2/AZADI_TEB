@@ -68,7 +68,9 @@ static void buildFonts(){
 //  RIGHT-aligned. The action bar is only present where it is needed so other
 //  screens keep the original clean single-layer header.
 static int mainBarH(){ return S(64); }                 // LAYER 1 height
-static int actionBarH(){ return S(50); }               // LAYER 2 height
+// v1.4.0 (§6): the action bar height is scaled by the header-collapse factor so
+// the bar slides up/down smoothly instead of snapping.
+static int actionBarH(){ return (int)(S(50) * HeaderCollapse_Factor() + 0.5f); }
 static bool headerHasActionBar(){ return s_curScreen==SC_RECEPTION; }
 static int topBarH(){ return mainBarH() + (headerHasActionBar()?actionBarH():0); }
 static int botBarH(){ return S(40); }
@@ -83,6 +85,7 @@ static void frameLayout(HWND h);   // fwd (header layout, defined below)
 void switchScreen(ScreenId id){
     if(s_screen){ DestroyWindow(s_screen); s_screen=0; }
     s_curScreen = id;
+    HeaderCollapse_Set(g_hFrame, false);   // v1.4.0 (§6): start each screen expanded
     switch(id){
         case SC_HOME:      s_screen = createHomeScreen(g_hFrame); break;
         case SC_RECEPTION: s_screen = createReceptionScreen(g_hFrame); break;
@@ -360,6 +363,17 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
             // (employees only — managers never get notified of their own send).
             notifyNewMessageRecipients();
         }
+        else if(w==HEADER_COLLAPSE_TIMER){
+            // v1.4.0 (§6): advance the header-collapse animation and re-layout
+            // the content area + header so the bar slides smoothly.
+            HeaderCollapse_Tick(h);
+            RECT rc = frameContentRect();
+            if(s_screen)
+                MoveWindow(s_screen, rc.left, rc.top,
+                           rc.right-rc.left, rc.bottom-rc.top, TRUE);
+            frameLayout(h);
+            InvalidateRect(h, NULL, FALSE);
+        }
         return 0;
     case WM_COMMAND: {
         int id=LOWORD(w);
@@ -378,7 +392,7 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 }
             }
         }
-        else if(id==ID_FR_SETTINGS) openSettingsPanel(h);
+        else if(id==ID_FR_SETTINGS) OpenSettings(h, g_session.user);  // §1 role dispatcher
         else if(id==ID_FR_CALC) openCalculator(h);
         // v1.7.0: header reception-action buttons → route to reception screen
         else if(id==ID_FR_NEWPAT) receptionAction(RA_NEWPAT);
@@ -881,7 +895,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
             else if(!wcscmp(dbg,L"admin")){    u.role=2; g_session.user=u;
                                                switchScreen(SC_ADMIN); }
             else if(!wcscmp(dbg,L"settings")){ switchScreen(SC_RECEPTION);
-                                               openSettingsPanel(f); }
+                                               OpenSettings(f, g_session.user); }
             else if(!wcscmp(dbg,L"backup")){   u.role=1; g_session.user=u;
                                                switchScreen(SC_MANAGE);
                                                openBackupManager(f); }

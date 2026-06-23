@@ -242,6 +242,36 @@ std::wstring jalaliDateShort(const SYSTEMTIME& st){
     wchar_t buf[32]; swprintf(buf,32,L"%04d/%02d/%02d",jy,jm,jd);
     return buf;
 }
+// ----------------------------------------------------------------------------
+//  v1.4.0: canonical Persian Jalali date formatter.
+//  Returns «۱۴۰۵/۰۴/۰۲» with Persian-Indic digits and RTL marks around each
+//  numeric run so the BiDi engine keeps the order stable under DT_RTLREADING.
+//  `utc==0` means "now" (Tehran). The Vazirmatn font (forced on date labels)
+//  supplies the Persian-Indic glyphs.
+std::wstring FormatJalaliPersian(time_t utc){
+    SYSTEMTIME st;
+    if(utc==0){
+        st = iranNow();
+    } else {
+        // Convert UTC time_t -> Tehran SYSTEMTIME (fixed +3:30, no DST).
+        ULONGLONG ll = (ULONGLONG)(utc) * 10000000ULL + 116444736000000000ULL;
+        ll += 12600ULL * 10000000ULL;        // +3h30m
+        FILETIME ft; ft.dwLowDateTime=(DWORD)ll; ft.dwHighDateTime=(DWORD)(ll>>32);
+        if(!FileTimeToSystemTime(&ft,&st)) st = iranNow();
+    }
+    int jy,jm,jd; gregToJalali(st.wYear,st.wMonth,st.wDay,jy,jm,jd);
+    const wchar_t RLM = 0x200F;
+    wchar_t buf[32]; swprintf(buf,32,L"%04d/%02d/%02d",jy,jm,jd);
+    std::wstring out;
+    out += RLM; out += toFaDigits(buf); out += RLM;
+    return out;
+}
+std::wstring JalaliTodayKey(){
+    SYSTEMTIME st = iranNow();
+    int jy,jm,jd; gregToJalali(st.wYear,st.wMonth,st.wDay,jy,jm,jd);
+    wchar_t buf[16]; swprintf(buf,16,L"%04d/%02d/%02d",jy,jm,jd);
+    return buf;
+}
 std::wstring iranTimeStr(const SYSTEMTIME& st, bool seconds){
     wchar_t buf[16];
     if(seconds) swprintf(buf,16,L"%02d:%02d:%02d",st.wHour,st.wMinute,st.wSecond);

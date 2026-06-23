@@ -87,6 +87,11 @@ extern HBRUSH  g_brBg, g_brSurface, g_brSurface2, g_brInput;
 void applyTheme(bool dark);             // rebuild colors + brushes
 void broadcastThemeChange();            // invalidate everything
 #define WM_APP_THEME (WM_APP+11)        // sent to every window on theme switch
+// ---------------------------------------------------------- 1.4.0 messages --
+//  Broadcast / internal messages introduced by release 1.4.0.
+#define WM_APP_THEME_CHANGED (WM_APP+12) // a settings panel changed the theme
+#define WM_APP_LAYOUT_REDO   (WM_APP+13) // AzLayoutGuard requests a relayout
+#define WM_APP_DESIGN_PUSHED (WM_APP+14) // a print design was pushed to sections
 
 // ------------------------------------------------------------- flat button -
 enum IconId {
@@ -175,6 +180,13 @@ void         gregToJalali(int gy,int gm,int gd,int&jy,int&jm,int&jd);
 std::wstring jalaliDateStr(const SYSTEMTIME& st);        // e.g. سه‌شنبه ۲۰ خرداد ۱۴۰۵
 std::wstring jalaliDateShort(const SYSTEMTIME& st);      // 1405/03/20
 std::wstring iranTimeStr(const SYSTEMTIME& st, bool seconds);
+//  v1.4.0: single canonical Persian Jalali formatter. Returns the date for a
+//  UTC time_t as «۱۴۰۵/۰۴/۰۲» using Persian-Indic digits with RTL-safe marks.
+//  Every date label in the app must route through this helper. Pass 0 for "now".
+std::wstring FormatJalaliPersian(time_t utc);
+//  Jalali Y/M/D string for *today* in Tehran, as "YYYY/MM/DD" (ASCII digits) —
+//  used as the per-day key for appointment counters.
+std::wstring JalaliTodayKey();
 std::wstring toFaDigits(const std::wstring& s);
 int          iranMinutesOfDay();
 int          detectShift();                              // 0=صبح 1=عصر 2=شب
@@ -201,13 +213,19 @@ void detectSpec();            // speed-handler: sets g_lowSpec
 void installVazirFont();      // embed-load + install on user system if missing
 
 // ------------------------------------------------------------------ users --
+// Role constants (kept as plain ints for ABI stability with stored data).
+#define ROLE_RECEPTION 0
+#define ROLE_ADMIN     1
 struct User {
     std::wstring username, fullname, dept, hash;
     int role;                 // 0 = پذیرش, 1 = مدیریت
+    int id;                   // stable per-user id (index into users store)
+    User():role(0),id(0){}
 };
 std::vector<User> loadUsers();
 bool addUser(const User& u, std::wstring& err);
 bool removeUser(const std::wstring& username);
+bool setUserFullName(const std::wstring& username, const std::wstring& fullname); // §5
 bool verifyLogin(const std::wstring& u, const std::wstring& p,
                  int wantRole, User& out, std::wstring& err);
 std::wstring hashPassword(const std::wstring& p);
@@ -293,6 +311,25 @@ void openCalculator(HWND owner);
 void openSettingsPanel(HWND frameOwner);
 bool settingsPanelVisible();
 void closeSettingsPanel();
+
+// ------------------------------------------------------ v1.4.0 settings tiers
+//  Role dispatcher: reception users get OpenReceptionSettings, admins get
+//  OpenManagementSettings (§1.1). The gear icon routes here.
+void OpenSettings(HWND hMain, const User& u);
+void OpenReceptionSettings(HWND hMain, const User& u);
+void OpenManagementSettings(HWND hMain, const User& u);
+
+// ------------------------------------------------- v1.4.0 header collapse (§6)
+//  A small state machine animates the reception header's action bar between
+//  fully-expanded (factor 1.0) and collapsed (factor 0.0). The frame queries
+//  HeaderCollapse_Factor() while laying out the header; HeaderCollapse_Set()
+//  starts an animation toward the target; HeaderCollapse_Tick() advances it and
+//  returns true while still animating (so the frame keeps the timer alive).
+#define HEADER_COLLAPSE_TIMER 0xC0A1
+void  HeaderCollapse_Set(HWND frame, bool collapsed);  // begin animating
+bool  HeaderCollapse_Tick(HWND frame);                 // advance; true if more
+float HeaderCollapse_Factor();                         // 0.0..1.0 (1 = expanded)
+bool  HeaderCollapse_Collapsed();                      // current target state
 
 // ----------------------------------------------------------------- update --
 void checkRemoteUpdate(HWND owner);      // remote-update over HTTP(S)

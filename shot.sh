@@ -10,16 +10,22 @@ CXX=i686-w64-mingw32-g++
 RES=i686-w64-mingw32-windres
 mkdir -p obj
 $RES -O coff -i src/app.rc -o obj/app.res
+# v1.4.0: keep the source/lib list in sync with build.sh (new modules added).
 SRCS="src/main.cpp src/util.cpp src/handlers.cpp src/theme.cpp src/users.cpp \
       src/billing.cpp src/calculator.cpp src/dialogs.cpp src/update.cpp \
       src/admin.cpp src/reception.cpp src/gdiplus.cpp src/settings.cpp \
-      src/printer.cpp src/employees.cpp src/data_ext.cpp src/appointment.cpp"
+      src/printer.cpp src/employees.cpp src/data_ext.cpp src/appointment.cpp \
+      src/backup.cpp src/ui_kit.cpp src/backup_analyzer.cpp src/backup_log.cpp \
+      src/sections.cpp src/print_designer.cpp src/user_settings.cpp \
+      src/net_sync.cpp src/profile_requests.cpp src/backup_log_viewer.cpp"
 $CXX -std=c++17 -O2 -municode -mwindows -DAZ_DEBUG_BUILD \
     -D_WIN32_IE=0x0700 -static -static-libgcc -static-libstdc++ \
     -Wall -Wno-unused-variable $SRCS obj/app.res \
     -o build/AzadiTeb_dbg.exe \
-    -lcomctl32 -lcomdlg32 -lgdi32 -lgdiplus -luser32 -lshlwapi -lwininet \
-    -ladvapi32 -lshell32 -lwinspool -lole32 -luuid >/dev/null
+    -lcomctl32 -lcomdlg32 -lgdi32 -lgdiplus -lmsimg32 -ldwmapi -luxtheme \
+    -luser32 -lshlwapi -lwininet -ladvapi32 -lshell32 -lwinspool \
+    -lole32 -luuid -lversion -lwinmm -ldbghelp \
+    -lwinhttp -lurlmon -lcrypt32 -lwintrust -lwtsapi32 >/dev/null
 i686-w64-mingw32-strip build/AzadiTeb_dbg.exe
 
 export WINEDEBUG=-all

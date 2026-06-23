@@ -12,6 +12,7 @@
 //  stays single & static.
 // ============================================================================
 #include "app.h"
+#include "print_designer.h"   // §3: new vector designer (PrintDesigner_Open)
 #include <stdio.h>
 
 // ----------------------------------------------------------------------------

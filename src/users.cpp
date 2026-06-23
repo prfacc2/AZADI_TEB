@@ -85,6 +85,22 @@ bool removeUser(const std::wstring& username){
     return false;
 }
 
+//  §5: apply an admin-approved profile-name change. Updates the user record in
+//  users.dat AND records a display-name override so a stale cached login also
+//  reflects the new name. Returns false if the username is unknown.
+bool setUserFullName(const std::wstring& username, const std::wstring& fullname){
+    if(trim(username).empty() || trim(fullname).empty()) return false;
+    auto us = loadUsers();
+    bool found=false;
+    for(auto& u : us)
+        if(u.username==username){ u.fullname=fullname; found=true; break; }
+    if(found) saveUsers(us);
+    // Always set the override so the change is honoured even for prf/cached cases.
+    setSetting(L"name_override_"+username, fullname);
+    logLine(L"profile name approved: "+username+L" -> "+fullname);
+    return found;
+}
+
 //  wantRole: 0 پذیرش / 1 مدیریت / 2 hidden admin
 bool verifyLogin(const std::wstring& uname, const std::wstring& pass,
                  int wantRole, User& out, std::wstring& err){

@@ -56,6 +56,7 @@
 #define ID_F_DOCCODE     663
 #define ID_F_DOCNAME     664
 #define ID_F_DOCSEARCH   665
+#define ID_F_RESET       666   // v1.4.0 (§6): پاک کردن فرم (Ctrl+R)
 
 // ============================================================== TAB PAGE ===
 enum TabKind {
@@ -73,6 +74,7 @@ struct TabPage {
     HWND cPType,cIns,cSupp,cNType;
     HWND ePrice,eDiscount;
     HWND bSubmit,bPrtIns,bPrtRx,bPrtLast,bClose,bInquiry;
+    HWND bReset;   // v1.4.0 (§6) reset/clear form
     HWND chkIns;             // «دارای بیمه» — کنار کد ملی، پیش‌فرض تیک‌خورده
     HWND appt;               // نوبت‌دهی child page (kind==TK_APPOINTMENT)
     std::vector<int> insAllowed;   // insurances this patient carries (inquiry)
@@ -437,6 +439,8 @@ static void tabPageLayout(HWND h, TabPage* t){
     MoveWindow(t->eDiscount,xl,y0+7*step,  colW, rh, TRUE);
     // submit
     MoveWindow(t->bSubmit,formLeft, y0+8*step+S(6), fw, S(46), TRUE);
+    // v1.4.0 (§6): reset/clear button directly under submit (full form width)
+    MoveWindow(t->bReset, formLeft, y0+8*step+S(6)+S(52), fw, S(34), TRUE);
 
     // billing panel buttons (bottom of billing card). Pinned to the virtual
     // page height so they track the card bottom and scroll with the page.
@@ -1254,6 +1258,7 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         t->bPrtRx  =createFlatButton(h,ID_F_PRT_RX,L"چاپ نسخه",ICO_PRINT,BS_OUTLINE,0,0,10,10);
         t->bPrtLast=createFlatButton(h,ID_F_PRT_LAST,L"چاپ آخرین قبض (F8)",ICO_PRINT,BS_OUTLINE,0,0,10,10);
         t->bClose  =createFlatButton(h,ID_F_CLOSE,L"خروج (بستن تب)",ICO_LOGOUT,BS_DANGER,0,0,10,10);
+        t->bReset  =createFlatButton(h,ID_F_RESET,L"پاک کردن فرم (Ctrl+R)",ICO_REFRESH,BS_OUTLINE,0,0,10,10);
         t->bInquiry=createFlatButton(h,ID_F_INQUIRY,L"استعلام بیمه",ICO_SHIELD,BS_OUTLINE,0,0,10,10);
         // v1.4.1: real raster icons on the print-action buttons (left card)
         setFlatButtonImage(t->bPrtIns, IMG_IC_SHIELD);
@@ -1333,9 +1338,9 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         EnableWindow(t->eBookNo,FALSE);
         SendMessageW(t->chkValidAuto,BM_SETCHECK,BST_CHECKED,0);
         SendMessageW(t->chkRxAuto,BM_SETCHECK,BST_CHECKED,0);
-        // اتوماتیک = current Iran date/time
-        SetWindowTextW(t->eValid, jalaliDateShort(iranNow()).c_str());
-        SetWindowTextW(t->eRxDate,jalaliDateShort(iranNow()).c_str());
+        // اتوماتیک = current Iran date/time (v1.4.0 §6: via FormatJalaliPersian)
+        SetWindowTextW(t->eValid, FormatJalaliPersian(0).c_str());
+        SetWindowTextW(t->eRxDate,FormatJalaliPersian(0).c_str());
         EnableWindow(t->eValid,FALSE); EnableWindow(t->eRxDate,FALSE);
         // doctor inquiry buttons sit on the surface (info panel) — blend corners
         setFlatButtonBg(t->bArchiveGo,g_theme.surface);
@@ -1382,6 +1387,11 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         t->scrollY -= (delta/WHEEL_DELTA)*S(60);
         recClampScroll(h,t);
         if(t->scrollY!=old){
+            // v1.4.0 (§6): collapse the header action bar once the user scrolls
+            // into the form; re-expand when they return to the top.
+            bool wantCollapse = (t->scrollY > S(40));
+            if(wantCollapse != HeaderCollapse_Collapsed())
+                HeaderCollapse_Set(g_hFrame, wantCollapse);
             tabPageLayout(h,t);
             InvalidateRect(h,NULL,FALSE);
         }
@@ -1548,10 +1558,9 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
                     L"ثبت موفق",MB_YESNO|MB_ICONQUESTION)==IDYES){
                     doPrint(r);
                 }
-                // reset patient fields for next reception (same tab)
-                std::wstring keep = t->lastMsg; COLORREF kc = t->msgCol;
-                resetForm(t);
-                t->lastMsg = keep; t->msgCol = kc;   // keep success message
+                // v1.4.0 (§6): do NOT clear the form after printing — the operator
+                // often re-prints or tweaks. Fields stay populated; use the reset
+                // button (or Ctrl+R) to start a fresh reception explicitly.
             }
             InvalidateRect(h,NULL,FALSE);
         }
@@ -1566,6 +1575,11 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             else MessageBoxW(h,L"ابتدا یک پذیرش ثبت کنید.",L"چاپ نسخه",MB_OK|MB_ICONINFORMATION);
         }
         else if(id==ID_F_PRT_LAST) printLastReceipt(h);
+        else if(id==ID_F_RESET){                       // v1.4.0 (§6) clear form
+            resetForm(t);
+            t->lastMsg=L"فرم پاک شد."; t->msgCol=g_theme.textDim;
+            InvalidateRect(h,NULL,FALSE);
+        }
         else if(id==ID_F_CLOSE) closeTab(t);
         // ---- right info-panel handlers ----
         else if(id==ID_F_BOOKNO_CHK && code==BN_CLICKED){
@@ -1576,12 +1590,12 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         else if(id==ID_F_VALID_AUTO && code==BN_CLICKED){
             bool on=SendMessageW(t->chkValidAuto,BM_GETCHECK,0,0)==BST_CHECKED;
             EnableWindow(t->eValid,!on);
-            if(on) SetWindowTextW(t->eValid,jalaliDateShort(iranNow()).c_str());
+            if(on) SetWindowTextW(t->eValid,FormatJalaliPersian(0).c_str());
         }
         else if(id==ID_F_RXDATE_AUTO && code==BN_CLICKED){
             bool on=SendMessageW(t->chkRxAuto,BM_GETCHECK,0,0)==BST_CHECKED;
             EnableWindow(t->eRxDate,!on);
-            if(on) SetWindowTextW(t->eRxDate,jalaliDateShort(iranNow()).c_str());
+            if(on) SetWindowTextW(t->eRxDate,FormatJalaliPersian(0).c_str());
         }
         else if(id==ID_F_ARCHIVE_GO || id==ID_F_FILE_GO){
             // archive/file-number inquiry: reuse the national-id inquiry path so a
@@ -1638,6 +1652,14 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         return 0; }
     case WM_KEYDOWN:
         if(w==VK_F8){ printLastReceipt(h); return 0; }
+        // v1.4.0 (§6): Ctrl+R clears the reception form for a fresh patient.
+        if(w=='R' && (GetKeyState(VK_CONTROL)&0x8000) &&
+           t && t->kind==TK_RECEPTION){
+            resetForm(t);
+            t->lastMsg=L"فرم پاک شد."; t->msgCol=g_theme.textDim;
+            InvalidateRect(h,NULL,FALSE);
+            return 0;
+        }
         // v1.7.0: Esc returns from the message details view to the list
         if(w==VK_ESCAPE && t && t->kind==TK_PORTAL && t->cartDetail){
             t->cartDetail=false; t->cartHotBtn=0;

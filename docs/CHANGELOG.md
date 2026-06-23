@@ -5,6 +5,85 @@
 
 ---
 
+## 1.4.0 — 2026-06-23
+
+> Major feature release. Two-tier settings, a full vector print-designer,
+> a LAN-sync layer, a sections/departments registry, header-only UI-kit
+> controls, an UndoStack, plus reception-form polish and two new admin
+> inboxes (profile-change requests, backup-log viewer).
+
+### Added
+- **Two-tier settings windows** (`src/user_settings.cpp`, §1) — the gear
+  icon now routes through `OpenSettings(hMain, u)`, which dispatches to
+  `OpenReceptionSettings` (760×520, 7 nav items) for reception users or
+  `OpenManagementSettings` (1000×640, 16 nav items) for the clinic-management
+  admin. Shared right-panel framework with fully-built panels (profile,
+  theme, printer, save-messages, notifications, about, logout) and management
+  panels (designer/restore launch, profile-requests inbox, backup-log viewer,
+  global theme/printer). RTL nav rail on the right.
+- **Vector print-designer** (`src/print_designer.{h,cpp}`,
+  `print_designer_templates.inc`, `print_designer_ui.inc`, §3) — section
+  picker, maximized WYSIWYG canvas, draggable/resizable/rotatable items, an
+  inspector, 20 built-in templates, appointment counters, `.aztpl`
+  import/export with an `AZTEMPLATE/1` magic header, keyboard shortcuts and a
+  page-border hollow hit-test. File-backed design store under `data\designs\`.
+- **Restore-design window** (§4) — imports a `.aztpl` back into the store.
+- **Sections / departments registry** (`src/sections.{h,cpp}`, §2) —
+  `Sections_All/Find/Upsert/Delete` over a pipe-delimited `data\sections.dat`,
+  seeded with reception/injection/lab/radiology/physician entries.
+- **Profile-change requests inbox** (`src/profile_requests.cpp`, §5) — admin
+  ListView merging `NetSync_GetJson` drains + persisted
+  `data\profile_requests_inbox\*.json`, with approve (applies the new name via
+  `setUserFullName`) / reject (archives) actions.
+- **Backup-log viewer** (`src/backup_log_viewer.cpp`, §7.2) — read-only
+  newest-first viewer of `%LOCALAPPDATA%\AzadiTeb\backup_logs\backup.log`
+  (and rotated siblings) with همه / موفق / ناموفق filter chips and a raw
+  details pane.
+- **LAN-sync layer** (`src/net_sync.{h,cpp}`, §9) — WinHTTP-first
+  `NetSync_PostJson/GetJson/HeadOk/HostReachable`, with a silent file-based
+  inbox/outbox fallback under the configured SMB share (or a local outbox).
+- **UI-kit controls** (`src/ui_kit.{h,cpp}`, §10) — AzSwitch, AzNumberSpinner,
+  AzColorPicker, AzDropZone, AzRulerH/V, AzGridLayer, AzHandle, plus the
+  AzLayoutGuard (anti-overlap) and AzZOrderShield (no page bleed-through)
+  handlers.
+- **Header-only UndoStack** (`src/undo.h`, §11) — ring-buffer undo/redo used
+  by the print-designer.
+- **`FormatJalaliPersian` / `JalaliTodayKey`** (`src/util.cpp`, `src/app.h`)
+  — Tehran-tz Jalali formatting (RLM-wrapped Persian-Indic digits) and an
+  ASCII day-key for counters.
+- **Reception reset button + Ctrl+R** (`src/reception.cpp`, §6) — explicit
+  «پاک کردن فرم» control to start a fresh reception.
+- **Header-collapse animation** (`src/handlers.cpp`, `src/main.cpp`, §6) — a
+  small state machine slides the reception action bar up/down as the form is
+  scrolled.
+
+### Changed
+- **Reception no longer clears fields after printing** (`src/reception.cpp`,
+  §6) — populated data stays on screen for re-prints/tweaks; clearing is now
+  explicit (reset button / Ctrl+R).
+- **Reception dates routed through `FormatJalaliPersian`** (`src/reception.cpp`)
+  — اعتبار / تاریخ نسخه auto-fields use the unified Persian formatter.
+- **Legacy print designer deprecated** (`src/printer_designer.inc`, §3) — the
+  old in-place designer is now a thin shim whose `openPrintDesigner()` forwards
+  to the new `PrintDesigner_Open()`; `printer.cpp` includes `print_designer.h`.
+- **Build** (`build.sh`, §13) — adds the new sources, links
+  `-lwinhttp -lurlmon -lcrypt32 -lwintrust -lwtsapi32` (alongside the existing
+  winspool/gdiplus/dbghelp/etc.), enables `-Werror` and `-s`.
+- **`shot.sh`** — source/lib list synced with `build.sh`.
+
+### Fixed
+- All new modules compile clean under `-Wall -Wextra -Werror`
+  (misleading-indentation lambdas split onto separate lines).
+
+### Notes
+- Logging policy unchanged (§8): the only on-disk log remains
+  `backup_logs/backup.log` (+ crash dumps); `.gitignore` extended with
+  `logs/` and the v1.4.0 runtime stores.
+- Still a single static PE32 exe built by `build.sh`; a `.sha256` sidecar is
+  written next to `build/AzadiTeb.exe`.
+
+---
+
 ## 1.3.0 — 2026-06-23
 
 ### Added

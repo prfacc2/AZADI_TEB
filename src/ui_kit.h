@@ -100,4 +100,71 @@ void InputWell(HDC dc, RECT rc, bool focused);
 //   Arabic-Indic & Persian digits → ASCII, lower-case, collapse spaces.
 std::wstring NormalizeFa(const std::wstring& s);
 
+// ============================================================================
+//  RELEASE 1.4.0 — NEW CONTROLS (§10) — all REAL HWND children so the
+//  AzZOrderShield / AzLayoutGuard contracts hold. Each owns its GDI objects
+//  via RAII and double-buffers through MemDC.
+// ============================================================================
+
+// Register all new window classes once (idempotent). Call at startup.
+void Az_RegisterControls();
+
+// --- AzSwitch (toggle) ------------------------------------------------------
+//  A flat iOS-style on/off switch. State stored in window; query via
+//  AzSwitch_Get / set via AzSwitch_Set. Sends WM_COMMAND BN_CLICKED to parent
+//  on toggle (use GetDlgCtrlID to identify).
+HWND AzSwitch_Create(HWND parent, int id, bool on, int x,int y,int w,int h);
+bool AzSwitch_Get(HWND sw);
+void AzSwitch_Set(HWND sw, bool on);
+
+// --- AzNumberSpinner --------------------------------------------------------
+HWND AzNumberSpinner_Create(HWND parent, int id, double val, double mn,
+                            double mx, double step, int x,int y,int w,int h);
+double AzNumberSpinner_Get(HWND sp);
+void   AzNumberSpinner_Set(HWND sp, double v);
+
+// --- AzColorPicker ----------------------------------------------------------
+//  A swatch button; click opens the system colour dialog. Current colour is
+//  stored on the control. Sends WM_COMMAND on change.
+HWND     AzColorPicker_Create(HWND parent, int id, COLORREF c, int x,int y,int w,int h);
+COLORREF AzColorPicker_Get(HWND cp);
+void     AzColorPicker_Set(HWND cp, COLORREF c);
+
+// --- AzDropZone -------------------------------------------------------------
+//  A dashed drop target accepting file drops (WM_DROPFILES). On drop it posts
+//  WM_APP+40 to the parent with WPARAM = control id, LPARAM = pointer to a
+//  heap std::wstring* (the dropped path, parent must delete). Also clickable to
+//  open a file dialog when a filter is set.
+#define AZ_DROPZONE_DROPPED (WM_APP+40)
+HWND AzDropZone_Create(HWND parent, int id, const wchar_t* caption,
+                       const wchar_t* filter, int x,int y,int w,int h);
+
+// --- Designer-only painters -------------------------------------------------
+//  These are lightweight painter helpers (NOT separate HWNDs by default) used
+//  by the print designer canvas. Kept here so the kit owns the look.
+void AzGridLayer_Paint(HDC dc, RECT area, double mmPerPx, COLORREF line);
+void AzRulerH_Paint(HDC dc, RECT area, double originPx, double mmPerPx);
+void AzRulerV_Paint(HDC dc, RECT area, double originPx, double mmPerPx);
+//  Draw the 8 resize handles + 1 rotate handle around a selected rect.
+void AzHandle_Paint(HDC dc, RECT sel);
+
+// ============================================================================
+//  AzLayoutGuard (Handler #1, §6.2) — anti-overlap / anti-jump.
+//  After a layout pass, Verify() walks the direct children of hParent and, in
+//  RELEASE builds, softly corrects any two that overlap by pushing the lower-z
+//  one below the higher-z one and reposting WM_APP_LAYOUT_REDO. Pairs flagged
+//  with WS_EX_LAYERED or the "az_overlap_ok" window-prop are excluded.
+// ============================================================================
+void AzLayoutGuard_AllowOverlap(HWND child);   // mark a child as overlap-OK
+bool AzLayoutGuard_Verify(HWND hParent);        // returns false if it corrected
+
+// ============================================================================
+//  AzZOrderShield (Handler #2, §6.2) — no bleed-through across pages.
+//  Push(hPage): hides all siblings of hPage, remembers their visibility, and
+//  lets hPage cover the parent client area. Pop(hPage): restores them.
+//  Re-entrant via an internal stack; double-push is a no-op.
+// ============================================================================
+void AzZOrderShield_Push(HWND hPage);
+void AzZOrderShield_Pop(HWND hPage);
+
 } // namespace uikit

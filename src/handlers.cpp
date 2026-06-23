@@ -268,3 +268,33 @@ void installVazirFont(){
     loadEmbedded(102, L"Vazirmatn-Bold.ttf",    !have);
     if(!have) logLine(L"Vazirmatn font installed for current user");
 }
+
+// =========================================================================
+//  v1.4.0 (§6) — header-collapse state machine.
+//  factor 1.0 = expanded, 0.0 = collapsed. We ease toward the target by a
+//  fixed step each tick (driven by a frame timer) for a smooth ~150ms slide.
+// =========================================================================
+static float s_hcFactor   = 1.0f;   // current
+static float s_hcTarget   = 1.0f;   // 1=expanded, 0=collapsed
+static bool  s_hcCollapsed = false;
+
+float HeaderCollapse_Factor(){ return s_hcFactor; }
+bool  HeaderCollapse_Collapsed(){ return s_hcCollapsed; }
+
+void HeaderCollapse_Set(HWND frame, bool collapsed){
+    s_hcCollapsed = collapsed;
+    s_hcTarget    = collapsed ? 0.0f : 1.0f;
+    if(frame) SetTimer(frame, HEADER_COLLAPSE_TIMER, 16, NULL);   // ~60fps
+}
+
+bool HeaderCollapse_Tick(HWND frame){
+    const float step = 0.14f;                 // per-tick easing amount
+    if(s_hcFactor < s_hcTarget){
+        s_hcFactor += step; if(s_hcFactor >= s_hcTarget) s_hcFactor = s_hcTarget;
+    } else if(s_hcFactor > s_hcTarget){
+        s_hcFactor -= step; if(s_hcFactor <= s_hcTarget) s_hcFactor = s_hcTarget;
+    }
+    bool more = (s_hcFactor != s_hcTarget);
+    if(!more && frame) KillTimer(frame, HEADER_COLLAPSE_TIMER);
+    return more;
+}
