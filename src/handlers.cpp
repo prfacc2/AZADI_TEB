@@ -270,31 +270,33 @@ void installVazirFont(){
 }
 
 // =========================================================================
-//  v1.4.0 (§6) — header-collapse state machine.
-//  factor 1.0 = expanded, 0.0 = collapsed. We ease toward the target by a
-//  fixed step each tick (driven by a frame timer) for a smooth ~150ms slide.
+//  §B (v1.10.0) — header layout state. The frame-by-frame collapse ANIMATION
+//  has been REMOVED entirely. There is no per-tick easing, no 16ms timer and
+//  no intermediate factor: the action bar is shown at its FULL compact height
+//  immediately on tab entry and the factor is always a discrete 0.0 / 1.0.
+//
+//  Why the API is kept: main.cpp / reception.cpp still call HeaderCollapse_*
+//  to query the state, so preserving the contract avoids touching unrelated
+//  layout code while guaranteeing the animation can never come back. Set()
+//  snaps instantly and never starts a timer; Tick() is a no-op kept only so
+//  any stray HEADER_COLLAPSE_TIMER message is harmless.
 // =========================================================================
-static float s_hcFactor   = 1.0f;   // current
-static float s_hcTarget   = 1.0f;   // 1=expanded, 0=collapsed
-static bool  s_hcCollapsed = false;
+static bool s_hcCollapsed = false;
 
-float HeaderCollapse_Factor(){ return s_hcFactor; }
+// Discrete factor: 1.0 expanded, 0.0 collapsed (compact). No tweening.
+float HeaderCollapse_Factor(){ return s_hcCollapsed ? 0.0f : 1.0f; }
 bool  HeaderCollapse_Collapsed(){ return s_hcCollapsed; }
 
 void HeaderCollapse_Set(HWND frame, bool collapsed){
+    // Instant snap — no animation, no timer. The caller re-lays-out the frame
+    // right after this call, so the new compact/expanded geometry appears in a
+    // single paint with no intermediate frames.
     s_hcCollapsed = collapsed;
-    s_hcTarget    = collapsed ? 0.0f : 1.0f;
-    if(frame) SetTimer(frame, HEADER_COLLAPSE_TIMER, 16, NULL);   // ~60fps
+    if(frame) KillTimer(frame, HEADER_COLLAPSE_TIMER);   // belt & braces
 }
 
+// Retained as a no-op so a stale timer (should never fire now) does nothing.
 bool HeaderCollapse_Tick(HWND frame){
-    const float step = 0.14f;                 // per-tick easing amount
-    if(s_hcFactor < s_hcTarget){
-        s_hcFactor += step; if(s_hcFactor >= s_hcTarget) s_hcFactor = s_hcTarget;
-    } else if(s_hcFactor > s_hcTarget){
-        s_hcFactor -= step; if(s_hcFactor <= s_hcTarget) s_hcFactor = s_hcTarget;
-    }
-    bool more = (s_hcFactor != s_hcTarget);
-    if(!more && frame) KillTimer(frame, HEADER_COLLAPSE_TIMER);
-    return more;
+    if(frame) KillTimer(frame, HEADER_COLLAPSE_TIMER);
+    return false;   // never "more" — there is nothing to animate
 }

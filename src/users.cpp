@@ -44,6 +44,9 @@ std::vector<User> loadUsers(){
         if(f.size() < 5) continue;
         User u; u.username=f[0]; u.fullname=f[1]; u.dept=f[2];
         u.role=_wtoi(f[3].c_str()); u.hash=f[4];
+        // §H: preserve any extra columns a newer version may have appended so a
+        // round-trip save never drops forward-compatible data.
+        for(size_t i=5;i<f.size();i++){ u.extra+=L"|"; u.extra+=f[i]; }
         out.push_back(u);
     }
     return out;
@@ -52,7 +55,9 @@ static void saveUsers(const std::vector<User>& us){
     std::wstring out;
     for(auto& u : us){
         wchar_t role[4]; swprintf(role,4,L"%d",u.role);
-        out += u.username+L"|"+u.fullname+L"|"+u.dept+L"|"+role+L"|"+u.hash+L"\r\n";
+        // §H: re-emit the canonical 5 columns + any preserved forward-compat
+        // trailing columns (u.extra already begins with its own '|' separators).
+        out += u.username+L"|"+u.fullname+L"|"+u.dept+L"|"+role+L"|"+u.hash+u.extra+L"\r\n";
     }
     writeFileUtf8(usersPath(), out, false);
 }

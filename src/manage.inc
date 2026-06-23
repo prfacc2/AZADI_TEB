@@ -8,9 +8,9 @@
 //    PG_DASH   داشبورد           — summary cards (sections / employees / online
 //                                  / pending requests) + quick actions
 //    PG_SECTS  بخش‌ها             — existing sections grid + «ایجاد بخش» page
-//    PG_EMPS   کارکنان           — employee list with combinable filters +
+//    PG_EMPS   کارمندان           — employee list with combinable filters +
 //                                  «افزودن کارمند» (full new-employee form)
-//    PG_MSG    پیام به کارکنان   — compose with live search, dept filters,
+//    PG_MSG    پیام به کارمندان   — compose with live search, dept filters,
 //                                  message routing and media attachment
 //    PG_REQS   درخواست‌ها         — settings + profile change requests
 //                                  (distinct violet "info" category, never red)
@@ -487,7 +487,7 @@ static LRESULT CALLBACK mrProc(HWND h, UINT m, WPARAM w, LPARAM l){
           drawIcon(dc,ICO_X,ci,g_theme.text,S(2)); }
         SelectObject(dc,g_fTitle); SetTextColor(dc,g_infoAccent);
         RECT tr={c.left+S(24),c.top+S(14),c.right-S(150),c.top+S(48)};
-        DrawTextW(dc,L"درخواست‌های تغییر تنظیمات کارکنان",-1,&tr,
+        DrawTextW(dc,L"درخواست‌های تغییر تنظیمات کارمندان",-1,&tr,
             DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
         // live unread counter chip (top-left)
         { int unread=0; for(auto&q:s_rs->reqs) if(!q.seen) unread++;
@@ -720,7 +720,7 @@ static LRESULT CALLBACK prProc(HWND h, UINT m, WPARAM w, LPARAM l){
           drawIcon(dc,ICO_X,ci,g_theme.text,S(2)); }
         SelectObject(dc,g_fTitle); SetTextColor(dc,g_infoAccent);
         RECT tr={c.left+S(24),c.top+S(16),c.right-S(54),c.top+S(50)};
-        DrawTextW(dc,L"درخواست‌های تغییر پروفایل کارکنان",-1,&tr,
+        DrawTextW(dc,L"درخواست‌های تغییر پروفایل کارمندان",-1,&tr,
             DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
         // build pending list count
         int pending=0; if(s_prs) for(auto&q:s_prs->reqs) if(q.status==0) pending++;
@@ -815,7 +815,7 @@ static void openProfReqs(HWND owner){
     BringWindowToTop(s_pr); SetFocus(s_pr);
 }
 
-// ====================== «پیام به کارکنان» compose modal =====================
+// ====================== «پیام به کارمندان» compose modal =====================
 //  v1.8.0 full redesign:
 //    • live SEARCH box (by id / unique-id / name) with suggestion list
 //    • department filter chips (multi-select, combinable) for message routing
@@ -834,7 +834,7 @@ static void openProfReqs(HWND owner){
 #define MM_B_ATTACH 3208
 #define MM_LB_SUG   3209
 #define MM_B_SAVE   3210
-#define MM_B_VIEWEMP 3211   // «مشاهدهٔ کارکنان» toggle for the right-side panel
+#define MM_B_VIEWEMP 3211   // «مشاهدهٔ کارمندان» toggle for the right-side panel
 #define MM_E_EMPSRCH 3212   // employee-panel search box
 struct MsgState {
     HWND eSearch, eText, rNormal, rUrgent, rCrit, bSend, bCancel, bAttach, lbSug, bSave;
@@ -853,7 +853,9 @@ struct MsgState {
     std::wstring empQuery;            // filter text for the panel
     int empHot;                       // hot-tracked panel row (-1 none)
     int empScroll;                    // vertical scroll offset (px)
-    struct PRow { int kind; int idx; std::wstring name; }; // 0=dept header,1=emp
+    // §E: PRow carries a code too — for section headers it is the section code,
+    // for employees it is the personnel code (empId). kind 0=dept header,1=emp.
+    struct PRow { int kind; int idx; std::wstring name; std::wstring code; };
     std::vector<PRow> empRows;
 };
 static HWND s_mm=NULL; static MsgState* s_ms=NULL;
@@ -915,6 +917,14 @@ static void mmRunSearch(HWND h){
 // Rebuild the grouped employee list for the right-side panel:
 //   • grouped by department; ONLINE first (green dot) then OFFLINE (gray dot)
 //   • honours the panel search box (name / username / dept).
+//  §E (v1.10.0): grouped by SECTION, ONLINE first; each section header shows
+//  the section CODE, each employee row shows the personnel CODE. The list is
+//  CAPPED at 20 sections and 20 employees per section (lazy virtualization:
+//  rows beyond the cap are summarised with a «… و N مورد دیگر» line so the
+//  panel stays light on weak hardware and never balloons). Online presence is
+//  preserved; sorting keeps online employees at the top of each section.
+#define MM_MAX_SECTIONS 20
+#define MM_MAX_EMPS_PER_SECTION 20
 static void mmBuildEmpRows(HWND h){
     if(!s_ms) return;
     s_ms->empRows.clear();
@@ -924,18 +934,27 @@ static void mmBuildEmpRows(HWND h){
         for(auto&d:s_ms->depts) if(d.id==did) return d.name;
         return s_ms->users[i].dept.empty()?L"بدون بخش":s_ms->users[i].dept;
     };
+    auto deptCodeOf=[&](const std::wstring& name)->std::wstring{
+        for(auto&d:s_ms->depts) if(d.name==name) return d.id;
+        return L"\u2014";   // —
+    };
+    // build the section ordering, capped at MM_MAX_SECTIONS
     std::vector<std::wstring> groups;
-    for(auto&d:s_ms->depts) groups.push_back(d.name);
+    for(auto&d:s_ms->depts){ if((int)groups.size()>=MM_MAX_SECTIONS) break;
+        groups.push_back(d.name); }
     groups.push_back(L"بدون بخش");
     auto matches=[&](int i)->bool{
         if(q.empty()) return true;
         std::wstring nm=s_ms->users[i].fullname; for(auto&ch:nm) ch=towlower(ch);
         std::wstring un=s_ms->users[i].username; for(auto&ch:un) ch=towlower(ch);
         std::wstring dn=deptNameOf(i);            for(auto&ch:dn) ch=towlower(ch);
+        std::wstring cd=s_ms->profs[i].empId;     for(auto&ch:cd) ch=towlower(ch);
         return nm.find(q)!=std::wstring::npos||un.find(q)!=std::wstring::npos
-             ||dn.find(q)!=std::wstring::npos;
+             ||dn.find(q)!=std::wstring::npos||cd.find(q)!=std::wstring::npos;
     };
+    int sectionsShown=0;
     for(auto&g:groups){
+        if(sectionsShown>=MM_MAX_SECTIONS) break;
         std::vector<int> on, off;
         for(int i=0;i<(int)s_ms->users.size();i++){
             if(deptNameOf(i)!=g) continue;
@@ -944,9 +963,21 @@ static void mmBuildEmpRows(HWND h){
             else off.push_back(i);
         }
         if(on.empty()&&off.empty()) continue;
-        s_ms->empRows.push_back({0,-1,g});
-        for(int i:on)  s_ms->empRows.push_back({1,i,L""});
-        for(int i:off) s_ms->empRows.push_back({1,i,L""});
+        std::wstring code = (g==L"بدون بخش") ? std::wstring(L"\u2014") : deptCodeOf(g);
+        s_ms->empRows.push_back({0,-1,g,code});
+        sectionsShown++;
+        // ONLINE first, then OFFLINE — capped per section.
+        int emitted=0; int totalInSection=(int)on.size()+(int)off.size();
+        auto emit=[&](const std::vector<int>& v){
+            for(int i:v){ if(emitted>=MM_MAX_EMPS_PER_SECTION) return;
+                s_ms->empRows.push_back({1,i,L"",s_ms->profs[i].empId}); emitted++; }
+        };
+        emit(on); emit(off);
+        if(totalInSection>emitted){
+            wchar_t mb[64]; swprintf(mb,64,L"\u2026 \u0648 %d \u0645\u0648\u0631\u062f \u062f\u06cc\u06af\u0631",
+                totalInSection-emitted);
+            s_ms->empRows.push_back({2,-1,mb,L""});   // kind 2 = "more" summary
+        }
     }
 }
 static void mmLayout(HWND h){
@@ -1074,7 +1105,7 @@ static LRESULT CALLBACK mmProc(HWND h, UINT m, WPARAM w, LPARAM l){
             WS_CHILD|BS_AUTOCHECKBOX|BS_RIGHTBUTTON|BS_RIGHT,0,0,10,10,h,(HMENU)MM_B_SAVE,g_hInst,0);
         s_ms->bSend  =createFlatButton(h,MM_B_SEND,L"ارسال پیام",ICO_BELL,BS_PRIMARY,0,0,10,10);
         s_ms->bCancel=createFlatButton(h,MM_B_CANCEL,L"انصراف",ICO_X,BS_OUTLINE,0,0,10,10);
-        s_ms->bViewEmp=createFlatButton(h,MM_B_VIEWEMP,L"مشاهدهٔ کارکنان",ICO_USER,BS_OUTLINE,0,0,10,10);
+        s_ms->bViewEmp=createFlatButton(h,MM_B_VIEWEMP,L"مشاهدهٔ کارمندان",ICO_USER,BS_OUTLINE,0,0,10,10);
         s_ms->eEmpSrch=CreateWindowExW(0,L"EDIT",L"",
             WS_CHILD|WS_TABSTOP|ES_AUTOHSCROLL,0,0,10,10,h,(HMENU)MM_E_EMPSRCH,g_hInst,0);
         SendMessageW(s_ms->eEmpSrch,EM_SETCUEBANNER,TRUE,(LPARAM)L"جستجوی کارمند…");
@@ -1164,7 +1195,7 @@ static LRESULT CALLBACK mmProc(HWND h, UINT m, WPARAM w, LPARAM l){
         }
         else if(id==MM_B_VIEWEMP){
             s_ms->empPanelOpen=!s_ms->empPanelOpen;
-            SetWindowTextW(s_ms->bViewEmp, s_ms->empPanelOpen?L"بستن کارکنان":L"مشاهدهٔ کارکنان");
+            SetWindowTextW(s_ms->bViewEmp, s_ms->empPanelOpen?L"بستن کارمندان":L"مشاهدهٔ کارمندان");
             if(s_ms->empPanelOpen){ s_ms->empScroll=0; mmBuildEmpRows(h); }
             mmLayout(h); InvalidateRect(h,NULL,TRUE);
         }
@@ -1203,7 +1234,7 @@ static LRESULT CALLBACK mmProc(HWND h, UINT m, WPARAM w, LPARAM l){
           drawIcon(dc,ICO_X,ci,g_theme.text,S(2)); }
         SelectObject(dc,g_fTitle); SetTextColor(dc,g_theme.accent);
         RECT tr={c.left+S(28),c.top+S(16),c.right-S(54),c.top+S(46)};
-        DrawTextW(dc,L"پیام به کارکنان",-1,&tr,
+        DrawTextW(dc,L"پیام به کارمندان",-1,&tr,
             DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
         // dept-filter label + chips
         SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
@@ -1234,7 +1265,7 @@ static LRESULT CALLBACK mmProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 g_dark?RGB(6,9,14):RGB(28,36,48));
             SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.text);
             RECT ph={p.left+S(14),p.top+S(14),p.right-S(14),p.top+S(40)};
-            DrawTextW(dc,L"کارکنان",-1,&ph,DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+            DrawTextW(dc,L"کارمندان",-1,&ph,DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
             RECT clip={p.left+S(2),mmPanelListTop(h),p.right-S(2),p.bottom-S(8)};
             HRGN rgn=CreateRectRgn(clip.left,clip.top,clip.right,clip.bottom);
             SelectClipRgn(dc,rgn);
@@ -1244,11 +1275,25 @@ static LRESULT CALLBACK mmProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 if(ry+rh<clip.top||ry>clip.bottom) continue;
                 auto& row=s_ms->empRows[i];
                 if(row.kind==0){
+                    // §E: section header — name on the right, section code badge on the left.
                     SelectObject(dc,g_fSmall); SetTextColor(dc,g_infoAccent2);
                     RECT hr={p.left+S(14),ry+S(6),p.right-S(14),ry+rh-S(4)};
                     DrawTextW(dc,row.name.c_str(),-1,&hr,
                         DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
+                    if(!row.code.empty()){
+                        std::wstring sc=L"کد "+row.code;
+                        SetTextColor(dc,blendColor(g_theme.textDim,g_theme.surface,20));
+                        RECT cr={p.left+S(14),ry+S(6),p.left+S(120),ry+rh-S(4)};
+                        DrawTextW(dc,sc.c_str(),-1,&cr,
+                            DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
+                    }
                     gpLine(dc,p.left+S(14),ry+rh-S(2),p.right-S(14),ry+rh-S(2),g_theme.border,1);
+                } else if(row.kind==2){
+                    // §E: "… و N مورد دیگر" lazy-overflow summary row (caps reached).
+                    SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
+                    RECT mr={p.left+S(16),ry+S(2),p.right-S(16),ry+rh-S(2)};
+                    DrawTextW(dc,row.name.c_str(),-1,&mr,
+                        DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
                 } else {
                     int u=row.idx; bool online=isUserOnline(s_ms->users[u].username);
                     bool sel=(s_ms->selUser==u), hot=(s_ms->empHot==i);
@@ -1259,7 +1304,17 @@ static LRESULT CALLBACK mmProc(HWND h, UINT m, WPARAM w, LPARAM l){
                     gpRoundRect(dc,dot,S(6), online?RGB(0x2E,0xB8,0x6B):blendColor(g_theme.textDim,g_theme.surface,30),
                         CLR_INVALID,255);
                     SelectObject(dc,g_fUI); SetTextColor(dc, sel?g_theme.accent:(online?g_theme.text:g_theme.textDim));
-                    RECT nr={rr.left+S(10),rr.top,rr.right-S(30),rr.bottom};
+                    // §E: employee code shown on the left of each row; name on the right.
+                    if(!row.code.empty()){
+                        SelectObject(dc,g_fSmall);
+                        SetTextColor(dc, sel?g_theme.accent:blendColor(g_theme.textDim,g_theme.surface,15));
+                        RECT cr={rr.left+S(10),rr.top,rr.left+S(96),rr.bottom};
+                        DrawTextW(dc,row.code.c_str(),-1,&cr,
+                            DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
+                        SelectObject(dc,g_fUI);
+                        SetTextColor(dc, sel?g_theme.accent:(online?g_theme.text:g_theme.textDim));
+                    }
+                    RECT nr={rr.left+S(100),rr.top,rr.right-S(30),rr.bottom};
                     std::wstring nm=s_ms->users[u].fullname.empty()
                         ?s_ms->users[u].username:s_ms->users[u].fullname;
                     DrawTextW(dc,nm.c_str(),-1,&nr,
@@ -1588,7 +1643,7 @@ static void openNewEmployee(HWND owner){
 static int  mgNavW(){ return S(220); }     // sidebar width
 static int  mgHeadH(){ return S(64); }      // content header height
 static const wchar_t* MG_NAV_LABELS[PG_COUNT] = {
-    L"داشبورد", L"بیماران", L"بخش‌ها", L"کارکنان", L"پیام به کارکنان",
+    L"داشبورد", L"بیماران", L"بخش‌ها", L"کارمندان", L"پیام به کارمندان",
     L"درخواست‌ها", L"پیام‌های ذخیره‌شده", L"پشتیبان‌گیری"
 };
 static int MG_NAV_ICONS[PG_COUNT] = {
@@ -1776,8 +1831,8 @@ static const wchar_t* mgCardTitle(int page){
         case PG_DASH:  return L"داشبورد مدیریت";
         case PG_PATIENTS: return L"مدیریت بیماران";
         case PG_SECTS: return L"مدیریت بخش‌ها";
-        case PG_EMPS:  return L"فهرست کارکنان";
-        case PG_MSG:   return L"پیام به کارکنان";
+        case PG_EMPS:  return L"فهرست کارمندان";
+        case PG_MSG:   return L"پیام به کارمندان";
         case PG_REQS:  return L"درخواست‌های تغییر";
         case PG_SAVED: return L"پیام‌های ذخیره‌شده";
         case PG_BACKUP:return L"پشتیبان‌گیری و بازیابی";
@@ -1805,7 +1860,7 @@ static void mgPaintDash(HDC dc, HWND h){
     struct SumCard { const wchar_t* lbl; std::wstring val; COLORREF col; int ico; };
     SumCard cards[4]={
         { L"بخش‌ها",          toFaDigits(std::to_wstring(nSec)), g_infoAccent,    ICO_SHIELD },
-        { L"کارکنان",         toFaDigits(std::to_wstring(nEmp)), g_theme.accent,  ICO_USER },
+        { L"کارمندان",         toFaDigits(std::to_wstring(nEmp)), g_theme.accent,  ICO_USER },
         { L"آنلاین",          toFaDigits(std::to_wstring(nOn)),  g_theme.success, ICO_BELL },
         { L"درخواست‌های نو",  toFaDigits(std::to_wstring(nReq)), nReq>0?g_infoAccent2:g_theme.textDim, ICO_GEAR },
     };
@@ -1829,7 +1884,7 @@ static void mgPaintDash(HDC dc, HWND h){
     QA qa[4]={
         { L"ایجاد بخش",       L"افزودن بخش جدید",        ICO_PLUS,  PG_SECTS },
         { L"افزودن کارمند",   L"ثبت کارمند جدید",        ICO_USER,  PG_EMPS  },
-        { L"پیام به کارکنان", L"ارسال پیام و رسانه",     ICO_BELL,  PG_MSG   },
+        { L"پیام به کارمندان", L"ارسال پیام و رسانه",     ICO_BELL,  PG_MSG   },
         { L"درخواست‌ها",      L"بررسی درخواست‌ها",       ICO_GEAR,  PG_REQS  },
     };
     for(int i=0;i<4;i++){

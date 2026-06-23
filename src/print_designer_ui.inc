@@ -104,8 +104,12 @@ static LRESULT CALLBACK PickerProc(HWND h,UINT m,WPARAM w,LPARAM l){
         return (LRESULT)g_brSurface;
     }
     case WM_ERASEBKGND:{ RECT rc; GetClientRect(h,&rc); FillRect((HDC)w,&rc,g_brSurface); return 1; }
-    case WM_CLOSE: st->result=false; DestroyWindow(h); return 0;
-    case WM_DESTROY: PostQuitMessage(0); return 0;
+    case WM_CLOSE: if(st) st->result=false; DestroyWindow(h); return 0;
+    // NOTE (§F fix): do NOT PostQuitMessage here. This is a NESTED modal loop;
+    // posting WM_QUIT would terminate the outer designer/restore modal loop too
+    // (the designer would then never appear). The modal loop below breaks on
+    // !IsWindow(h), which fires as soon as this window is destroyed.
+    case WM_DESTROY: return 0;
     }
     return DefWindowProcW(h,m,w,l);
 }
@@ -164,11 +168,16 @@ static bool RunSectionPicker(HWND owner, DesignerLaunch& out){
     picker_reload(&st); picker_syncSel(&st);
     ShowWindow(h,SW_SHOW);
     EnableWindow(owner,FALSE);
+    // §F fix: self-contained modal pump. Breaks as soon as `h` is destroyed
+    // (checked AFTER dispatch) and never depends on a posted WM_QUIT, so the
+    // surrounding designer modal loop is left intact.
     MSG msg;
-    while(GetMessageW(&msg,NULL,0,0)){
+    while(IsWindow(h) && GetMessageW(&msg,NULL,0,0)){
+        if(msg.message==WM_QUIT){ PostQuitMessage((int)msg.wParam); break; }
         if(!IsWindow(h)) break;
-        if(IsDialogMessageW(h,&msg)) continue;
+        if(IsDialogMessageW(h,&msg)){ if(!IsWindow(h)) break; continue; }
         TranslateMessage(&msg); DispatchMessageW(&msg);
+        if(!IsWindow(h)) break;
     }
     EnableWindow(owner,TRUE); SetForegroundWindow(owner);
     out.sectionIds=st.selected;
@@ -734,7 +743,9 @@ static LRESULT CALLBACK DesignerProc(HWND h,UINT m,WPARAM w,LPARAM l){
         DestroyWindow(h); return 0;
     case WM_DESTROY:
         clearInspector();
-        PostQuitMessage(0);
+        // §F fix: no PostQuitMessage — the modal loop in OpenDesignerWindow()
+        // breaks on !IsWindow(h). Injecting WM_QUIT here would tear down the
+        // whole application message pump on the way back to the frame.
         return 0;
     }
     return DefWindowProcW(h,m,w,l);
@@ -813,11 +824,14 @@ static void OpenDesignerWindow(HWND owner,const DesignerLaunch& launch,
     designer_layout(h);
     ShowWindow(h,SW_SHOW);
     EnableWindow(owner,FALSE);
+    // §F fix: self-contained modal pump (see RunSectionPicker note).
     MSG msg;
-    while(GetMessageW(&msg,NULL,0,0)){
+    while(IsWindow(h) && GetMessageW(&msg,NULL,0,0)){
+        if(msg.message==WM_QUIT){ PostQuitMessage((int)msg.wParam); break; }
         if(!IsWindow(h)) break;
-        if(IsDialogMessageW(h,&msg)) continue;
+        if(IsDialogMessageW(h,&msg)){ if(!IsWindow(h)) break; continue; }
         TranslateMessage(&msg); DispatchMessageW(&msg);
+        if(!IsWindow(h)) break;
     }
     EnableWindow(owner,TRUE); SetForegroundWindow(owner);
     delete st;
@@ -901,7 +915,8 @@ static LRESULT CALLBACK RestoreProc(HWND h,UINT m,WPARAM w,LPARAM l){
         SetTextColor(dc,g_theme.text); return (LRESULT)g_brSurface; }
     case WM_ERASEBKGND:{ RECT rc; GetClientRect(h,&rc); FillRect((HDC)w,&rc,g_brSurface); return 1; }
     case WM_CLOSE: DestroyWindow(h); return 0;
-    case WM_DESTROY: PostQuitMessage(0); return 0;
+    // §F fix: no PostQuitMessage — nested modal loop breaks on !IsWindow(h).
+    case WM_DESTROY: return 0;
     }
     return DefWindowProcW(h,m,w,l);
 }
@@ -938,11 +953,14 @@ void RestoreDesign_Open(HWND hMain){
         mgn,H-S(54),S(110),S(34));
     ShowWindow(h,SW_SHOW);
     EnableWindow(hMain,FALSE);
+    // §F fix: self-contained modal pump (see RunSectionPicker note).
     MSG msg;
-    while(GetMessageW(&msg,NULL,0,0)){
+    while(IsWindow(h) && GetMessageW(&msg,NULL,0,0)){
+        if(msg.message==WM_QUIT){ PostQuitMessage((int)msg.wParam); break; }
         if(!IsWindow(h)) break;
-        if(IsDialogMessageW(h,&msg)) continue;
+        if(IsDialogMessageW(h,&msg)){ if(!IsWindow(h)) break; continue; }
         TranslateMessage(&msg); DispatchMessageW(&msg);
+        if(!IsWindow(h)) break;
     }
     EnableWindow(hMain,TRUE); SetForegroundWindow(hMain);
 }

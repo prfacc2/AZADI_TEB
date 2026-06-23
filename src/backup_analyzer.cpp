@@ -12,6 +12,10 @@
 //                  statements out of the file, and computes a SHA-256 schema
 //                  fingerprint. (No sqlite3 lib is linked; we parse the on-disk
 //                  format directly, which is fully documented & stable.)
+//    • SQL Server .bak (MTF/TAPE) → reads the leading descriptor blocks ONLY
+//                  (never loads a multi-GB .bak), recovers media/backup-set
+//                  names, vendor, machine, embedded DB file list, and reports
+//                  the honest SQL-Server-restore import path.
 //    • ZIP       → enumerates entries (name, raw vs compressed size, ratio).
 //    • SQL dump  → counts CREATE TABLE / INSERT INTO per table, statements.
 //    • JSON      → object/array/key counts.
@@ -28,6 +32,7 @@
 #include "backup_log.h"
 #include <stdio.h>
 #include <stdint.h>
+#include <csetjmp>
 
 // ----------------------------------------------------------------- SHA-256 ---
 //  Tiny, self-contained SHA-256 (public-domain style implementation) used only
@@ -377,6 +382,188 @@ static void analyzeZip(const std::wstring& path, BkAnalysis& A,
     A.ok=true;
 }
 
+// =================================================== SQL Server .bak (MTF) ===
+//  SQL Server native backups are stored in Microsoft Tape Format (MTF). Every
+//  MTF stream begins with a TAPE descriptor DBLK. We parse the documented MTF
+//  on-disk structures HONESTLY — reading only the small descriptor blocks at
+//  the front of the file (never loading a multi-GB .bak wholesale) and walk the
+//  DBLK chain to recover the media/backup-set names, software vendor/version,
+//  and the embedded database file list (MSCI/DBDB). This is a *read-only,
+//  forensic* description: AzadiTeb does not (and cannot) restore a SQL Server
+//  database — that requires a running SQL Server instance — so the report is
+//  explicit about the honest import path (restore via SQL Server / SSMS, then
+//  export the patient data and import the result here).
+//
+//  MTF reference (Microsoft Tape Format spec): each DBLK shares a common header
+//    +0  char[4]  DBLK type   ("TAPE","SSET","VOLB","DBDB","SPAD","ESET", …)
+//    +4  uint32   block attributes
+//    +8  uint16   offset to first event
+//   +14  uint16   "string storage" format (1=ANSI,2=Unicode)
+//   +16  uint32   OS id / OS version
+//   +24  uint64   displayable size
+//   +38  uint16   "format logical address" / header size hint
+//  String fields are stored as (uint16 size, uint16 offset-from-DBLK-start).
+static void analyzeMtf(const std::wstring& path, BkAnalysis& A,
+                       BkProgFn prog, void* user){
+    long long total=bkFileSize(path);
+    FILE* f=_wfopen(path.c_str(),L"rb");
+    if(!f){ A.error=L"فایل باز نشد."; return; }
+    if(prog) prog(10,L"خواندن توصیف‌گر نوار (MTF)…",user);
+
+    // Read only the leading descriptor region — capped so a 50GB .bak never
+    // gets pulled into RAM. The TAPE/SSET/DBDB descriptors all live up front.
+    const size_t CAP = 256*1024;
+    std::vector<uint8_t> d(CAP);
+    size_t got=fread(d.data(),1,CAP,f);
+    fclose(f);
+    d.resize(got);
+    if(got<64 || memcmp(d.data(),"TAPE",4)!=0){
+        A.error=L"این فایل با امضای MTF (TAPE) آغاز نمی‌شود.";
+        return;
+    }
+    BackupLog_Breadcrumb(L"MTF: TAPE descriptor confirmed");
+
+    auto rd16=[&](size_t o)->uint16_t{
+        if(o+2>d.size()) return 0; return (uint16_t)(d[o]|(d[o+1]<<8)); };
+    auto rd32=[&](size_t o)->uint32_t{
+        if(o+4>d.size()) return 0;
+        return (uint32_t)(d[o]|(d[o+1]<<8)|(d[o+2]<<16)|(d[o+3]<<24)); };
+
+    // MTF string: (uint16 size, uint16 offset) stored within the DBLK at a
+    // type-specific position. Read a string relative to a DBLK start `base`.
+    auto mtfStr=[&](size_t base, size_t sizeFieldOff, bool unicode)->std::wstring{
+        uint16_t sz = rd16(base+sizeFieldOff);
+        uint16_t off= rd16(base+sizeFieldOff+2);
+        if(sz==0||off==0) return L"";
+        size_t s=base+off; if(s>=d.size()) return L"";
+        size_t avail=d.size()-s; if(sz>avail) sz=(uint16_t)avail;
+        if(unicode){
+            std::wstring w; w.reserve(sz/2);
+            for(size_t i=0;i+1<(size_t)sz;i+=2) w.push_back((wchar_t)(d[s+i]|(d[s+i+1]<<8)));
+            return w;
+        }
+        int wl=MultiByteToWideChar(CP_ACP,0,(const char*)&d[s],sz,NULL,0);
+        std::wstring w(wl,L'\0');
+        if(wl>0) MultiByteToWideChar(CP_ACP,0,(const char*)&d[s],sz,&w[0],wl);
+        return w;
+    };
+
+    if(prog) prog(35,L"پیمایش بلوک‌های توصیف‌گر…",user);
+    // String-storage type lives at TAPE +14 (1=ANSI, 2=Unicode in most writers).
+    uint16_t strFmt = rd16(14);
+    bool uni = (strFmt==2);
+
+    // Walk the DBLK chain. Each common header carries a uint32 "displayable
+    // size" of the DBLK at +24 (little endian, low dword sufficient for headers)
+    // and we advance to the next block on a fixed-block-size boundary. SQL
+    // Server MTF uses 1024-byte logical blocks for descriptors; align up.
+    auto isType=[&](size_t o,const char* t)->bool{
+        return o+4<=d.size() && memcmp(&d[o],t,4)==0; };
+    auto alignUp=[&](size_t v,size_t a)->size_t{ return ((v+a-1)/a)*a; };
+
+    std::wstring mediaName, setName, vendor, machine, software;
+    int sets=0, volumes=0, dbCount=0;
+    std::wstring dbFiles;
+    {
+        // SSET (backup-set) descriptor is the most informative for SQL Server.
+        // Its data-set name / description fields begin near +52 for the common
+        // header variants. We scan block by block.
+        size_t pos=0, guard=0;
+        size_t blk = 1024;                       // MTF descriptor block size
+        // refine block size from TAPE "format logical block size" hint at +38
+        uint16_t hint=rd16(38);
+        if(hint==512||hint==1024||hint==2048||hint==4096) blk=hint;
+        while(pos+4<=d.size() && guard<512){
+            guard++;
+            if(isType(pos,"TAPE")){
+                // media/tape name string at +52 (size/off pair) in many writers
+                if(mediaName.empty()) mediaName=mtfStr(pos,52,uni);
+                if(software.empty())  software =mtfStr(pos,60,uni);
+            } else if(isType(pos,"SSET")){
+                sets++;
+                if(setName.empty())  setName =mtfStr(pos,52,uni);
+                if(vendor.empty())   vendor  =mtfStr(pos,56,uni);
+                if(machine.empty())  machine =mtfStr(pos,72,uni);
+            } else if(isType(pos,"VOLB")){
+                volumes++;
+                if(machine.empty())  machine =mtfStr(pos,52,uni);
+            } else if(isType(pos,"DBDB")||isType(pos,"FILE")){
+                dbCount++;
+                std::wstring nm=mtfStr(pos,52,uni);
+                if(!nm.empty() && dbCount<=32) dbFiles+=L"  • "+nm+L"\r\n";
+            } else if(isType(pos,"ESET")||isType(pos,"EOTM")){
+                break;                            // end of set / end of media
+            }
+            // advance: use the DBLK "size of formatted/displayable size" at +24
+            // when sane, else a single block; always align to block boundary.
+            uint32_t dsize=rd32(pos+24);
+            size_t step = (dsize>=blk && dsize<d.size()) ? dsize : blk;
+            size_t next = alignUp(pos+step, blk);
+            if(next<=pos) next=pos+blk;
+            pos=next;
+            if(prog && d.size()>0){
+                int pct=35+(int)(45.0*(double)pos/(double)d.size());
+                if(pct>82) pct=82; prog(pct,L"خواندن بلوک‌ها…",user);
+            }
+        }
+    }
+
+    if(prog) prog(88,L"محاسبهٔ اثر انگشت توصیف‌گر…",user);
+    Sha256 sh; sh.init();
+    sh.update(d.data(), got<8192?got:8192);     // fingerprint of the descriptor
+    uint8_t dig[32]; sh.final(dig);
+    std::wstring fp=hex32(dig);
+
+    if(prog) prog(94,L"تهیهٔ گزارش…",user);
+    {
+        BkSection s; s.title=L"نوع بکاپ و نسخهٔ فرمت";
+        s.body =L"نوع: پشتیبان بومی SQL Server (فرمت نوار مایکروسافت – MTF)\r\n";
+        s.body+=L"امضای فایل: TAPE (معتبر)\r\n";
+        s.body+=L"کدگذاری رشته‌ها: "+std::wstring(uni?L"Unicode":L"ANSI");
+        A.sections.push_back(s);
+    }
+    {
+        BkSection s; s.title=L"مشخصات مجموعهٔ پشتیبان";
+        if(!mediaName.empty()) s.body+=L"نام رسانه: "+mediaName+L"\r\n";
+        if(!setName.empty())   s.body+=L"نام مجموعهٔ پشتیبان: "+setName+L"\r\n";
+        if(!machine.empty())   s.body+=L"نام رایانه/سرور: "+machine+L"\r\n";
+        if(!vendor.empty())    s.body+=L"سازندهٔ نرم‌افزار: "+vendor+L"\r\n";
+        if(!software.empty())  s.body+=L"نرم‌افزار پشتیبان‌گیر: "+software+L"\r\n";
+        s.body+=L"تعداد مجموعه‌های پشتیبان (SSET): "+bkNum(sets)+L"\r\n";
+        s.body+=L"تعداد جلدها (VOLB): "+bkNum(volumes);
+        if(s.body.empty()) s.body=L"اطلاعات توصیفی قابل‌خواندنی یافت نشد.";
+        A.sections.push_back(s);
+    }
+    if(!dbFiles.empty() || dbCount>0){
+        BkSection s; s.title=L"فایل‌های پایگاه‌دادهٔ درون پشتیبان (DBDB)";
+        s.body =L"تعداد فایل‌های شناسایی‌شده: "+bkNum(dbCount)+L"\r\n";
+        if(!dbFiles.empty()) s.body+=dbFiles;
+        A.sections.push_back(s);
+    }
+    {
+        BkSection s; s.title=L"حجم اطلاعات";
+        s.body =L"حجم فایل روی دیسک: "+bkHuman(total)+L"\r\n";
+        s.body+=L"حجم توصیف‌گر خوانده‌شده: "+bkHuman((long long)got)+L" (فقط ابتدای فایل خوانده شد؛ کل فایل بارگذاری نشد)";
+        A.sections.push_back(s);
+    }
+    {
+        BkSection s; s.title=L"پیش‌نیازها و روش وارد کردن (مهم)";
+        s.body =L"این یک پشتیبان بومی SQL Server است و آزادی‌طب به‌تنهایی قادر به بازیابی مستقیم آن نیست؛ بازیابی نیازمند یک نمونهٔ SQL Server است.\r\n\r\n";
+        s.body+=L"روش درست و صادقانه:\r\n";
+        s.body+=L"۱) فایل .bak را در SQL Server / SSMS با دستور RESTORE DATABASE بازیابی کنید.\r\n";
+        s.body+=L"۲) داده‌های بیماران را از پایگاه‌دادهٔ بازیابی‌شده به CSV/SQL خروجی بگیرید.\r\n";
+        s.body+=L"۳) خروجی را از مسیر «بازیابی از پشتیبان» در آزادی‌طب وارد کنید.";
+        A.sections.push_back(s);
+    }
+    {
+        BkSection s; s.title=L"اطلاعات تکمیلی";
+        s.body =L"اثر انگشت توصیف‌گر (SHA-256):\r\n"+fp+L"\r\n";
+        s.body+=L"بررسی یکپارچگی: امضای معتبر MTF/TAPE شناسایی شد.";
+        A.sections.push_back(s);
+    }
+    A.ok=true;
+}
+
 // ========================================================= SQL / JSON / text =
 static void analyzeText(const std::wstring& path, BkAnalysis& A, int kind,
                         BkProgFn prog, void* user){
@@ -476,6 +663,11 @@ static void analyzeCore(const std::wstring& path, BkAnalysis& A,
             BackupLog_Breadcrumb(L"detected: SQLite 3");
             analyzeSqlite(path,A,prog,user);
         }
+        // SQL Server native backup (MTF):  "TAPE"
+        else if(head.size()>=4 && memcmp(head.data(),"TAPE",4)==0){
+            BackupLog_Breadcrumb(L"detected: SQL Server .bak (MTF/TAPE)");
+            analyzeMtf(path,A,prog,user);
+        }
         // ZIP:  PK\x03\x04
         else if(head[0]==0x50&&head[1]==0x4B&&head[2]==0x03&&head[3]==0x04){
             BackupLog_Breadcrumb(L"detected: ZIP");
@@ -508,26 +700,55 @@ static void analyzeCore(const std::wstring& path, BkAnalysis& A,
 }
 
 //  Structured-exception guard — a single bad page / access violation in any
-//  parsing step is caught here, logged, and surfaced as an error instead of
-//  crashing the whole UI. MinGW's GCC win32 build does not expose MS-style
-//  __try/__except for arbitrary code, so we use a vectored exception handler
-//  scoped to this worker to translate hardware faults into a C++ throw that the
-//  try/catch in analyzeCore() can absorb.
+//  parsing step is REALLY CONTAINED here (not merely logged): MinGW's GCC win32
+//  build does not expose MS-style __try/__except for arbitrary code, so we arm a
+//  vectored exception handler that, on a genuine hardware fault, longjmp()s back
+//  to a setjmp() landing pad established before the parse. That unwinds the
+//  faulting native stack to a known-good frame and lets us surface an honest
+//  Persian error instead of letting the access violation tear down the process.
+//
+//  The jmp landing-pad + an "armed" flag are thread-local so the VEH only ever
+//  redirects faults that originate inside THIS analyzer worker; faults anywhere
+//  else in the app fall through to the normal crash handler untouched.
+static thread_local jmp_buf  s_azJmp;
+static thread_local bool     s_azArmed = false;
+static thread_local DWORD    s_azFaultCode = 0;
+
 static LONG CALLBACK azAnalyzeVeh(EXCEPTION_POINTERS* ep){
     DWORD code = ep && ep->ExceptionRecord ? ep->ExceptionRecord->ExceptionCode : 0;
-    // only translate genuine hardware faults; let everything else flow through.
-    if(code==EXCEPTION_ACCESS_VIOLATION || code==EXCEPTION_IN_PAGE_ERROR ||
-       code==EXCEPTION_DATATYPE_MISALIGNMENT || code==EXCEPTION_ARRAY_BOUNDS_EXCEEDED){
-        wchar_t db[96]; swprintf(db,96,L"SEH exception code=0x%08lX",(unsigned long)code);
+    // Only contain genuine hardware faults that occur WHILE the analyzer is
+    // armed on this thread. Everything else flows through to other handlers.
+    if(s_azArmed &&
+       (code==EXCEPTION_ACCESS_VIOLATION || code==EXCEPTION_IN_PAGE_ERROR ||
+        code==EXCEPTION_DATATYPE_MISALIGNMENT || code==EXCEPTION_ARRAY_BOUNDS_EXCEEDED ||
+        code==EXCEPTION_STACK_OVERFLOW)){
+        wchar_t db[96]; swprintf(db,96,L"SEH contained code=0x%08lX",(unsigned long)code);
         BackupLog_Event(L"ANALYZE_FAIL",L"",db);
+        s_azFaultCode = code;
+        s_azArmed = false;          // disarm before unwinding
+        longjmp(s_azJmp, 1);        // unwind to the landing pad in analyzeSeh()
     }
-    return EXCEPTION_CONTINUE_SEARCH;   // forensic log only; do not swallow
+    return EXCEPTION_CONTINUE_SEARCH;   // not ours / not a fault → let it flow
 }
 
 static void analyzeSeh(const std::wstring& path, BkAnalysis& A,
                        BkProgFn prog, void* user){
     PVOID veh = AddVectoredExceptionHandler(1, azAnalyzeVeh);
-    analyzeCore(path,A,prog,user);
+    s_azFaultCode = 0;
+    if(setjmp(s_azJmp)==0){
+        s_azArmed = true;
+        analyzeCore(path,A,prog,user);
+        s_azArmed = false;
+    } else {
+        // We arrived here via longjmp() from the VEH: a hardware fault was
+        // contained. Report it honestly instead of crashing.
+        s_azArmed = false;
+        A.ok = false;
+        wchar_t db[160];
+        swprintf(db,160,L"خطای سخت‌افزاری حین تحلیل مهار شد (کد 0x%08lX). فایل احتمالاً خراب یا ناقص است.",
+                 (unsigned long)s_azFaultCode);
+        A.error = db;
+    }
     if(veh) RemoveVectoredExceptionHandler(veh);
 }
 

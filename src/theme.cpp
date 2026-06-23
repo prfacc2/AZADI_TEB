@@ -41,37 +41,44 @@ void applyTheme(bool dark){
         g_infoAccent  = RGB(150, 120, 245);   // bright violet (stands out, not red)
         g_infoAccent2 = RGB(120, 92, 225);
     } else {
-        // ---- Refined light palette: NOT flat white. A soft cool-grey page,
-        //      warm-tinted cards with a gentle top-light gradient, a richer
-        //      indigo→sky accent, and an amber highlight so the UI has depth
-        //      and contrast instead of one washed-out white sheet. ----
-        //  More tonal depth so the screen is not one flat sheet that strains the
-        //  eyes: the page is a noticeably tinted soft blue-grey, cards are clean
-        //  white, bars sit one step below white, and the header reads white →
-        //  one shade lower so its three layers are distinguishable.
-        g_theme.bg          = RGB(223, 231, 242); // page (cool soft grey-blue, deeper)
-        g_theme.bg2         = RGB(208, 219, 236); // subtle gradient bottom
+        // ---- Premium light palette (v1.10.0 §C): a genuinely LAYERED light
+        //      theme, not a washed-out white sheet. Five clearly distinct
+        //      elevation tones — page → wells/bars → cards → card-top highlight
+        //      → header — give real depth. Borders are crisp, text is high
+        //      contrast (near-WCAG-AAA on white), the accent is a richer, more
+        //      saturated indigo→sky, and hover/focus/active/disabled states are
+        //      visually separated so every control reads clearly.
+        //
+        //  Elevation ladder (lightness):
+        //      bg2  214 ── page bottom (deepest)
+        //      bg   222 ── page
+        //      surface2 234 ── wells / bars / list backgrounds
+        //      border 196 ── crisp hairline between layers
+        //      surface 255 ── cards (clean white, pops off the tinted page)
+        //      surfaceTop 250 ── soft top-light on cards
+        g_theme.bg          = RGB(220, 229, 241); // page (cool soft grey-blue)
+        g_theme.bg2         = RGB(204, 216, 234); // page gradient bottom (deeper)
         g_theme.surface     = RGB(255, 255, 255); // card body (clean white)
-        g_theme.surfaceTop  = RGB(249, 251, 255); // card gradient top (airy)
-        g_theme.surface2    = RGB(236, 241, 248); // bars (one notch below white)
-        g_theme.border      = RGB(200, 211, 227);
-        g_theme.text        = RGB(26, 36, 54);
-        g_theme.textDim     = RGB(98, 113, 137);
-        g_theme.accent      = RGB(33, 102, 232);  // indigo-blue
-        g_theme.accent2     = RGB(46, 150, 240);  // sky end for gradients
-        g_theme.accentHover = RGB(54, 124, 246);
+        g_theme.surfaceTop  = RGB(250, 252, 255); // card gradient top (airy light)
+        g_theme.surface2    = RGB(234, 240, 248); // wells / bars (a clear notch below white)
+        g_theme.border      = RGB(196, 208, 226); // crisper hairline (more contrast)
+        g_theme.text        = RGB(20, 29, 46);    // deeper ink for stronger contrast
+        g_theme.textDim     = RGB(92, 107, 132);  // legible secondary text
+        g_theme.accent      = RGB(28, 96, 230);   // richer indigo-blue
+        g_theme.accent2     = RGB(44, 152, 244);  // sky end for gradients
+        g_theme.accentHover = RGB(48, 118, 246);  // lighter on hover
         g_theme.accentText  = RGB(255, 255, 255);
-        g_theme.danger      = RGB(222, 60, 76);
-        g_theme.dangerHover = RGB(236, 86, 100);
-        g_theme.success     = RGB(20, 160, 108);
-        g_theme.warn        = RGB(220, 150, 30);
-        g_theme.inputBg     = RGB(243, 247, 252); // tinted, not pure white
-        g_theme.inputText   = RGB(22, 30, 46);
-        g_theme.hover       = RGB(228, 237, 250);
+        g_theme.danger      = RGB(216, 52, 70);
+        g_theme.dangerHover = RGB(232, 80, 96);
+        g_theme.success     = RGB(16, 156, 104);
+        g_theme.warn        = RGB(214, 144, 22);
+        g_theme.inputBg     = RGB(245, 248, 253); // tinted well, not pure white
+        g_theme.inputText   = RGB(18, 26, 42);
+        g_theme.hover       = RGB(224, 234, 249); // soft blue wash on hover
         g_theme.headerTop   = RGB(255, 255, 255);
-        g_theme.headerBot   = RGB(235, 241, 249);
-        g_infoAccent  = RGB(124, 92, 230);    // violet (distinct, non-red)
-        g_infoAccent2 = RGB(98, 70, 210);
+        g_theme.headerBot   = RGB(232, 239, 249); // header reads as its own layer
+        g_infoAccent  = RGB(120, 86, 228);    // violet (distinct, non-red)
+        g_infoAccent2 = RGB(94, 66, 208);
     }
     if(g_brBg)       DeleteObject(g_brBg);
     if(g_brSurface)  DeleteObject(g_brSurface);
@@ -350,6 +357,11 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
     case WM_MOUSELEAVE:
         if(d){ d->hover=false; d->down=false; InvalidateRect(h,NULL,TRUE); }
         break;
+    case WM_SETFOCUS:
+    case WM_KILLFOCUS:
+    case WM_ENABLE:
+        InvalidateRect(h,NULL,TRUE);   // §C: repaint focus ring / disabled state
+        break;
     case WM_LBUTTONDOWN:
         if(d){ d->down=true; InvalidateRect(h,NULL,TRUE); SetCapture(h); }
         break;
@@ -393,7 +405,9 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
 
         COLORREF fill, txt, bord = CLR_INVALID;
         int st = d ? d->style : BS_GHOST;
-        bool hv = d&&d->hover, dn = d&&d->down;
+        bool enabled = IsWindowEnabled(h)!=FALSE;
+        bool hv = enabled && d && d->hover, dn = enabled && d && d->down;
+        bool focused = enabled && (GetFocus()==h);   // §C: explicit focus ring
         switch(st){
         case BS_PRIMARY:
             fill = dn ? g_theme.accent : hv ? g_theme.accentHover : g_theme.accent;
@@ -437,8 +451,17 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
         } else {
             gpRoundRect(dc, rr, rad, fill, bord);
         }
+        // §C: explicit focus ring — a crisp accent hairline inset 2px so keyboard
+        //     focus is always visible without shifting layout.
+        if(focused){
+            RECT fr=rr; InflateRect(&fr,-S(2),-S(2));
+            gpRoundRect(dc, fr, rad>S(3)?rad-S(2):rad, CLR_INVALID, g_theme.accent);
+        }
 
         SetBkMode(dc, TRANSPARENT);
+        // §C: disabled controls render dim + low-contrast text so the state is
+        //     unmistakable (and they ignore hover/active above).
+        if(!enabled) txt = g_theme.textDim;
         SetTextColor(dc, txt);
         if(st==BS_CARD){
             // big card: icon centered upper, title, subtitle
@@ -496,6 +519,13 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 DrawTextW(dc, d->text.c_str(), -1, &rc,
                     DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
             }
+        }
+        // §C: disabled veil — a translucent wash of the page colour over the
+        //     whole control so disabled buttons are visually muted but still
+        //     legible. Applied last, over both fill and content.
+        if(!enabled){
+            gpRoundRectBg(dc, rr, rad,
+                blendColor(g_theme.bg, g_theme.surface2, 40), CLR_INVALID, g_theme.surface, 150);
         }
         BitBlt(dc0,0,0,rc.right,rc.bottom,dc,0,0,SRCCOPY);
         SelectObject(dc,obm); DeleteObject(bmp); DeleteDC(dc);

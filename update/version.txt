@@ -1,2 +1,2 @@
-1.4.0
+1.10.0
 https://example.com/path/AzadiTeb.exe

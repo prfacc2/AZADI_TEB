@@ -19,6 +19,8 @@
 //  Pure owner-drawn (GDI+) so it inherits the theme automatically.
 // ============================================================================
 #include "app.h"
+#include "print_designer.h"   // §A: PrintDesigner_Open — so «دیزاین چاپ» opens
+                              // the print DESIGNER, not the printer settings.
 #include <stdio.h>
 
 #define SET_CLASS  L"AzSettings"
@@ -505,7 +507,9 @@ static LRESULT CALLBACK setProc(HWND h, UINT m, WPARAM w, LPARAM l){
             case ROW_NOTIFY:      doNotifyToggle(h); break;
             case ROW_SAVEDMSGS:   doSavedMsgsToggle(h); break;
             case ROW_PRINTER:     closeSettingsPanel(); openPrinterSettings(g_hFrame); break;
-            case ROW_PRINTDESIGN: closeSettingsPanel(); openPrinterSettings(g_hFrame); break;
+            // §A CRITICAL: «دیزاین چاپ» must open the print DESIGNER (was wrongly
+            // routed to the printer-settings dialog).
+            case ROW_PRINTDESIGN: closeSettingsPanel(); PrintDesigner_Open(g_hFrame); break;
             case ROW_PROFILE:     doProfile(h); break;
             case ROW_DENSITY:     doDensityToggle(h); break;
             case ROW_AUTOPRINT:   doAutoPrintToggle(h); break;

@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.3.0"
+#define APP_VERSION_W   L"1.10.0"
 
 // ----------------------------------------------------------- logging policy -
 //  RELEASE 1.2.0 (Section A): all general user-behavior logging is gated behind
@@ -220,6 +220,10 @@ struct User {
     std::wstring username, fullname, dept, hash;
     int role;                 // 0 = پذیرش, 1 = مدیریت
     int id;                   // stable per-user id (index into users store)
+    // §H forward-compat: any extra pipe-delimited columns written by a FUTURE
+    // version (fields 6,7,…) are captured verbatim here and written back
+    // unchanged, so an older build never silently drops newer data.
+    std::wstring extra;
     User():role(0),id(0){}
 };
 std::vector<User> loadUsers();
@@ -352,7 +356,10 @@ void kickCashDrawer();
 
 // --------------------------------------------------------------- employees --
 //  Department categories + employee directory (management panel).
-struct DeptCat { std::wstring id, name, manager, icon; };
+struct DeptCat { std::wstring id, name, manager, icon;
+    // §H forward-compat: extra pipe columns from a newer version, kept verbatim
+    // (already pipe-prefixed + escaped) so a save round-trip never drops them.
+    std::wstring extra; };
 std::vector<DeptCat> loadDepts();
 bool addDept(const DeptCat& c, std::wstring& err);
 bool removeDept(const std::wstring& id);
@@ -365,6 +372,10 @@ struct EmpProfile {
     std::wstring username, nationalId, fatherName, address, landline,
                  shiftFrom, shiftTo, photoPath, idCardPath, deptId;
     std::wstring empId, uniqueId, position, mobile, email, hireDate, workHours;
+    // §H forward-compat: unknown key=value lines written by a FUTURE version are
+    // captured here (already including their trailing CRLF) and re-emitted on
+    // save so older builds never silently drop newer profile fields.
+    std::wstring extraKv;
 };
 EmpProfile loadEmpProfile(const std::wstring& username);
 void       saveEmpProfile(const EmpProfile& p);

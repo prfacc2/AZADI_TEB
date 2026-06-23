@@ -115,27 +115,40 @@ std::wstring getSetting(const std::wstring& key, const std::wstring& def){
         size_t e = all.find(L'\n', pos);
         if(e==std::wstring::npos) e = all.size();
         std::wstring line = trim(all.substr(pos, e-pos));
+        pos = e+1;
+        // §H: skip comment lines so a future "# key=note" can never be mistaken
+        //     for a real value.
+        if(line.empty() || line[0]==L'#' || line[0]==L';') continue;
         size_t eq = line.find(L'=');
         if(eq!=std::wstring::npos && trim(line.substr(0,eq))==key)
             return trim(line.substr(eq+1));
-        pos = e+1;
     }
     return def;
 }
 void setSetting(const std::wstring& key, const std::wstring& val){
+    //  §H future-update safety: this rewriter PRESERVES every line it does not
+    //  own — comments (#, ;), blank lines, section markers ([..]) and any
+    //  unknown key=value pairs written by a newer version are all carried over
+    //  verbatim. Only the single matching key is replaced (or appended).
     std::wstring all = readFileUtf8(settingsPath());
     std::wstring out; bool done=false; size_t pos=0;
     while(pos < all.size()){
         size_t e = all.find(L'\n', pos);
         if(e==std::wstring::npos) e = all.size();
-        std::wstring line = trim(all.substr(pos, e-pos));
-        size_t eq = line.find(L'=');
-        if(!line.empty()){
-            if(eq!=std::wstring::npos && trim(line.substr(0,eq))==key){
-                out += key+L"="+val+L"\r\n"; done=true;
-            } else out += line+L"\r\n";
-        }
+        std::wstring raw  = all.substr(pos, e-pos);
+        // strip a trailing CR so we re-emit with a single canonical CRLF
+        if(!raw.empty() && raw.back()==L'\r') raw.pop_back();
+        std::wstring line = trim(raw);
         pos = e+1;
+        bool isComment = (!line.empty() && (line[0]==L'#' || line[0]==L';'));
+        size_t eq = line.find(L'=');
+        if(!isComment && !line.empty() && eq!=std::wstring::npos &&
+           trim(line.substr(0,eq))==key){
+            out += key+L"="+val+L"\r\n"; done=true;     // replace our key
+        } else {
+            // preserve EVERYTHING else exactly — comments, blanks, other keys.
+            out += raw+L"\r\n";
+        }
     }
     if(!done) out += key+L"="+val+L"\r\n";
     writeFileUtf8(settingsPath(), out, false);

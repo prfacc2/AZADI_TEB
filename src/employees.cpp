@@ -32,13 +32,15 @@ std::vector<DeptCat> loadDepts(){
         auto f=splitPipe(line);
         if(f.size()<4) continue;
         DeptCat c; c.id=f[0]; c.name=f[1]; c.manager=f[2]; c.icon=f[3];
+        // §H: preserve any future extra columns (re-escaped on save below).
+        for(size_t i=4;i<f.size();i++){ c.extra+=L"|"; c.extra+=pipeEsc(f[i]); }
         out.push_back(c);
     }
     return out;
 }
 static void saveDepts(const std::vector<DeptCat>& v){
     std::wstring out;
-    for(auto&c:v) out+=pipeEsc(c.id)+L"|"+pipeEsc(c.name)+L"|"+pipeEsc(c.manager)+L"|"+pipeEsc(c.icon)+L"\r\n";
+    for(auto&c:v) out+=pipeEsc(c.id)+L"|"+pipeEsc(c.name)+L"|"+pipeEsc(c.manager)+L"|"+pipeEsc(c.icon)+c.extra+L"\r\n";
     writeFileUtf8(deptsPath(),out,false);
 }
 //  v1.4.1: make sure the default «پذیرش» category always exists so the
@@ -96,6 +98,8 @@ EmpProfile loadEmpProfile(const std::wstring& username){
         else if(k==L"position") p.position=v; else if(k==L"mobile") p.mobile=v;
         else if(k==L"email") p.email=v; else if(k==L"hireDate") p.hireDate=v;
         else if(k==L"workHours") p.workHours=v;
+        // §H: any key we don't recognise belongs to a newer version — keep it.
+        else p.extraKv += k+L"="+v+L"\r\n";
     }
     return p;
 }
@@ -117,6 +121,7 @@ void saveEmpProfile(const EmpProfile& p){
     s+=L"email="+p.email+L"\r\n";
     s+=L"hireDate="+p.hireDate+L"\r\n";
     s+=L"workHours="+p.workHours+L"\r\n";
+    s+=p.extraKv;                 // §H: preserve forward-compat unknown fields
     writeFileUtf8(empPath(p.username),s,false);
 }
 

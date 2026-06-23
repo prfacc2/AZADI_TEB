@@ -68,9 +68,12 @@ static void buildFonts(){
 //  RIGHT-aligned. The action bar is only present where it is needed so other
 //  screens keep the original clean single-layer header.
 static int mainBarH(){ return S(64); }                 // LAYER 1 height
-// v1.4.0 (§6): the action bar height is scaled by the header-collapse factor so
-// the bar slides up/down smoothly instead of snapping.
-static int actionBarH(){ return (int)(S(50) * HeaderCollapse_Factor() + 0.5f); }
+// §B (v1.10.0): the action bar has a FIXED compact height. The old code scaled
+// it by an animated collapse factor (S(50)*factor) which produced the
+// frame-by-frame slide, the one-frame "stuck" artifact and an empty header row
+// mid-animation. The animation is gone: the bar is simply present (compact) on
+// the reception screen and absent everywhere else — applied in a single paint.
+static int actionBarH(){ return S(48); }
 static bool headerHasActionBar(){ return s_curScreen==SC_RECEPTION; }
 static int topBarH(){ return mainBarH() + (headerHasActionBar()?actionBarH():0); }
 static int botBarH(){ return S(40); }
@@ -85,7 +88,9 @@ static void frameLayout(HWND h);   // fwd (header layout, defined below)
 void switchScreen(ScreenId id){
     if(s_screen){ DestroyWindow(s_screen); s_screen=0; }
     s_curScreen = id;
-    HeaderCollapse_Set(g_hFrame, false);   // v1.4.0 (§6): start each screen expanded
+    // §B (v1.10.0): NO animation. The reception screen uses the COMPACT header
+    // layout immediately on entry; every other screen has no action bar at all.
+    HeaderCollapse_Set(g_hFrame, id==SC_RECEPTION);
     switch(id){
         case SC_HOME:      s_screen = createHomeScreen(g_hFrame); break;
         case SC_RECEPTION: s_screen = createReceptionScreen(g_hFrame); break;
@@ -355,24 +360,20 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         return 0;
     case WM_TIMER:
         if(w==TIMER_CLOCK){
-            // repaint only the centered clock/date zone in the top header
-            RECT rc; GetClientRect(h,&rc);
-            RECT cz={rc.right/2-S(260), 0, rc.right/2+S(260), mainBarH()};
+            // §B: repaint only the LEFT clock/date zone (minimal invalidation —
+            // no whole-window invalidate). Matches the new left-aligned clock.
+            int clkLeft = S(14)+S(38)+S(8)+S(38)+S(14);
+            RECT cz={clkLeft-S(2), 0, clkLeft+S(290), mainBarH()};
             InvalidateRect(h,&cz,FALSE);
             // v1.9.0: poll for an incoming-message notification for THIS user
             // (employees only — managers never get notified of their own send).
             notifyNewMessageRecipients();
         }
+        // §B (v1.10.0): the HEADER_COLLAPSE_TIMER animation has been removed.
+        // The timer is never started anymore; if a stale one ever fires we just
+        // kill it so nothing animates.
         else if(w==HEADER_COLLAPSE_TIMER){
-            // v1.4.0 (§6): advance the header-collapse animation and re-layout
-            // the content area + header so the bar slides smoothly.
-            HeaderCollapse_Tick(h);
-            RECT rc = frameContentRect();
-            if(s_screen)
-                MoveWindow(s_screen, rc.left, rc.top,
-                           rc.right-rc.left, rc.bottom-rc.top, TRUE);
-            frameLayout(h);
-            InvalidateRect(h, NULL, FALSE);
+            KillTimer(h, HEADER_COLLAPSE_TIMER);
         }
         return 0;
     case WM_COMMAND: {
@@ -496,20 +497,25 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
         }
 
-        // ===== CENTER of LAYER 1: live clock (bold, top) + Jalali date =====
+        // ===== LEFT of LAYER 1: live clock (bold, top) + Jalali date =====
+        // §B (v1.10.0): the clock now sits on the LEFT, immediately to the right
+        // of the gear + calculator buttons (calculator beside the clock), per the
+        // reception redesign brief. It is left-aligned so it never collides with
+        // the centred/identity content and the close-X stays top-right.
         SYSTEMTIME st=iranNow();
-        // clock — big & bold, perfectly centered
+        int clkLeft = S(14) + S(38) + S(8) + S(38) + S(14);   // pad + gear + gap + calc + gap
+        int clkW    = S(220);
         SetTextColor(dc,g_theme.accent);
         SelectObject(dc,g_fMono);
-        RECT ck={rc.right/2-S(220),S(6),rc.right/2+S(220),S(6)+S(34)};
+        RECT ck={clkLeft,S(6),clkLeft+clkW,S(6)+S(34)};
         DrawTextW(dc,toFaDigits(iranTimeStr(st,true)).c_str(),-1,&ck,
-            DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX);
-        // date — centered just below the clock
+            DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX);
+        // date — left-aligned just below the clock
         SetTextColor(dc,g_theme.textDim);
         SelectObject(dc,g_fSmall);
-        RECT dr={rc.right/2-S(260),S(6)+S(34),rc.right/2+S(260),mainBarH()-S(2)};
+        RECT dr={clkLeft,S(6)+S(34),clkLeft+clkW+S(60),mainBarH()-S(2)};
         DrawTextW(dc,jalaliDateStr(st).c_str(),-1,&dr,
-            DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+            DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
 
         // ===== bottom status bar: shift indicator (left) =====
         SetTextColor(dc,g_theme.textDim);
@@ -831,9 +837,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
     BackupLog_Init();                // dedicated Backup Log channel (A.3)
     logLine(L"=== Azadi-Teb start v" APP_VERSION_W L" ===");
 
-    // single instance
+    // single instance — capture GetLastError() IMMEDIATELY after CreateMutexW,
+    // before any other call can clobber the thread's last-error value (§G).
     CreateMutexW(NULL, TRUE, L"AzadiTeb_SingleInstance");
-    if(GetLastError()==ERROR_ALREADY_EXISTS){
+    DWORD muErr = GetLastError();
+    if(muErr==ERROR_ALREADY_EXISTS){
         HWND ex=FindWindowW(APP_CLASS_W,NULL);
         if(ex) SetForegroundWindow(ex);
         return 0;

@@ -5,6 +5,81 @@
 
 ---
 
+## 1.10.0 — 2026-06-23
+
+> Production-grade redesign & stabilization release. Messenger-style settings
+> with a dedicated guest path, an animation-free compact reception layout, a
+> premium layered light theme, real SQL-Server `.bak` (MTF) analysis with true
+> SEH containment, an integrated employee-messaging side panel, and end-to-end
+> forward-compatible data safety. Single static 32-bit PE32 EXE, no new
+> warnings, no regressions.
+
+### Added
+- **§A Messenger-style settings + dedicated guest path** (`src/user_settings.cpp`)
+  — a `SettingsMode { SM_GUEST, SM_RECEPTION, SM_ADMIN }` enum drives a
+  future-proof, role-aware settings window. Guests (no login) now see ONLY two
+  items: «تغییر پوستر» (change theme) and a new «ارتباط با ما» (Contact us)
+  page (`buildContactPanel`, reads `contact.*` settings with Persian
+  defaults + a clipboard-copy button). The Contact-us entry is also added to
+  the reception and management navs. Window size/title are mode-aware.
+- **§D Saved-messages / cartable master toggle** — a visible master switch in
+  save-messages settings (`saved_msgs_enabled`), and the reception archive
+  toggle icon is now ALWAYS drawn, reachable, and offers to enable the feature
+  on click instead of silently doing nothing (`src/reception.cpp`).
+- **§E Employee-messaging side panel** (`src/manage.inc`) — the messaging
+  window gains an integrated right panel grouped by section, showing section
+  codes and per-employee personnel codes, online-first ordering, and lazy
+  «… و N مورد دیگر» overflow rows. Capped at 20 sections × 20 employees.
+- **§G SQL Server `.bak` (MTF/TAPE) analysis** (`src/backup_analyzer.cpp`) —
+  real magic-byte detection of the Microsoft Tape Format; reads ONLY the
+  leading descriptor blocks (never loads a multi-GB backup), walks the DBLK
+  chain to recover media/backup-set names, vendor, machine and the embedded
+  database file list, computes a descriptor fingerprint, and reports the
+  honest SQL-Server-restore import path.
+
+### Changed
+- **§B Reception layout** (`src/handlers.cpp`, `src/main.cpp`,
+  `src/reception.cpp`) — the frame-by-frame header-collapse animation is
+  REMOVED entirely; the reception tab now switches to its compact layout
+  immediately on entry (`HeaderCollapse` reduced to a discrete state, no
+  timer). The clock + calculator moved to the LEFT; scroll no longer drives
+  the header, eliminating layer-blend / one-frame-stuck artifacts.
+- **§C Premium light theme** (`src/theme.cpp`) — a genuinely layered light
+  palette (five distinct elevation tones), crisper borders, higher-contrast
+  ink, a richer indigo→sky accent, plus explicit focus ring, disabled veil and
+  enable-aware hover/active states in the flat-button control.
+- **§E Terminology** — every user-facing «کارکنان» renamed to «کارمندان».
+- **§J Versioning** — unified to **1.10.0** across `src/app.h`, `src/app.rc`
+  (FILEVERSION/PRODUCTVERSION 1.10.0.0) and `update/version.txt`.
+
+### Fixed
+- **§F Print designer would not open** (`src/print_designer_ui.inc`,
+  `src/user_settings.cpp`) — removed the `PostQuitMessage(0)` from three nested
+  modal `WM_DESTROY` handlers (it injected `WM_QUIT` that killed the next
+  modal pump, so the designer window never appeared) and fixed a
+  use-after-free where `sw->hMain` was read after `DestroyWindow` freed `sw`.
+  All three modal loops hardened with `IsWindow` + `WM_QUIT` re-post.
+- **§A Settings routing** (`src/settings.cpp`) — «طراح چاپ» now opens the print
+  designer (`PrintDesigner_Open`) instead of the printer-settings page.
+- **§G SEH containment** — `azAnalyzeVeh` now REALLY contains hardware faults
+  via a thread-local `setjmp`/`longjmp` landing pad (was log-only), surfacing
+  an honest Persian error instead of letting an access violation crash the UI.
+- **§G stale `GetLastError`** (`src/main.cpp`) — the single-instance check now
+  captures `GetLastError()` immediately after `CreateMutexW`.
+
+### Safety (§H — data / permission / future-update)
+- `setSetting` (`src/util.cpp`) now preserves comments, blank lines and ALL
+  unknown keys; `getSetting` skips comment lines.
+- `User` (users.dat), `EmpProfile` (emp_*.dat) and `DeptCat` (depts.dat) gained
+  forward-compat `extra`/`extraKv` capture so unknown columns/keys written by a
+  FUTURE version are round-tripped verbatim and never silently dropped.
+
+### Build
+- Single static 32-bit `build/AzadiTeb.exe` (PE32, runs on Windows 7–11),
+  rebuilt with `-Wall -Wextra -Werror` clean; refreshed `AzadiTeb.exe.sha256`.
+
+---
+
 ## 1.4.0 — 2026-06-23
 
 > Major feature release. Two-tier settings, a full vector print-designer,

@@ -891,13 +891,18 @@ static void drawCartList(HDC dc, const RECT& rc, TabPage* t){
     DrawTextW(dc, archive?L"پیام‌های ذخیره‌شده":L"کارتابل — پیام‌های مدیریت درمانگاه",-1,&tr,
         DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
 
-    // v1.8.0: archive toggle icon in the TOP-LEFT corner (only when enabled)
-    s_cartArchiveRect = {0,0,0,0};
-    if(savedOn){
+    // §D (v1.10.0): the saved-messages (archive) toggle is ALWAYS visible and
+    // reachable in the TOP-LEFT corner of the cartable header — it is no longer
+    // hidden behind the «پیام‌های ذخیره‌شده» setting. When the feature is off,
+    // clicking it offers to enable it (handled in WM_LBUTTONUP), so the entry is
+    // discoverable instead of dead.
+    {
         RECT ab={panel.left+S(12),panel.top+S(12),panel.left+S(40),panel.top+S(40)};
         if(archive) gpRoundRect(dc,ab,S(8),RGB(255,255,255),CLR_INVALID,60);
         RECT ai={ab.left+S(4),ab.top+S(4),ab.right-S(4),ab.bottom-S(4)};
-        drawIcon(dc, archive?ICO_BELL:ICO_SAVE, ai, RGB(255,255,255), S(2));
+        // dim the icon a touch when the feature is disabled (still clickable).
+        drawIcon(dc, archive?ICO_BELL:ICO_SAVE, ai,
+                 savedOn?RGB(255,255,255):RGB(210,224,242), S(2));
         s_cartArchiveRect = ab;
     }
 
@@ -1387,11 +1392,8 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         t->scrollY -= (delta/WHEEL_DELTA)*S(60);
         recClampScroll(h,t);
         if(t->scrollY!=old){
-            // v1.4.0 (§6): collapse the header action bar once the user scrolls
-            // into the form; re-expand when they return to the top.
-            bool wantCollapse = (t->scrollY > S(40));
-            if(wantCollapse != HeaderCollapse_Collapsed())
-                HeaderCollapse_Set(g_hFrame, wantCollapse);
+            // §B (v1.10.0): no header-collapse animation on scroll. The action
+            // bar stays at its fixed compact height; we just scroll the page.
             tabPageLayout(h,t);
             InvalidateRect(h,NULL,FALSE);
         }
@@ -1769,8 +1771,18 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 }
                 return 0;
             }
-            // ----- v1.8.0: archive toggle icon (top-left of the header) -----
-            if(savedMsgsEnabled() && PtInRect(&s_cartArchiveRect,pt)){
+            // ----- §D: archive toggle icon (top-left of the header) -----
+            if(PtInRect(&s_cartArchiveRect,pt)){
+                if(!savedMsgsEnabled()){
+                    // feature is off — offer to enable it so the entry is never
+                    // a dead end (the brief: must be reachable + functional).
+                    int r=MessageBoxW(h,
+                        L"\u0642\u0627\u0628\u0644\u06cc\u062a \u00ab\u067e\u06cc\u0627\u0645\u200c\u0647\u0627\u06cc \u0630\u062e\u06cc\u0631\u0647\u200c\u0634\u062f\u0647\u00bb \u063a\u06cc\u0631\u0641\u0639\u0627\u0644 \u0627\u0633\u062a. \u0641\u0639\u0627\u0644 \u0634\u0648\u062f\u061f",
+                        L"\u067e\u06cc\u0627\u0645\u200c\u0647\u0627\u06cc \u0630\u062e\u06cc\u0631\u0647\u200c\u0634\u062f\u0647",
+                        MB_YESNO|MB_ICONQUESTION);
+                    if(r==IDYES) setSetting(L"saved_msgs_enabled",L"1");
+                    else { InvalidateRect(h,NULL,FALSE); return 0; }
+                }
                 t->cartShowArchive = !t->cartShowArchive;
                 t->cartDetail=false; t->cartHotBtn=0;
                 InvalidateRect(h,NULL,FALSE);
