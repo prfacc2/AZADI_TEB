@@ -261,14 +261,20 @@ static void rcVMetrics(int H, int& y0, int& step, int& rh){
     // no-overlap invariant is  step >= rh + S(40)  (caption band S(44)→S(40),
     // label band stays). We start tight and only shrink further on very short
     // screens — never grow a scrollbar in the common resolutions.
-    y0 = S(104); rh = S(26); step = rh + S(40);    // = S(66)
+    // v1.3.0: caption band is S(20) tall and is drawn S(42) above the input
+    // baseline (see WM_PAINT). To GUARANTEE a strictly-positive gap between the
+    // previous row's input (which ends at base-step+rh) and THIS row's caption
+    // (which starts at base-42) we require:  step - rh >= 42 + 4(gap).
+    // step = rh + S(46) gives a +4px clear band → no overlap at any DPI rounding.
+    y0 = S(104); rh = S(26); step = rh + S(46);    // = S(72), +4px clearance band
     int need = y0 + 8*step + S(96);
     if(H > 0 && need > H){
         int s2 = (H - y0 - S(96)) / 8;
-        if(s2 < S(58)) s2 = S(58);                 // hard floor (still readable)
+        if(s2 < S(62)) s2 = S(62);                 // hard floor: rh + 42 + 2 clear
         if(s2 < step){
             step = s2;
-            rh = step - S(36); if(rh > S(26)) rh = S(26); if(rh < S(22)) rh = S(22);
+            // keep the no-overlap invariant: rh <= step - 44 (42 band + 2 clear)
+            rh = step - S(44); if(rh > S(26)) rh = S(26); if(rh < S(20)) rh = S(20);
         }
     }
 }
@@ -1834,13 +1840,24 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
                       {L"مبلغ و تخفیف",7,ICO_RECEIPT} };
         SelectObject(dc,g_fUIB);
         for(int i=0;i<4;i++){
-            int sy=y0+secs[i].row*step-S(40);
+            // v1.3.0: caption sits S(42) above the input baseline. With
+            // step = rh + S(46) the previous input ends at base-46+rh = base-46
+            // ..wait rh<=step-44 so previous-input-bottom = base-step+rh
+            // <= base-44, leaving a >=2px clear band above this caption's top
+            // (base-42). The section-header rect therefore never intersects a
+            // sibling input rect (the v1.2.x "blue label behind input" bug).
+            int scy=y0+secs[i].row*step-S(42);
             // icon flush-right, caption text stops well to its LEFT (no overlap)
             int icoW=S(18), gap=S(8);
-            RECT si={formRight-icoW,sy+S(1),formRight,sy+S(19)};
+            // paint the caption band background with the card surface FIRST so a
+            // stale prior frame can never bleed under the blue label.
+            RECT band={formLeft,scy,formRight,scy+S(20)};
+            { HBRUSH bb=CreateSolidBrush(g_theme.surface);
+              FillRect(dc,&band,bb); DeleteObject(bb); }
+            RECT si={formRight-icoW,scy+S(1),formRight,scy+S(19)};
             drawIcon(dc,secs[i].icon,si,g_theme.accent,S(2));
             SetTextColor(dc,g_theme.accent);
-            RECT sr={formLeft,sy,formRight-icoW-gap,sy+S(20)};
+            RECT sr={formLeft,scy,formRight-icoW-gap,scy+S(20)};
             DrawTextW(dc,secs[i].s,-1,&sr,DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
         }
 

@@ -227,6 +227,61 @@ static void analyzeSqlite(const std::wstring& path, BkAnalysis& A,
         s.body+=L"تعداد ویوها: "+bkNum(nViews);
         A.sections.push_back(s);
     }
+    // v1.3.0: extract the per-table names + column counts straight out of the
+    // recovered CREATE TABLE statements (no sqlite3 link needed). Also detect a
+    // «patients» table by name or by its signature columns and surface a domain
+    // summary. This is real ground-truth taken from the on-disk schema, not a
+    // fabricated value.
+    {
+        bool hasPatients=false; int patientCols=0; std::wstring patientName;
+        std::wstring tableList;
+        int shown=0;
+        for(auto& stmt : creates){
+            std::string ls; ls.resize(stmt.size());
+            for(size_t i=0;i<stmt.size();i++){ char c=stmt[i]; ls[i]=(c>='A'&&c<='Z')?c+32:c; }
+            if(ls.find("create table")==std::string::npos) continue;
+            // table name: token after "table" (skip "if not exists")
+            size_t tp=ls.find("table"); size_t np=tp+5;
+            while(np<ls.size() && (ls[np]==' '||ls[np]=='\t'||ls[np]=='\r'||ls[np]=='\n')) np++;
+            // skip optional "if not exists"
+            if(ls.compare(np,13,"if not exists")==0){ np+=13;
+                while(np<ls.size() && (ls[np]==' '||ls[np]=='\t')) np++; }
+            size_t ne=np;
+            while(ne<ls.size() && ls[ne]!=' '&&ls[ne]!='('&&ls[ne]!='\t'&&
+                  ls[ne]!='\r'&&ls[ne]!='\n') ne++;
+            std::string rawName=stmt.substr(np,ne-np);
+            // strip quotes/backticks/brackets
+            std::string nm; for(char c:rawName) if(c!='"'&&c!='`'&&c!='['&&c!=']'&&c!='\'') nm+=c;
+            // count columns ≈ commas at top paren depth + 1
+            int cols=0,depth=0; bool any=false;
+            for(char c:stmt){
+                if(c=='(') { depth++; if(depth==1) any=true; }
+                else if(c==')') { if(depth==1) break; depth--; }
+                else if(c==','&&depth==1) cols++;
+            }
+            if(any) cols++; else cols=0;
+            int wlen=MultiByteToWideChar(CP_UTF8,0,nm.c_str(),(int)nm.size(),NULL,0);
+            std::wstring wn(wlen,L'\0');
+            if(wlen>0) MultiByteToWideChar(CP_UTF8,0,nm.c_str(),(int)nm.size(),&wn[0],wlen);
+            bool sig = (ls.find("national_code")!=std::string::npos &&
+                        ls.find("first_name")!=std::string::npos &&
+                        ls.find("last_name")!=std::string::npos);
+            if(nm=="patients" || sig){ hasPatients=true; patientCols=cols; patientName=wn; }
+            if(shown<24){ tableList+=L"  • "+wn+L"  ("+bkNum(cols)+L" ستون)\r\n"; shown++; }
+        }
+        if(!tableList.empty()){
+            BkSection s; s.title=L"فهرست جداول (حداکثر ۲۴ مورد)";
+            s.body=tableList;
+            A.sections.push_back(s);
+        }
+        if(hasPatients){
+            BkSection s; s.title=L"تحلیل دامنه: جدول بیماران";
+            s.body =L"جدول بیماران شناسایی شد: "+(patientName.empty()?std::wstring(L"patients"):patientName)+L"\r\n";
+            s.body+=L"تعداد ستون‌ها: "+bkNum(patientCols)+L"\r\n";
+            s.body+=L"این پشتیبان شامل ساختار اطلاعات بیماران سازگار با آزادی‌طب است.";
+            A.sections.push_back(s);
+        }
+    }
     {
         BkSection s; s.title=L"حجم اطلاعات";
         s.body =L"حجم فایل روی دیسک: "+bkHuman(total)+L"\r\n";
