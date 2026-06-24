@@ -25,7 +25,8 @@ SRCS="src/main.cpp src/util.cpp src/handlers.cpp src/theme.cpp src/users.cpp \
       src/backup.cpp src/ui_kit.cpp src/backup_analyzer.cpp \
       src/backup_log.cpp src/sections.cpp src/print_designer.cpp \
       src/user_settings.cpp src/net_sync.cpp src/profile_requests.cpp \
-      src/backup_log_viewer.cpp src/backup_mtf.cpp src/saved_messages.cpp"
+      src/backup_log_viewer.cpp src/backup_mtf.cpp src/saved_messages.cpp \
+      src/webhost.cpp"
 
 $CXX -std=c++17 -O2 -s -municode -mwindows \
     -DUNICODE -D_UNICODE -D_WIN32_IE=0x0700 \
@@ -38,7 +39,7 @@ $CXX -std=c++17 -O2 -s -municode -mwindows \
     -o build/AzadiTeb.exe \
     -lcomctl32 -lcomdlg32 -lgdi32 -lgdiplus -lmsimg32 -ldwmapi -luxtheme \
     -luser32 -lshlwapi -lwininet -ladvapi32 -lshell32 -lwinspool \
-    -lole32 -luuid -lversion -lwinmm -ldbghelp \
+    -lole32 -loleaut32 -luuid -lversion -lwinmm -ldbghelp \
     -lwinhttp -lurlmon -lcrypt32 -lwintrust -lwtsapi32 -lpsapi
 
 echo "[3/3] Stripping..."
@@ -75,7 +76,7 @@ if [ -n "$AZ_SMOKE" ]; then
         -o build/AzadiTeb_smoke.exe \
         -lcomctl32 -lcomdlg32 -lgdi32 -lgdiplus -lmsimg32 -ldwmapi -luxtheme \
         -luser32 -lshlwapi -lwininet -ladvapi32 -lshell32 -lwinspool \
-        -lole32 -luuid -lversion -lwinmm -ldbghelp \
+        -lole32 -loleaut32 -luuid -lversion -lwinmm -ldbghelp \
         -lwinhttp -lurlmon -lcrypt32 -lwintrust -lwtsapi32 -lpsapi
     if command -v wine >/dev/null 2>&1; then
         echo "[smoke] Running print_designer open/close path under Wine..."

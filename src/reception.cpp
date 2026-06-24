@@ -6,6 +6,7 @@
 //   • print: رسید بیمه / چاپ نسخه / چاپ آخرین قبض (F8) — real printer output
 // ============================================================================
 #include "app.h"
+#include "webhost.h"
 #include <commctrl.h>
 #include <stdio.h>
 #include <algorithm>
@@ -77,6 +78,12 @@ struct TabPage {
     HWND bReset;   // v1.4.0 (§6) reset/clear form
     HWND chkIns;             // «دارای بیمه» — کنار کد ملی، پیش‌فرض تیک‌خورده
     HWND appt;               // نوبت‌دهی child page (kind==TK_APPOINTMENT)
+    //  v1.13.0 (§3/§4): the hybrid HTML/CSS/JS presentation host. When non-NULL
+    //  it is the VISIBLE interface for this reception/appointment tab (rendered
+    //  via the system MSHTML control). C++ stays the source of truth — the host
+    //  bridges every action to the existing repository functions. NULL means the
+    //  classic native form is used (deterministic fallback if MSHTML is absent).
+    HWND web;
     std::vector<int> insAllowed;   // insurances this patient carries (inquiry)
     // ---- right info panel (v1.6.0) ----
     HWND eArchive, bArchiveGo;     // ش بایگانی + استعلام
@@ -116,7 +123,7 @@ struct TabPage {
     int  scrollY;
     int  contentH;           // last computed total content height
     std::wstring lastMsg; COLORREF msgCol;
-    TabPage():page(0),kind(TK_RECEPTION),appt(0),total(0),mainShare(0),patientShare(0),
+    TabPage():page(0),kind(TK_RECEPTION),appt(0),web(0),total(0),mainShare(0),patientShare(0),
         baseDiff(0),orgShare(0),paid(0),detached(false),autoPrice(false),
         idChecked(false),idVerified(false),
         cartDetail(false),cartSelDisp(-1),cartSelNF(-1),cartHotBtn(0),
@@ -402,6 +409,12 @@ static void recUpdateScrollbar(HWND h, TabPage* t){
 }
 static void tabPageLayout(HWND h, TabPage* t){
     if(!t) return;
+    // §3 hybrid host: if the HTML/CSS/JS surface is up it owns the whole tab.
+    if(t->web){
+        RECT rc; GetClientRect(h,&rc);
+        MoveWindow(t->web,0,0,rc.right,rc.bottom,TRUE);
+        return;
+    }
     if(t->kind==TK_APPOINTMENT){
         if(t->appt){ RECT rc; GetClientRect(h,&rc);
             MoveWindow(t->appt,0,0,rc.right,rc.bottom,TRUE); }
@@ -1213,9 +1226,20 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         t=(TabPage*)cs->lpCreateParams;
         SetWindowLongPtrW(h,GWLP_USERDATA,(LONG_PTR)t);
         t->page=h;
-        // The appointment tab hosts the self-contained نوبت‌دهی page as a child
-        // that fills the whole tab area.
+        // §3 hybrid host: when opening the Appointment tab we first try to bring
+        // up the HTML/CSS/JS surface (system MSHTML/WebBrowser OLE control) with a
+        // centred loader while native state synchronises. C++ stays the host /
+        // validator / lifecycle owner; JS owns only layout + interaction. If the
+        // renderer is unavailable or fails, we fall back to the classic native
+        // appointment page so the app NEVER loses the feature.
         if(t->kind==TK_APPOINTMENT){
+            t->web = WebHost_Create(h, WH_APPOINTMENT);
+            if(t->web){
+                ShowWindow(t->web, SW_SHOW);
+                tabPageLayout(h,t);
+                return 0;
+            }
+            WebHost_LogError(L"appointment", L"web host unavailable — using native fallback");
             t->appt = createAppointmentPage(h);
             if(t->appt) ShowWindow(t->appt, SW_SHOW);
             return 0;
@@ -1223,6 +1247,20 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         // Portal-message and empty tabs are pure painted pages with no form
         // controls — they own no edit boxes, combos or buttons.
         if(t->kind!=TK_RECEPTION) return 0;
+        // §3 hybrid host for Reception: attempt the HTML/CSS/JS surface first.
+        // On success we host the web control full-bleed and skip building the
+        // native edit-box form entirely (the bridge replaces it). On failure we
+        // continue below and build the classic native reception form.
+        {
+            HWND wh = WebHost_Create(h, WH_RECEPTION);
+            if(wh){
+                t->web = wh;
+                ShowWindow(t->web, SW_SHOW);
+                tabPageLayout(h,t);
+                return 0;
+            }
+            WebHost_LogError(L"reception", L"web host unavailable — using native fallback");
+        }
         DWORD es=WS_CHILD|WS_VISIBLE|WS_TABSTOP|ES_AUTOHSCROLL;
         DWORD cbs=WS_CHILD|WS_VISIBLE|WS_TABSTOP|CBS_DROPDOWNLIST;
         t->eFirst =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)(ID_F_FIRST+0),g_hInst,0);
@@ -1368,7 +1406,7 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
     case WM_SIZE: if(t) tabPageLayout(h,t); return 0;
     case WM_VSCROLL: {
         // vertical scrollbar of the reception form
-        if(!t || t->kind!=TK_RECEPTION) break;
+        if(!t || t->web || t->kind!=TK_RECEPTION) break;
         int maxS=recClampScroll(h,t);
         int old=t->scrollY;
         SCROLLINFO si={sizeof(si)}; si.fMask=SIF_TRACKPOS;
@@ -1394,7 +1432,7 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         }
         return 0; }
     case WM_MOUSEWHEEL: {
-        if(!t || t->kind!=TK_RECEPTION) break;
+        if(!t || t->web || t->kind!=TK_RECEPTION) break;
         int maxS=recClampScroll(h,t);
         if(maxS<=0) return 0;            // nothing to scroll
         int delta=GET_WHEEL_DELTA_WPARAM(w);
@@ -1449,7 +1487,7 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         if(drawThemedComboItem((LPDRAWITEMSTRUCT)l)) return TRUE;
         break; }
     case WM_COMMAND: {
-        if(!t) return 0;
+        if(!t || t->web) return 0;   // hybrid host owns input; no native controls
         int id=LOWORD(w), code=HIWORD(w);
         // Repaint the field wells whenever an edit/combo gains or loses focus so
         // the focused well border updates immediately (thin red focus ring that
@@ -1666,7 +1704,7 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         if(w==VK_F8){ printLastReceipt(h); return 0; }
         // v1.4.0 (§6): Ctrl+R clears the reception form for a fresh patient.
         if(w=='R' && (GetKeyState(VK_CONTROL)&0x8000) &&
-           t && t->kind==TK_RECEPTION){
+           t && !t->web && t->kind==TK_RECEPTION){
             resetForm(t);
             t->lastMsg=L"فرم پاک شد."; t->msgCol=g_theme.textDim;
             InvalidateRect(h,NULL,FALSE);
@@ -1824,8 +1862,10 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         FillRect(dc,&rc,g_brBg);
         SetBkMode(dc,TRANSPARENT);
 
-        // -------- Appointment tab: a child page fills it, just clear bg -------
-        if(t && t->kind==TK_APPOINTMENT){
+        // -------- Hybrid HTML host / appointment child page: just clear bg ----
+        // When the web surface is up it covers the whole tab, so the host only
+        // needs to clear the background behind it (no native form is painted).
+        if(t && (t->web || t->kind==TK_APPOINTMENT)){
             BitBlt(dc0,0,0,rc.right,rc.bottom,dc,0,0,SRCCOPY);
             SelectObject(dc,obm); DeleteObject(bmp); DeleteDC(dc);
             EndPaint(h,&ps);
@@ -2065,6 +2105,12 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         SelectObject(dc,obm); DeleteObject(bmp); DeleteDC(dc);
         EndPaint(h,&ps);
         return 0; }
+    case WM_DESTROY:
+        // §3 deterministic teardown: tear the hybrid HTML host down before the
+        // page window goes away (its own WM_DESTROY also runs teardown, but we
+        // null our handle here so no stale reference can be reused).
+        if(t && t->web){ HWND w0=t->web; t->web=0; DestroyWindow(w0); }
+        return 0;
     }
     return DefWindowProcW(h,m,w,l);
 }

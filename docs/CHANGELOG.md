@@ -5,6 +5,66 @@
 
 ---
 
+## 1.13.0 — 2026-06-24
+
+> **Major production upgrade.** Reception & Appointment become a **hybrid
+> HTML/CSS/JS surface hosted inside the app** via the system
+> MSHTML/WebBrowser (Trident) OLE control — no shipped DLLs, no internet, works
+> Win7→Win11 x86/x64 in the single static 32-bit EXE. C++ remains the host,
+> validator, lifecycle owner, persistence layer and bridge; JS owns only layout
+> and interaction. Settings header is rebalanced and gains a pinned close
+> button. Single static PE32 EXE, zero warnings (`-Wall -Wextra -Werror`), no
+> regressions, access levels + existing data preserved.
+
+### Added
+- **§3 Hybrid HTML reception/appointment host** (`src/webhost.h`,
+  `src/webhost.cpp`, `src/webhost_host.inc`, `src/webhost_run.inc`,
+  `src/webhost_bridge.inc`, `src/webhost_assets.inc`) — a hand-rolled (no ATL)
+  OLE host for the system WebBrowser control: `IOleClientSite`,
+  `IOleInPlaceSite/Frame`, `IDocHostUIHandler`, a `DWebBrowserEvents2` sink and
+  a bridge `IDispatch` exposed as `window.external`. Opening Reception / New
+  reception / Appointment shows a **centred, minimal loader with a determinate
+  progress bar** while native state, section metadata and form config
+  synchronise, then renders the HTML UI. The bridge is synchronous
+  (`window.external.call(verb, jsonArgs)` → JSON) and C++ → JS pushes go through
+  `window.azReceive`. Verbs: `lookup`, `bill`, `saveReception`, `print`,
+  `printLast`, `apptList`, `apptNext`, `saveAppointment`, `cancelAppointment`,
+  `setTheme`, `theme`, `sections`, `ping`. All validation, tariff math and
+  persistence happen **server-side in C++** — JS never fabricates a result.
+  Reception UI includes every field/button/date-time input, print + management
+  actions, **Enter→next field** and **Tab/Shift+Tab** navigation, with primary
+  fields placed high (no scrolling for normal use) and a responsive,
+  theme-driven layout.
+- **Deterministic native fallback** (`src/reception.cpp`) — if the WebBrowser
+  control is unavailable or fails to start, the tab silently falls back to the
+  classic native reception/appointment form and logs the cause; the app never
+  loses the feature or crashes. No reentrancy / double-open / race on repeated
+  open/close.
+- **§2 Settings — pinned top-right close button** (`src/user_settings.cpp`) —
+  every settings page (home + sub-pages) now carries a pinned ✕ close button in
+  the top-right corner with hover/press feedback and a hand cursor.
+
+### Changed
+- **§2 Settings profile header** (`src/user_settings.cpp`) — the profile circle
+  is now **slightly smaller** (`g_scaleAvatar` S(96)→S(84)) and sits **slightly
+  lower** (`avatarTopDrop` = S(22)); the name/role identity block stays anchored
+  to the circle so it remains visually connected, and `homeRowsTop()` was
+  recomputed to keep clean, consistent spacing below the block.
+- **Section stable codes (§4)** continue to back the reception/appointment
+  bridge boot payload and the print-designer bindings (REC/INJ/LAB/RAD/PHY …).
+- **Persistent logging (§7)** — sync failures, web-host OLE faults and
+  bridge errors persist (throttled, de-duplicated) to
+  `logs\webhost_errors.log`; UI spam / debug traces are not persisted.
+
+### Build
+- `build.sh` — added `src/webhost.cpp` to the source set and `-loleaut32` to
+  the link flags (SafeArray / `SysAllocString` / `VariantClear`). Local IIDs are
+  defined for `IWebBrowser2`, `IOleObject`, `IConnectionPointContainer`,
+  `DWebBrowserEvents2` and `ICustomDoc` so the link succeeds across MinGW
+  toolchain versions.
+
+---
+
 ## 1.12.0 — 2026-06-24
 
 > Full update / stability / UI-modernization sprint. Hardens the print-designer

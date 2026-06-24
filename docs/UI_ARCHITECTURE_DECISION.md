@@ -1,4 +1,54 @@
-# UI Architecture Decision: Native GDI/GDI+ vs Hybrid HTML/CSS/JS (v1.12.0)
+# UI Architecture Decision: Hybrid HTML/CSS/JS via system MSHTML (v1.13.0)
+
+> **SUPERSEDES the 1.12.0 decision below.** The 1.13.0 directive (§3) makes the
+> Reception & Appointment UI an explicit, mandatory **HTML/CSS/JS surface
+> rendered inside the app**. The 1.12.0 rationale (kept verbatim further down)
+> correctly rejected **WebView2 / CEF** — and that reasoning still holds. The
+> 1.13.0 implementation honours every one of those constraints by choosing a
+> *different* renderer that ships with Windows itself.
+
+## Decision (1.13.0)
+
+**Render Reception & Appointment as HTML/CSS/JS inside the app using the system
+`MSHTML` / `WebBrowser` (Trident) OLE control.** C++ is the host, validator,
+lifecycle owner, persistence layer and bridge; JavaScript owns only layout and
+interaction.
+
+### Why MSHTML (and not WebView2 / CEF)
+
+1. **Still a single static 32-bit EXE, no shipped DLLs.** `MSHTML.dll` /
+   `ieframe.dll` are OS components present on **every** Windows 7→11 install.
+   We `CoCreateInstance` the system WebBrowser control — nothing is bundled,
+   nothing is downloaded, the "one self-contained `AzadiTeb.exe`" guarantee is
+   intact.
+2. **Windows 7 → 11, x86 + x64, offline.** Trident has shipped in-box since IE;
+   it works on the oldest clinic PCs with zero runtime install and zero internet
+   surface — exactly the air-gapped-clinic constraint from 1.12.0.
+3. **RTL Persian + embedded Vazirmatn.** The embedded HTML sets `dir="rtl"` and
+   `@font-face`s the Vazirmatn already embedded in resources; no system-font
+   dependency.
+4. **Crash containment & determinism.** The OLE host is wrapped by the same
+   process-wide crash handler, the open path is guarded, and **any** failure to
+   create/start the control falls back deterministically to the classic native
+   reception/appointment form (and logs the cause). No state drift, no
+   double-open races.
+
+### Host architecture
+
+* Hand-rolled OLE site (no ATL, MinGW-friendly): `IOleClientSite`,
+  `IOleInPlaceSite`, `IOleInPlaceFrame`, `IDocHostUIHandler`, a
+  `DWebBrowserEvents2` sink, and a bridge `IDispatch` exposed as
+  `window.external` (`src/webhost*.{cpp,inc}`).
+* **Synchronous bridge:** `window.external.call(verb, jsonArgs)` returns a JSON
+  string; C++ → JS pushes use `window.azReceive(json)` via `execScript`.
+* **Centred loader** with a determinate progress bar shows while native state /
+  section metadata / form config synchronise, then the HTML UI renders.
+* All validation, tariff math and persistence run **server-side in C++**
+  (`WebHostBridge_Call`); JS never fabricates a lookup/bill/save result.
+
+---
+
+# (Historical) UI Architecture Decision: Native GDI/GDI+ vs WebView2/CEF (v1.12.0)
 
 Work-order §3/§4 asks for a frontend decision for the reception + appointment
 screens, explicitly allowing **"the best engineering choice; a native refactor

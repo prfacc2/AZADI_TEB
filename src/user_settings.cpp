@@ -134,6 +134,8 @@ struct SettingsWin {
     int               hotRow = -1;   // hovered card-row index (home page)
     int               downRow = -1;  // pressed card-row index
     bool              backHot = false, backDown = false;
+    // §2: top-right close button hover/pressed state (present on every page).
+    bool              closeHot = false, closeDown = false;
     // §1.12.0: full-page settings now scroll. `scrollY` is the current vertical
     // offset (px, >=0); `contentH` is the laid-out content height of the page.
     int               scrollY = 0;
@@ -192,7 +194,14 @@ static std::vector<RowDef> homeRows(int mode){
 }
 
 // ---------------------------------------------------------- geometry ---------
-static int g_scaleAvatar(){ return S(96); }
+// §2: profile circle is slightly SMALLER than before (was S(96)) and sits a
+// touch LOWER (see paintAvatar) so it reads as a deliberate, balanced header
+// rather than hugging the top edge.
+static int g_scaleAvatar(){ return S(84); }
+// §2: vertical drop applied to the profile circle so it sits slightly lower in
+// the header. The identity block (name/role) is anchored to the circle's bottom
+// so it stays visually connected and moves down together.
+static int avatarTopDrop(){ return S(22); }
 // §1.12.0: the settings window is now a FULL-PAGE surface. To keep a clean,
 // modern look on wide monitors the actual content lives in a CENTERED COLUMN of
 // at most COLW px; the rest of the page is the flat #bg surface (no background
@@ -220,8 +229,10 @@ static RECT contentRectUnscrolled(SettingsWin* sw){
 }
 static int rowH(){ return S(64); }
 static int rowGap(){ return S(8); }
-// y of the first card-row on the home page (below the avatar + identity block)
-static int homeRowsTop(){ return S(96) + S(28) + S(58); }
+// y of the first card-row on the home page (below the avatar + identity block).
+// §2: recomputed for the lower + smaller circle so the option rows keep a clean,
+// consistent gap below the identity block (avatar drop + diameter + name + role).
+static int homeRowsTop(){ return avatarTopDrop() + S(84) + S(30) + S(54); }
 static RECT homeRowRect(SettingsWin* sw, int idx){
     RECT c=contentRect(sw);
     int top = c.top + homeRowsTop() + idx*(rowH()+rowGap());
@@ -233,6 +244,15 @@ static RECT homeRowRect(SettingsWin* sw, int idx){
 static RECT backBtnRect(SettingsWin* sw){
     RECT c=contentRectUnscrolled(sw);
     RECT r={ c.left+S(6), S(14), c.left+S(6)+S(40), S(14)+S(36) };
+    return r;
+}
+// §2: close button — pinned to the TOP-RIGHT of the content column (the visual
+// "close" corner). It never scrolls and is present on every settings page so
+// the operator can always dismiss the page with one click.
+static RECT closeBtnRect(SettingsWin* sw){
+    RECT c=contentRectUnscrolled(sw);
+    int sz=S(36);
+    RECT r={ c.right-S(6)-sz, S(14), c.right-S(6), S(14)+sz };
     return r;
 }
 
@@ -466,7 +486,9 @@ static const wchar_t* roleName(const User& u){
 static void paintAvatar(HDC dc, SettingsWin* sw, RECT c){
     int d=g_scaleAvatar();
     int cx=(c.left+c.right)/2;
-    RECT av={cx-d/2, c.top+S(6), cx+d/2, c.top+S(6)+d};
+    // §2: drop the circle slightly lower than the top edge for a balanced header.
+    int avTop=c.top+avatarTopDrop();
+    RECT av={cx-d/2, avTop, cx+d/2, avTop+d};
     bool guest=(sw->mode==SM_GUEST) || sw->user.username.empty();
     // try a user photo first
     bool drewPhoto=false;
@@ -515,8 +537,27 @@ static void paintAvatar(HDC dc, SettingsWin* sw, RECT c){
     }
 }
 
+// §2: draw the pinned top-right close button (rounded square + ✕ glyph). Used on
+// every settings page so the page can always be dismissed.
+static void paintCloseBtn(HDC dc, SettingsWin* sw){
+    RECT b=closeBtnRect(sw);
+    COLORREF fill = sw->closeDown? g_theme.surface2 : sw->closeHot? g_theme.hover : g_theme.surface;
+    COLORREF brd  = sw->closeHot ? g_theme.danger : g_theme.border;
+    gpRoundRectBg(dc,b,S(8),fill,brd,g_theme.bg);
+    // ✕ drawn as two crossing strokes (no glyph-font dependency)
+    COLORREF ix = sw->closeHot? g_theme.danger : g_theme.textDim;
+    int pad=S(11);
+    RECT g={ b.left+pad, b.top+pad, b.right-pad, b.bottom-pad };
+    HPEN pen=CreatePen(PS_GEOMETRIC|PS_ENDCAP_ROUND,S(2),ix);
+    HGDIOBJ op=SelectObject(dc,pen);
+    MoveToEx(dc,g.left,g.top,0);  LineTo(dc,g.right,g.bottom);
+    MoveToEx(dc,g.right,g.top,0); LineTo(dc,g.left,g.bottom);
+    SelectObject(dc,op); DeleteObject(pen);
+}
+
 static void paintHome(HDC dc, SettingsWin* sw, RECT c){
     paintAvatar(dc,sw,c);
+    paintCloseBtn(dc,sw);
     std::vector<RowDef> rows=homeRows(sw->mode);
     SetBkMode(dc,TRANSPARENT);
     for(size_t i=0;i<rows.size();++i){
@@ -580,10 +621,13 @@ static void paintSubHeader(HDC dc, SettingsWin* sw, RECT /*c*/){
     COLORREF fill = sw->backDown? g_theme.surface2 : sw->backHot? g_theme.hover : g_theme.surface;
     gpRoundRectBg(dc,b,S(8),fill,g_theme.border,g_theme.bg);
     drawIcon(dc,ICO_BACK,b,g_theme.accent,S(2));
-    // page title (centered, pinned)
+    // §2: pinned top-right close button (same on every page).
+    paintCloseBtn(dc,sw);
+    // page title (centered, pinned) — keep clear of BOTH the back button (left)
+    // and the close button (right) so nothing overlaps.
     SetBkMode(dc,TRANSPARENT);
     SelectObject(dc,g_fTitle); SetTextColor(dc,g_theme.text);
-    RECT tr={cu.left+S(52),S(14),cu.right-S(8),S(14)+S(36)};
+    RECT tr={cu.left+S(52),S(14),cu.right-S(52),S(14)+S(36)};
     DrawTextW(dc,pageTitle(curPage(sw)),-1,&tr,
         DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
 }
@@ -681,6 +725,10 @@ static LRESULT CALLBACK SettingsProc(HWND h,UINT m,WPARAM w,LPARAM l){
     case WM_MOUSEMOVE:{
         if(!sw) break;
         int mx=GET_X_LPARAM(l), my=GET_Y_LPARAM(l);
+        // §2: close button hover (pinned, every page)
+        { RECT cb=closeBtnRect(sw);
+          bool nc=(mx>=cb.left&&mx<cb.right&&my>=cb.top&&my<cb.bottom);
+          if(nc!=sw->closeHot){ sw->closeHot=nc; InvalidateRect(h,NULL,FALSE); } }
         if(curPage(sw)==PAGE_HOME){
             int nh=homeRowHit(sw,mx,my);
             if(nh!=sw->hotRow){ sw->hotRow=nh; InvalidateRect(h,NULL,FALSE); }
@@ -692,11 +740,15 @@ static LRESULT CALLBACK SettingsProc(HWND h,UINT m,WPARAM w,LPARAM l){
         TRACKMOUSEEVENT t={sizeof(t),TME_LEAVE,h,0}; TrackMouseEvent(&t);
         return 0; }
     case WM_MOUSELEAVE:
-        if(sw){ sw->hotRow=-1; sw->backHot=false; InvalidateRect(h,NULL,FALSE); }
+        if(sw){ sw->hotRow=-1; sw->backHot=false; sw->closeHot=false; InvalidateRect(h,NULL,FALSE); }
         return 0;
     case WM_LBUTTONDOWN:{
         if(!sw) break;
         int mx=GET_X_LPARAM(l), my=GET_Y_LPARAM(l);
+        // §2: close button press (pinned, every page) — takes priority
+        { RECT cb=closeBtnRect(sw);
+          if(mx>=cb.left&&mx<cb.right&&my>=cb.top&&my<cb.bottom){
+              sw->closeDown=true; InvalidateRect(h,NULL,FALSE); SetCapture(h); return 0; } }
         if(curPage(sw)==PAGE_HOME){
             sw->downRow=homeRowHit(sw,mx,my);
             if(sw->downRow>=0) InvalidateRect(h,NULL,FALSE);
@@ -712,6 +764,14 @@ static LRESULT CALLBACK SettingsProc(HWND h,UINT m,WPARAM w,LPARAM l){
         if(!sw) break;
         ReleaseCapture();
         int mx=GET_X_LPARAM(l), my=GET_Y_LPARAM(l);
+        // §2: close button release — if pressed AND released over it, close page
+        if(sw->closeDown){
+            RECT cb=closeBtnRect(sw);
+            bool onClose=(mx>=cb.left&&mx<cb.right&&my>=cb.top&&my<cb.bottom);
+            sw->closeDown=false; InvalidateRect(h,NULL,FALSE);
+            if(onClose){ DestroyWindow(h); return 0; }
+            return 0;
+        }
         if(curPage(sw)==PAGE_HOME){
             int up=homeRowHit(sw,mx,my);
             int down=sw->downRow; sw->downRow=-1;
@@ -778,6 +838,18 @@ static LRESULT CALLBACK SettingsProc(HWND h,UINT m,WPARAM w,LPARAM l){
             return 0; }
         }
         return 0; }
+    case WM_SETCURSOR:
+        // §2: hand cursor over the pinned close button (and home rows / back).
+        if(sw && LOWORD(l)==HTCLIENT){
+            POINT pt; GetCursorPos(&pt); ScreenToClient(h,&pt);
+            RECT cb=closeBtnRect(sw);
+            bool hand=(pt.x>=cb.left&&pt.x<cb.right&&pt.y>=cb.top&&pt.y<cb.bottom);
+            if(!hand && curPage(sw)==PAGE_HOME) hand=(homeRowHit(sw,pt.x,pt.y)>=0);
+            else if(!hand){ RECT b=backBtnRect(sw);
+                hand=(pt.x>=b.left&&pt.x<b.right&&pt.y>=b.top&&pt.y<b.bottom); }
+            if(hand){ SetCursor(LoadCursor(NULL,IDC_HAND)); return TRUE; }
+        }
+        break;
     case WM_KEYDOWN:
         if(sw && (w==VK_ESCAPE || w==VK_BACK)){
             if(curPage(sw)==PAGE_HOME) DestroyWindow(h);
