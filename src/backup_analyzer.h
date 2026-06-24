@@ -10,6 +10,9 @@ struct BkAnalysis {
     std::vector<BkSection> sections;
     bool ok=false;
     std::wstring error;
+    // §C.7: surfaced identity for the logs/app.log breadcrumb (no PII).
+    std::wstring dbName;     // database name (MTF/SQLite) when known
+    std::wstring fileType;   // short type tag: mtf/sqlite/zip/sql/json/text
 };
 
 //  Progress callback: pct 0..100 + a Persian status line.

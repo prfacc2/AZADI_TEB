@@ -766,6 +766,30 @@ static void designer_save(HWND h,bool asNew){
     }
     // apply to selected sections
     for(int sid:st->targetSections) SectionDesign_Set(sid,st->design.id);
+    // §D.3: ALSO persist the design per-section under
+    // data/print_designs/{depCode}.az_design (forward-compatible JSON per §H —
+    // unknown keys are preserved by Design_FromJson on load). The directory is
+    // created on demand. This gives each department its own restorable design
+    // file alongside the central store binding.
+    {
+        std::wstring dir = dataDir() + L"\\print_designs";
+        CreateDirectoryW(dir.c_str(), NULL);
+        std::vector<Section> all; Sections_All(all);
+        std::string json = Design_ToJson(st->design);
+        for(int sid : st->targetSections){
+            std::wstring code;
+            for(const auto& s : all) if(s.id==sid){ code=s.code; break; }
+            if(code.empty()){ wchar_t b[24]; swprintf(b,24,L"DEP%d",sid); code=b; }
+            std::wstring path = dir + L"\\" + code + L".az_design";
+            // write raw UTF-8 JSON
+            HANDLE fh=CreateFileW(path.c_str(),GENERIC_WRITE,0,NULL,
+                                  CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
+            if(fh!=INVALID_HANDLE_VALUE){
+                DWORD wr; WriteFile(fh,json.data(),(DWORD)json.size(),&wr,NULL);
+                CloseHandle(fh);
+            }
+        }
+    }
     // broadcast design push
     if(g_hFrame) PostMessageW(g_hFrame,WM_APP_DESIGN_PUSHED,(WPARAM)st->design.id,0);
     st->dirty=false;
@@ -792,8 +816,16 @@ static void OpenDesignerWindow(HWND owner,const DesignerLaunch& launch,
     }
     st->undo.seed(st->design);
 
+    // §D.2: designer header shows «طراح چاپ — {نام بخش}» for the chosen section.
+    std::wstring titleTxt = L"\u0637\u0631\u0627\u062d \u0686\u0627\u067e";   // «طراح چاپ»
+    if(!launch.sectionIds.empty()){
+        std::vector<Section> all; Sections_All(all);
+        for(const auto& s : all) if(s.id==launch.sectionIds[0]){
+            titleTxt += L" \u2014 " + s.name_fa; break;
+        }
+    }
     RECT wa; SystemParametersInfoW(SPI_GETWORKAREA,0,&wa,0);
-    HWND h=CreateWindowExW(0,CLS,L"\u062f\u06cc\u0632\u0627\u06cc\u0646 \u0686\u0627\u067e",
+    HWND h=CreateWindowExW(0,CLS,titleTxt.c_str(),
         WS_POPUP|WS_VISIBLE|WS_CLIPCHILDREN,
         wa.left,wa.top,wa.right-wa.left,wa.bottom-wa.top,owner,NULL,g_hInst,NULL);
     SetWindowLongPtrW(h,GWLP_USERDATA,(LONG_PTR)st);
@@ -841,6 +873,7 @@ static void OpenDesignerWindow(HWND owner,const DesignerLaunch& launch,
 
 // ---------------------------------------------------------- public entries ---
 void PrintDesigner_Open(HWND hMain){
+    Breadcrumb(L"print designer: open");
     Sections_Init(); Designs_Init();
     DesignerLaunch launch;
     if(!RunSectionPicker(hMain,launch)) return;

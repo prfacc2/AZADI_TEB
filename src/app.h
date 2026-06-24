@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.10.0"
+#define APP_VERSION_W   L"1.11.0"
 
 // ----------------------------------------------------------- logging policy -
 //  RELEASE 1.2.0 (Section A): all general user-behavior logging is gated behind
@@ -41,6 +41,9 @@ extern bool      g_dark;            // dark theme active
 
 // fonts (Vazirmatn, embedded)
 extern HFONT g_fUI, g_fUIB, g_fSmall, g_fTitle, g_fBig, g_fHuge, g_fMono;
+// §G (1.11.0): a TRUE fixed-pitch font for section / personnel CODES so digits
+// align in a clean column. Falls back Consolas → Courier New at build time.
+extern HFONT g_fCode;
 
 // scale helper
 inline int S(int v){ return (int)(v * g_scale + 0.5); }
@@ -99,8 +102,14 @@ enum IconId {
     ICO_USER, ICO_SHIELD, ICO_PLUS, ICO_LOGOUT, ICO_DETACH, ICO_CROSS_MED,
     ICO_CHECK, ICO_TRASH, ICO_SAVE, ICO_BACK,
     ICO_ID, ICO_PHONE, ICO_CAL, ICO_PIN, ICO_RECEIPT, ICO_CLOCK, ICO_REFRESH,
-    ICO_GEAR, ICO_BELL, ICO_TAB, ICO_CHEVRON
+    ICO_GEAR, ICO_BELL, ICO_TAB, ICO_CHEVRON,
+    // v1.11.0 §F: bookmark glyph for the Saved-Messages feature.
+    ICO_SAVED_MSG,
+    // v1.11.0 §A: people / contact / palette glyphs for messenger-style rows.
+    ICO_PALETTE, ICO_INFO, ICO_PEOPLE
 };
+// §F: spec name alias — the work order references this symbol explicitly.
+#define IC_SAVED_MSG ICO_SAVED_MSG
 enum BtnStyle { BS_GHOST=0, BS_PRIMARY=1, BS_DANGER=2, BS_OUTLINE=3, BS_CARD=4,
                 //  v1.8.0: a distinct, non-red "attention" style (violet/teal)
                 //  used for the management change-request categories so they
@@ -196,7 +205,10 @@ std::wstring shiftName(int s);
 std::wstring exeDir();
 std::wstring dataDir();      // <exe>\data   (auto-created)
 std::wstring logsDir();      // <exe>\logs   (auto-created)
+void         writeSchemaVersion();   // §I: stamp data\.schema_version (informational only)
 void         logLine(const std::wstring& s);
+// §J: record a flow breadcrumb (last 32 are dumped into the crash report).
+void         Breadcrumb(const wchar_t* what);
 std::wstring formatMoney(long long v);                   // 1,234,567
 long long    parseMoney(const std::wstring& s);
 std::wstring trim(const std::wstring& s);
@@ -379,8 +391,9 @@ struct EmpProfile {
 };
 EmpProfile loadEmpProfile(const std::wstring& username);
 void       saveEmpProfile(const EmpProfile& p);
-bool       isUserOnline(const std::wstring& username);   // session presence
+bool       isUserOnline(const std::wstring& username);   // session presence (heartbeat <90s)
 void       setUserOnline(const std::wstring& username, bool on);
+void       heartbeatUser(const std::wstring& username);  // §G: refresh presence on a timer
 
 // ------------------------------------------------------------------ kartabl --
 //  Cartable / inbox messages pushed from management to a user (or broadcast).

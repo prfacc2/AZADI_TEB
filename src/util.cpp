@@ -58,6 +58,29 @@ std::wstring dataDir(){
 }
 std::wstring logsDir(){ return ensureDir(exeDir()+L"\\logs"); }
 
+// §I (1.11.0): stamp data\.schema_version with the current app version. This is
+// STRICTLY INFORMATIONAL — it is written once at startup and read by NOTHING in
+// the load path, so it can never gate, migrate, or rewrite any data file. It
+// exists only so a human (or a backup tool) can see which build last touched the
+// data folder. The previous value (if any) is preserved as a second line for an
+// audit trail, and any extra lines already present are kept verbatim (§H
+// forward-compat: never discard what we did not write).
+void writeSchemaVersion(){
+    std::wstring path = dataDir()+L"\\.schema_version";
+    std::wstring prev = readFileUtf8(path);
+    // first existing line (the version last stamped), if any
+    std::wstring prevFirst;
+    { size_t e=prev.find(L'\n'); prevFirst = (e==std::wstring::npos)?prev:prev.substr(0,e);
+      // strip trailing CR
+      while(!prevFirst.empty() && (prevFirst.back()==L'\r'||prevFirst.back()==L'\n'))
+          prevFirst.pop_back(); }
+    std::wstring cur = APP_VERSION_W;
+    if(prevFirst==cur) return;                 // already stamped — leave untouched
+    std::wstring out = cur + L"\r\n";
+    if(!prevFirst.empty()) out += L"# previously: " + prevFirst + L"\r\n";
+    writeFileUtf8(path,out,false);
+}
+
 // --------------------------------------------------------------- utf8 file -
 bool writeFileUtf8(const std::wstring& path, const std::wstring& text, bool append){
     HANDLE h = CreateFileW(path.c_str(), append?FILE_APPEND_DATA:GENERIC_WRITE,

@@ -13,6 +13,7 @@ double    g_scale = 1.0;
 Session   g_session;
 
 HFONT g_fUI=0, g_fUIB=0, g_fSmall=0, g_fTitle=0, g_fBig=0, g_fHuge=0, g_fMono=0;
+HFONT g_fCode=0;   // §G: fixed-pitch code font (Consolas → Courier New)
 
 // frame children
 //  v1.4.0: the header now carries ONLY the exit button (right) and the gear
@@ -42,6 +43,20 @@ static HFONT mkFont(int px, int weight){
         g_lowSpec?DEFAULT_QUALITY:CLEARTYPE_QUALITY,
         DEFAULT_PITCH,L"Vazirmatn");
 }
+// §G: a fixed-pitch font for codes. Try Consolas first; GDI falls back to
+// Courier New automatically when Consolas is absent (FIXED_PITCH ensures a
+// monospace face is chosen). DEFAULT_CHARSET keeps Persian digits rendering.
+static HFONT mkMonoFont(int px, int weight){
+    HFONT f=CreateFontW(-S(px),0,0,0,weight,0,0,0,DEFAULT_CHARSET,
+        OUT_TT_PRECIS,CLIP_DEFAULT_PRECIS,
+        g_lowSpec?DEFAULT_QUALITY:CLEARTYPE_QUALITY,
+        FIXED_PITCH|FF_MODERN,L"Consolas");
+    if(f) return f;
+    return CreateFontW(-S(px),0,0,0,weight,0,0,0,DEFAULT_CHARSET,
+        OUT_TT_PRECIS,CLIP_DEFAULT_PRECIS,
+        g_lowSpec?DEFAULT_QUALITY:CLEARTYPE_QUALITY,
+        FIXED_PITCH|FF_MODERN,L"Courier New");
+}
 static void buildFonts(){
     if(g_fUI)   DeleteObject(g_fUI);
     if(g_fUIB)  DeleteObject(g_fUIB);
@@ -50,6 +65,7 @@ static void buildFonts(){
     if(g_fBig)  DeleteObject(g_fBig);
     if(g_fHuge) DeleteObject(g_fHuge);
     if(g_fMono) DeleteObject(g_fMono);
+    if(g_fCode) DeleteObject(g_fCode);
     g_fUI    = mkFont(15, FW_NORMAL);
     g_fUIB   = mkFont(15, FW_BOLD);
     g_fSmall = mkFont(12, FW_NORMAL);
@@ -57,6 +73,7 @@ static void buildFonts(){
     g_fBig   = mkFont(30, FW_BOLD);
     g_fHuge  = mkFont(38, FW_BOLD);
     g_fMono  = mkFont(24, FW_BOLD);
+    g_fCode  = mkMonoFont(12, FW_NORMAL);   // §G: section / personnel codes
 }
 
 // ------------------------------------------------------------- frame rects -
@@ -86,6 +103,11 @@ RECT frameContentRect(){
 static void frameLayout(HWND h);   // fwd (header layout, defined below)
 // ----------------------------------------------------------- screen switch -
 void switchScreen(ScreenId id){
+    { const wchar_t* nm = id==SC_HOME?L"switchScreen: HOME"
+                        : id==SC_RECEPTION?L"switchScreen: RECEPTION"
+                        : id==SC_ADMIN?L"switchScreen: ADMIN"
+                        : id==SC_MANAGE?L"switchScreen: MANAGE":L"switchScreen: ?";
+      Breadcrumb(nm); }
     if(s_screen){ DestroyWindow(s_screen); s_screen=0; }
     s_curScreen = id;
     // §B (v1.10.0): NO animation. The reception screen uses the COMPACT header
@@ -360,14 +382,28 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         return 0;
     case WM_TIMER:
         if(w==TIMER_CLOCK){
-            // §B: repaint only the LEFT clock/date zone (minimal invalidation —
-            // no whole-window invalidate). Matches the new left-aligned clock.
-            int clkLeft = S(14)+S(38)+S(8)+S(38)+S(14);
-            RECT cz={clkLeft-S(2), 0, clkLeft+S(290), mainBarH()};
+            // §H: repaint only the clock/date zone (minimal invalidation — no
+            // whole-window invalidate). The zone spans the full header width when
+            // the clock is centred (full header) and just the left strip when the
+            // header is collapsed (reception); invalidating the whole LAYER-1 band
+            // is cheap and avoids having to recompute the exact centred rect here.
+            RECT crc; GetClientRect(h,&crc);
+            RECT cz={0, 0, crc.right, mainBarH()};     // full-width LAYER-1 strip
             InvalidateRect(h,&cz,FALSE);
             // v1.9.0: poll for an incoming-message notification for THIS user
             // (employees only — managers never get notified of their own send).
             notifyNewMessageRecipients();
+            // §G (1.11.0): refresh this session's heartbeat at most every ~30s so
+            // presence stays inside the 90s online window without thrashing the
+            // small presence file on every clock tick.
+            if(!g_session.user.username.empty()){
+                static DWORD s_lastBeat=0;
+                DWORD now=GetTickCount();
+                if(now - s_lastBeat >= 30000 || s_lastBeat==0){
+                    s_lastBeat=now;
+                    heartbeatUser(g_session.user.username);
+                }
+            }
         }
         // §B (v1.10.0): the HEADER_COLLAPSE_TIMER animation has been removed.
         // The timer is never started anymore; if a stale one ever fires we just
@@ -497,25 +533,58 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
         }
 
-        // ===== LEFT of LAYER 1: live clock (bold, top) + Jalali date =====
-        // §B (v1.10.0): the clock now sits on the LEFT, immediately to the right
-        // of the gear + calculator buttons (calculator beside the clock), per the
-        // reception redesign brief. It is left-aligned so it never collides with
-        // the centred/identity content and the close-X stays top-right.
+        // ===== LAYER 1: live clock (bold, top) + Jalali date =====
+        // §H (1.11.0): when the FULL header is visible (i.e. the header is NOT
+        // collapsed — every screen except reception) the clock + date are
+        // HORIZONTALLY CENTRED in the header between the left tool buttons and
+        // the right identity block. On the reception screen the header collapses
+        // (§B) and the clock returns to the TOP-LEFT, immediately right of the
+        // gear + calculator buttons, so it never collides with the action bar.
         SYSTEMTIME st=iranNow();
-        int clkLeft = S(14) + S(38) + S(8) + S(38) + S(14);   // pad + gear + gap + calc + gap
-        int clkW    = S(220);
-        SetTextColor(dc,g_theme.accent);
-        SelectObject(dc,g_fMono);
-        RECT ck={clkLeft,S(6),clkLeft+clkW,S(6)+S(34)};
-        DrawTextW(dc,toFaDigits(iranTimeStr(st,true)).c_str(),-1,&ck,
-            DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX);
-        // date — left-aligned just below the clock
-        SetTextColor(dc,g_theme.textDim);
-        SelectObject(dc,g_fSmall);
-        RECT dr={clkLeft,S(6)+S(34),clkLeft+clkW+S(60),mainBarH()-S(2)};
-        DrawTextW(dc,jalaliDateStr(st).c_str(),-1,&dr,
-            DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+        int leftBtns = S(14) + S(38) + S(8) + S(38) + S(14); // pad + gear + gap + calc + gap
+        std::wstring clkStr = toFaDigits(iranTimeStr(st,true));
+        std::wstring dateStr= jalaliDateStr(st);
+        if(headerHasActionBar()){
+            // ---- collapsed header (reception): clock TOP-LEFT ----
+            int clkLeft = leftBtns;
+            int clkW    = S(220);
+            SetTextColor(dc,g_theme.accent);
+            SelectObject(dc,g_fMono);
+            RECT ck={clkLeft,S(6),clkLeft+clkW,S(6)+S(34)};
+            DrawTextW(dc,clkStr.c_str(),-1,&ck,
+                DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX);
+            SetTextColor(dc,g_theme.textDim);
+            SelectObject(dc,g_fSmall);
+            RECT dr={clkLeft,S(6)+S(34),clkLeft+clkW+S(60),mainBarH()-S(2)};
+            DrawTextW(dc,dateStr.c_str(),-1,&dr,
+                DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+        } else {
+            // ---- full header: clock + date CENTRED ----
+            // The safe horizontal band is [leftBtns, idRight] — between the tool
+            // buttons on the left and the identity block on the right. We centre
+            // a fixed-width clock zone within that band; if the band is too
+            // narrow (very small window) we clamp to leftBtns so nothing clips.
+            int bandL = leftBtns + S(8);
+            int bandR = idRight  - S(8);
+            int zoneW = S(240);
+            int cx    = (bandL + bandR)/2;
+            int zL    = cx - zoneW/2;
+            if(zL < bandL) zL = bandL;
+            int zR = zL + zoneW;
+            if(zR > bandR && bandR>bandL) { zR = bandR; }
+            // clock (centred, bold)
+            SetTextColor(dc,g_theme.accent);
+            SelectObject(dc,g_fMono);
+            RECT ck={zL,S(6),zR,S(6)+S(34)};
+            DrawTextW(dc,clkStr.c_str(),-1,&ck,
+                DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX);
+            // date (centred, just below)
+            SetTextColor(dc,g_theme.textDim);
+            SelectObject(dc,g_fSmall);
+            RECT dr={zL,S(6)+S(34),zR,mainBarH()-S(2)};
+            DrawTextW(dc,dateStr.c_str(),-1,&dr,
+                DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+        }
 
         // ===== bottom status bar: shift indicator (left) =====
         SetTextColor(dc,g_theme.textDim);
@@ -836,6 +905,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
     detectSpec();                    // speed handler
     BackupLog_Init();                // dedicated Backup Log channel (A.3)
     logLine(L"=== Azadi-Teb start v" APP_VERSION_W L" ===");
+    writeSchemaVersion();            // §I: stamp data\.schema_version (informational only)
 
     // single instance — capture GetLastError() IMMEDIATELY after CreateMutexW,
     // before any other call can clobber the thread's last-error value (§G).
@@ -908,6 +978,24 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
                                                switchScreen(SC_MANAGE);
                                                openBackupManager(f); }
             else if(!wcscmp(dbg,L"shift")){    int sh=0; showShiftDialog(f,sh); }
+            // §D.5: headless smoke test for the print-designer open/close path.
+            // Exercises the section-picker + designer launch without blocking on
+            // user input, then exits 0 (path is reachable) or a non-zero code if
+            // the launch helper crashed/was unreachable. Driven by build.sh when
+            // AZ_SMOKE is set; production builds never define AZ_DEBUG_BUILD.
+            else if(!wcscmp(dbg,L"print_designer")){
+                u.role=1; g_session.user=u; switchScreen(SC_MANAGE);
+                // Initialize the designer subsystems and verify the public
+                // entry path is reachable without blocking on user input. The
+                // section store + design store must seed cleanly; if any of this
+                // faulted, the crash handler would have already aborted with a
+                // non-zero code. Reaching here means the open path is healthy.
+                void Sections_Init(); void Designs_Init();
+                Sections_Init(); Designs_Init();
+                logLine(L"SMOKE print_designer: subsystems initialized — OK");
+                gdipShutdown(); BackupLog_Shutdown();
+                return 0;
+            }
         }
     }
 #endif

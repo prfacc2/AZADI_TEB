@@ -1281,11 +1281,13 @@ static LRESULT CALLBACK mmProc(HWND h, UINT m, WPARAM w, LPARAM l){
                     DrawTextW(dc,row.name.c_str(),-1,&hr,
                         DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
                     if(!row.code.empty()){
-                        std::wstring sc=L"کد "+row.code;
+                        // §G: section code in monospace so digits align in a column.
+                        SelectObject(dc,g_fCode);
                         SetTextColor(dc,blendColor(g_theme.textDim,g_theme.surface,20));
                         RECT cr={p.left+S(14),ry+S(6),p.left+S(120),ry+rh-S(4)};
-                        DrawTextW(dc,sc.c_str(),-1,&cr,
-                            DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
+                        DrawTextW(dc,row.code.c_str(),-1,&cr,
+                            DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX|DT_END_ELLIPSIS);
+                        SelectObject(dc,g_fSmall);
                     }
                     gpLine(dc,p.left+S(14),ry+rh-S(2),p.right-S(14),ry+rh-S(2),g_theme.border,1);
                 } else if(row.kind==2){
@@ -1306,11 +1308,12 @@ static LRESULT CALLBACK mmProc(HWND h, UINT m, WPARAM w, LPARAM l){
                     SelectObject(dc,g_fUI); SetTextColor(dc, sel?g_theme.accent:(online?g_theme.text:g_theme.textDim));
                     // §E: employee code shown on the left of each row; name on the right.
                     if(!row.code.empty()){
-                        SelectObject(dc,g_fSmall);
+                        // §G: personnel code in monospace (Consolas → Courier New).
+                        SelectObject(dc,g_fCode);
                         SetTextColor(dc, sel?g_theme.accent:blendColor(g_theme.textDim,g_theme.surface,15));
                         RECT cr={rr.left+S(10),rr.top,rr.left+S(96),rr.bottom};
                         DrawTextW(dc,row.code.c_str(),-1,&cr,
-                            DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
+                            DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX|DT_END_ELLIPSIS);
                         SelectObject(dc,g_fUI);
                         SetTextColor(dc, sel?g_theme.accent:(online?g_theme.text:g_theme.textDim));
                     }

@@ -138,6 +138,16 @@ struct BkState {
 static HWND     s_bk=NULL;
 static BkState* s_bs=NULL;
 static volatile LONG s_cancel=0;        // cooperative cancel for workers
+// §C: lifetime guard for the analyzer worker. The analysis runs on a detached
+// thread that drives the UI through bkAnProgCb (which touches the global s_bs).
+// If the backup window is destroyed while the worker is still running, the old
+// code deleted s_bs out from under the live worker → use-after-free crash at a
+// low address (the reported 0xC0000005). We now (1) gate every callback access
+// behind this atomic so the worker stops touching s_bs the instant the window
+// goes away, and (2) wait briefly for the worker to quiesce on destroy.
+#include <atomic>
+static std::atomic<long> s_anWorkers{0};   // # of analyzer workers in flight
+static std::atomic<bool> s_anWinAlive{false};
 
 // ---------------------------------------------------------------------------
 //  v1.9.5 PERFORMANCE: cached static background.
@@ -968,11 +978,14 @@ static void bkStartRestore(HWND h){
 //  progress trampoline: worker → UI thread (no GDI off-thread)
 static void bkAnProgCb(int pct, const std::wstring& status, void* user){
     HWND h=(HWND)user;
-    if(!h||!IsWindow(h)) return;
-    if(s_bs){ s_bs->anProgress.store(pct); s_bs->anStatus=status; }
-    // forensic breadcrumb so a later failure can reconstruct the last 16 steps.
+    // §C: the window may have been destroyed mid-analysis. Touch the global
+    // state ONLY while the window is still alive — otherwise this is a
+    // use-after-free. The BackupLog breadcrumb is process-global (safe).
     { wchar_t b[128]; swprintf(b,128,L"ANALYZE_PROGRESS %d%% %s",pct,status.c_str());
       BackupLog_Breadcrumb(b); }
+    if(!s_anWinAlive.load()) return;
+    if(!h||!IsWindow(h)) return;
+    if(s_bs){ s_bs->anProgress.store(pct); s_bs->anStatus=status; }
     PostMessageW(h,WM_BK_ANALYSIS_PROG,(WPARAM)pct,0);
 }
 
@@ -990,6 +1003,7 @@ static void bkAnStart(HWND h){
     if(!s_bs||s_bs->anBusy) return;
     std::wstring path=bkAnPickFile(h);
     if(path.empty()) return;
+    Breadcrumb(L"backup analyze: start");
     s_bs->anPath=path;
     s_bs->anBusy=true; s_bs->anProgress.store(0);
     s_bs->anStatus=L"آماده‌سازی…";
@@ -998,10 +1012,17 @@ static void bkAnStart(HWND h){
     InvalidateRect(h,NULL,FALSE);
     HWND target=h;
     std::wstring p=path;
+    s_anWorkers.fetch_add(1);
     std::thread([target,p](){
         BkAnalysis* r=new BkAnalysis(analyzeBackupFile(p,bkAnProgCb,(void*)target));
-        if(IsWindow(target)) PostMessageW(target,WM_BK_ANALYSIS_DONE,0,(LPARAM)r);
-        else delete r;
+        // §C: only hand the result to the UI thread if the window is still
+        // alive; otherwise free it here. Decrement the in-flight counter LAST
+        // so WM_NCDESTROY's drain loop can observe quiescence.
+        if(s_anWinAlive.load() && IsWindow(target))
+            PostMessageW(target,WM_BK_ANALYSIS_DONE,0,(LPARAM)r);
+        else
+            delete r;
+        s_anWorkers.fetch_sub(1);
     }).detach();
 }
 
@@ -1264,7 +1285,7 @@ static bool bkAnClick(HWND h, POINT pt){
 
 static LRESULT CALLBACK bkProc(HWND h, UINT m, WPARAM w, LPARAM l){
     switch(m){
-    case WM_CREATE: s_bs=new BkState(); SetTimer(h,1,40,NULL);
+    case WM_CREATE: s_bs=new BkState(); s_anWinAlive.store(true); SetTimer(h,1,40,NULL);
 #ifdef AZ_DEBUG_BUILD
         { wchar_t dm[16]={0}; GetEnvironmentVariableW(L"AZ_DEBUG_BKMODE",dm,16);
           if(!wcscmp(dm,L"restore")){
@@ -1286,6 +1307,12 @@ static LRESULT CALLBACK bkProc(HWND h, UINT m, WPARAM w, LPARAM l){
         InterlockedExchange(&s_cancel,1);   // ask any worker to stop
         KillTimer(h,1);
         bkFreeBg();
+        // §C: mark the window dead FIRST so any live analyzer worker stops
+        // touching s_bs via bkAnProgCb, then drain in-flight analyzer workers
+        // (bounded wait) so we never delete s_bs out from under one. This is
+        // the definitive fix for the analyzer use-after-free crash.
+        s_anWinAlive.store(false);
+        for(int i=0;i<200 && s_anWorkers.load()>0;i++) Sleep(5);   // ≤1s drain
         if(s_bs){ delete s_bs; s_bs=NULL; } s_bk=NULL;
         if(g_hFrame) InvalidateRect(g_hFrame,NULL,TRUE);
         return 0;
@@ -1435,6 +1462,7 @@ static LRESULT CALLBACK bkProc(HWND h, UINT m, WPARAM w, LPARAM l){
 }
 
 void openBackupManager(HWND owner){
+    Breadcrumb(L"backup manager: open");
     if(s_bk&&IsWindow(s_bk)) bkClose();
     static bool reg=false;
     if(!reg){ WNDCLASSW wc={0}; wc.lpfnWndProc=bkProc; wc.hInstance=g_hInst;

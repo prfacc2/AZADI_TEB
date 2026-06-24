@@ -56,29 +56,34 @@ void applyTheme(bool dark){
         //      border 196 ── crisp hairline between layers
         //      surface 255 ── cards (clean white, pops off the tinted page)
         //      surfaceTop 250 ── soft top-light on cards
-        g_theme.bg          = RGB(220, 229, 241); // page (cool soft grey-blue)
-        g_theme.bg2         = RGB(204, 216, 234); // page gradient bottom (deeper)
-        g_theme.surface     = RGB(255, 255, 255); // card body (clean white)
-        g_theme.surfaceTop  = RGB(250, 252, 255); // card gradient top (airy light)
-        g_theme.surface2    = RGB(234, 240, 248); // wells / bars (a clear notch below white)
-        g_theme.border      = RGB(196, 208, 226); // crisper hairline (more contrast)
-        g_theme.text        = RGB(20, 29, 46);    // deeper ink for stronger contrast
-        g_theme.textDim     = RGB(92, 107, 132);  // legible secondary text
-        g_theme.accent      = RGB(28, 96, 230);   // richer indigo-blue
-        g_theme.accent2     = RGB(44, 152, 244);  // sky end for gradients
-        g_theme.accentHover = RGB(48, 118, 246);  // lighter on hover
-        g_theme.accentText  = RGB(255, 255, 255);
-        g_theme.danger      = RGB(216, 52, 70);
-        g_theme.dangerHover = RGB(232, 80, 96);
-        g_theme.success     = RGB(16, 156, 104);
-        g_theme.warn        = RGB(214, 144, 22);
-        g_theme.inputBg     = RGB(245, 248, 253); // tinted well, not pure white
-        g_theme.inputText   = RGB(18, 26, 42);
-        g_theme.hover       = RGB(224, 234, 249); // soft blue wash on hover
-        g_theme.headerTop   = RGB(255, 255, 255);
-        g_theme.headerBot   = RGB(232, 239, 249); // header reads as its own layer
-        g_infoAccent  = RGB(120, 86, 228);    // violet (distinct, non-red)
-        g_infoAccent2 = RGB(94, 66, 208);
+        // ---- v1.11.0 §E: layered light palette using the EXACT spec values.
+        //  bg #F5F7FB · surface #FFFFFF · surface2 #EEF2F8 · border #D7DDE6
+        //  text #0F172A · muted #5B6577 · accent #2563EB · accent2 #0EA5E9
+        //  success #10B981 · warning #F59E0B · danger #EF4444.
+        //  focus_ring is accent @40% alpha (drawn via gdiplus where needed).
+        g_theme.bg          = RGB(0xF5, 0xF7, 0xFB); // #F5F7FB app background
+        g_theme.bg2         = RGB(0xE7, 0xEC, 0xF4); // page gradient bottom (subtle)
+        g_theme.surface     = RGB(0xFF, 0xFF, 0xFF); // #FFFFFF cards / sheets
+        g_theme.surfaceTop  = RGB(0xFF, 0xFF, 0xFF); // card gradient top (flat white)
+        g_theme.surface2    = RGB(0xEE, 0xF2, 0xF8); // #EEF2F8 subtle elevation
+        g_theme.border      = RGB(0xD7, 0xDD, 0xE6); // #D7DDE6 hairline
+        g_theme.text        = RGB(0x0F, 0x17, 0x2A); // #0F172A primary ink
+        g_theme.textDim     = RGB(0x5B, 0x65, 0x77); // #5B6577 muted
+        g_theme.accent      = RGB(0x25, 0x63, 0xEB); // #2563EB primary actions
+        g_theme.accent2     = RGB(0x0E, 0xA5, 0xE9); // #0EA5E9 secondary
+        g_theme.accentHover = RGB(0x3B, 0x76, 0xEF); // lighter accent on hover
+        g_theme.accentText  = RGB(0xFF, 0xFF, 0xFF);
+        g_theme.danger      = RGB(0xEF, 0x44, 0x44); // #EF4444
+        g_theme.dangerHover = RGB(0xF2, 0x5F, 0x5F);
+        g_theme.success     = RGB(0x10, 0xB9, 0x81); // #10B981
+        g_theme.warn        = RGB(0xF5, 0x9E, 0x0B); // #F59E0B warning
+        g_theme.inputBg     = RGB(0xF7, 0xF9, 0xFC); // tinted well (just above bg)
+        g_theme.inputText   = RGB(0x0F, 0x17, 0x2A);
+        g_theme.hover       = RGB(0xE7, 0xEE, 0xFB); // soft accent wash on hover
+        g_theme.headerTop   = RGB(0xFF, 0xFF, 0xFF);
+        g_theme.headerBot   = RGB(0xEE, 0xF2, 0xF8); // header reads as its own layer
+        g_infoAccent  = RGB(0x7C, 0x56, 0xE4);    // violet (distinct, non-red)
+        g_infoAccent2 = RGB(0x5E, 0x42, 0xD0);
     }
     if(g_brBg)       DeleteObject(g_brBg);
     if(g_brSurface)  DeleteObject(g_brSurface);
@@ -315,6 +320,32 @@ void drawIcon(HDC dc, int icon, RECT rc, COLORREF col, int thick){
         break; }
     case ICO_CHEVRON: {
         MoveToEx(dc,cx-r/2,cy-r/2,0); LineTo(dc,cx+r/3,cy); LineTo(dc,cx-r/2,cy+r/2);
+        break; }
+    case ICO_SAVED_MSG: {   // §F: bookmark / ribbon glyph
+        int w=(r*60)/100, top=cy-r+2, bot=cy+r-2;
+        MoveToEx(dc,cx-w,top,0);
+        LineTo(dc,cx+w,top); LineTo(dc,cx+w,bot);
+        LineTo(dc,cx,bot-r/3);                 // notch up
+        LineTo(dc,cx-w,bot); LineTo(dc,cx-w,top);
+        break; }
+    case ICO_PALETTE: {     // §A: theme / palette (a swatch ring + dot)
+        Ellipse(dc,cx-r+1,cy-r+1,cx+r-1,cy+r-1);
+        int d=(r*22)/100;
+        Ellipse(dc,cx-r/2-d,cy-r/3-d,cx-r/2+d,cy-r/3+d);
+        Ellipse(dc,cx+r/3-d,cy-r/2-d,cx+r/3+d,cy-r/2+d);
+        Ellipse(dc,cx+r/2-d,cy+r/4-d,cx+r/2+d,cy+r/4+d);
+        break; }
+    case ICO_INFO: {        // §A: about / info (circle + i)
+        Ellipse(dc,cx-r+1,cy-r+1,cx+r-1,cy+r-1);
+        SetPixel(dc,cx,cy-r/2,col);
+        MoveToEx(dc,cx,cy-r/5,0); LineTo(dc,cx,cy+r/2);
+        break; }
+    case ICO_PEOPLE: {      // §A/§G: two-person group glyph
+        int rr=(r*30)/100;
+        Ellipse(dc,cx-r/2-rr,cy-r/3-rr,cx-r/2+rr,cy-r/3+rr);   // head 1
+        Arc(dc,cx-r,cy,cx,cy+r, cx,cy, cx-r,cy);               // body 1
+        Ellipse(dc,cx+r/3-rr,cy-r/4-rr,cx+r/3+rr,cy-r/4+rr);   // head 2
+        Arc(dc,cx,cy+r/8,cx+r,cy+r, cx+r,cy+r/8, cx,cy+r/8);   // body 2
         break; }
     }
     SetBkMode(dc, oldBk);

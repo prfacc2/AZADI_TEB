@@ -13,8 +13,32 @@
 #include <exception>
 #include <shlobj.h>
 #include <dbghelp.h>
+#include <psapi.h>
 
 bool g_lowSpec = false;
+
+// ============================================================== breadcrumbs ==
+//  §J (1.11.0): a lock-light ring buffer of the last 32 UI/flow breadcrumbs
+//  (up from the previous 16). Code calls Breadcrumb(L"...") at meaningful steps
+//  ("open settings", "analyze backup start", "print designer save", …). When a
+//  crash occurs the newest-first trail is appended to the crash report so we can
+//  see WHAT THE USER WAS DOING in the moments before the fault. Storage is a
+//  fixed static array of fixed-size wide buffers — NO heap, NO CRT streams — so
+//  it is safe to read from inside the crash handler.
+#define CRUMB_COUNT 32
+#define CRUMB_LEN   120
+static wchar_t  s_crumbs[CRUMB_COUNT][CRUMB_LEN];
+static DWORD    s_crumbTick[CRUMB_COUNT];     // GetTickCount() at record time
+static volatile LONG s_crumbHead = 0;         // next write slot (monotonic)
+
+void Breadcrumb(const wchar_t* what){
+    if(!what) return;
+    // reserve a slot atomically; modulo into the ring on read/write.
+    LONG idx = InterlockedIncrement(&s_crumbHead) - 1;
+    int slot = (int)(((ULONG)idx) % CRUMB_COUNT);
+    lstrcpynW(s_crumbs[slot], what, CRUMB_LEN);
+    s_crumbTick[slot] = GetTickCount();
+}
 
 // ---------------------------------------------------------- crash dumps ----
 //  RELEASE 1.2.0 (F.4): write a MiniDumpWriteDump alongside the existing crash
@@ -93,6 +117,38 @@ static void rawWrite(const wchar_t* path, const wchar_t* text){
     CloseHandle(h);
 }
 
+//  §J: resolve a faulting address to "module.dll+0xOFFSET" by walking the loaded
+//  modules (EnumProcessModules / GetModuleInformation) and finding the module
+//  whose [base, base+size) range contains the address. Crash-safe: only static
+//  buffers, no heap. Writes "<module>+0x<offset>" (or "<unknown>") into `out`.
+static void resolveModuleOffset(void* addr, wchar_t* out, int outLen){
+    if(out && outLen>0) out[0]=0;
+    if(!addr || !out || outLen<=0){ if(out&&outLen>0) lstrcpynW(out,L"<unknown>",outLen); return; }
+    HMODULE mods[512]; DWORD needed=0;
+    HANDLE proc=GetCurrentProcess();
+    if(!EnumProcessModules(proc, mods, sizeof(mods), &needed)){
+        lstrcpynW(out,L"<unknown>",outLen); return;
+    }
+    int count=(int)(needed/sizeof(HMODULE));
+    if(count>512) count=512;
+    UINT_PTR a=(UINT_PTR)addr;
+    for(int i=0;i<count;i++){
+        MODULEINFO mi; 
+        if(!GetModuleInformation(proc, mods[i], &mi, sizeof(mi))) continue;
+        UINT_PTR base=(UINT_PTR)mi.lpBaseOfDll;
+        if(a>=base && a < base+mi.SizeOfImage){
+            wchar_t name[MAX_PATH]={0};
+            GetModuleFileNameW(mods[i], name, MAX_PATH);
+            // keep just the file name (strip the directory)
+            const wchar_t* leaf=name; 
+            for(const wchar_t* p=name; *p; ++p) if(*p==L'\\'||*p==L'/') leaf=p+1;
+            wsprintfW(out, L"%s+0x%X", leaf, (unsigned)(a-base));
+            return;
+        }
+    }
+    lstrcpynW(out,L"<unknown>",outLen);
+}
+
 static void crashCore(DWORD code, void* addr, CONTEXT* c){
     // recursion guard — if the handler itself faults, terminate hard
     if(InterlockedExchange(&s_inCrash, 1))
@@ -113,17 +169,21 @@ static void crashCore(DWORD code, void* addr, CONTEXT* c){
     MEMORYSTATUSEX ms; ms.dwLength = sizeof(ms); GlobalMemoryStatusEx(&ms);
     SYSTEM_INFO si; GetSystemInfo(&si);
 
+    // §J: resolve the faulting address to module+offset for a meaningful name.
+    static wchar_t modoff[MAX_PATH+32];
+    resolveModuleOffset(addr, modoff, MAX_PATH+32);
+
     static wchar_t body[4096];
 #if defined(_M_X64) || defined(__x86_64__)
     wsprintfW(body,
         L"==== Azadi-Teb crash report v%s (x64) ====\r\n"
         L"Time   : %04d-%02d-%02d %02d:%02d:%02d (local)\r\n"
         L"Code   : 0x%08X (%s)\r\n"
-        L"Address: %p\r\nModule : %s\r\n"
+        L"Address: %p\r\nModule : %s\r\nFault  : %s\r\n"
         L"RIP=%p RSP=%p RBP=%p\r\nRAX=%p RBX=%p RCX=%p RDX=%p\r\n"
         L"CPU cores: %u   RAM: %u MB (free %u MB)\r\n",
         APP_VERSION_W, st.wYear,st.wMonth,st.wDay,st.wHour,st.wMinute,st.wSecond,
-        code, excName(code), addr, exe,
+        code, excName(code), addr, exe, modoff,
         c?(void*)c->Rip:0, c?(void*)c->Rsp:0, c?(void*)c->Rbp:0,
         c?(void*)c->Rax:0, c?(void*)c->Rbx:0, c?(void*)c->Rcx:0, c?(void*)c->Rdx:0,
         si.dwNumberOfProcessors,
@@ -133,32 +193,55 @@ static void crashCore(DWORD code, void* addr, CONTEXT* c){
         L"==== Azadi-Teb crash report v%s (x86) ====\r\n"
         L"Time   : %04d-%02d-%02d %02d:%02d:%02d (local)\r\n"
         L"Code   : 0x%08X (%s)\r\n"
-        L"Address: %p\r\nModule : %s\r\n"
+        L"Address: %p\r\nModule : %s\r\nFault  : %s\r\n"
         L"EIP=%p ESP=%p EBP=%p\r\nEAX=%p EBX=%p ECX=%p EDX=%p\r\n"
         L"CPU cores: %u   RAM: %u MB (free %u MB)\r\n",
         APP_VERSION_W, st.wYear,st.wMonth,st.wDay,st.wHour,st.wMinute,st.wSecond,
-        code, excName(code), addr, exe,
+        code, excName(code), addr, exe, modoff,
         c?(void*)(UINT_PTR)c->Eip:0, c?(void*)(UINT_PTR)c->Esp:0, c?(void*)(UINT_PTR)c->Ebp:0,
         c?(void*)(UINT_PTR)c->Eax:0, c?(void*)(UINT_PTR)c->Ebx:0,
         c?(void*)(UINT_PTR)c->Ecx:0, c?(void*)(UINT_PTR)c->Edx:0,
         si.dwNumberOfProcessors,
         (UINT)(ms.ullTotalPhys/(1024*1024)), (UINT)(ms.ullAvailPhys/(1024*1024)));
 #endif
+    // §J: append the last 32 breadcrumbs (newest first) so the report shows the
+    // flow leading up to the fault. Built into its own static buffer, then
+    // appended to the body before writing — still heap-free.
+    {
+        static wchar_t crumbs[4096];
+        int off = wsprintfW(crumbs, L"\r\n---- breadcrumbs (newest first) ----\r\n");
+        LONG head = s_crumbHead;        // snapshot
+        int shown = 0;
+        for(int i=1; i<=CRUMB_COUNT && shown<CRUMB_COUNT; ++i){
+            LONG idx = head - i;
+            if(idx < 0) break;          // fewer than CRUMB_COUNT recorded so far
+            int slot = (int)(((ULONG)idx) % CRUMB_COUNT);
+            if(s_crumbs[slot][0]==0) continue;
+            // guard the static buffer
+            if(off > (int)(sizeof(crumbs)/sizeof(wchar_t)) - CRUMB_LEN - 32) break;
+            off += wsprintfW(crumbs+off, L"[%2d] +%lums  %s\r\n",
+                shown+1, (unsigned long)(GetTickCount()-s_crumbTick[slot]),
+                s_crumbs[slot]);
+            shown++;
+        }
+        if(shown==0) off += wsprintfW(crumbs+off, L"(none recorded)\r\n");
+        // append to body (truncate-safe) then write the combined report
+        int blen = lstrlenW(body);
+        int room = (int)(sizeof(body)/sizeof(wchar_t)) - blen - 1;
+        if(room>0) lstrcpynW(body+blen, crumbs, room);
+    }
     rawWrite(path, body);
 
-    int r = MessageBoxW(NULL,
-        L"متأسفانه خطای غیرمنتظره‌ای رخ داد.\n"
-        L"گزارش کامل خطا در پوشه logs ذخیره شد.\n\n"
-        L"برنامه دوباره اجرا شود؟",
+    // §J: NO auto-restart. We inform the user (Persian) that a report was saved,
+    // then exit cleanly — never relaunch the process (the work order forbids it,
+    // because an immediate relaunch can crash-loop on a corrupt state).
+    MessageBoxW(NULL,
+        L"متأسفانه خطای غیرمنتظره‌ای رخ داد و برنامه بسته می‌شود.\n"
+        L"گزارش کامل خطا در پوشهٔ logs ذخیره شد.\n\n"
+        L"لطفاً برنامه را به‌صورت دستی دوباره اجرا کنید.",
         L"آزادی طب — خطای سیستم",
-        MB_YESNO|MB_ICONERROR|MB_TOPMOST|MB_SETFOREGROUND);
-    if(r == IDYES){
-        STARTUPINFOW siu = { sizeof(siu) };
-        PROCESS_INFORMATION pi;
-        if(CreateProcessW(exe, NULL, NULL, NULL, FALSE, 0, NULL, dir, &siu, &pi)){
-            CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
-        }
-    }
+        MB_OK|MB_ICONERROR|MB_TOPMOST|MB_SETFOREGROUND);
+    (void)dir; (void)exe;
     TerminateProcess(GetCurrentProcess(), (UINT)code);
 }
 
@@ -243,10 +326,20 @@ static void loadEmbedded(int resId, const wchar_t* fileName, bool installSystem)
     } else target = exeDir() + L"\\" + fileName;
 
     if(GetFileAttributesW(target.c_str()) == INVALID_FILE_ATTRIBUTES){
+        // §C.3: the font cache file is genuinely replaceable — use CREATE_ALWAYS
+        // so a stale/partial copy from a previous run (or a TOCTOU race between
+        // the GetFileAttributesW check above and this open) can never surface
+        // win32_err:183 (ERROR_ALREADY_EXISTS). We do NOT silently swallow a
+        // real failure: it is logged with the precise GetLastError.
         HANDLE h = CreateFileW(target.c_str(), GENERIC_WRITE, 0, NULL,
-                               CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+                               CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
         if(h != INVALID_HANDLE_VALUE){
             DWORD wr; WriteFile(h, dat, sz, &wr, NULL); CloseHandle(h);
+        } else {
+            DWORD e=GetLastError();
+            wchar_t lb[160]; swprintf(lb,160,L"font write failed win32_err=%lu file=%s",
+                                      (unsigned long)e,fileName);
+            logLine(lb);
         }
     }
     AddFontResourceExW(target.c_str(), 0, 0);

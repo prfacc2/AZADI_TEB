@@ -5,6 +5,72 @@
 
 ---
 
+## 1.11.0 — 2026-06-24
+
+> Production hardening & UX-redesign sprint. A fully messenger-style settings
+> panel with a circular avatar, tappable card rows and push/pop sub-page
+> navigation governed by a single `canAccess(row, mode)` source of truth; a
+> standalone Saved-Messages viewer reachable from settings; heartbeat-based
+> online presence (<90s) with monospace section/personnel codes; a clock+date
+> that centres in the full header and returns to the top-left when the reception
+> header collapses; an informational `data\.schema_version` stamp; and a
+> rebuilt crash handler that resolves the faulting `module+offset`, dumps the
+> last **32** flow breadcrumbs, shows a Persian message and exits cleanly with
+> **no auto-restart**. Single static 32-bit PE32 EXE, zero warnings
+> (`-Wall -Wextra -Werror`), no regressions.
+
+### Added
+- **§A Messenger-style settings (rebuilt)** (`src/user_settings.cpp`) — a
+  top-centre circular avatar (photo → initial → silhouette fallback), an
+  identity block, and a vertical stack of full-width **tappable card rows**
+  with hover / pressed states. Navigation is **push/pop within the same
+  window** (`pageStack`) with a back button top-left. Row visibility is driven
+  by a SINGLE SOURCE OF TRUTH, `canAccess(SettingsRow, SettingsMode)`, consulted
+  by every row handler; a debug-build `selfCheckMatrix()` asserts the
+  role/row matrix at startup. Guest contract (`SM_GUEST`): EXACTLY two rows —
+  «تغییر پوسته» + «ارتباط با ما».
+- **§F Standalone Saved-Messages viewer** (`src/saved_messages.cpp`, new) —
+  `SavedMessages_Show(HWND)` renders the permanent local archive
+  (`data\saved_msgs.dat`) as scrollable, double-buffered messenger cards with a
+  bookmark-icon header, severity chips, click-to-detail and an empty state.
+  Opened from the settings card row; the in-cartable «ذخیره در پیام‌ها» save
+  button and archive view (reception.cpp) remain the write path.
+- **§G Heartbeat presence + monospace codes** (`src/employees.cpp`,
+  `src/manage.inc`, `src/main.cpp`) — `online.dat` now stores
+  `username|epochSeconds` and `isUserOnline()` only reports online inside a
+  90-second window; `heartbeatUser()` is pumped every ~30s from the frame clock
+  timer. A new fixed-pitch `g_fCode` font (Consolas → Courier New) renders
+  section and personnel codes in an aligned column. Send-message side panel
+  keeps online-first grouping by section, the 20×20 cap with a «… و N مورد
+  دیگر» overflow line, and clip-based virtualization.
+- **§H Centred header clock** (`src/main.cpp`) — when the full header is
+  visible the live clock + Jalali date are horizontally centred between the
+  left tool buttons and the right identity block; on the reception screen
+  (collapsed header, §B) they return to the top-left.
+- **§I `data\.schema_version` stamp** (`src/util.cpp`) — `writeSchemaVersion()`
+  writes `1.11.0` once at startup. Strictly informational: read by nothing in
+  the load path, so it can never gate or migrate data. Prior value is kept as a
+  comment line for an audit trail.
+- **§J Breadcrumb trail (32)** (`src/handlers.cpp`) — a heap-free 32-slot ring
+  buffer (`Breadcrumb(const wchar_t*)`); breadcrumbs are recorded at screen
+  switches, settings open, backup manager/analyze and print-designer open.
+
+### Changed
+- **§J Crash handler** (`src/handlers.cpp`) — the faulting address is now
+  resolved to `module.dll+0xOFFSET` via `EnumProcessModules` /
+  `GetModuleInformation`, the last 32 breadcrumbs (newest first, with relative
+  ms) are appended to the crash report, and the dialog is now a Persian
+  information box that **exits cleanly with no auto-restart** (the previous
+  one-click relaunch was removed to avoid crash-loops). Links `-lpsapi`.
+
+### Build
+- `APP_VERSION_W` → `L"1.11.0"` (`src/app.h`); `FILEVERSION` /
+  `PRODUCTVERSION` → `1,11,0,0` and matching `StringFileInfo`
+  (`src/app.rc`); `update/version.txt` line 1 → `1.11.0`. `src/saved_messages.cpp`
+  added to `build.sh`.
+
+---
+
 ## 1.10.0 — 2026-06-23
 
 > Production-grade redesign & stabilization release. Messenger-style settings

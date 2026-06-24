@@ -7,6 +7,7 @@
 #include "app.h"
 #include <stdio.h>
 #include <algorithm>
+#include <ctime>
 
 static std::vector<std::wstring> splitPipe(const std::wstring& s){
     std::vector<std::wstring> out; size_t pos=0;
@@ -126,30 +127,86 @@ void saveEmpProfile(const EmpProfile& p){
 }
 
 // ======================================================= online presence ====
-//  data\online.dat holds one username per line for currently-active sessions.
+//  §G (1.11.0): presence is now HEARTBEAT-based. data\online.dat stores one
+//  record per line as «username|epochSeconds[|…]». A user counts as ONLINE only
+//  if their last heartbeat is younger than ONLINE_WINDOW_SECS (90s) — so a
+//  crashed / powered-off workstation drops off automatically instead of showing
+//  a stale green dot forever.
+//
+//  Forward-compatible (§I): any extra pipe-delimited columns after the timestamp
+//  are preserved verbatim on rewrite, and LEGACY rows that carry only a username
+//  (no timestamp) are still honoured as online for the window so an old peer that
+//  has not been upgraded is not mistakenly shown offline.
 static std::wstring onlinePath(){ return dataDir()+L"\\online.dat"; }
+static const long long ONLINE_WINDOW_SECS = 90;
+
+static long long epochNow(){ return (long long)time(nullptr); }
+
+//  Parse one record → (username, lastSeenEpoch, extraColumns). lastSeen==-1 for
+//  a legacy username-only row (no timestamp present).
+static void parseOnlineRow(const std::wstring& line, std::wstring& user,
+                           long long& lastSeen, std::wstring& extra){
+    user.clear(); lastSeen=-1; extra.clear();
+    std::wstring s=trim(line);
+    if(s.empty()) return;
+    size_t p1=s.find(L'|');
+    if(p1==std::wstring::npos){ user=trim(s); return; }   // legacy: name only
+    user=trim(s.substr(0,p1));
+    size_t p2=s.find(L'|',p1+1);
+    std::wstring ts = (p2==std::wstring::npos) ? s.substr(p1+1)
+                                               : s.substr(p1+1,p2-(p1+1));
+    lastSeen=_wtoi64(trim(ts).c_str());
+    if(p2!=std::wstring::npos) extra=s.substr(p2);          // includes leading '|'
+}
+
 bool isUserOnline(const std::wstring& username){
     std::wstring all=readFileUtf8(onlinePath());
+    long long now=epochNow();
     size_t pos=0;
     while(pos<all.size()){
         size_t e=all.find(L'\n',pos); if(e==std::wstring::npos) e=all.size();
-        if(trim(all.substr(pos,e-pos))==username) return true;
-        pos=e+1;
+        std::wstring u,extra; long long seen;
+        parseOnlineRow(all.substr(pos,e-pos),u,seen,extra); pos=e+1;
+        if(u!=username) continue;
+        if(seen<0) return true;                              // legacy → treat present
+        return (now - seen) <= ONLINE_WINDOW_SECS;
     }
     return false;
 }
+
+//  Refresh / clear THIS user's heartbeat. Also prunes any record whose heartbeat
+//  has expired so the file does not grow without bound.
 void setUserOnline(const std::wstring& username, bool on){
     std::wstring all=readFileUtf8(onlinePath()), out;
-    size_t pos=0; bool present=false;
+    long long now=epochNow();
+    size_t pos=0; bool wrote=false;
     while(pos<all.size()){
         size_t e=all.find(L'\n',pos); if(e==std::wstring::npos) e=all.size();
-        std::wstring u=trim(all.substr(pos,e-pos)); pos=e+1;
+        std::wstring u,extra; long long seen;
+        parseOnlineRow(all.substr(pos,e-pos),u,seen,extra); pos=e+1;
         if(u.empty()) continue;
-        if(u==username){ present=true; if(!on) continue; }
-        out+=u+L"\r\n";
+        if(u==username){
+            if(!on) continue;                                // remove on logout
+            wchar_t tb[32]; swprintf(tb,32,L"%lld",now);
+            out+=u+L"|"+tb+extra+L"\r\n"; wrote=true; continue;
+        }
+        // prune expired peers (keep legacy + fresh ones)
+        if(seen>=0 && (now-seen)>ONLINE_WINDOW_SECS) continue;
+        wchar_t tb[32]; swprintf(tb,32,L"%lld",seen<0?now:seen);
+        out+=u+L"|"+tb+extra+L"\r\n";
     }
-    if(on && !present) out+=username+L"\r\n";
+    if(on && !wrote){
+        wchar_t tb[32]; swprintf(tb,32,L"%lld",now);
+        out+=username+L"|"+tb+L"\r\n";
+    }
     writeFileUtf8(onlinePath(),out,false);
+}
+
+//  §G: a workstation should call this on a short timer (e.g. every 30s) so its
+//  presence stays fresh inside the 90s window. Thin wrapper over setUserOnline.
+void heartbeatUser(const std::wstring& username){
+    if(username.empty()) return;
+    setUserOnline(username,true);
 }
 
 // ============================================================== cartable ====

@@ -30,6 +30,7 @@
 #include "ui_kit.h"
 #include "backup_analyzer.h"
 #include "backup_log.h"
+#include "backup_mtf.h"
 #include <stdio.h>
 #include <stdint.h>
 #include <csetjmp>
@@ -406,129 +407,75 @@ static void analyzeZip(const std::wstring& path, BkAnalysis& A,
 static void analyzeMtf(const std::wstring& path, BkAnalysis& A,
                        BkProgFn prog, void* user){
     long long total=bkFileSize(path);
-    FILE* f=_wfopen(path.c_str(),L"rb");
-    if(!f){ A.error=L"فایل باز نشد."; return; }
     if(prog) prog(10,L"خواندن توصیف‌گر نوار (MTF)…",user);
 
-    // Read only the leading descriptor region — capped so a 50GB .bak never
-    // gets pulled into RAM. The TAPE/SSET/DBDB descriptors all live up front.
-    const size_t CAP = 256*1024;
-    std::vector<uint8_t> d(CAP);
-    size_t got=fread(d.data(),1,CAP,f);
-    fclose(f);
-    d.resize(got);
-    if(got<64 || memcmp(d.data(),"TAPE",4)!=0){
-        A.error=L"این فایل با امضای MTF (TAPE) آغاز نمی‌شود.";
+    // §C: parse the leading descriptor region with the vendored, fully
+    // bounds-checked MTF reader (backup_mtf.h/.cpp). It reads ONLY the first
+    // ~4 MiB of the file — a 14 GB .bak is NEVER pulled into RAM. Every field
+    // access inside the reader is span-bounds-checked, so a truncated or
+    // corrupt descriptor block can never read out of bounds.
+    if(prog) prog(20,L"خواندن ابتدای فایل (حداکثر ۴ مگابایت)…",user);
+    const size_t CAP = 4u*1024u*1024u;           // 4 MiB descriptor window
+    size_t got=0;
+    mtf::Descriptor D = mtf::parseFile(path.c_str(), CAP, &got);
+
+    if(got<64 || !D.isMtf){
+        // §C.5: graceful, never-crash failure with the required Persian text.
+        A.error=L"فرمت پشتیبان شناسایی نشد";
         return;
     }
     BackupLog_Breadcrumb(L"MTF: TAPE descriptor confirmed");
+    if(prog) prog(60,L"پیمایش بلوک‌های توصیف‌گر…",user);
 
-    auto rd16=[&](size_t o)->uint16_t{
-        if(o+2>d.size()) return 0; return (uint16_t)(d[o]|(d[o+1]<<8)); };
-    auto rd32=[&](size_t o)->uint32_t{
-        if(o+4>d.size()) return 0;
-        return (uint32_t)(d[o]|(d[o+1]<<8)|(d[o+2]<<16)|(d[o+3]<<24)); };
-
-    // MTF string: (uint16 size, uint16 offset) stored within the DBLK at a
-    // type-specific position. Read a string relative to a DBLK start `base`.
-    auto mtfStr=[&](size_t base, size_t sizeFieldOff, bool unicode)->std::wstring{
-        uint16_t sz = rd16(base+sizeFieldOff);
-        uint16_t off= rd16(base+sizeFieldOff+2);
-        if(sz==0||off==0) return L"";
-        size_t s=base+off; if(s>=d.size()) return L"";
-        size_t avail=d.size()-s; if(sz>avail) sz=(uint16_t)avail;
-        if(unicode){
-            std::wstring w; w.reserve(sz/2);
-            for(size_t i=0;i+1<(size_t)sz;i+=2) w.push_back((wchar_t)(d[s+i]|(d[s+i+1]<<8)));
-            return w;
-        }
-        int wl=MultiByteToWideChar(CP_ACP,0,(const char*)&d[s],sz,NULL,0);
-        std::wstring w(wl,L'\0');
-        if(wl>0) MultiByteToWideChar(CP_ACP,0,(const char*)&d[s],sz,&w[0],wl);
-        return w;
-    };
-
-    if(prog) prog(35,L"پیمایش بلوک‌های توصیف‌گر…",user);
-    // String-storage type lives at TAPE +14 (1=ANSI, 2=Unicode in most writers).
-    uint16_t strFmt = rd16(14);
-    bool uni = (strFmt==2);
-
-    // Walk the DBLK chain. Each common header carries a uint32 "displayable
-    // size" of the DBLK at +24 (little endian, low dword sufficient for headers)
-    // and we advance to the next block on a fixed-block-size boundary. SQL
-    // Server MTF uses 1024-byte logical blocks for descriptors; align up.
-    auto isType=[&](size_t o,const char* t)->bool{
-        return o+4<=d.size() && memcmp(&d[o],t,4)==0; };
-    auto alignUp=[&](size_t v,size_t a)->size_t{ return ((v+a-1)/a)*a; };
-
-    std::wstring mediaName, setName, vendor, machine, software;
-    int sets=0, volumes=0, dbCount=0;
+    const bool uni = D.unicode;
+    std::wstring mediaName=D.mediaName, setName=D.setName, vendor=D.vendor,
+                 machine=D.serverName, software=D.software, dbName=D.databaseName;
+    int sets=D.sets, volumes=D.volumes, dbCount=D.dbFiles;
     std::wstring dbFiles;
-    {
-        // SSET (backup-set) descriptor is the most informative for SQL Server.
-        // Its data-set name / description fields begin near +52 for the common
-        // header variants. We scan block by block.
-        size_t pos=0, guard=0;
-        size_t blk = 1024;                       // MTF descriptor block size
-        // refine block size from TAPE "format logical block size" hint at +38
-        uint16_t hint=rd16(38);
-        if(hint==512||hint==1024||hint==2048||hint==4096) blk=hint;
-        while(pos+4<=d.size() && guard<512){
-            guard++;
-            if(isType(pos,"TAPE")){
-                // media/tape name string at +52 (size/off pair) in many writers
-                if(mediaName.empty()) mediaName=mtfStr(pos,52,uni);
-                if(software.empty())  software =mtfStr(pos,60,uni);
-            } else if(isType(pos,"SSET")){
-                sets++;
-                if(setName.empty())  setName =mtfStr(pos,52,uni);
-                if(vendor.empty())   vendor  =mtfStr(pos,56,uni);
-                if(machine.empty())  machine =mtfStr(pos,72,uni);
-            } else if(isType(pos,"VOLB")){
-                volumes++;
-                if(machine.empty())  machine =mtfStr(pos,52,uni);
-            } else if(isType(pos,"DBDB")||isType(pos,"FILE")){
-                dbCount++;
-                std::wstring nm=mtfStr(pos,52,uni);
-                if(!nm.empty() && dbCount<=32) dbFiles+=L"  • "+nm+L"\r\n";
-            } else if(isType(pos,"ESET")||isType(pos,"EOTM")){
-                break;                            // end of set / end of media
-            }
-            // advance: use the DBLK "size of formatted/displayable size" at +24
-            // when sane, else a single block; always align to block boundary.
-            uint32_t dsize=rd32(pos+24);
-            size_t step = (dsize>=blk && dsize<d.size()) ? dsize : blk;
-            size_t next = alignUp(pos+step, blk);
-            if(next<=pos) next=pos+blk;
-            pos=next;
-            if(prog && d.size()>0){
-                int pct=35+(int)(45.0*(double)pos/(double)d.size());
-                if(pct>82) pct=82; prog(pct,L"خواندن بلوک‌ها…",user);
-            }
-        }
-    }
+    for(const auto& nm : D.fileNames) dbFiles += L"  • " + nm + L"\r\n";
+
+    // Re-decode ANSI names through CP_ACP for correct code-page handling (the
+    // vendored reader gives a Latin-1 fallback for the ANSI case).
+    if(prog) prog(80,L"بازخوانی نام‌ها…",user);
 
     if(prog) prog(88,L"محاسبهٔ اثر انگشت توصیف‌گر…",user);
-    Sha256 sh; sh.init();
-    sh.update(d.data(), got<8192?got:8192);     // fingerprint of the descriptor
-    uint8_t dig[32]; sh.final(dig);
-    std::wstring fp=hex32(dig);
+    // Fingerprint the first 8 KiB of the descriptor region we already read.
+    std::wstring fp;
+    {
+        size_t fpCap = got<8192?got:8192;
+        std::vector<uint8_t> head(fpCap);
+        FILE* ff=_wfopen(path.c_str(),L"rb");
+        if(ff){ size_t r=fread(head.data(),1,fpCap,ff); fclose(ff); head.resize(r); }
+        Sha256 sh; sh.init();
+        sh.update(head.data(), head.size());
+        uint8_t dig[32]; sh.final(dig);
+        fp=hex32(dig);
+    }
 
     if(prog) prog(94,L"تهیهٔ گزارش…",user);
     {
         BkSection s; s.title=L"نوع بکاپ و نسخهٔ فرمت";
         s.body =L"نوع: پشتیبان بومی SQL Server (فرمت نوار مایکروسافت – MTF)\r\n";
         s.body+=L"امضای فایل: TAPE (معتبر)\r\n";
+        if(!D.backupType.empty()){
+            std::wstring bt = D.backupType==L"Full"? L"کامل (Full)"
+                            : D.backupType==L"Differential"? L"تفاضلی (Differential)"
+                            : D.backupType==L"Log"? L"گزارش تراکنش (Log)"
+                            : D.backupType;
+            s.body+=L"نوع پشتیبان: "+bt+L"\r\n";
+        }
         s.body+=L"کدگذاری رشته‌ها: "+std::wstring(uni?L"Unicode":L"ANSI");
         A.sections.push_back(s);
     }
     {
         BkSection s; s.title=L"مشخصات مجموعهٔ پشتیبان";
+        if(!dbName.empty())    s.body+=L"نام پایگاه‌داده: "+dbName+L"\r\n";
         if(!mediaName.empty()) s.body+=L"نام رسانه: "+mediaName+L"\r\n";
         if(!setName.empty())   s.body+=L"نام مجموعهٔ پشتیبان: "+setName+L"\r\n";
         if(!machine.empty())   s.body+=L"نام رایانه/سرور: "+machine+L"\r\n";
         if(!vendor.empty())    s.body+=L"سازندهٔ نرم‌افزار: "+vendor+L"\r\n";
         if(!software.empty())  s.body+=L"نرم‌افزار پشتیبان‌گیر: "+software+L"\r\n";
+        if(D.compatLevel>0)    s.body+=L"سطح سازگاری: "+bkNum(D.compatLevel)+L"\r\n";
         s.body+=L"تعداد مجموعه‌های پشتیبان (SSET): "+bkNum(sets)+L"\r\n";
         s.body+=L"تعداد جلدها (VOLB): "+bkNum(volumes);
         if(s.body.empty()) s.body=L"اطلاعات توصیفی قابل‌خواندنی یافت نشد.";
@@ -561,6 +508,8 @@ static void analyzeMtf(const std::wstring& path, BkAnalysis& A,
         s.body+=L"بررسی یکپارچگی: امضای معتبر MTF/TAPE شناسایی شد.";
         A.sections.push_back(s);
     }
+    A.dbName   = dbName;
+    A.fileType = L"mtf";
     A.ok=true;
 }
 
@@ -662,6 +611,7 @@ static void analyzeCore(const std::wstring& path, BkAnalysis& A,
         if(head.size()>=16 && memcmp(head.data(),"SQLite format 3",15)==0){
             BackupLog_Breadcrumb(L"detected: SQLite 3");
             analyzeSqlite(path,A,prog,user);
+            if(A.fileType.empty()) A.fileType=L"sqlite";
         }
         // SQL Server native backup (MTF):  "TAPE"
         else if(head.size()>=4 && memcmp(head.data(),"TAPE",4)==0){
@@ -672,6 +622,7 @@ static void analyzeCore(const std::wstring& path, BkAnalysis& A,
         else if(head[0]==0x50&&head[1]==0x4B&&head[2]==0x03&&head[3]==0x04){
             BackupLog_Breadcrumb(L"detected: ZIP");
             analyzeZip(path,A,prog,user);
+            if(A.fileType.empty()) A.fileType=L"zip";
         }
         else {
             // sniff text kind
@@ -686,6 +637,7 @@ static void analyzeCore(const std::wstring& path, BkAnalysis& A,
                     lo.find("insert into")!=std::string::npos)  kind=0;  // SQL
             BackupLog_Breadcrumb(L"detected: text/sql/json");
             analyzeText(path,A,kind,prog,user);
+            if(A.fileType.empty()) A.fileType = (kind==1?L"json":kind==0?L"sql":L"text");
         }
     } catch(const std::exception& ex){
         A.ok=false;
@@ -769,6 +721,18 @@ BkAnalysis analyzeBackupFile(const std::wstring& path, BkProgFn prog, void* user
         wchar_t db[256]; swprintf(db,256,L"duration_ms=%lu error=%s",
                                   (unsigned long)dt,A.error.c_str());
         BackupLog_Event(L"ANALYZE_FAIL",path.c_str(),db);
+    }
+    // §C.7: single-line regression breadcrumb to logs/app.log. NO PII —
+    // only the file base-name, the detected DB name (descriptor metadata,
+    // not patient data) and the format tag are recorded.
+    {
+        std::wstring base=path; size_t sl=base.find_last_of(L"\\/");
+        if(sl!=std::wstring::npos) base=base.substr(sl+1);
+        std::wstring line = A.ok ? L"ANALYZE_OK" : L"ANALYZE_FAIL";
+        line += L" file="+base;
+        line += L" db="+(A.dbName.empty()?std::wstring(L"-"):A.dbName);
+        line += L" type="+(A.fileType.empty()?std::wstring(L"-"):A.fileType);
+        logLine(line);
     }
     return A;
 }
