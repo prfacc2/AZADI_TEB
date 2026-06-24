@@ -9,6 +9,12 @@
 
 using namespace Gdiplus;
 
+// §8 (1.14.0): structured, persistent designer error/crash log
+// (logs\print_designer.log). Forward-declared at file scope so the namespace'd
+// UI code (e.g. OpenDesignerWindow's create-failure path) can call it; the
+// definition lives with the public crash-containment entries below.
+static void PrintDesigner_Log(const wchar_t* where, const wchar_t* detail);
+
 // ---------------------------------------------------------------- ids --------
 namespace {
 
@@ -884,6 +890,16 @@ static void OpenDesignerWindow(HWND owner,const DesignerLaunch& launch,
     HWND h=CreateWindowExW(0,CLS,titleTxt.c_str(),
         WS_POPUP|WS_VISIBLE|WS_CLIPCHILDREN,
         wa.left,wa.top,wa.right-wa.left,wa.bottom-wa.top,owner,NULL,g_hInst,NULL);
+    // §8 (1.14.0) hardening: if the host window could not be created, never
+    // proceed to wire controls against a NULL HWND (that was a guaranteed
+    // fault). Free state, re-enable the owner, and bail gracefully.
+    if(!h || !IsWindow(h)){
+        Breadcrumb(L"print designer: editor window create failed");
+        PrintDesigner_Log(L"editor",L"CreateWindow returned NULL");
+        delete st;
+        if(owner && IsWindow(owner)) EnableWindow(owner,TRUE);
+        return;
+    }
     SetWindowLongPtrW(h,GWLP_USERDATA,(LONG_PTR)st);
 
     createFlatButton(h,IDC_DSG_SAVE,L"\u0630\u062e\u06cc\u0631\u0647",ICO_SAVE,BS_PRIMARY,0,0,10,10);
@@ -967,23 +983,68 @@ static void PrintDesigner_OpenCore(HWND hMain){
     Breadcrumb(L"print designer: closed");
 }
 
-// §8 (1.12.0): crash containment. MinGW's GCC win32 build does not expose
-// MS-style __try/__except for arbitrary code, so — mirroring the backup
-// analyzer's proven approach — we arm a thread-local vectored exception
-// handler that longjmp()s back to a landing pad established here on a genuine
-// hardware fault originating inside the designer open flow. Faults anywhere
-// else in the app fall through to the normal crash handler untouched. The
-// REAL bugs are fixed above; this is belt-and-braces fault isolation so a
-// regression can never again be process-fatal on «print designer: open».
+// §8 (1.14.0): crash containment — strengthened.
+//  MinGW's GCC win32 build does not expose MS-style __try/__except for
+//  arbitrary code, so — mirroring the backup analyzer's proven approach — we
+//  arm a thread-local vectored exception handler that longjmp()s back to a
+//  landing pad established here on a genuine hardware fault originating inside
+//  the designer open flow. Faults anywhere else in the app fall through to the
+//  normal crash handler untouched.
+//
+//  The REAL bugs are fixed up-front (every init step is guarded, the picker and
+//  editor never dereference a NULL/garbage state, bindings are reconciled and
+//  re-validated, designs are sanitized before the canvas sees them). This VEH
+//  is belt-and-braces fault isolation so a regression can never again be
+//  process-fatal on «print designer: open» — AND, critically, the landing pad
+//  now performs a full cleanup so the app is left in a CONSISTENT state and the
+//  designer can be opened again afterwards:
+//    • release any mouse capture grabbed mid-drag
+//    • tear down orphaned inspector child windows (global handle table)
+//    • destroy any half-built designer/picker popup still on screen
+//    • re-enable the owner so the UI is not frozen
+//    • write a structured, persistent crash report (logs\print_designer.log)
+//  A re-entrancy guard makes a second concurrent open a no-op (idempotent).
 static thread_local jmp_buf s_pdJmp;
 static thread_local bool    s_pdArmed = false;
 static thread_local DWORD   s_pdFaultCode = 0;
+static bool                 s_pdOpening = false;   // re-entrancy / idempotency
+
+// Persistent, structured designer error log (logs\print_designer.log).
+static void PrintDesigner_Log(const wchar_t* where, const wchar_t* detail){
+    SYSTEMTIME st = iranNow();
+    wchar_t hdr[96];
+    swprintf(hdr,96,L"[%04d-%02d-%02d %02d:%02d:%02d] print_designer/",
+             st.wYear,st.wMonth,st.wDay,st.wHour,st.wMinute,st.wSecond);
+    std::wstring line = hdr; line += (where?where:L"?");
+    line += L": "; line += (detail?detail:L""); line += L"\r\n";
+    writeFileUtf8(logsDir()+L"\\print_designer.log", line, true);
+}
+
+// Best-effort, exception-safe teardown of any windows the designer may have
+// left on screen after a contained fault. Class names are matched so we only
+// ever touch our own popups.
+static void PrintDesigner_PurgeWindows(){
+    ReleaseCapture();
+    clearInspector();                       // destroys + zeroes the global table
+    const wchar_t* CLS[]={L"AzPrintDesigner",L"AzSectionPicker",L"AzRestoreDesign"};
+    for(const wchar_t* cls : CLS){
+        HWND w=NULL;
+        while((w=FindWindowExW(NULL,NULL,cls,NULL))!=NULL && IsWindow(w)){
+            DestroyWindow(w);
+            // FindWindowEx restarts from the top each pass; bail if it cannot
+            // be destroyed to avoid an infinite loop.
+            if(IsWindow(w)) break;
+        }
+    }
+}
 
 static LONG CALLBACK pdOpenVeh(EXCEPTION_POINTERS* ep){
     DWORD code = ep && ep->ExceptionRecord ? ep->ExceptionRecord->ExceptionCode : 0;
     if(s_pdArmed &&
        (code==EXCEPTION_ACCESS_VIOLATION || code==EXCEPTION_IN_PAGE_ERROR ||
-        code==EXCEPTION_DATATYPE_MISALIGNMENT || code==EXCEPTION_ARRAY_BOUNDS_EXCEEDED)){
+        code==EXCEPTION_DATATYPE_MISALIGNMENT || code==EXCEPTION_ARRAY_BOUNDS_EXCEEDED ||
+        code==EXCEPTION_STACK_OVERFLOW || code==EXCEPTION_ILLEGAL_INSTRUCTION ||
+        code==EXCEPTION_INT_DIVIDE_BY_ZERO)){
         Breadcrumb(L"print designer: VEH contained fault");
         s_pdFaultCode = code;
         s_pdArmed = false;
@@ -994,6 +1055,15 @@ static LONG CALLBACK pdOpenVeh(EXCEPTION_POINTERS* ep){
 
 void PrintDesigner_Open(HWND hMain){
     Breadcrumb(L"print designer: safe-open");
+    // Idempotency: if an open is already in flight (e.g. a double-click on the
+    // toolbar entry, or a re-entrant call from a contained-fault message box),
+    // do nothing instead of stacking two nested modal loops.
+    if(s_pdOpening){
+        Breadcrumb(L"print designer: open suppressed (already open)");
+        return;
+    }
+    s_pdOpening = true;
+
     PVOID veh = AddVectoredExceptionHandler(1, pdOpenVeh);
     s_pdFaultCode = 0;
     if(setjmp(s_pdJmp)==0){
@@ -1001,14 +1071,21 @@ void PrintDesigner_Open(HWND hMain){
         PrintDesigner_OpenCore(hMain);
         s_pdArmed = false;
     } else {
+        // Arrived here via longjmp() from the VEH — a hardware fault was
+        // contained. Restore a consistent UI state and persist diagnostics.
         s_pdArmed = false;
         Breadcrumb(L"print designer: contained fault on open");
-        if(hMain && IsWindow(hMain)) EnableWindow(hMain,TRUE);
+        wchar_t det[64]; swprintf(det,64,L"contained fault code=0x%08lX",
+                                  (unsigned long)s_pdFaultCode);
+        PrintDesigner_Log(L"open", det);
+        PrintDesigner_PurgeWindows();
+        if(hMain && IsWindow(hMain)){ EnableWindow(hMain,TRUE); SetForegroundWindow(hMain); }
         MessageBoxW(hMain && IsWindow(hMain)?hMain:NULL,
             L"\u0628\u0627\u0632 \u06a9\u0631\u062f\u0646 \u0637\u0631\u0627\u062d \u0686\u0627\u067e \u0628\u0627 \u062e\u0637\u0627 \u0631\u0648\u0628\u0631\u0648 \u0634\u062f\u060c \u0627\u0645\u0627 \u0628\u0631\u0646\u0627\u0645\u0647 \u0627\u062f\u0627\u0645\u0647 \u062f\u0627\u0631\u062f.",
             L"\u0637\u0631\u0627\u062d \u0686\u0627\u067e",MB_OK|MB_ICONWARNING);
     }
     if(veh) RemoveVectoredExceptionHandler(veh);
+    s_pdOpening = false;
 }
 
 // =====================================================================

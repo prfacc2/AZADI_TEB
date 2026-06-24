@@ -49,6 +49,9 @@ static std::vector<Section> sec_readAll(){
         s.is_active = _wtoi(f[4].c_str());
         s.created_at= f[5];
         s.updated_at= f[6];
+        // §7 (1.14.0): optional 8th field = net_meta. Older files have only 7
+        // fields and load unchanged (net_meta stays empty).
+        if(f.size() >= 8) s.net_meta = f[7];
         v.push_back(s);
     }
     return v;
@@ -65,7 +68,8 @@ static bool sec_writeAll(const std::vector<Section>& v){
         out += sec_esc(s.kind);    out += L'|';
         out += act;                out += L'|';
         out += sec_esc(s.created_at);out += L'|';
-        out += sec_esc(s.updated_at);out += L"\r\n";
+        out += sec_esc(s.updated_at);out += L'|';
+        out += sec_esc(s.net_meta); out += L"\r\n";
     }
     return writeFileUtf8(sec_path(), out, false);
 }
@@ -74,11 +78,18 @@ void Sections_Init(){
     std::vector<Section> v = sec_readAll();
     if(!v.empty()) return;     // already seeded
     struct Seed { const wchar_t* code; const wchar_t* name; const wchar_t* kind; };
+    // §7 (1.14.0): seeds use the stable category-code scheme
+    // (REC/APR/LAB/INJ/PHR/BIL/RAD/PHY). Codes are durable routing/sync keys;
+    // the Persian names are display-only and may be renamed later without
+    // breaking any binding.
     static const Seed seeds[] = {
         { L"REC01", L"\u067e\u0630\u06cc\u0631\u0634 \u0645\u0631\u06a9\u0632\u06cc", L"reception" },
         { L"REC02", L"\u067e\u0630\u06cc\u0631\u0634 \u0637\u0628\u0642\u0647 \u06f1", L"reception" },
+        { L"APR01", L"\u0646\u0648\u0628\u062a\u200c\u062f\u0647\u06cc", L"appointment" },
         { L"INJ01", L"\u062a\u0632\u0631\u06cc\u0642\u0627\u062a \u0648 \u067e\u0627\u0646\u0633\u0645\u0627\u0646", L"injection" },
         { L"LAB01", L"\u0622\u0632\u0645\u0627\u06cc\u0634\u06af\u0627\u0647", L"lab" },
+        { L"PHR01", L"\u062f\u0627\u0631\u0648\u062e\u0627\u0646\u0647", L"pharmacy" },
+        { L"BIL01", L"\u0635\u0646\u062f\u0648\u0642 / \u062d\u0633\u0627\u0628\u062f\u0627\u0631\u06cc", L"billing" },
         { L"RAD01", L"\u0631\u0627\u062f\u06cc\u0648\u0644\u0648\u0698\u06cc", L"radiology" },
         { L"PHY01", L"\u0641\u06cc\u0632\u06cc\u0648\u062a\u0631\u0627\u067e\u06cc", L"physio" },
     };
@@ -146,10 +157,41 @@ int Sections_Delete(int id){
 }
 
 const wchar_t* Sections_KindLabel(const std::wstring& kind){
-    if(kind==L"reception") return L"\u067e\u0630\u06cc\u0631\u0634";
-    if(kind==L"injection") return L"\u062a\u0632\u0631\u06cc\u0642\u0627\u062a";
-    if(kind==L"lab")       return L"\u0622\u0632\u0645\u0627\u06cc\u0634\u06af\u0627\u0647";
-    if(kind==L"radiology") return L"\u0631\u0627\u062f\u06cc\u0648\u0644\u0648\u0698\u06cc";
-    if(kind==L"physio")    return L"\u0641\u06cc\u0632\u06cc\u0648\u062a\u0631\u0627\u067e\u06cc";
+    if(kind==L"reception")   return L"\u067e\u0630\u06cc\u0631\u0634";
+    if(kind==L"appointment") return L"\u0646\u0648\u0628\u062a\u200c\u062f\u0647\u06cc";
+    if(kind==L"injection")   return L"\u062a\u0632\u0631\u06cc\u0642\u0627\u062a";
+    if(kind==L"lab")         return L"\u0622\u0632\u0645\u0627\u06cc\u0634\u06af\u0627\u0647";
+    if(kind==L"pharmacy")    return L"\u062f\u0627\u0631\u0648\u062e\u0627\u0646\u0647";
+    if(kind==L"billing")     return L"\u0635\u0646\u062f\u0648\u0642";
+    if(kind==L"radiology")   return L"\u0631\u0627\u062f\u06cc\u0648\u0644\u0648\u0698\u06cc";
+    if(kind==L"physio")      return L"\u0641\u06cc\u0632\u06cc\u0648\u062a\u0631\u0627\u067e\u06cc";
     return L"\u0633\u0627\u06cc\u0631";
+}
+
+// §7 (1.14.0): stable, durable category code for a section `kind`. These short
+// prefixes are the canonical routing/sync keys and never change with display
+// names. Unknown kinds collapse to a stable "GEN" (general) so a code is always
+// produced.
+const wchar_t* Sections_CategoryCode(const std::wstring& kind){
+    if(kind==L"reception")   return L"REC";
+    if(kind==L"appointment") return L"APR";
+    if(kind==L"lab")         return L"LAB";
+    if(kind==L"injection")   return L"INJ";
+    if(kind==L"pharmacy")    return L"PHR";
+    if(kind==L"billing")     return L"BIL";
+    if(kind==L"radiology")   return L"RAD";
+    if(kind==L"physio")      return L"PHY";
+    return L"GEN";
+}
+
+std::wstring Sections_CodePrefix(const Section& s){
+    // Leading alpha run of the stored code, e.g. "REC01" -> "REC".
+    std::wstring p;
+    for(wchar_t c : s.code){
+        if((c>=L'A'&&c<=L'Z') || (c>=L'a'&&c<=L'z')) p += (wchar_t)towupper(c);
+        else break;
+    }
+    if(!p.empty()) return p;
+    // No alpha prefix in the code — derive a durable one from the kind.
+    return Sections_CategoryCode(s.kind);
 }

@@ -15,8 +15,26 @@ struct Section {
     std::wstring kind;       // reception|injection|lab|radiology|physio|other
     int          is_active;
     std::wstring created_at, updated_at;
+    // §7 (1.14.0): stable, durable identity + network metadata. `net_meta` is an
+    // opaque, serializable string reserved for future network sync (node id,
+    // remote mapping key, …). It is optional in storage so older data files load
+    // unchanged. Routing/binding (print designer, future sync) must key off the
+    // STABLE category prefix + id/code, never the display name (`name_fa`).
+    std::wstring net_meta;
     Section():id(0),is_active(1){}
 };
+
+// Stable durable CATEGORY codes (§7). Section display names may change; these
+// short prefixes never do. The full per-section `code` is "<CAT><nn>"
+// (e.g. REC01). These are the canonical keys for routing + network sync.
+//   REC reception · APR appointment · LAB laboratory · INJ injection
+//   PHR pharmacy   · BIL billing     · RAD radiology  · PHY physiotherapy
+// Map a section `kind` to its stable 3-letter category code.
+const wchar_t* Sections_CategoryCode(const std::wstring& kind);
+// Extract the stable category prefix (leading alpha run) from a section code,
+// e.g. "REC01" -> "REC". Falls back to deriving it from `kind` when the code
+// has no alpha prefix. Always returns a stable, durable key (never a name).
+std::wstring   Sections_CodePrefix(const Section& s);
 
 // Ensure the store exists and is seeded on first run (idempotent).
 void Sections_Init();

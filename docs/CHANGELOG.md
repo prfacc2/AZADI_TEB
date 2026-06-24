@@ -5,6 +5,76 @@
 
 ---
 
+## 1.14.0 — 2026-06-24
+
+> **Incremental production refinement** of the 1.13.0 hybrid surface — no
+> rewrite, no regressions. The Reception/Appointment HTML surface is completed
+> into a polished, responsive, **three-zone** workspace; the native→HTML sync is
+> hardened with a deterministic loader watchdog and idempotent repeated opens;
+> the Settings panel is rebalanced (close button moved to the top-**right**,
+> profile circle slightly smaller and lower); the Print Designer open/close
+> lifecycle is crash-hardened; and the section identity model gains stable
+> category codes plus serialisable network metadata. Single static PE32 i386
+> EXE, zero warnings (`-Wall -Wextra -Werror`), Win7→Win11 x86/x64.
+
+### Added
+- **§7 Stable section identity** (`src/sections.h`, `src/sections.cpp`) — every
+  section now resolves to a stable 3-letter **category code** (REC reception ·
+  APR appointment · LAB laboratory · INJ injection · PHR pharmacy · BIL billing ·
+  RAD radiology · PHY physiotherapy · GEN generic) via
+  `Sections_CategoryCode()`, plus a durable `Sections_CodePrefix()` derived from
+  the section code. Routing keys off these stable identifiers, never display
+  names. Seeded appointment / pharmacy / billing sections (APR01/PHR01/BIL01).
+- **§8 Serialisable network metadata** — the `Section` record gains an optional
+  `net_meta` field, persisted as a backward-compatible 8th column (older files
+  with 7 columns still load). Keeps the section model network-ready while local
+  mode stays primary.
+- **§4 Loader watchdog** (`src/webhost_host.inc`, `src/webhost_run.inc`) — a
+  deterministic deadline (≈6 s hard cap, ≈1.5 s after `READYSTATE_COMPLETE`)
+  force-reveals the document if `DocumentComplete` is slow or lost, so the
+  centred loader can never stick. Forced reveals are logged.
+
+### Changed
+- **§2 Reception/Appointment HTML/CSS/JS completed** (`src/webhost_assets.inc`)
+  — the bare shell becomes a complete design system: `:root` theme tokens, a top
+  bar with brand, a tab strip, and a responsive **three-zone grid** (left
+  summary panel · centre form · right patient/search/insurance panel) with
+  cards, tiles, billing block, patient card, field/button states (focus, hover,
+  disabled), a compact/dense mode and breakpoints at 1180/1000/820 px. Primary
+  fields sit high — no scrolling for normal desktop tasks. JS adds tab switching,
+  **Enter→next field**, **Tab/Shift+Tab**, keyboard-safe dropdowns, print/save/
+  reset/open/search handlers, validation hooks and state hydration from the C++
+  authority via `window.azReceive`. The boot payload now carries each section's
+  stable `cat`/`prefix` keys.
+- **§3/§4 Native→HTML sync hardened** — reveal logic is centralised in one
+  idempotent `WebHost_RevealDocument()`; repeated `DocumentComplete` (tab
+  re-entry / internal navigation) re-pushes a refresh rather than re-running
+  boot; the boot push tolerates an empty payload (logged, still reveals).
+- **§5 Settings panel refined** (`src/settings.cpp`) — the close (×) button
+  moves from the top-left to the top-**right** corner (single `closeBtnRect()`
+  helper keeps paint/hover/hit-test in lock-step); the profile circle is
+  slightly **smaller** and sits slightly **lower**; the header is re-tuned so
+  the name/role lines stay clear of the first row. The panel covers the full
+  client area (scrim + opaque card, no bleed-through).
+
+### Fixed
+- **§6 Print Designer crash hardening** (`src/print_designer_ui.inc`) — the
+  open/close/reopen path is now idempotent (`s_pdOpening` guard), guards a NULL
+  editor-window creation, and the VEH containment landing pad catches a wider
+  set of faults (access violation, in-page error, misalignment, bounds, stack
+  overflow, illegal instruction, divide-by-zero), purges any orphaned designer
+  popups, re-enables the owner and shows a graceful warning instead of taking
+  the app down. Breadcrumb sequence and structured logs to
+  `logs\print_designer.log` are preserved.
+
+### Logging
+- **§9** All failure categories persist with timestamps and **no live UI
+  chatter**: hybrid host errors/watchdog/reveal/bridge → `logs\webhost_errors.log`
+  (duplicate-throttled); print designer init/binding/section-picker/editor
+  faults → `logs\print_designer.log`.
+
+---
+
 ## 1.13.0 — 2026-06-24
 
 > **Major production upgrade.** Reception & Appointment become a **hybrid

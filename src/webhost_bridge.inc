@@ -74,6 +74,8 @@ static std::wstring wh_sectionsJson(){
         whjson::Obj o;
         o.num(L"id",s.id);
         o.str(L"code",s.code);
+        o.str(L"cat",Sections_CategoryCode(s.kind));   // §7 stable category key
+        o.str(L"prefix",Sections_CodePrefix(s));        // §7 durable code prefix
         o.str(L"name",s.name_fa);
         o.str(L"kind",s.kind);
         o.str(L"kindLabel",Sections_KindLabel(s.kind));

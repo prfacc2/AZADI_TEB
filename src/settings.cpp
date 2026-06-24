@@ -70,7 +70,7 @@ static void freeBgCache(){
 
 // ---- geometry: a centered card -------------------------------------------
 static int cardW(){ return S(460); }
-static int headerH(){ return S(204); }   // cover + avatar + name + role (own lines)
+static int headerH(){ return S(212); }   // cover + avatar + name + role (own lines) — §5 tuned
 static int rowH(){ return S(58); }
 static int cardH(){
     int n = s_st ? (int)s_st->rows.size() : 5;
@@ -103,11 +103,19 @@ static int hitRow(HWND h, POINT pt){
 // button, or nothing). Used so WM_MOUSEMOVE invalidates ONLY the small region
 // whose hover state changed — never the whole full-screen scrim/shadow/blur
 // (that full repaint caused the stuttering on the settings window).
+// §5: the close (×) button lives at the TOP-RIGHT corner of the card. A single
+// helper defines its rect so paint, hover and hit-testing can never drift apart.
+static RECT closeBtnRect(const RECT& card){
+    RECT cb={card.right-S(40),card.top+S(14),card.right-S(14),card.top+S(40)};
+    return cb;
+}
+
 static bool hotRectFor(HWND h, int id, RECT& out){
     if(id==0 || id==-1) return false;
     RECT card=cardRect(h);
-    if(id==-2){ // close (×) button top-left
-        out = {card.left+S(10),card.top+S(10),card.left+S(44),card.top+S(44)};
+    if(id==-2){ // close (×) button top-right (§5)
+        RECT cb=closeBtnRect(card);
+        out = {cb.left-S(4),cb.top-S(4),cb.right+S(4),cb.bottom+S(4)};
         return true;
     }
     if(!s_st) return false;
@@ -314,13 +322,14 @@ static void buildBgCache(HWND h, HDC ref){
         DeleteObject(cardRgn);
     }
 
-    // close (×) icon top-left (the hover highlight is drawn live on top)
-    { RECT cb={card.left+S(14),card.top+S(14),card.left+S(40),card.top+S(40)};
+    // close (×) icon top-RIGHT (§5) — the hover highlight is drawn live on top
+    { RECT cb=closeBtnRect(card);
       RECT ci={cb.left+S(5),cb.top+S(5),cb.right-S(5),cb.bottom-S(5)};
       drawIcon(dc,ICO_X,ci,RGB(255,255,255),S(2)); }
 
-    // avatar
-    int avR=S(42), avCx=(card.left+card.right)/2, avCy=card.top+S(96);
+    // avatar (§5: slightly smaller and slightly lower so it sits clear of the
+    // cover band's top edge and is visually balanced under the close button)
+    int avR=S(37), avCx=(card.left+card.right)/2, avCy=card.top+S(104);
     RECT avo={avCx-avR-S(4),avCy-avR-S(4),avCx+avR+S(4),avCy+avR+S(4)};
     gpRoundRect(dc,avo,avR+S(4),g_theme.surfaceTop,CLR_INVALID,255);
     RECT av={avCx-avR,avCy-avR,avCx+avR,avCy+avR};
@@ -366,7 +375,7 @@ static void paintRows(HWND h, HDC dc){
     SetBkMode(dc,TRANSPARENT);
     // live close (×) hover highlight (icon itself lives in the cached bg)
     if(s_st && s_st->hot==-2){
-        RECT cb={card.left+S(14),card.top+S(14),card.left+S(40),card.top+S(40)};
+        RECT cb=closeBtnRect(card);
         gpRoundRect(dc,cb,S(8),RGB(255,255,255),CLR_INVALID,60);
         RECT ci={cb.left+S(5),cb.top+S(5),cb.right-S(5),cb.bottom-S(5)};
         drawIcon(dc,ICO_X,ci,RGB(255,255,255),S(2));
@@ -464,7 +473,7 @@ static LRESULT CALLBACK setProc(HWND h, UINT m, WPARAM w, LPARAM l){
         POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
         RECT card=cardRect(h);
         int hr;
-        RECT cb={card.left+S(14),card.top+S(14),card.left+S(40),card.top+S(40)};
+        RECT cb=closeBtnRect(card);
         if(PtInRect(&cb,pt)) hr=-2; else hr=hitRow(h,pt);
         if(s_st && hr!=s_st->hot){
             // v1.7.0 perf: repaint ONLY the two affected rectangles (the row we
@@ -491,7 +500,7 @@ static LRESULT CALLBACK setProc(HWND h, UINT m, WPARAM w, LPARAM l){
     case WM_LBUTTONDOWN: {
         POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
         RECT card=cardRect(h);
-        RECT cb={card.left+S(14),card.top+S(14),card.left+S(40),card.top+S(40)};
+        RECT cb=closeBtnRect(card);
         if(PtInRect(&cb,pt)){ closeSettingsPanel(); return 0; }
         int id=hitRow(h,pt);
         if(id==-1){ closeSettingsPanel(); return 0; }   // scrim

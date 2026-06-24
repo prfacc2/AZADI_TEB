@@ -42,20 +42,43 @@ static bool WebHost_WriteDocument(WebHost* wh){
     return ok;
 }
 
-// Called when the browser fires DocumentComplete. We may be re-entered for
-// sub-frames; we only act once on the top document and guard with wh->ready.
-static void WebHost_OnDocumentComplete(WebHost* wh){
+// Reveal the document: push the boot payload, retire the loader and lay out the
+// browser. §4: this is the single, idempotent place that flips a host from the
+// loading state to the live state — driven either by a real DocumentComplete or
+// by the watchdog deadline. Calling it more than once is a no-op.
+static void WebHost_RevealDocument(WebHost* wh, bool forced){
     if(!wh || wh->ready) return;
-    Breadcrumb(L"webhost: document complete");
+    Breadcrumb(forced?L"webhost: reveal (watchdog)":L"webhost: reveal (complete)");
     wh->ready=true;
+    wh->forcedReveal=forced;
     // wire the push channel + send the boot payload now the DOM + JS exist.
+    // The bridge boot builder is itself guarded; a failed/empty payload still
+    // reveals the view so the user never sees a stuck loader.
     std::wstring boot = WebHostBridge_BootPayload(wh->kind);
-    WebHost_PushToJs(wh, boot);
+    if(!boot.empty()) WebHost_PushToJs(wh, boot);
+    else WebHost_LogError(L"reveal",L"empty boot payload");
     // reveal the web view, retire the loader.
+    wh->loaderPct=100;
     wh->showLoader=false;
     if(wh->loaderTimer){ KillTimer(wh->hwnd,wh->loaderTimer); wh->loaderTimer=0; }
     WebHost_LayoutBrowser(wh);
     InvalidateRect(wh->hwnd,NULL,TRUE);
+}
+
+// Called when the browser fires DocumentComplete. We may be re-entered for
+// sub-frames; we only act once on the top document and guard with wh->ready.
+static void WebHost_OnDocumentComplete(WebHost* wh){
+    if(!wh) return;
+    wh->docCompleted=true;
+    if(wh->ready){
+        // §4: a *repeated* DocumentComplete (e.g. user re-enters the tab and the
+        // host is reused, or an internal navigation completes). Re-push a refresh
+        // so the page re-hydrates idempotently from the C++ authority.
+        std::wstring boot = WebHostBridge_BootPayload(wh->kind);
+        if(!boot.empty()) WebHost_PushToJs(wh, boot);
+        return;
+    }
+    WebHost_RevealDocument(wh, false);
 }
 
 // Push a JSON string into the page by invoking the global window.azReceive(str).
@@ -239,10 +262,29 @@ static LRESULT CALLBACK WebHost_Proc(HWND h,UINT m,WPARAM w,LPARAM l){
         return 0;
     case WM_TIMER:
         if(wh && w==WH_TIMER_LOADER && wh->showLoader){
+            wh->loaderTicks++;
             // gentle ease toward 90% while the document loads; the jump to 100%
-            // happens on DocumentComplete.
+            // happens on DocumentComplete (or the watchdog below).
             if(wh->loaderPct<90) wh->loaderPct += (90-wh->loaderPct)/6 + 1;
             InvalidateRect(h,NULL,FALSE);
+            // §4 watchdog: the timer fires every 60ms. If DocumentComplete has
+            // not arrived after ~6s (100 ticks) the document is either slow or
+            // the event was lost; force-reveal so the loader never sticks. We
+            // only force once the readystate is at least interactive, otherwise
+            // we wait the full deadline then reveal regardless.
+            if(!wh->ready){
+                READYSTATE rs=READYSTATE_UNINITIALIZED;
+                if(wh->web) wh->web->get_ReadyState(&rs);
+                bool deadline = wh->loaderTicks>=100;             // ~6s hard cap
+                bool interactiveStall = (rs>=READYSTATE_COMPLETE)
+                                        && wh->loaderTicks>=25;   // ~1.5s after complete
+                if(deadline || interactiveStall){
+                    WebHost_LogError(L"watchdog",
+                        deadline?L"document-complete deadline; forcing reveal"
+                                :L"readystate complete but no event; forcing reveal");
+                    WebHost_RevealDocument(wh, true);
+                }
+            }
         }
         return 0;
     case WM_APP_THEME:

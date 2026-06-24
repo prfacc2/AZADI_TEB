@@ -140,6 +140,9 @@ struct WebHost {
     bool          showLoader = true;
     int           loaderPct  = 0;      // 0..100 progress
     UINT_PTR      loaderTimer= 0;
+    int           loaderTicks= 0;      // §4: timer ticks since create (deadline watchdog)
+    bool          docCompleted=false;  // §4: real DocumentComplete observed (vs. forced)
+    bool          forcedReveal=false;  // §4: revealed by watchdog rather than event
 };
 
 class HostSite :
