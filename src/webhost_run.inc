@@ -310,6 +310,11 @@ HWND WebHost_Create(HWND parent, int kind){
     // initialized COM.
     CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
 
+    // Ensure modern Trident standards mode is registered before we create the
+    // control (idempotent; also done at startup). Without this the hosted
+    // WebBrowser falls back to IE7 quirks and modern CSS/JS break.
+    WebHost_SetBrowserEmulation();
+
     if(!WebHost_Available()){
         WebHost_LogError(L"create",L"MSHTML WebBrowser unavailable");
         return NULL;   // caller falls back to native form

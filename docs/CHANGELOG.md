@@ -5,6 +5,46 @@
 
 ---
 
+## 1.14.1 — 2026-06-24
+
+> **Critical fix for the hybrid Reception/Appointment surface.** The screens
+> showed a *Script Error — "Object doesn't support this property or method"* and
+> rendered unstyled because a hosted WebBrowser control defaults to **IE7 quirks
+> mode** (which lacks modern JS like `JSON`/`querySelectorAll` and ignores
+> `<meta X-UA-Compatible>`), and because **IE11 has no support for CSS custom
+> properties (`var()`)** — so every themed colour resolved to nothing. Both are
+> now fixed and the surface renders fully styled and interactive.
+
+### Fixed
+- **Trident standards mode** (`src/webhost.cpp`, `src/webhost.h`,
+  `src/main.cpp`, `src/webhost_run.inc`) — register this EXE under
+  `FEATURE_BROWSER_EMULATION = 11001` (IE11 edge/standards) in **HKCU** (per-user,
+  no admin) at startup and again defensively before the control is created
+  (idempotent, failure-tolerant). The hosted WebBrowser now runs modern CSS/JS
+  instead of IE7 quirks — eliminating the *“Object doesn’t support this property
+  or method”* script error.
+- **CSS custom-property ponyfill** (`src/webhost_assets.inc`) — because IE11
+  itself does not implement `var()`, an ES5 ponyfill detects the lack of native
+  `CSS.supports('--a','0')`, collects the page stylesheet, resolves every
+  `var(--token[, fallback])` to a concrete value from the theme token map, and
+  writes the result into a managed `<style id='az-theme'>`. `applyTheme()` now
+  updates the token map and re-resolves on every theme push (and uses native
+  custom properties on modern engines). Result: the three-zone layout, cards,
+  buttons, tiles and billing block render fully styled on IE11 *and* modern
+  engines.
+- **JSON polyfill guard** (`src/webhost_assets.inc`) — a compact ES3-safe
+  `JSON.stringify`/`JSON.parse` is installed only if the engine lacks a native
+  `JSON`, so the synchronous bridge can never die on its first call in a degraded
+  Trident.
+
+### Validated
+- Generated Reception & Appointment documents rendered headless in Chromium
+  (modern path) and in a forced **no-`var()`** configuration (IE11 ponyfill
+  path): **zero JavaScript errors**, three zones present, theme tokens resolved,
+  bridge calls (`apptNext`/`bill`/`lookup`) round-trip cleanly.
+
+---
+
 ## 1.14.0 — 2026-06-24
 
 > **Incremental production refinement** of the 1.13.0 hybrid surface — no

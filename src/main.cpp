@@ -914,6 +914,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
     InitCommonControlsEx(&icc);
 
     installVazirFont();              // embedded Vazirmatn + per-user install
+    // v1.14.1: register this EXE for modern Trident standards mode so the hybrid
+    // reception/appointment WebBrowser surfaces run modern CSS/JS instead of the
+    // IE7-quirks default (which silently breaks flexbox/grid + JSON/querySelector).
+    extern void WebHost_SetBrowserEmulation();
+    WebHost_SetBrowserEmulation();
     gdipStartup();                   // v1.3.0: GDI+ rendering layer
     seedDefaultDepts();              // v1.4.1: ensure «پذیرش» category exists
 

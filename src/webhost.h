@@ -55,6 +55,12 @@ HWND WebHost_Create(HWND parent, int kind);
 // in a degraded environment instead of showing a blank pane).
 bool WebHost_Available();
 
+// Register this EXE for modern Trident standards mode (FEATURE_BROWSER_EMULATION
+// = IE11 edge). Without this a hosted WebBrowser runs in IE7 quirks mode and
+// modern CSS/JS fail. Per-user (HKCU), idempotent, failure-tolerant. Call once
+// early at startup, before any hybrid surface is created.
+void WebHost_SetBrowserEmulation();
+
 // Persistent, throttled error logger for the hybrid layer. Writes to
 // logs\webhost_errors.log (created on demand). NEVER shows UI; NEVER floods —
 // identical messages within a short window are coalesced. Use for sync

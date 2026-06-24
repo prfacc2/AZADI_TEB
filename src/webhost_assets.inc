@@ -206,6 +206,27 @@ static std::wstring wh_commonHead(){
 static std::wstring wh_commonScript(){
     return
     L"<script type='text/javascript'>"
+    // ---- JSON polyfill guard (ES3-safe) ----------------------------------
+    // FEATURE_BROWSER_EMULATION promotes us to IE11 standards mode where JSON,
+    // querySelectorAll, addEventListener etc. all exist. As a belt-and-braces
+    // for any degraded Trident that still lacks the native JSON object, install
+    // a tiny compatible stringify/parse so the bridge can never die on the very
+    // first call (which is what produced the 'Object doesn't support…' error).
+    L"if(typeof JSON==='undefined'||!JSON.stringify){window.JSON=window.JSON||{};"
+    L" var _esc=function(s){return '\"'+String(s).replace(/[\\\\\"\\u0000-\\u001f]/g,"
+    L"  function(c){var m={'\\\\':'\\\\\\\\','\"':'\\\\\"','\\n':'\\\\n','\\r':'\\\\r','\\t':'\\\\t'};"
+    L"  return m[c]||('\\\\u'+('0000'+c.charCodeAt(0).toString(16)).slice(-4));})+'\"';};"
+    L" JSON.stringify=JSON.stringify||function(v){"
+    L"  if(v===null||typeof v==='undefined')return 'null';"
+    L"  if(typeof v==='number')return isFinite(v)?String(v):'null';"
+    L"  if(typeof v==='boolean')return String(v);"
+    L"  if(typeof v==='string')return _esc(v);"
+    L"  var i,a;"
+    L"  if(Object.prototype.toString.call(v)==='[object Array]'){a=[];"
+    L"   for(i=0;i<v.length;i++)a.push(JSON.stringify(v[i]));return '['+a.join(',')+']';}"
+    L"  a=[];for(i in v){if(v.hasOwnProperty(i)&&typeof v[i]!=='function')"
+    L"   a.push(_esc(i)+':'+JSON.stringify(v[i]));}return '{'+a.join(',')+'}';};"
+    L" JSON.parse=JSON.parse||function(s){return eval('('+s+')');}; }"
     L"var AZ={kind:0,boot:null,ready:false};"
     // synchronous bridge call; never throws across the COM boundary.
     L"function call(verb,args){try{"
@@ -214,10 +235,47 @@ static std::wstring wh_commonScript(){
     L"  return s?JSON.parse(s):{};"
     L"}catch(e){ if(window.external&&window.external.log)window.external.log('call '+verb+':'+e); return {}; }}"
     L"function logErr(m){try{if(window.external&&window.external.log)window.external.log(''+m);}catch(e){}}"
-    // theme: apply hex custom-properties + dark/compact body classes.
-    L"function applyTheme(t){if(!t)return;var r=document.documentElement.style;"
-    L"  for(var k in t){ if(typeof t[k]==='string'&&t[k].charAt(0)==='#'){ r.setProperty('--'+k,t[k]); } }"
+    // detect native CSS custom-property (var()) support. IE11 / older Trident
+    // do NOT support var(), so we must resolve tokens ourselves (ponyfill).
+    L"var AZ_VARS_OK=(function(){try{return !!(window.CSS&&CSS.supports&&CSS.supports('--a','0'));}catch(e){return false;}})();"
+    // remember the raw CSS text of our style sheets so the ponyfill can re-resolve
+    // var(--token) -> concrete value whenever the theme changes.
+    L"var AZ_CSS_RAW=null;"
+    L"function azCollectCss(){if(AZ_CSS_RAW!==null)return;var out=[];"
+    L"  var ss=document.getElementsByTagName('style');"
+    L"  for(var i=0;i<ss.length;i++){ if(ss[i].getAttribute('data-az')==='1') continue;"
+    L"    out.push(ss[i].innerHTML||ss[i].textContent||'');} AZ_CSS_RAW=out.join('\\n');}"
+    // current token map (token -> #hex). Seeded from the :root defaults so the
+    // ponyfill has values even before the first theme push.
+    L"var AZ_TOK={bg:'#eef1f7',surface:'#ffffff',surfaceTop:'#ffffff',surface2:'#eef1f6',"
+    L"  border:'#d7dce5',text:'#1d2330',textDim:'#6b7689',accent:'#2563eb',accent2:'#1d4ed8',"
+    L"  accentText:'#ffffff',danger:'#dc2626',success:'#16a34a',warn:'#d97706',"
+    L"  inputBg:'#ffffff',inputText:'#1d2330',"
+    L"  r:'14px',r2:'10px',r3:'8px',sp:'14px',sp2:'10px',sp3:'7px',"
+    L"  shadow:'0 1px 3px rgba(16,24,40,.08),0 6px 18px rgba(16,24,40,.06)',"
+    L"  ring:'0 0 0 3px rgba(37,99,235,.18)'};"
+    // resolve every var(--x[, fallback]) in the collected CSS to a literal value,
+    // then write the result into a single managed <style data-az='1'> element.
+    L"function azPonyResolve(){ azCollectCss(); if(AZ_CSS_RAW===null)return;"
+    L"  var css=AZ_CSS_RAW.replace(/var\\(\\s*--([a-zA-Z0-9_-]+)\\s*(?:,\\s*([^)]*))?\\)/g,"
+    L"    function(m,name,fb){ var v=AZ_TOK[name]; if(typeof v!=='undefined')return v;"
+    L"      return (typeof fb!=='undefined'&&fb!==null)?fb:'inherit'; });"
+    L"  var el=document.getElementById('az-theme');"
+    L"  if(!el){el=document.createElement('style');el.id='az-theme';el.setAttribute('data-az','1');"
+    L"    var hd=document.getElementsByTagName('head')[0]||document.documentElement;hd.appendChild(el);}"
+    L"  if(el.styleSheet){el.styleSheet.cssText=css;}else{el.innerHTML=css;} }"
+    // theme: apply hex tokens. On modern engines we set real custom properties;
+    // on IE11/old Trident we update AZ_TOK and re-run the ponyfill.
+    L"function applyTheme(t){if(!t)return;var k;"
+    L"  for(k in t){ if(typeof t[k]==='string'&&t[k].charAt(0)==='#'){ AZ_TOK[k]=t[k];"
+    L"     if(AZ_VARS_OK){try{document.documentElement.style.setProperty('--'+k,t[k]);}catch(_){}} } }"
+    L"  if(!AZ_VARS_OK){ azPonyResolve(); }"
     L"  if(typeof t.compact!=='undefined'){ document.body.className=t.compact?'compact':''; } }"
+    // on first load (before any push) make sure the ponyfill paints the defaults
+    // so the page is never unstyled on IE11.
+    L"if(!AZ_VARS_OK){ if(window.attachEvent){window.attachEvent('onload',azPonyResolve);} "
+    L"  else if(document.addEventListener){document.addEventListener('DOMContentLoaded',azPonyResolve,false);} "
+    L"  setTimeout(azPonyResolve,0); }"
     L"function toast(msg,kind){var t=document.getElementById('toast');if(!t)return;"
     L"  t.innerHTML=msg; t.className='toast show '+(kind||'');"
     L"  if(t._tm)clearTimeout(t._tm);"

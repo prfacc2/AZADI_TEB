@@ -112,4 +112,46 @@ bool WebHost_Available(){
     return false;
 }
 
+// ---------------------------------------------------------------------------
+//  Browser emulation (FEATURE_BROWSER_EMULATION)
+//
+//  A hosted WebBrowser control defaults to IE7 *quirks* mode regardless of any
+//  <meta http-equiv='X-UA-Compatible'> tag — that is why modern CSS (flexbox /
+//  grid / custom properties) and modern JS (JSON, querySelectorAll, …) silently
+//  fail with "Object doesn't support this property or method". The only reliable
+//  fix is to register our EXE under FEATURE_BROWSER_EMULATION so Trident runs in
+//  the newest standards mode installed on the machine.
+//
+//  We write to HKCU (per-user, no admin needed) for the bare EXE name, which is
+//  what the WebBrowser control keys off. Value 11001 = IE11 edge/standards mode
+//  (falls back gracefully to whatever Trident is actually installed). Done once,
+//  early, before any browser is created. Idempotent and failure-tolerant.
+// ---------------------------------------------------------------------------
+void WebHost_SetBrowserEmulation(){
+    wchar_t path[MAX_PATH]={0};
+    if(!GetModuleFileNameW(NULL,path,MAX_PATH)) return;
+    const wchar_t* exe=path;
+    for(const wchar_t* p=path; *p; ++p) if(*p==L'\\'||*p==L'/') exe=p+1;
+    if(!exe || !*exe) return;
+
+    const wchar_t* SUBKEY =
+        L"Software\\Microsoft\\Internet Explorer\\Main\\FeatureControl\\FEATURE_BROWSER_EMULATION";
+    HKEY hk=NULL;
+    if(RegCreateKeyExW(HKEY_CURRENT_USER,SUBKEY,0,NULL,REG_OPTION_NON_VOLATILE,
+                       KEY_READ|KEY_WRITE,NULL,&hk,NULL)!=ERROR_SUCCESS)
+        return;
+    DWORD desired=11001;                 // IE11 edge mode (standards)
+    DWORD cur=0, cb=sizeof(cur), type=0;
+    bool need=true;
+    if(RegQueryValueExW(hk,exe,NULL,&type,(LPBYTE)&cur,&cb)==ERROR_SUCCESS
+       && type==REG_DWORD && cur==desired)
+        need=false;                      // already set — idempotent
+    if(need)
+        RegSetValueExW(hk,exe,0,REG_DWORD,(const BYTE*)&desired,sizeof(desired));
+    RegCloseKey(hk);
+
+    // also register under the WOW6432 view is unnecessary for a 32-bit EXE on
+    // x64: the control reads the native HKCU view, which is what we wrote.
+}
+
 #include "webhost_host.inc"
