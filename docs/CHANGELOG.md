@@ -5,6 +5,59 @@
 
 ---
 
+## 1.14.3 — 2026-06-24
+
+> **Print-designer crash root-cause fix + reception UI redesign.** Eliminates
+> the recurring print-designer crash (reported `0x80000026`) at its true
+> source — a GDI+ font-construction fault during canvas paint on machines that
+> do not have the requested font installed — and completely redesigns the
+> reception screen into a modern, professional three-zone layout.
+
+### Fixed (print designer crash — root cause, §4)
+- **Crash-proof GDI+ font construction** (`src/print_designer_ui.inc`) — new
+  `makeSafeFont(reqName, pxSize, gdiStyle)` helper builds a font through a
+  deterministic fallback chain (requested family → bundled `Vazirmatn` →
+  `GenericSansSerif`), validating `GetLastStatus()`/`IsAvailable()` at every
+  step. The two previously-unguarded `FontFamily`/`Font` construction sites in
+  the canvas painter (LOGO/IMAGE/PHOTO placeholder glyph and the
+  APPTNO/LABEL/FIELD text path) now route through `makeSafeFont`, so a missing
+  font name can no longer throw inside GDI+ and trip the contained VEH fault.
+- **Safe VEH around the modal designer pump** (`src/print_designer_ui.inc`) —
+  `0x80000026` was the VEH's own `longjmp` status (`STATUS_LONGJMP`).
+  `longjmp`-ing out of a nested Win32 modal message pump unwinds past GDI+
+  destructors and `delete st`, corrupting state. `OpenDesignerWindow` now
+  disarms the handler (`s_pdArmed = false`) for the duration of its modal
+  `MSG` pump and re-arms it afterward, so a paint fault during
+  `DispatchMessage` is handled normally instead of being `longjmp`'d out of
+  deep Win32 dispatch. `s_pdArmed` was moved to file scope to make this
+  arm/disarm coordination explicit.
+
+### Changed (reception UI redesign)
+- **Modern design system** (`src/webhost_assets.inc`, `wh_commonHead()`) —
+  rebuilt the CSS with a medical-blue palette, elevated cards, accent bars,
+  icon chips, gradient primary/success buttons, a custom select caret, a
+  toast, and responsive breakpoints (1180px / 980px) plus a `compact` mode.
+- **Three-zone reception layout** (`src/webhost_assets.inc`,
+  `wh_receptionHtml()`) — removed the in-page "پذیرش بیمار" title bar and the
+  "خلاصه"/"عملیات" summary panel; lifted the form fields up so the screen
+  needs no scrolling. Right zone: patient avatar + counts, search keys with
+  استعلام buttons, insurance + supplementary insurance, treating doctor.
+  Center zone: مشخصات بیمار + بیمه و نوبت + save/new/reset actions. Left zone:
+  صدور قبض billing breakdown + print buttons.
+- **Reworked reception script** (`src/webhost_assets.inc`,
+  `wh_receptionScript()`) — new field IDs, `v()`/`on()` helpers, header
+  binding, `recalc()`/`lookup()`/`setPatient()`/`clearForm()`/`azSubmit()`/
+  `doPrint()` wiring, and a Ctrl+R clear shortcut. The appointment top bar was
+  updated to the new `.crumb` breadcrumb and the IE11 CSS-var ponyfill token
+  defaults were refreshed (added `shadowSm`).
+
+### Files
+- `src/print_designer_ui.inc`, `src/webhost_assets.inc`,
+  `src/app.h`, `src/app.rc`, `update/version.txt`,
+  `build/AzadiTeb.exe`, `build/AzadiTeb.exe.sha256`, `docs/CHANGELOG.md`.
+
+---
+
 ## 1.14.2 — 2026-06-24
 
 > **Production stabilization pass.** Hardens the print-designer open path

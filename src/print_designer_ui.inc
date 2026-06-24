@@ -15,6 +15,12 @@ using namespace Gdiplus;
 // definition lives with the public crash-containment entries below.
 static void PrintDesigner_Log(const wchar_t* where, const wchar_t* detail);
 
+// §1.14.3: the open-flow VEH "armed" flag is declared here at file scope (its
+// value is set by PrintDesigner_Open below) so that OpenDesignerWindow can
+// disarm it around its modal pump — longjmp out of a nested Win32 DispatchMessage
+// is unsafe, and the pump body is now independently crash-proof.
+static thread_local bool s_pdArmed = false;
+
 // ---------------------------------------------------------------- ids --------
 namespace {
 
@@ -300,6 +306,40 @@ static void designer_layout(HWND h);
 static void designer_buildInspector(HWND h);
 extern "C" {}
 
+// §1.14.3 crash-proofing: a GDI+ Font built from an un-installed family name on
+// some Windows configurations leaves the FontFamily in an error state, and
+// constructing a Font from it (or DrawString-ing with it) can raise a hardware
+// fault inside gdiplus.dll — which is exactly what produced the contained
+// "open editor" crash. makeSafeFont() guarantees a USABLE family every time by
+// degrading deterministically: requested name -> Vazirmatn -> GenericSansSerif.
+// The returned Font is heap-owned (caller deletes). `pxSize` is the final glyph
+// size in PIXELS (we always build with UnitPixel). We test each candidate
+// family's status before building a Font from it, then verify the Font itself.
+static Gdiplus::Font* makeSafeFont(const std::wstring& reqName,double pxSize,int gdiStyle){
+    using namespace Gdiplus;
+    static FontFamily s_vazir(L"Vazirmatn");                 // may or may not be Ok
+    const FontFamily* generic = FontFamily::GenericSansSerif(); // never fails
+    REAL px=(REAL)((pxSize>0?pxSize:10.0));
+    // 1) try the requested family (only if a real name was given)
+    if(!reqName.empty()){
+        FontFamily ff(reqName.c_str());
+        if(ff.GetLastStatus()==Ok && ff.IsAvailable()){
+            Font* f=new Font(&ff,px,(FontStyle)gdiStyle,UnitPixel);
+            if(f && f->GetLastStatus()==Ok) return f;
+            delete f;
+        }
+    }
+    // 2) try Vazirmatn
+    if(s_vazir.GetLastStatus()==Ok && s_vazir.IsAvailable()){
+        Font* f=new Font(&s_vazir,px,(FontStyle)gdiStyle,UnitPixel);
+        if(f && f->GetLastStatus()==Ok) return f;
+        delete f;
+    }
+    // 3) generic sans-serif — this path cannot fail on any GDI+ build.
+    Font* f=new Font(generic,px,(FontStyle)gdiStyle,UnitPixel);
+    return f;
+}
+
 // ---- GDI+ rendering of one item into canvas px coords ----------------------
 static std::wstring sampleValue(const std::wstring& field){
     if(field==L"firstName") return L"\u0639\u0644\u06cc";
@@ -352,43 +392,44 @@ static void drawItemGdip(Graphics& g,DesignerState* st,const PrintItem& it,bool 
         break; }
     case PIT_LOGO: case PIT_IMAGE: case PIT_PHOTO:{
         Pen p(bc,1.0f); g.DrawRectangle(&p,x,y,w,hgt);
-        FontFamily ff(L"Vazirmatn"); Font f(&ff,(REAL)(std::min(w,hgt)*0.5),
-            FontStyleRegular,UnitPixel);
-        SolidBrush tb(Color(255,150,150,150));
-        StringFormat sf; sf.SetAlignment(StringAlignmentCenter);
-        sf.SetLineAlignment(StringAlignmentCenter);
-        const wchar_t* gl=(it.type==PIT_PHOTO)?L"\u0639":(it.type==PIT_LOGO)?L"\u0644":L"\u062a";
-        RectF rf(x,y,w,hgt); g.DrawString(gl,-1,&f,rf,&sf,&tb);
+        // §1.14.3: crash-proof font (was an unguarded FontFamily that could fault
+        // on machines without Vazirmatn installed — a real "open editor" crash).
+        double gpt=(double)(std::min(w,hgt)*0.5); if(gpt<1) gpt=1;
+        Font* f=makeSafeFont(L"Vazirmatn",gpt,FontStyleRegular);
+        if(f){
+            SolidBrush tb(Color(255,150,150,150));
+            StringFormat sf; sf.SetAlignment(StringAlignmentCenter);
+            sf.SetLineAlignment(StringAlignmentCenter);
+            const wchar_t* gl=(it.type==PIT_PHOTO)?L"\u0639":(it.type==PIT_LOGO)?L"\u0644":L"\u062a";
+            RectF rf(x,y,w,hgt); g.DrawString(gl,-1,f,rf,&sf,&tb);
+            delete f;
+        }
         break; }
     case PIT_APPTNO: case PIT_LABEL: case PIT_FIELD: default:{
         std::wstring text;
         if(it.type==PIT_APPTNO) text=L"###";
         else if(it.type==PIT_FIELD) text=it.prefix+sampleValue(it.field)+it.suffix;
         else text=it.text;
-        // §1.12.0: validate the font family — an un-installed name leaves the
-        // FontFamily in an error state which makes the Font metrics garbage.
-        const wchar_t* fname=it.fontName.empty()?L"Vazirmatn":it.fontName.c_str();
-        FontFamily ff(fname);
-        FontFamily genericFallback(L"Vazirmatn");
-        const FontFamily* useFF = (ff.GetLastStatus()==Ok) ? &ff : &genericFallback;
-        if(useFF->GetLastStatus()!=Ok){
-            // last resort — GDI+ generic sans-serif never fails
-            useFF = FontFamily::GenericSansSerif();
-        }
+        // §1.14.3: crash-proof font construction (deterministic fallback chain).
         int style=FontStyleRegular;
         if(it.bold) style|=FontStyleBold;
         if(it.italic) style|=FontStyleItalic;
         double pt=(it.fontPt>0)?it.fontPt:10;
-        Font f(useFF,(REAL)(pt*1.333*st->zoom),(FontStyle)style,UnitPixel);
-        SolidBrush tb(tc);
-        StringFormat sf;
-        sf.SetFormatFlags(StringFormatFlagsDirectionRightToLeft);
-        if(it.align==1) sf.SetAlignment(StringAlignmentCenter);
-        else if(it.align==2) sf.SetAlignment(StringAlignmentFar);  // visual left in RTL
-        else sf.SetAlignment(StringAlignmentNear);                 // right
-        sf.SetLineAlignment(StringAlignmentCenter);
-        RectF rf(x,y,w,hgt);
-        g.DrawString(text.c_str(),-1,&f,rf,&sf,&tb);
+        double zf=(st->zoom>0?st->zoom:1.0);
+        double px2=pt*1.333*zf; if(px2<1) px2=1;
+        Font* f=makeSafeFont(it.fontName, px2, style);
+        if(f){
+            SolidBrush tb(tc);
+            StringFormat sf;
+            sf.SetFormatFlags(StringFormatFlagsDirectionRightToLeft);
+            if(it.align==1) sf.SetAlignment(StringAlignmentCenter);
+            else if(it.align==2) sf.SetAlignment(StringAlignmentFar);  // visual left in RTL
+            else sf.SetAlignment(StringAlignmentNear);                 // right
+            sf.SetLineAlignment(StringAlignmentCenter);
+            RectF rf(x,y,w,hgt);
+            g.DrawString(text.c_str(),-1,f,rf,&sf,&tb);
+            delete f;
+        }
         break; }
     }
     g.Restore(gs);
@@ -953,6 +994,14 @@ static void OpenDesignerWindow(HWND owner,const DesignerLaunch& launch,
     designer_layout(h);
     ShowWindow(h,SW_SHOW);
     EnableWindow(owner,FALSE);
+    // §1.14.3: DISARM the open-flow VEH before entering the modal pump. longjmp()
+    // out of a deeply-nested Win32 DispatchMessage (where designer_paint runs) is
+    // unsafe — it unwinds past GDI+ destructors and the `delete st` below, leaving
+    // COM/GDI+/window state corrupt and the editor un-reopenable. The setjmp
+    // landing pad in PrintDesigner_Open only needs to protect the SYNCHRONOUS
+    // setup phase (picker + state build + window create). The pump body itself is
+    // now crash-proof (every paint uses makeSafeFont + sanitized geometry).
+    bool wasArmed=s_pdArmed; s_pdArmed=false;
     // §F fix: self-contained modal pump (see RunSectionPicker note).
     MSG msg;
     while(IsWindow(h) && GetMessageW(&msg,NULL,0,0)){
@@ -962,6 +1011,7 @@ static void OpenDesignerWindow(HWND owner,const DesignerLaunch& launch,
         TranslateMessage(&msg); DispatchMessageW(&msg);
         if(!IsWindow(h)) break;
     }
+    s_pdArmed=wasArmed;   // re-arm for the remainder of the synchronous open flow
     EnableWindow(owner,TRUE); SetForegroundWindow(owner);
     delete st;
 }
@@ -1030,7 +1080,7 @@ static void PrintDesigner_OpenCore(HWND hMain){
 //    • write a structured, persistent crash report (logs\print_designer.log)
 //  A re-entrancy guard makes a second concurrent open a no-op (idempotent).
 static thread_local jmp_buf s_pdJmp;
-static thread_local bool    s_pdArmed = false;
+// s_pdArmed is declared at file scope near the top (see §1.14.3 note).
 static thread_local DWORD   s_pdFaultCode = 0;
 static bool                 s_pdOpening = false;   // re-entrancy / idempotency
 
