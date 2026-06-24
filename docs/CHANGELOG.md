@@ -5,6 +5,51 @@
 
 ---
 
+## 1.14.2 — 2026-06-24
+
+> **Production stabilization pass.** Hardens the print-designer open path
+> against dangling-pointer / stale-state faults on repeated open / close /
+> reopen cycles, and finalizes the release (version bump + rebuilt EXE).
+
+### Fixed (print designer crash-hardening, §4)
+- **Instance-safe inspector handle table** (`src/print_designer_ui.inc`) —
+  `OpenDesignerWindow` now calls `clearInspector()` before allocating a new
+  `DesignerState`, so a process-global inspector handle table left over from a
+  previous (possibly abnormally-closed) designer instance can never be reused
+  with stale `HWND`s.
+- **Post-destroy state detach** (`src/print_designer_ui.inc`) — `WM_DESTROY`
+  in `PickerProc`, `DesignerProc` and `RestoreProc` now clears
+  `GWLP_USERDATA`, so any late `WM_COMMAND` / drop / notify message that
+  arrives after the window is gone reads a null state pointer instead of
+  dereferencing freed memory.
+- **Section-picker id validation** (`src/print_designer_ui.inc`) —
+  `picker_syncSel` only records a selection when `ListView_GetItem` succeeds
+  **and** the item `lParam` (section id) is `> 0`, rejecting the
+  zero/garbage ids that previously fed the editor and triggered the contained
+  VEH fault.
+- **Restore-dialog null-safety** (`src/print_designer_ui.inc`) —
+  `RestoreProc` guards `WM_COMMAND` and the drop-zone load on a non-null
+  state pointer (and deletes the dropped-path payload unconditionally),
+  preventing a crash when the dialog is interacted with mid-teardown.
+
+### Changed
+- **Design sanitation** (`src/print_designer_ui.inc`) — on open, an empty
+  paper size defaults to `A5`, an out-of-range orientation is forced to `0`,
+  and degenerate item geometry (`w<=0` / `h<=0`) is clamped to `1`, so a
+  corrupt or partially-written design file can no longer drive the editor
+  into an invalid layout state.
+- **Version bump to 1.14.2** (`src/app.h`, `src/app.rc`,
+  `update/version.txt`) — `APP_VERSION_W`, `FILEVERSION` / `PRODUCTVERSION`
+  and the update channel manifest all advanced to `1.14.2`.
+
+### Validated
+- Clean cross-build with `./build.sh` under
+  `-Wall -Wextra -Werror` (i686-w64-mingw32, static PE32). The rebuilt
+  `build/AzadiTeb.exe` carries the `1.14.2` version resource and its
+  `build/AzadiTeb.exe.sha256` sidecar was regenerated to match.
+
+---
+
 ## 1.14.1 — 2026-06-24
 
 > **Critical fix for the hybrid Reception/Appointment surface.** The screens

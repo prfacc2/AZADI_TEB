@@ -101,8 +101,11 @@ static void picker_syncSel(PickState* st){
     for(int i=0;i<n;i++){
         if(ListView_GetCheckState(st->hList,i)){
             LVITEMW it; ZeroMemory(&it,sizeof(it)); it.mask=LVIF_PARAM; it.iItem=i;
-            ListView_GetItem(st->hList,&it);
-            st->selected.push_back((int)it.lParam);
+            // §1.14.2 hardening: only trust a section id we actually read back, and
+            // reject the LVITEM sentinel value 0 (a row whose lParam never set) so
+            // a garbage/zero id can never be carried into the editor open path.
+            if(ListView_GetItem(st->hList,&it) && (int)it.lParam>0)
+                st->selected.push_back((int)it.lParam);
         }
     }
     if(st->hCount && IsWindow(st->hCount)){
@@ -146,7 +149,12 @@ static LRESULT CALLBACK PickerProc(HWND h,UINT m,WPARAM w,LPARAM l){
     // posting WM_QUIT would terminate the outer designer/restore modal loop too
     // (the designer would then never appear). The modal loop below breaks on
     // !IsWindow(h), which fires as soon as this window is destroyed.
-    case WM_DESTROY: return 0;
+    case WM_DESTROY:
+        // §1.14.2 hardening: `st` is a stack object in RunSectionPicker. Detach it
+        // now so any listview notification that is dispatched AFTER teardown sees a
+        // NULL state (every handler bails on !st) instead of a dangling pointer.
+        SetWindowLongPtrW(h,GWLP_USERDATA,0);
+        return 0;
     }
     return DefWindowProcW(h,m,w,l);
 }
@@ -790,6 +798,10 @@ static LRESULT CALLBACK DesignerProc(HWND h,UINT m,WPARAM w,LPARAM l){
         DestroyWindow(h); return 0;
     case WM_DESTROY:
         clearInspector();
+        // §1.14.2: detach the state pointer so any message dispatched between
+        // DestroyWindow and the heap `delete st` in OpenDesignerWindow sees NULL
+        // (every handler guards on !st) rather than a freed DesignerState.
+        SetWindowLongPtrW(h,GWLP_USERDATA,0);
         // §F fix: no PostQuitMessage — the modal loop in OpenDesignerWindow()
         // breaks on !IsWindow(h). Injecting WM_QUIT here would tear down the
         // whole application message pump on the way back to the frame.
@@ -851,6 +863,13 @@ static void OpenDesignerWindow(HWND owner,const DesignerLaunch& launch,
         wc.hCursor=LoadCursor(NULL,IDC_ARROW); wc.lpszClassName=CLS;
         wc.hbrBackground=g_brBg; wc.style=CS_HREDRAW|CS_VREDRAW;
         RegisterClassW(&wc); reg=true; }
+    // §1.14.2 hardening: the inspector child-handle table is process-global and
+    // shared by every designer instance. If a previous editor closed abnormally
+    // (e.g. a contained fault) the table could still hold stale HWNDs that the
+    // next build would try to destroy. Purge it up-front so each open starts
+    // from a known-clean state (idempotent — clearInspector zeroes the count).
+    clearInspector();
+
     DesignerState* st=new DesignerState();
     st->hMain=owner; st->targetSections=launch.sectionIds;
     bool resolved=false;
@@ -871,10 +890,16 @@ static void OpenDesignerWindow(HWND owner,const DesignerLaunch& launch,
         st->design=blank;
         Breadcrumb(L"print designer: fallback blank design");
     }
+    // §1.14.2: a missing paper name leaves the paper combo unselected and lets a
+    // later orientation swap operate on an inconsistent design; default it.
+    if(st->design.paper.empty()) st->design.paper=L"A5";
+    if(st->design.orientation!=0 && st->design.orientation!=1) st->design.orientation=0;
     // Sanitize every item's font so GDI+ FontFamily never receives an empty name.
     for(auto& it : st->design.items){
         if(it.fontName.empty()) it.fontName=L"Vazirmatn";
         if(it.fontPt<=0)        it.fontPt=10;
+        if(it.w<=0)             it.w=1;       // zero-size items confuse hit-test/paint
+        if(it.h<=0)             it.h=1;
     }
     st->undo.seed(st->design);
 
@@ -1124,10 +1149,12 @@ static LRESULT CALLBACK RestoreProc(HWND h,UINT m,WPARAM w,LPARAM l){
     switch(m){
     case AZ_DROPZONE_DROPPED:{
         std::wstring* p=(std::wstring*)l;
-        if(p){ restore_loadFile(h,st,*p); delete p; }
+        if(st && p){ restore_loadFile(h,st,*p); }
+        delete p;                 // §1.14.2: free even if state is gone (no leak)
         return 0;
     }
     case WM_COMMAND:{
+        if(!st) return 0;         // §1.14.2: bail on a detached/post-destroy state
         int id=LOWORD(w);
         if(id==IDC_RST_PICK){
             wchar_t file[MAX_PATH]={0};
@@ -1157,7 +1184,11 @@ static LRESULT CALLBACK RestoreProc(HWND h,UINT m,WPARAM w,LPARAM l){
     case WM_ERASEBKGND:{ RECT rc; GetClientRect(h,&rc); FillRect((HDC)w,&rc,g_brSurface); return 1; }
     case WM_CLOSE: DestroyWindow(h); return 0;
     // §F fix: no PostQuitMessage — nested modal loop breaks on !IsWindow(h).
-    case WM_DESTROY: return 0;
+    case WM_DESTROY:
+        // §1.14.2: RestoreState is a stack object in RestoreDesign_Open; detach so
+        // a post-destroy message can never dereference a dangling pointer.
+        SetWindowLongPtrW(h,GWLP_USERDATA,0);
+        return 0;
     }
     return DefWindowProcW(h,m,w,l);
 }
