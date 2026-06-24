@@ -5,6 +5,71 @@
 
 ---
 
+## 1.14.4 — 2026-06-24
+
+> **Print-designer crash containment for the modal pump + reception save/insurance
+> hardening.** Closes the remaining crash window in «دیزاین پرینتر» (the
+> `0xC0000005` ACCESS_VIOLATION at `AzadiTeb.exe+0x12649`, last breadcrumb
+> *"print designer: open editor"*, garbage `EBP`) and finishes the patient
+> reception update (save error, empty insurance lists, ptype tariff parity).
+
+### Fixed (print designer crash — modal-pump containment, §4)
+- **Root cause:** release 1.14.3 *disarmed* the open-flow VEH (`s_pdArmed=false`)
+  around the designer's modal message pump on the theory that `longjmp` out of a
+  nested `DispatchMessage` was unsafe. That left the pump body — `designer_paint`
+  / `WM_COMMAND` inspector edits / `designer_buildInspector` — with **no fault
+  containment at all**, so any GDI+ paint fault became process-fatal. The crash
+  log (garbage `EBP`) is the classic signature of a fault dispatched with no
+  armed handler.
+- **Correction:** `longjmp` does **not** run C++ destructors or unwind frames —
+  it only restores SP/registers — so the "unwinding past GDI+ destructors" worry
+  was unfounded. This toolchain is DWARF-EH MinGW with **no `__try`/`__except`**,
+  so a vectored handler + `setjmp`/`longjmp` is the only available containment.
+- **Fix** (`src/print_designer_ui.inc`) — added a dedicated, thread-local pump
+  landing pad (`s_pdPumpJmp` / `s_pdPumpArmed`). `OpenDesignerWindow` installs a
+  per-pump `setjmp` recovery point and arms `s_pdPumpArmed` for the whole modal
+  loop; `pdOpenVeh` now recovers to the **innermost** armed pad (pump first, then
+  open-flow). On a contained pump fault we tear down the inspector + editor
+  window, still run `delete st`, re-enable the owner, and show a friendly notice —
+  the designer remains re-openable and the app never dies.
+- **`makeSafeFont` hardened further** — clamps the pixel size (`1 … 4000`),
+  guards `GenericSansSerif()` against a null/error family on a GDI+ that failed
+  to start, adds an `Arial` last-resort family, and returns `nullptr` (all call
+  sites already null-check) instead of ever building a `Font` from a bad family.
+
+### Fixed (patient reception)
+- **Save error «خطا در ثبت»** (`src/webhost_host.inc`, `src/webhost_bridge.inc`) —
+  `WebHostBridge_Call` is wrapped in `try/catch(...)` inside `BridgeDispatch::Invoke`
+  so a COM/STL exception can never escape as an empty `{}` (which the JS surfaced
+  as the generic save error); a proper JSON error is always returned.
+- **Empty insurance lists** (`src/webhost_bridge.inc`, `src/webhost_assets.inc`) —
+  added `boot` / `insurances` / `supp` bridge verbs; `fillInsurance()` pulls the
+  lists directly from C++ when the boot push is empty, and `selfHydrate()` polls
+  at 350 ms / 900 ms so the «بیمه پایه» / «بیمه مکمل» selects are never blank.
+- **Tariff parity on save** (`src/webhost_bridge.inc`, `src/webhost_assets.inc`) —
+  `saveReception` now falls back to `defaultServicePrice(ptype, ntype)` using the
+  real selected indices (was hardcoded `0,0`), matching the live bill preview;
+  `azSubmit` sends the `ptype`/`ntype` indices and the correct option *text*.
+
+### Reception UI redesign (carried from the in-progress 1.14.3 work)
+- Modern blue/white design system, bigger Vazir fonts, content-sized field
+  classes, correct field order (نام→نام خانوادگی→کد ملی→جنسیت→نام پدر→تاریخ
+  تولد→موبایل+تلفن ثابت→آدرس), «ثبت پذیرش و صدور قبض» moved to the visual left
+  (`flex-direction:row-reverse`), «پاک کردن» removed and «پذیرش جدید» now resets
+  with a `(Ctrl+R)` hint, smart Jalali birth-date mask (auto slashes, Ctrl+A,
+  correct backspace), live Rial thousands grouping with live billing recompute,
+  and responsive breakpoints. (`src/webhost_assets.inc`)
+
+### Files
+- `src/print_designer_ui.inc` — pump VEH landing pad + `makeSafeFont` hardening.
+- `src/webhost_assets.inc` — reception HTML/CSS/JS redesign, masks, insurance
+  fallback, ptype/ntype submit.
+- `src/webhost_bridge.inc` — `boot`/`insurances`/`supp` verbs, save tariff parity.
+- `src/webhost_host.inc` — `try/catch` around the bridge call in `Invoke`.
+- `src/app.h`, `src/app.rc` — version bump to **1.14.4**.
+
+---
+
 ## 1.14.3 — 2026-06-24
 
 > **Print-designer crash root-cause fix + reception UI redesign.** Eliminates

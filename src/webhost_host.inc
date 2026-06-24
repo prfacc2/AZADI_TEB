@@ -61,9 +61,19 @@ public:
                 if(dp->cArgs>=1 && dp->rgvarg[0].vt==VT_BSTR) args=dp->rgvarg[0].bstrVal;
             }
             std::wstring out;
-            // Bridge calls must NEVER throw across the COM boundary; the bridge
-            // implementation is itself guarded, but belt-and-braces here too.
-            out = WebHostBridge_Call(m_kind, verb, args);
+            // Bridge calls must NEVER throw across the COM boundary. A C++
+            // exception escaping here would surface to JS as an empty result
+            // (`{}`), which the page reports as the generic «خطا در ثبت». We
+            // therefore contain every exception and return a well-formed JSON
+            // error so the operator sees the real reason instead.
+            try {
+                out = WebHostBridge_Call(m_kind, verb, args);
+            } catch(...){
+                // Any C++ exception (std or otherwise) is contained and reported
+                // as a clean JSON error so JS never receives an empty result.
+                WebHost_LogError(L"verb-exc", verb.c_str());
+                out = L"{\"ok\":false,\"error\":\"\\u062e\\u0637\\u0627\\u06cc \\u062f\\u0627\\u062e\\u0644\\u06cc \\u062f\\u0631 \\u062b\\u0628\\u062a\"}";
+            }
             if(res){
                 VariantInit(res);
                 res->vt=VT_BSTR;

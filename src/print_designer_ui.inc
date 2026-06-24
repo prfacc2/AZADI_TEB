@@ -21,6 +21,15 @@ static void PrintDesigner_Log(const wchar_t* where, const wchar_t* detail);
 // is unsafe, and the pump body is now independently crash-proof.
 static thread_local bool s_pdArmed = false;
 
+// §1.14.4: a SECOND, independent vectored-handler landing pad used ONLY by the
+// designer's modal message pump. Declared at file scope (with its own armed
+// flag) so OpenDesignerWindow can install a per-iteration setjmp recovery point
+// for faults raised inside a dispatched message (paint / command / layout)
+// without disturbing the open-flow pad (s_pdJmp / s_pdArmed).
+#include <csetjmp>
+static thread_local jmp_buf s_pdPumpJmp;
+static thread_local bool    s_pdPumpArmed = false;
+
 // ---------------------------------------------------------------- ids --------
 namespace {
 
@@ -318,8 +327,9 @@ extern "C" {}
 static Gdiplus::Font* makeSafeFont(const std::wstring& reqName,double pxSize,int gdiStyle){
     using namespace Gdiplus;
     static FontFamily s_vazir(L"Vazirmatn");                 // may or may not be Ok
-    const FontFamily* generic = FontFamily::GenericSansSerif(); // never fails
     REAL px=(REAL)((pxSize>0?pxSize:10.0));
+    if(px<1)   px=1;
+    if(px>4000)px=4000;                  // absurd zoom * pt → clamp before GDI+
     // 1) try the requested family (only if a real name was given)
     if(!reqName.empty()){
         FontFamily ff(reqName.c_str());
@@ -335,9 +345,27 @@ static Gdiplus::Font* makeSafeFont(const std::wstring& reqName,double pxSize,int
         if(f && f->GetLastStatus()==Ok) return f;
         delete f;
     }
-    // 3) generic sans-serif — this path cannot fail on any GDI+ build.
-    Font* f=new Font(generic,px,(FontStyle)gdiStyle,UnitPixel);
-    return f;
+    // 3) generic sans-serif. GenericSansSerif() returns a process-wide singleton
+    //    that is normally non-null, but on a GDI+ that failed to start it can be
+    //    null or in an error state — guard it so we NEVER construct a Font from a
+    //    bad family (that was a real DrawString-time access violation source).
+    const FontFamily* generic = FontFamily::GenericSansSerif();
+    if(generic && generic->GetLastStatus()==Ok){
+        Font* f=new Font(generic,px,(FontStyle)gdiStyle,UnitPixel);
+        if(f && f->GetLastStatus()==Ok) return f;
+        delete f;
+    }
+    // 4) last resort: build from a generic family name directly. If even this
+    //    fails we return nullptr and EVERY caller already null-checks `f`.
+    {
+        FontFamily fam(L"Arial");
+        if(fam.GetLastStatus()==Ok){
+            Font* f=new Font(&fam,px,(FontStyle)gdiStyle,UnitPixel);
+            if(f && f->GetLastStatus()==Ok) return f;
+            delete f;
+        }
+    }
+    return nullptr;
 }
 
 // ---- GDI+ rendering of one item into canvas px coords ----------------------
@@ -994,26 +1022,64 @@ static void OpenDesignerWindow(HWND owner,const DesignerLaunch& launch,
     designer_layout(h);
     ShowWindow(h,SW_SHOW);
     EnableWindow(owner,FALSE);
-    // §1.14.3: DISARM the open-flow VEH before entering the modal pump. longjmp()
-    // out of a deeply-nested Win32 DispatchMessage (where designer_paint runs) is
-    // unsafe — it unwinds past GDI+ destructors and the `delete st` below, leaving
-    // COM/GDI+/window state corrupt and the editor un-reopenable. The setjmp
-    // landing pad in PrintDesigner_Open only needs to protect the SYNCHRONOUS
-    // setup phase (picker + state build + window create). The pump body itself is
-    // now crash-proof (every paint uses makeSafeFont + sanitized geometry).
-    bool wasArmed=s_pdArmed; s_pdArmed=false;
-    // §F fix: self-contained modal pump (see RunSectionPicker note).
+    // §1.14.4 — crash containment for the MODAL PUMP ITSELF.
+    //
+    // The previous release DISARMED the open-flow VEH around the pump on the
+    // theory that a longjmp() out of a deeply-nested DispatchMessage was unsafe,
+    // and asserted the pump body was "now crash-proof". A real field crash
+    // (0xC0000005 at AzadiTeb.exe+0x12649, last breadcrumb "open editor", garbage
+    // EBP) disproved that — a fault inside designer_paint / WM_COMMAND / the
+    // inspector rebuild during the pump became PROCESS-FATAL because nothing was
+    // armed to catch it. This toolchain is DWARF-EH MinGW with NO __try/__except,
+    // so a vectored handler + setjmp/longjmp is the only containment available.
+    //
+    // KEY CORRECTION: longjmp does NOT run C++ destructors or unwind frames — it
+    // simply restores SP/registers to the setjmp point. The earlier worry about
+    // "unwinding past GDI+ destructors" was wrong; the genuine cost is a few
+    // leaked transient GDI+/GDI objects from the faulting paint, which is fully
+    // acceptable in exchange for not killing the whole clinic app. We therefore
+    // install a PER-ITERATION landing pad INSIDE the pump: if Dispatch faults, we
+    // land back at the top of the loop, tear the editor window down safely, and
+    // leave the pump — `delete st` below still runs, the owner is re-enabled, and
+    // the designer can be opened again.
+    bool wasArmed=s_pdArmed;
     MSG msg;
-    while(IsWindow(h) && GetMessageW(&msg,NULL,0,0)){
+    // `volatile` because it is written after setjmp() and read again on the
+    // longjmp() return path — without it GCC's -Werror=clobbered (correctly)
+    // warns that the value could be lost across the non-local jump.
+    volatile bool pumpFaulted=false;
+    // Local landing pad — distinct from the open-flow s_pdJmp so a contained
+    // pump fault does not abort the whole open sequence (we want to fall through
+    // to the orderly teardown right here).
+    if(setjmp(s_pdPumpJmp)!=0){
+        // Arrived via the pump VEH after a hardware fault during a dispatched
+        // message. The faulting handler's stack is abandoned (no unwind needed).
+        pumpFaulted=true;
+        PrintDesigner_Log(L"pump", L"contained fault during modal dispatch");
+        Breadcrumb(L"print designer: pump fault contained");
+        clearInspector();                 // drop possibly half-built inspector
+        if(h && IsWindow(h)){ s_pdPumpArmed=false; DestroyWindow(h); }
+    }
+    // Arm the dedicated pump handler for the whole loop. It is independent of the
+    // open-flow handler so the two never fight over s_pdJmp.
+    s_pdPumpArmed = true;
+    s_pdArmed     = false;                // open-flow pad must not fire from here
+    while(!pumpFaulted && IsWindow(h) && GetMessageW(&msg,NULL,0,0)){
         if(msg.message==WM_QUIT){ PostQuitMessage((int)msg.wParam); break; }
         if(!IsWindow(h)) break;
         if(IsDialogMessageW(h,&msg)){ if(!IsWindow(h)) break; continue; }
         TranslateMessage(&msg); DispatchMessageW(&msg);
         if(!IsWindow(h)) break;
     }
+    s_pdPumpArmed=false;
     s_pdArmed=wasArmed;   // re-arm for the remainder of the synchronous open flow
-    EnableWindow(owner,TRUE); SetForegroundWindow(owner);
+    if(owner && IsWindow(owner)){ EnableWindow(owner,TRUE); SetForegroundWindow(owner); }
     delete st;
+    if(pumpFaulted){
+        MessageBoxW(owner && IsWindow(owner)?owner:NULL,
+            L"\u0648\u06cc\u0631\u0627\u06cc\u0634\u06af\u0631 \u062f\u06cc\u0632\u0627\u06cc\u0646 \u0628\u0627 \u062e\u0637\u0627\u06cc\u06cc \u0628\u0633\u062a\u0647 \u0634\u062f\u060c \u0627\u0645\u0627 \u0628\u0631\u0646\u0627\u0645\u0647 \u0627\u062f\u0627\u0645\u0647 \u062f\u0627\u0631\u062f. \u0644\u0637\u0641\u0627\u064b \u062f\u0648\u0628\u0627\u0631\u0647 \u062a\u0644\u0627\u0634 \u06a9\u0646\u06cc\u062f.",
+            L"\u0637\u0631\u0627\u062d \u0686\u0627\u067e",MB_OK|MB_ICONWARNING);
+    }
 }
 
 } // anonymous namespace
@@ -1113,13 +1179,26 @@ static void PrintDesigner_PurgeWindows(){
     }
 }
 
+static bool pdIsContainable(DWORD code){
+    return code==EXCEPTION_ACCESS_VIOLATION || code==EXCEPTION_IN_PAGE_ERROR ||
+           code==EXCEPTION_DATATYPE_MISALIGNMENT || code==EXCEPTION_ARRAY_BOUNDS_EXCEEDED ||
+           code==EXCEPTION_STACK_OVERFLOW || code==EXCEPTION_ILLEGAL_INSTRUCTION ||
+           code==EXCEPTION_INT_DIVIDE_BY_ZERO;
+}
 static LONG CALLBACK pdOpenVeh(EXCEPTION_POINTERS* ep){
     DWORD code = ep && ep->ExceptionRecord ? ep->ExceptionRecord->ExceptionCode : 0;
-    if(s_pdArmed &&
-       (code==EXCEPTION_ACCESS_VIOLATION || code==EXCEPTION_IN_PAGE_ERROR ||
-        code==EXCEPTION_DATATYPE_MISALIGNMENT || code==EXCEPTION_ARRAY_BOUNDS_EXCEEDED ||
-        code==EXCEPTION_STACK_OVERFLOW || code==EXCEPTION_ILLEGAL_INSTRUCTION ||
-        code==EXCEPTION_INT_DIVIDE_BY_ZERO)){
+    if(!pdIsContainable(code)) return EXCEPTION_CONTINUE_SEARCH;
+    // §1.14.4: the PUMP pad takes priority — it is the innermost armed landing
+    // point (the modal pump runs nested inside the open flow). Recovering to it
+    // lets OpenDesignerWindow do an orderly teardown (delete st, re-enable owner)
+    // instead of aborting the whole open sequence.
+    if(s_pdPumpArmed){
+        Breadcrumb(L"print designer: VEH contained pump fault");
+        s_pdFaultCode = code;
+        s_pdPumpArmed = false;
+        longjmp(s_pdPumpJmp, 1);
+    }
+    if(s_pdArmed){
         Breadcrumb(L"print designer: VEH contained fault");
         s_pdFaultCode = code;
         s_pdArmed = false;

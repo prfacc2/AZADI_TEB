@@ -254,7 +254,11 @@ std::wstring WebHostBridge_Call(int kind, const std::wstring& verb,
         int insIdx=r.insIdx, suppIdx=r.suppIdx;
         if(insIdx<0||insIdx>=N_INSURANCES) insIdx=0;
         if(suppIdx<0||suppIdx>=N_SUPP) suppIdx=0;
-        long long price=r.total; if(price<=0) price=defaultServicePrice(0,0);
+        // mirror the live preview: when the amount field is empty fall back to the
+        // tariff for the chosen patient/visit type (not a hardcoded عادی tariff).
+        int pTypeI=(int)whjson::getNum(argsJson,L"ptype");
+        int nTypeI=(int)whjson::getNum(argsJson,L"ntype");
+        long long price=r.total; if(price<=0) price=defaultServicePrice(pTypeI,nTypeI);
         r.total=price;
         r.mainShare=price*INSURANCES[insIdx].pct/100;
         r.baseDiff=price-r.mainShare;
@@ -331,6 +335,12 @@ std::wstring WebHostBridge_Call(int kind, const std::wstring& verb,
     }
     if(verb==L"theme"){ return wh_themeJson(); }
     if(verb==L"sections"){ return wh_sectionsJson(); }
+    // ---- explicit boot pull: lets the page request its hydration payload if a
+    //      pushed boot was missed (timing/watchdog). Returns the full boot obj. --
+    if(verb==L"boot"){ return WebHostBridge_BootPayload(kind); }
+    // ---- insurance lists on demand (belt-and-braces for an empty dropdown) ----
+    if(verb==L"insurances"){ return wh_insurancesJson(); }
+    if(verb==L"supp"){ return wh_suppJson(); }
     if(verb==L"ping"){ whjson::Obj o; o.boolean(L"ok",true); return o.done(); }
 
     // unknown verb — log once, return an empty object so JS never breaks.
