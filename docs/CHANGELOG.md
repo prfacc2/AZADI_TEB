@@ -5,6 +5,86 @@
 
 ---
 
+## 1.12.0 — 2026-06-24
+
+> Full update / stability / UI-modernization sprint. Hardens the print-designer
+> open path against the `0xC0000005` access-violation crash, makes the section
+> picker the single source of truth (only real, active sections), turns Settings
+> into a separate full-page scrollable surface in both modes, modernizes the
+> reception header and the management dashboard, ships a dedup-aware patient
+> **import pipeline** that feeds the same store the reception national-ID
+> auto-fill reads, and documents the SQL Server `.bak` analysis and the
+> network/service-readiness architecture. Single static 32-bit PE32 EXE, zero
+> warnings (`-Wall -Wextra -Werror`), no regressions, access levels and existing
+> data preserved.
+
+### Fixed
+- **§8 Print-designer crash (`ACCESS_VIOLATION 0xC0000005`)**
+  (`src/print_designer_ui.inc`, `src/print_designer.cpp/.h`) — root-caused to a
+  NULL `st` dereference in `PickerProc` (notifications can fire before
+  `SetWindowLongPtr`) and `LVN_ITEMCHANGED` re-entrancy during the picker's
+  `ListView_SetCheckState`. Added NULL guards in `picker_reload` /
+  `picker_syncSel` / `PickerProc`, a `reloading` re-entrancy flag, a
+  blank-A5-design synthesis fallback when no paper is resolved
+  (`paperW/paperH<=0`), GDI+ font-family validation (empty → Vazirmatn → generic
+  sans), and **VEH + `thread_local setjmp/longjmp` crash containment** around the
+  whole open path (`PrintDesigner_Open` → `PrintDesigner_OpenCore`). MinGW GCC
+  cannot use `__try/__except` for arbitrary code, so the proven VEH pattern from
+  `backup_analyzer.cpp` is reused.
+- **§2.E Reception blue section labels covered by text boxes**
+  (`src/reception.cpp`) — the caption-vs-input-well clearance is now an enforced,
+  strictly-positive invariant (`step >= rh + S(52)`, ≥`S(6)` clear band). Painter
+  (`WM_PAINT`) and control positioner (`tabPageLayout`) both consume the same
+  `rcVMetrics` geometry, so painted labels and real HWND controls can never drift
+  apart.
+
+### Added
+- **§11–§13 Patient import pipeline** (`src/data_ext.cpp`, `src/app.h`,
+  `src/backup.cpp`) — `parsePatientImportFile()` (UTF-8/16, auto delimiter
+  `| , ; TAB`, auto header in English **or** Persian, positional fallback) +
+  `importPatients()` with **national-ID dedup** (existing code → update in place,
+  new code → insert; invalid/empty codes and nameless rows skipped and counted)
+  returning an `ImportResult` reconciliation summary. Reachable from the hidden
+  backup-analyzer page via the new «ورود بیماران» button (Path B offline-staged).
+- **§5 Management CRM "at-a-glance" activity panel** (`src/manage.inc`) — a
+  read-only dashboard surface showing the total patient roster, today's
+  appointments, and a workload bar (today vs. busiest recorded day), sourced from
+  the existing stores; no data/functionality changed.
+- **§10/§15 Architecture docs** — `docs/BACKUP_IMPORT_ARCHITECTURE.md` (MTF
+  `.bak` layout, what the analyzer extracts and why table/column names need a
+  live restore, Path A/B import, dedup contract, network/service-repository
+  readiness) and `docs/UI_ARCHITECTURE_DECISION.md` (native GDI vs hybrid
+  HTML/CSS/JS decision and rationale for §3/§4).
+
+### Changed
+- **§1/§6 Settings → full-page + scrollable** (`src/user_settings.cpp`) — opens
+  as a full work-area `WS_POPUP|WS_VSCROLL` page (no background bleed) with a
+  centred content column and full vertical scrolling (mouse wheel + scrollbar +
+  `PgUp/PgDn/Home/End`), in **both** reception and management modes. Sub-page
+  header is pinned; scroll resets on push/pop.
+- **§2.A–C Reception header** (`src/main.cpp`, `src/reception.cpp`) — clock/date
+  always centred in the header band on every screen; header height reduced
+  (`mainBarH` S(64)→S(56)); slimmer, better-spaced tab strip (`tabBarH`
+  S(40)→S(38), explicit `tabGap()=S(8)`, refined top padding and edge margin).
+- **§7 Print-designer single source of truth** (`src/print_designer_ui.inc`,
+  `src/print_designer.cpp`) — the section picker now shows ONLY real, active,
+  defined sections (filters inactive on an empty query); `SectionDesign_Cleanup()`
+  reconciles section↔design bindings with the live `Sections` registry and
+  archives orphaned `.az_design` files; post-picker section validation.
+- **§9 Crash breadcrumbs** — fine-grained `Breadcrumb()` markers along the
+  print-designer open path (`PrintDesigner_OpenCore`, picker reload, restore).
+- **§17 Version → 1.12.0** (`src/app.h`, `src/app.rc`, `update/version.txt`).
+
+### Notes
+- **§14 Reception national-ID Enter auto-fill** and **§16 access levels / data
+  preservation** were already correct and are retained unchanged: imported
+  patients flow into the same `data\patients.dat` that `lookupCitizen` →
+  `lookupLocalPatient` reads, so Enter on a national code instantly recalls an
+  imported identity. The `canAccess` permission matrix and all `data\*.dat`
+  schemas are untouched.
+
+---
+
 ## 1.11.0 — 2026-06-24
 
 > Production hardening & UX-redesign sprint. A fully messenger-style settings

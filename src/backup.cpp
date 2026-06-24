@@ -1039,6 +1039,44 @@ static void bkAnCopy(HWND owner, const std::wstring& text){
     }
     CloseClipboard();
 }
+
+//  v1.12.0 (§11-13): pick a staged patient file and bulk-import it (Path B).
+//  Synchronous (import files are small relative to the multi-GB .bak), with a
+//  national-ID dedup summary message. Never touches the analyzer worker state.
+static void bkAnImportPatients(HWND h){
+    if(!s_bs) return;
+    wchar_t buf[1024]={0};
+    OPENFILENAMEW ofn={0}; ofn.lStructSize=sizeof(ofn); ofn.hwndOwner=h;
+    ofn.lpstrFilter=L"فایل بیماران (CSV/متنی)\0*.csv;*.txt;*.tsv;*.dat\0همه فایل‌ها\0*.*\0";
+    ofn.lpstrFile=buf; ofn.nMaxFile=1024;
+    ofn.lpstrTitle=L"انتخاب فایل بیماران برای ورود (دارای کد ملی)";
+    ofn.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST|OFN_EXPLORER;
+    if(!GetOpenFileNameW(&ofn)) return;
+    Breadcrumb(L"patient import: start");
+    ImportResult r=importPatientsFromFile(buf);
+    if(!r.ok && r.inserted==0 && r.updated==0){
+        std::wstring msg=L"ورود بیماران ناموفق بود.";
+        if(!r.error.empty()) msg+=L"\n"+r.error;
+        MessageBoxW(h,msg.c_str(),L"ورود بیماران",MB_ICONERROR|MB_OK);
+        Breadcrumb(L"patient import: failed");
+        return;
+    }
+    wchar_t mb[512];
+    swprintf(mb,512,
+        L"ورود بیماران کامل شد.\n\n"
+        L"ردیف‌های پردازش‌شده: %d\n"
+        L"افزوده‌شده (کد ملی جدید): %d\n"
+        L"به‌روزشده (کد ملی تکراری): %d\n"
+        L"رد به‌علت کد ملی نامعتبر: %d\n"
+        L"رد به‌علت نبود نام: %d",
+        r.total,r.inserted,r.updated,r.skippedInvalid,r.skippedEmpty);
+    MessageBoxW(h,toFaDigits(mb).c_str(),L"خلاصهٔ ورود بیماران",
+        MB_ICONINFORMATION|MB_OK);
+    { wchar_t lb[160]; swprintf(lb,160,L"patient import: +%d ~%d (skip %d/%d)",
+        r.inserted,r.updated,r.skippedInvalid,r.skippedEmpty);
+      Breadcrumb(lb); }
+}
+
 static std::wstring bkAnFullReport(){
     std::wstring out;
     if(s_bs && s_bs->anResult){
@@ -1057,6 +1095,16 @@ static RECT bkAnBtnAnalyze(HWND h){
     RECT rc=bkAnPageRect(h);
     int w=S(220), hh=S(48);
     RECT r={(rc.right-w)/2, S(96), (rc.right+w)/2, S(96)+hh};
+    return r;
+}
+//  v1.12.0 (§11-13): «ورود بیماران» — import a staged patient file (Path B,
+//  offline) into the local store with national-ID dedup. Sits just under the
+//  analyze button on the hidden analyzer page.
+static RECT bkAnBtnImport(HWND h){
+    RECT b=bkAnBtnAnalyze(h);
+    int w=S(220), hh=S(40);
+    RECT r={(b.left+b.right)/2-w/2, b.bottom+S(10),
+            (b.left+b.right)/2+w/2, b.bottom+S(10)+hh};
     return r;
 }
 static RECT bkAnBtnCopyAll(HWND h){
@@ -1106,7 +1154,16 @@ static void bkAnPaint(HWND h, HDC dc){
       DrawTextW(dc,L"آنالیز بکاپ",-1,&b,
         DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX); }
 
-    int y=S(160);
+    // v1.12.0: secondary «ورود بیماران» button (Path B offline import)
+    { RECT bi=bkAnBtnImport(h);
+      gpRoundRectBg(dc,bi,S(10),g_theme.surface2,g_theme.accent,g_theme.surface);
+      SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.accent);
+      drawIcon(dc,ICO_USER,{bi.right-S(34),bi.top+S(8),bi.right-S(10),bi.top+S(32)},g_theme.accent,S(2));
+      RECT bit={bi.left+S(8),bi.top,bi.right-S(40),bi.bottom};
+      DrawTextW(dc,L"ورود بیماران (با کد ملی)",-1,&bit,
+        DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX); }
+
+    int y=S(212);   // start below the two action buttons
 
     // chosen file
     if(s_bs && !s_bs->anPath.empty()){
@@ -1240,6 +1297,8 @@ static bool bkAnClick(HWND h, POINT pt){
     if(PtInRect(&x,pt)){ s_bs->anPage=false; InvalidateRect(h,NULL,FALSE); return true; }
     RECT b=bkAnBtnAnalyze(h);
     if(PtInRect(&b,pt)){ bkAnStart(h); return true; }
+    RECT bi=bkAnBtnImport(h);
+    if(PtInRect(&bi,pt)){ if(!s_bs->anBusy) bkAnImportPatients(h); return true; }
     // B.4: error-card buttons (expander + copy details)
     if(s_bs->anResult && !s_bs->anResult->ok && !s_bs->anResult->error.empty()){
         RECT rc=bkAnPageRect(h);

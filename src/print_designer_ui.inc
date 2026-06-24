@@ -44,12 +44,33 @@ struct PickState {
     std::vector<int>     selected;   // section ids
     HWND hSearch, hList, hOk, hCount;
     bool result;
+    bool reloading;                  // §1.12.0 re-entrancy guard for LVN_ITEMCHANGED
+    PickState():hSearch(NULL),hList(NULL),hOk(NULL),hCount(NULL),
+                result(false),reloading(false){}
 };
 
 static void picker_reload(PickState* st){
+    // §1.12.0 crash-hardening: guard against NULL state and a not-yet-created
+    // listview/search edit (notifications can arrive before the controls exist).
+    if(!st || !st->hList || !IsWindow(st->hList)) return;
+    st->reloading = true;            // suppress LVN_ITEMCHANGED re-entrancy
     std::wstring q;
-    wchar_t buf[128]={0}; GetWindowTextW(st->hSearch,buf,127); q=buf;
-    Sections_Find(q, st->shown);
+    if(st->hSearch && IsWindow(st->hSearch)){
+        wchar_t buf[128]={0}; GetWindowTextW(st->hSearch,buf,127); q=buf;
+    }
+    std::vector<Section> found;
+    Sections_Find(q, found);
+    // §7 (1.12.0): the picker is bound to the LIVE Sections registry, so deleted
+    // sections never appear. When the search is empty we additionally hide
+    // INACTIVE sections (per app rules: inactive = not bookable) so the default
+    // list shows only real, active, defined sections. Typing a query still
+    // reveals inactive matches so an admin can re-bind a design if needed.
+    st->shown.clear();
+    bool emptyQuery=q.empty();
+    for(const auto& s : found){
+        if(emptyQuery && !s.is_active) continue;   // hide inactive by default
+        st->shown.push_back(s);
+    }
     ListView_DeleteAllItems(st->hList);
     for(size_t i=0;i<st->shown.size();++i){
         const Section& s=st->shown[i];
@@ -64,8 +85,11 @@ static void picker_reload(PickState* st){
         bool chk=std::find(st->selected.begin(),st->selected.end(),s.id)!=st->selected.end();
         ListView_SetCheckState(st->hList,(int)i,chk);
     }
+    st->reloading = false;
 }
 static void picker_syncSel(PickState* st){
+    if(!st || !st->hList || !IsWindow(st->hList)) return;
+    if(st->reloading) return;        // §1.12.0: ignore notifications fired mid-reload
     st->selected.clear();
     int n=ListView_GetItemCount(st->hList);
     for(int i=0;i<n;i++){
@@ -75,11 +99,13 @@ static void picker_syncSel(PickState* st){
             st->selected.push_back((int)it.lParam);
         }
     }
-    wchar_t b[64]; swprintf(b,64,
-        L"\u0628\u062e\u0634\u200c\u0647\u0627\u06cc \u0627\u0646\u062a\u062e\u0627\u0628 \u0634\u062f\u0647: %d",
-        (int)st->selected.size());
-    SetWindowTextW(st->hCount,b);
-    EnableWindow(st->hOk, !st->selected.empty());
+    if(st->hCount && IsWindow(st->hCount)){
+        wchar_t b[64]; swprintf(b,64,
+            L"\u0628\u062e\u0634\u200c\u0647\u0627\u06cc \u0627\u0646\u062a\u062e\u0627\u0628 \u0634\u062f\u0647: %d",
+            (int)st->selected.size());
+        SetWindowTextW(st->hCount,b);
+    }
+    if(st->hOk && IsWindow(st->hOk)) EnableWindow(st->hOk, !st->selected.empty());
 }
 
 static LRESULT CALLBACK PickerProc(HWND h,UINT m,WPARAM w,LPARAM l){
@@ -87,11 +113,16 @@ static LRESULT CALLBACK PickerProc(HWND h,UINT m,WPARAM w,LPARAM l){
     switch(m){
     case WM_CREATE: return 0;
     case WM_COMMAND:
+        // §1.12.0: every branch below dereferences `st`; bail if it is not yet
+        // attached (notifications can fire during CreateWindow before the
+        // SetWindowLongPtr call completes).
+        if(!st) return 0;
         if(LOWORD(w)==IDC_DZ_SEARCH && HIWORD(w)==EN_CHANGE){ picker_reload(st); picker_syncSel(st); }
         else if(LOWORD(w)==IDC_DZ_OK){ st->result=true; DestroyWindow(h); }
         else if(LOWORD(w)==IDC_DZ_CANCEL){ st->result=false; DestroyWindow(h); }
         return 0;
     case WM_NOTIFY:{
+        if(!st) return 0;
         LPNMHDR nh=(LPNMHDR)l;
         if(nh->idFrom==IDC_DZ_LIST && nh->code==LVN_ITEMCHANGED){
             NMLISTVIEW* nv=(NMLISTVIEW*)l;
@@ -320,11 +351,21 @@ static void drawItemGdip(Graphics& g,DesignerState* st,const PrintItem& it,bool 
         if(it.type==PIT_APPTNO) text=L"###";
         else if(it.type==PIT_FIELD) text=it.prefix+sampleValue(it.field)+it.suffix;
         else text=it.text;
-        FontFamily ff(it.fontName.c_str());
+        // §1.12.0: validate the font family — an un-installed name leaves the
+        // FontFamily in an error state which makes the Font metrics garbage.
+        const wchar_t* fname=it.fontName.empty()?L"Vazirmatn":it.fontName.c_str();
+        FontFamily ff(fname);
+        FontFamily genericFallback(L"Vazirmatn");
+        const FontFamily* useFF = (ff.GetLastStatus()==Ok) ? &ff : &genericFallback;
+        if(useFF->GetLastStatus()!=Ok){
+            // last resort — GDI+ generic sans-serif never fails
+            useFF = FontFamily::GenericSansSerif();
+        }
         int style=FontStyleRegular;
         if(it.bold) style|=FontStyleBold;
         if(it.italic) style|=FontStyleItalic;
-        Font f(&ff,(REAL)(it.fontPt*1.333*st->zoom),(FontStyle)style,UnitPixel);
+        double pt=(it.fontPt>0)?it.fontPt:10;
+        Font f(useFF,(REAL)(pt*1.333*st->zoom),(FontStyle)style,UnitPixel);
         SolidBrush tb(tc);
         StringFormat sf;
         sf.SetFormatFlags(StringFormatFlagsDirectionRightToLeft);
@@ -806,13 +847,28 @@ static void OpenDesignerWindow(HWND owner,const DesignerLaunch& launch,
         RegisterClassW(&wc); reg=true; }
     DesignerState* st=new DesignerState();
     st->hMain=owner; st->targetSections=launch.sectionIds;
-    if(initial) st->design=*initial;
+    bool resolved=false;
+    if(initial){ st->design=*initial; resolved=true; }
     else {
         // load active design of first section, else T01
         if(!launch.sectionIds.empty())
-            SectionDesign_Resolve(launch.sectionIds[0],st->design);
-        else { std::vector<PrintDesign> b; Designs_Builtins(b);
-            if(!b.empty()) st->design=b[0]; }
+            resolved=SectionDesign_Resolve(launch.sectionIds[0],st->design);
+        if(!resolved){ std::vector<PrintDesign> b; Designs_Builtins(b);
+            if(!b.empty()){ st->design=b[0]; resolved=true; } }
+    }
+    // §1.12.0 crash-hardening: NEVER open the designer on an empty/garbage
+    // design. If nothing resolved (missing/corrupt store), synthesize a minimal
+    // valid A5 blank so the canvas + paint loop have safe geometry.
+    if(!resolved || st->design.paperW<=0 || st->design.paperH<=0){
+        PrintDesign blank;            // ctor → A5 148×210, no items
+        blank.name=L"\u062e\u0627\u0644\u06cc";       // «خالی»
+        st->design=blank;
+        Breadcrumb(L"print designer: fallback blank design");
+    }
+    // Sanitize every item's font so GDI+ FontFamily never receives an empty name.
+    for(auto& it : st->design.items){
+        if(it.fontName.empty()) it.fontName=L"Vazirmatn";
+        if(it.fontPt<=0)        it.fontPt=10;
     }
     st->undo.seed(st->design);
 
@@ -872,12 +928,87 @@ static void OpenDesignerWindow(HWND owner,const DesignerLaunch& launch,
 } // anonymous namespace
 
 // ---------------------------------------------------------- public entries ---
-void PrintDesigner_Open(HWND hMain){
-    Breadcrumb(L"print designer: open");
+//  §8 (1.12.0): the real open flow, wrapped below by a SEH containment layer
+//  (PrintDesigner_Open) so a fault inside the picker/editor never kills the
+//  whole process. Preconditions are validated up-front and the section<->design
+//  store is reconciled with the live Sections registry on every open.
+static void PrintDesigner_OpenCore(HWND hMain){
+    Breadcrumb(L"print designer: open (enter)");
+    if(!hMain || !IsWindow(hMain)) hMain = g_hFrame;
+    if(!hMain || !IsWindow(hMain)){
+        Breadcrumb(L"print designer: abort — no valid owner");
+        return;
+    }
+    Breadcrumb(L"print designer: init stores");
     Sections_Init(); Designs_Init();
+    Breadcrumb(L"print designer: reconcile section bindings");
+    SectionDesign_Cleanup();                 // §7: drop stale/orphaned mappings
     DesignerLaunch launch;
-    if(!RunSectionPicker(hMain,launch)) return;
+    Breadcrumb(L"print designer: section picker");
+    if(!RunSectionPicker(hMain,launch)){
+        Breadcrumb(L"print designer: picker cancelled");
+        return;
+    }
+    // validate that every chosen section still exists (defensive: the picker
+    // already reads the live store, but a delete could race a long-open picker).
+    {
+        std::vector<Section> all; Sections_All(all);
+        std::vector<int> valid;
+        for(int sid : launch.sectionIds)
+            for(const auto& s : all) if(s.id==sid){ valid.push_back(sid); break; }
+        launch.sectionIds=valid;
+        if(launch.sectionIds.empty()){
+            Breadcrumb(L"print designer: no valid section after picker");
+            return;
+        }
+    }
+    Breadcrumb(L"print designer: open editor");
     OpenDesignerWindow(hMain,launch,nullptr);
+    Breadcrumb(L"print designer: closed");
+}
+
+// §8 (1.12.0): crash containment. MinGW's GCC win32 build does not expose
+// MS-style __try/__except for arbitrary code, so — mirroring the backup
+// analyzer's proven approach — we arm a thread-local vectored exception
+// handler that longjmp()s back to a landing pad established here on a genuine
+// hardware fault originating inside the designer open flow. Faults anywhere
+// else in the app fall through to the normal crash handler untouched. The
+// REAL bugs are fixed above; this is belt-and-braces fault isolation so a
+// regression can never again be process-fatal on «print designer: open».
+static thread_local jmp_buf s_pdJmp;
+static thread_local bool    s_pdArmed = false;
+static thread_local DWORD   s_pdFaultCode = 0;
+
+static LONG CALLBACK pdOpenVeh(EXCEPTION_POINTERS* ep){
+    DWORD code = ep && ep->ExceptionRecord ? ep->ExceptionRecord->ExceptionCode : 0;
+    if(s_pdArmed &&
+       (code==EXCEPTION_ACCESS_VIOLATION || code==EXCEPTION_IN_PAGE_ERROR ||
+        code==EXCEPTION_DATATYPE_MISALIGNMENT || code==EXCEPTION_ARRAY_BOUNDS_EXCEEDED)){
+        Breadcrumb(L"print designer: VEH contained fault");
+        s_pdFaultCode = code;
+        s_pdArmed = false;
+        longjmp(s_pdJmp, 1);
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+void PrintDesigner_Open(HWND hMain){
+    Breadcrumb(L"print designer: safe-open");
+    PVOID veh = AddVectoredExceptionHandler(1, pdOpenVeh);
+    s_pdFaultCode = 0;
+    if(setjmp(s_pdJmp)==0){
+        s_pdArmed = true;
+        PrintDesigner_OpenCore(hMain);
+        s_pdArmed = false;
+    } else {
+        s_pdArmed = false;
+        Breadcrumb(L"print designer: contained fault on open");
+        if(hMain && IsWindow(hMain)) EnableWindow(hMain,TRUE);
+        MessageBoxW(hMain && IsWindow(hMain)?hMain:NULL,
+            L"\u0628\u0627\u0632 \u06a9\u0631\u062f\u0646 \u0637\u0631\u0627\u062d \u0686\u0627\u067e \u0628\u0627 \u062e\u0637\u0627 \u0631\u0648\u0628\u0631\u0648 \u0634\u062f\u060c \u0627\u0645\u0627 \u0628\u0631\u0646\u0627\u0645\u0647 \u0627\u062f\u0627\u0645\u0647 \u062f\u0627\u0631\u062f.",
+            L"\u0637\u0631\u0627\u062d \u0686\u0627\u067e",MB_OK|MB_ICONWARNING);
+    }
+    if(veh) RemoveVectoredExceptionHandler(veh);
 }
 
 // =====================================================================
@@ -956,7 +1087,9 @@ static LRESULT CALLBACK RestoreProc(HWND h,UINT m,WPARAM w,LPARAM l){
 } // anon
 
 void RestoreDesign_Open(HWND hMain){
+    Breadcrumb(L"restore design: open");
     Sections_Init(); Designs_Init();
+    SectionDesign_Cleanup();
     static bool reg=false; const wchar_t* CLS=L"AzRestoreDesign";
     if(!reg){ WNDCLASSW wc={0}; wc.lpfnWndProc=RestoreProc; wc.hInstance=g_hInst;
         wc.hCursor=LoadCursor(NULL,IDC_ARROW); wc.lpszClassName=CLS;

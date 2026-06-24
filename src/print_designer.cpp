@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <sstream>
 #include <map>
+#include <csetjmp>
 
 // ============================================================================
 //  defaults
@@ -373,6 +374,60 @@ bool SectionDesign_Resolve(int sectionId, PrintDesign& out){
     std::vector<PrintDesign> b; Designs_Builtins(b);
     if(!b.empty()){ out=b[0]; return true; }
     return false;
+}
+
+// §1.12.0 (§7): single-source-of-truth reconciliation. Detach (archive) any
+// section→design binding whose section no longer exists in the live Sections
+// registry, and drop any binding that points at a design file that is gone.
+// This keeps the print-designer section picker — which reads Sections_Find —
+// from ever surfacing stale/orphaned mappings, and prevents the editor from
+// resolving a dangling design id. Returns the number of bindings removed.
+int SectionDesign_Cleanup(){
+    // live section ids
+    std::vector<Section> secs; Sections_All(secs);
+    std::map<int,bool> liveSection;
+    for(const auto& s : secs) liveSection[s.id]=true;
+    // existing design ids
+    std::vector<PrintDesign> designs; Designs_All(designs);
+    std::map<int,bool> liveDesign;
+    for(const auto& d : designs) liveDesign[d.id]=true;
+
+    auto m=loadSectionDesigns();
+    int removed=0;
+    for(auto it=m.begin(); it!=m.end(); ){
+        bool secOk    = liveSection.count(it->first)>0;
+        bool designOk = (it->second>0) && liveDesign.count(it->second)>0;
+        if(!secOk || !designOk){ it=m.erase(it); ++removed; }
+        else ++it;
+    }
+    if(removed>0) saveSectionDesigns(m);
+
+    // also archive orphaned per-department .az_design files (move *.az_design
+    // whose code has no matching live section into an `_archived` subfolder, so
+    // we never delete user work, just detach it).
+    std::wstring dir = dataDir()+L"\\print_designs";
+    WIN32_FIND_DATAW fd; std::wstring pat=dir+L"\\*.az_design";
+    HANDLE h=FindFirstFileW(pat.c_str(),&fd);
+    if(h!=INVALID_HANDLE_VALUE){
+        std::map<std::wstring,bool> liveCode;
+        for(const auto& s : secs) liveCode[s.code]=true;
+        std::wstring arch=dir+L"\\_archived";
+        do {
+            std::wstring fn=fd.cFileName;
+            size_t dot=fn.rfind(L'.');
+            std::wstring code=(dot==std::wstring::npos)?fn:fn.substr(0,dot);
+            if(liveCode.count(code)==0){
+                CreateDirectoryW(arch.c_str(),NULL);
+                std::wstring src=dir+L"\\"+fn;
+                std::wstring dst=arch+L"\\"+fn;
+                DeleteFileW(dst.c_str());
+                if(!MoveFileW(src.c_str(),dst.c_str())) DeleteFileW(src.c_str());
+                ++removed;
+            }
+        } while(FindNextFileW(h,&fd));
+        FindClose(h);
+    }
+    return removed;
 }
 
 // ============================================================================

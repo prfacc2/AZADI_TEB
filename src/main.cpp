@@ -84,7 +84,11 @@ static void buildFonts(){
 //  screen, hosts the blue navigation buttons (نوبت‌دهی / پذیرش جدید / تب جدید)
 //  RIGHT-aligned. The action bar is only present where it is needed so other
 //  screens keep the original clean single-layer header.
-static int mainBarH(){ return S(64); }                 // LAYER 1 height
+// §2.B (1.12.0): the LAYER-1 header was slightly reduced from S(64) to S(56)
+// for a more compact, modern look. The clock (top) + Jalali date (below) still
+// fit comfortably because the clock band is S(6)+S(30) and the date S(30)→S(54)
+// — both recalculated against this height in the paint code below.
+static int mainBarH(){ return S(56); }                 // LAYER 1 height
 // §B (v1.10.0): the action bar has a FIXED compact height. The old code scaled
 // it by an animated collapse factor (S(50)*factor) which produced the
 // frame-by-frame slide, the one-frame "stuck" artifact and an empty header row
@@ -509,10 +513,11 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         int idRight = logoCx-logoR-S(12);
         bool loggedIn = !g_session.user.username.empty();
         if(loggedIn){
-            // two stacked lines: app name (top) + person/role (bottom)
+            // two stacked lines: app name (top) + person/role (bottom).
+            // §2.B: offsets tuned for the compact S(56) header.
             SelectObject(dc,g_fUIB);
             SetTextColor(dc,g_theme.text);
-            RECT nr={S(160),S(8),idRight,S(8)+S(24)};
+            RECT nr={S(160),S(5),idRight,S(5)+S(24)};
             DrawTextW(dc,APP_NAME_W,-1,&nr,
                 DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
             SelectObject(dc,g_fSmall);
@@ -522,7 +527,7 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 g_session.user.role==1 ? L"مدیریت درمانگاه" : L"پذیرش درمانگاه";
             std::wstring sub = g_session.user.fullname + L"  •  " + role +
                 (g_session.user.dept.empty()?L"":(L"  •  "+g_session.user.dept));
-            RECT sr={S(160),S(8)+S(24),idRight,mainBarH()-S(6)};
+            RECT sr={S(160),S(5)+S(26),idRight,mainBarH()-S(4)};
             DrawTextW(dc,sub.c_str(),-1,&sr,
                 DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
         } else {
@@ -544,26 +549,14 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         int leftBtns = S(14) + S(38) + S(8) + S(38) + S(14); // pad + gear + gap + calc + gap
         std::wstring clkStr = toFaDigits(iranTimeStr(st,true));
         std::wstring dateStr= jalaliDateStr(st);
-        if(headerHasActionBar()){
-            // ---- collapsed header (reception): clock TOP-LEFT ----
-            int clkLeft = leftBtns;
-            int clkW    = S(220);
-            SetTextColor(dc,g_theme.accent);
-            SelectObject(dc,g_fMono);
-            RECT ck={clkLeft,S(6),clkLeft+clkW,S(6)+S(34)};
-            DrawTextW(dc,clkStr.c_str(),-1,&ck,
-                DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX);
-            SetTextColor(dc,g_theme.textDim);
-            SelectObject(dc,g_fSmall);
-            RECT dr={clkLeft,S(6)+S(34),clkLeft+clkW+S(60),mainBarH()-S(2)};
-            DrawTextW(dc,dateStr.c_str(),-1,&dr,
-                DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
-        } else {
-            // ---- full header: clock + date CENTRED ----
-            // The safe horizontal band is [leftBtns, idRight] — between the tool
-            // buttons on the left and the identity block on the right. We centre
-            // a fixed-width clock zone within that band; if the band is too
-            // narrow (very small window) we clamp to leftBtns so nothing clips.
+        {
+            // §2.A (1.12.0): the live clock + Jalali date are now HORIZONTALLY
+            // CENTRED in the LAYER-1 header on EVERY screen — including reception
+            // (previously the reception header forced them top-LEFT). The safe
+            // band is [leftBtns, idRight] (between the tool buttons on the left
+            // and the identity block on the right); the clock zone is centred in
+            // it and clamped so it never clips on small/low-resolution screens or
+            // under DPI scaling. Stacked: clock on top (bold mono), date below.
             int bandL = leftBtns + S(8);
             int bandR = idRight  - S(8);
             int zoneW = S(240);
@@ -572,16 +565,16 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
             if(zL < bandL) zL = bandL;
             int zR = zL + zoneW;
             if(zR > bandR && bandR>bandL) { zR = bandR; }
-            // clock (centred, bold)
+            // clock (centred, bold) — band tuned for the compact S(56) header
             SetTextColor(dc,g_theme.accent);
             SelectObject(dc,g_fMono);
-            RECT ck={zL,S(6),zR,S(6)+S(34)};
+            RECT ck={zL,S(5),zR,S(5)+S(28)};
             DrawTextW(dc,clkStr.c_str(),-1,&ck,
                 DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX);
             // date (centred, just below)
             SetTextColor(dc,g_theme.textDim);
             SelectObject(dc,g_fSmall);
-            RECT dr={zL,S(6)+S(34),zR,mainBarH()-S(2)};
+            RECT dr={zL,S(5)+S(28),zR,mainBarH()-S(2)};
             DrawTextW(dc,dateStr.c_str(),-1,&dr,
                 DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
         }

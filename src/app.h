@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.11.0"
+#define APP_VERSION_W   L"1.12.0"
 
 // ----------------------------------------------------------- logging policy -
 //  RELEASE 1.2.0 (Section A): all general user-behavior logging is gated behind
@@ -585,6 +585,40 @@ std::vector<PatientRow> loadAllPatients();
 //  Delete a patient record by national code from the local store. Returns true
 //  if a row was removed.
 bool                    deletePatient(const std::wstring& nationalId);
+
+// ----------------------------------------------- patient import pipeline ----
+//  v1.12.0 (§11-13): a dedup-aware bulk import path that feeds the SAME local
+//  patient store the reception national-ID auto-fill reads from. Records can
+//  originate from an offline-staged CSV (Path B) extracted from a restored SQL
+//  Server database, or from the in-app analyzer staging. Matching is by the
+//  10-digit national code (the clinical primary key): an incoming row with a
+//  code already on file UPDATES that record (newer wins) instead of creating a
+//  duplicate; rows with an invalid/empty code are skipped and counted.
+struct ImportPatientRow {
+    std::wstring nid, first, last, father, gender, birth, mobile;
+    std::vector<int> insurances;
+};
+struct ImportResult {
+    int total=0;        // rows seen in the source
+    int inserted=0;     // brand-new national codes added
+    int updated=0;      // existing codes refreshed (dedup match)
+    int skippedInvalid=0;// rows with an invalid/empty national code
+    int skippedEmpty=0; // rows with no usable name
+    std::wstring error; // non-empty on hard failure (file unreadable etc.)
+    bool ok=false;
+};
+//  Bulk-import a vector of rows into the local store with national-ID dedup.
+ImportResult importPatients(const std::vector<ImportPatientRow>& rows);
+//  Parse a staged import file (UTF-8/UTF-16). Auto-detects the delimiter
+//  (| , ; or TAB) and a header row. Expected columns (header names matched
+//  case-insensitively, English or Persian):
+//      national_id/کدملی, first/نام, last/خانوادگی, father/پدر,
+//      gender/جنسیت, birth/تولد, mobile/موبایل, insurance/بیمه
+//  Columns may also be positional in the canonical order above. Never throws.
+std::vector<ImportPatientRow> parsePatientImportFile(const std::wstring& path,
+                                                     std::wstring& parseError);
+//  Convenience: parse + import a staged file in one call (Path B offline).
+ImportResult importPatientsFromFile(const std::wstring& path);
 
 // ----------------------------------------------------------- doctors --------
 //  Doctors & their services for the appointment screen (file-backed, seeded

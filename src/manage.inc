@@ -1904,6 +1904,83 @@ static void mgPaintDash(HDC dc, HWND h){
         RECT sr={r.left+S(8),r.top+S(84),r.right-S(8),r.bottom-S(8)};
         DrawTextW(dc,qa[i].sub,-1,&sr,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
     }
+
+    // ------------------------------------------------------------------------
+    // v1.12.0 (§5): CRM-style "at-a-glance" activity panel. A read-only,
+    // additive surface — it never changes data, only summarises it: total
+    // patient roster, appointments registered today, and a tiny workload bar
+    // (today vs. the day's busiest historical count). All sourced from the
+    // existing file-backed stores so nothing else changes.
+    {
+        int panelTop = a.top+mgHeadH()+S(150)+S(110)+S(20);   // below quick tiles
+        int panelBot = a.bottom-S(12);
+        if(panelBot - panelTop >= S(120)){
+            RECT pr={a.left+S(12),panelTop,a.right-S(12),panelBot};
+            gpRoundRectBg(dc,pr,S(14),g_theme.surface,g_theme.border,g_theme.bg);
+            // title
+            SetTextColor(dc,g_theme.text); SelectObject(dc,g_fUIB);
+            RECT tr={pr.left+S(16),pr.top+S(12),pr.right-S(16),pr.top+S(38)};
+            DrawTextW(dc,L"یک نگاه به فعالیت کلینیک",-1,&tr,
+                DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+            // data
+            int nPat=(int)loadAllPatients().size();
+            auto appts=loadAppointments(false);
+            SYSTEMTIME nowst=iranNow();
+            std::wstring today=jalaliDateShort(nowst);
+            int nToday=0; int busiest=0;
+            { // tally per-day counts without <map>: collect distinct dates +
+              // counts in parallel vectors (appointment volume is small).
+              std::vector<std::wstring> days; std::vector<int> cnt;
+              for(auto&ap:appts){
+                  if(ap.cancelled) continue;
+                  size_t k=0; for(;k<days.size();k++) if(days[k]==ap.apptDate) break;
+                  if(k==days.size()){ days.push_back(ap.apptDate); cnt.push_back(0); }
+                  cnt[k]++;
+              }
+              for(size_t k=0;k<days.size();k++){
+                  if(cnt[k]>busiest) busiest=cnt[k];
+                  if(days[k]==today) nToday=cnt[k];
+              }
+            }
+            // two read-only metric chips (patients / today) — RTL, right→left
+            struct AC{ const wchar_t* lbl; std::wstring val; COLORREF col; int ico; };
+            AC ac[2]={
+                { L"کل بیماران ثبت‌شده", toFaDigits(std::to_wstring(nPat)),   g_theme.accent, ICO_USER },
+                { L"نوبت‌های امروز",     toFaDigits(std::to_wstring(nToday)), g_infoAccent,   ICO_BELL },
+            };
+            int cy=pr.top+S(48);
+            int cellW=(pr.right-pr.left-S(32))/2;
+            for(int i=0;i<2;i++){
+                int cx=pr.right-S(16)-(i+1)*cellW;          // RTL
+                RECT cr={cx,cy,cx+cellW-S(8),cy+S(56)};
+                RECT ico={cr.right-S(44),cr.top+S(8),cr.right-S(14),cr.top+S(38)};
+                drawIcon(dc,ac[i].ico,ico,ac[i].col,S(2));
+                SetTextColor(dc,g_theme.text); SelectObject(dc,g_fTitle);
+                RECT vr={cr.left+S(6),cr.top+S(4),cr.right-S(48),cr.top+S(36)};
+                DrawTextW(dc,ac[i].val.c_str(),-1,&vr,DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+                SetTextColor(dc,g_theme.textDim); SelectObject(dc,g_fSmall);
+                RECT lr={cr.left+S(6),cr.bottom-S(20),cr.right-S(6),cr.bottom};
+                DrawTextW(dc,ac[i].lbl,-1,&lr,DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+            }
+            // workload bar: today vs busiest day on record
+            int barTop=cy+S(64);
+            if(barTop+S(24) <= pr.bottom-S(10)){
+                SetTextColor(dc,g_theme.textDim); SelectObject(dc,g_fSmall);
+                RECT wl={pr.left+S(16),barTop,pr.right-S(16),barTop+S(18)};
+                DrawTextW(dc,L"حجم کاری امروز نسبت به شلوغ‌ترین روز ثبت‌شده",-1,&wl,
+                    DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+                RECT track={pr.left+S(16),barTop+S(20),pr.right-S(16),barTop+S(30)};
+                gpRoundRectBg(dc,track,S(5),g_theme.surface2,g_theme.border,g_theme.surface);
+                int den=busiest>0?busiest:1;
+                double frac=(double)nToday/(double)den; if(frac>1.0)frac=1.0; if(frac<0)frac=0;
+                int fillW=(int)((track.right-track.left)*frac);
+                if(fillW>0){
+                    RECT fillr={track.right-fillW,track.top,track.right,track.bottom}; // RTL fill
+                    gpRoundRectBg(dc,fillr,S(5),g_infoAccent,g_infoAccent,g_theme.surface2);
+                }
+            }
+        }
+    }
 }
 
 static void mgPaintSects(HDC dc, HWND h){

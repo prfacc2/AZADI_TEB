@@ -165,6 +165,169 @@ bool deletePatient(const std::wstring& nationalId){
 }
 
 // ----------------------------------------------------------------------------
+//  v1.12.0 (§11-13): PATIENT IMPORT PIPELINE — dedup-aware bulk import into the
+//  same data\patients.dat store the reception auto-fill (lookupLocalPatient)
+//  reads. The national code is the clinical primary key; an incoming row whose
+//  code is already on file UPDATES it (newer wins), so re-importing a refreshed
+//  export never produces duplicates. Invalid/empty codes and nameless rows are
+//  skipped and counted so the operator gets an honest reconciliation summary.
+// ----------------------------------------------------------------------------
+ImportResult importPatients(const std::vector<ImportPatientRow>& rows){
+    ImportResult res; res.total=(int)rows.size();
+    // Load the current store ONCE into an index so a large import is O(n) over
+    // the file rather than re-reading patients.dat per row.
+    std::wstring all=readFileUtf8(patientsPath());
+    std::vector<std::wstring> nids;          // existing national codes (order)
+    std::vector<std::wstring> lines;         // existing serialized rows
+    {
+        size_t pos=0;
+        while(pos<all.size()){
+            size_t e=all.find(L'\n',pos); if(e==std::wstring::npos) e=all.size();
+            std::wstring line=trim(all.substr(pos,e-pos)); pos=e+1;
+            if(line.empty()) continue;
+            auto f=dx_split(line,L'|');
+            if(f.empty()) continue;
+            nids.push_back(trim(f[0]));
+            lines.push_back(line);
+        }
+    }
+    auto findIdx=[&](const std::wstring& nid)->int{
+        for(size_t i=0;i<nids.size();i++) if(nids[i]==nid) return (int)i;
+        return -1;
+    };
+    for(const auto& r : rows){
+        std::wstring nid=trim(r.nid);
+        if(!validNationalId(nid)){ res.skippedInvalid++; continue; }
+        if(trim(r.first).empty() && trim(r.last).empty()){ res.skippedEmpty++; continue; }
+        std::wstring row = dx_esc(nid)+L"|"+dx_esc(r.first)+L"|"+dx_esc(r.last)
+            + L"|"+dx_esc(r.father)+L"|"+dx_esc(r.gender)+L"|"+dx_esc(r.birth)
+            + L"|"+dx_esc(r.mobile)+L"|"+insToCsv(r.insurances);
+        int idx=findIdx(nid);
+        if(idx>=0){ lines[idx]=row; res.updated++; }      // dedup: refresh in place
+        else { nids.push_back(nid); lines.push_back(row); res.inserted++; }
+    }
+    // persist once
+    std::wstring out; for(auto& l:lines) out+=l+L"\r\n";
+    writeFileUtf8(patientsPath(),out,false);
+    res.ok=true;
+    return res;
+}
+
+//  Detect the most likely field delimiter on a sample line.
+static wchar_t dx_detectDelim(const std::wstring& line){
+    int pipe=0,comma=0,semi=0,tab=0;
+    for(wchar_t ch:line){
+        if(ch==L'|')pipe++; else if(ch==L',')comma++;
+        else if(ch==L';')semi++; else if(ch==L'\t')tab++;
+    }
+    if(pipe>=comma && pipe>=semi && pipe>=tab && pipe>0) return L'|';
+    if(tab>=comma && tab>=semi && tab>0) return L'\t';
+    if(semi>=comma && semi>0) return L';';
+    if(comma>0) return L',';
+    return L'|';
+}
+//  Map a header cell (English or Persian) to a canonical column index, or -1.
+//   0=nid 1=first 2=last 3=father 4=gender 5=birth 6=mobile 7=insurance
+static int dx_headerCol(const std::wstring& raw){
+    std::wstring h=trim(raw);
+    // lower-case the ASCII part for English matching
+    std::wstring l=h; for(auto& c:l) if(c>=L'A'&&c<=L'Z') c=(wchar_t)(c-L'A'+L'a');
+    auto has=[&](const wchar_t* s){ return l.find(s)!=std::wstring::npos; };
+    auto fa =[&](const wchar_t* s){ return h.find(s)!=std::wstring::npos; };
+    if(has(L"national")||has(L"nid")||has(L"melli")||has(L"codemeli")||fa(L"کد ملی")||fa(L"کدملی")||fa(L"ملی")) return 0;
+    if(has(L"father")||fa(L"پدر")) return 3;   // check father BEFORE first/last (both contain "نام")
+    // last/family name (check before generic "first/name" so خانوادگی wins)
+    if(has(L"last")||has(L"family")||has(L"surname")||fa(L"خانوادگی")) return 2;
+    if(has(L"first")||has(L"fname")||(has(L"name")&&!has(L"last"))||fa(L"نام")) return 1;
+    if(has(L"gender")||has(L"sex")||fa(L"جنس")) return 4;
+    if(has(L"birth")||has(L"dob")||has(L"tavalod")||fa(L"تولد")||fa(L"تاریخ تولد")) return 5;
+    if(has(L"mobile")||has(L"phone")||has(L"cell")||fa(L"موبایل")||fa(L"همراه")||fa(L"تلفن")) return 6;
+    if(has(L"insur")||has(L"bime")||fa(L"بیمه")) return 7;
+    return -1;
+}
+//  Normalise a free-text gender value to the store's canonical مرد/زن.
+static std::wstring dx_normGender(const std::wstring& g){
+    std::wstring t=trim(g);
+    if(t.empty()) return t;
+    std::wstring l=t; for(auto&c:l) if(c>=L'A'&&c<=L'Z') c=(wchar_t)(c-L'A'+L'a');
+    if(t.find(L"زن")!=std::wstring::npos||l==L"f"||l.find(L"female")!=std::wstring::npos||l==L"0") return L"زن";
+    if(t.find(L"مرد")!=std::wstring::npos||l==L"m"||l.find(L"male")!=std::wstring::npos||l==L"1") return L"مرد";
+    return t;   // leave unknown values untouched (no fabrication)
+}
+std::vector<ImportPatientRow> parsePatientImportFile(const std::wstring& path,
+                                                     std::wstring& parseError){
+    std::vector<ImportPatientRow> out;
+    parseError.clear();
+    std::wstring all=readFileUtf8(path);   // handles UTF-8/UTF-16 BOM
+    if(trim(all).empty()){ parseError=L"فایل ورودی خالی یا غیرقابل‌خواندن است."; return out; }
+    // split into non-empty trimmed lines
+    std::vector<std::wstring> rawLines;
+    { size_t pos=0;
+      while(pos<all.size()){
+          size_t e=all.find(L'\n',pos); if(e==std::wstring::npos) e=all.size();
+          std::wstring line=all.substr(pos,e-pos); pos=e+1;
+          // strip trailing \r
+          while(!line.empty() && (line.back()==L'\r')) line.pop_back();
+          if(!trim(line).empty()) rawLines.push_back(line);
+      } }
+    if(rawLines.empty()){ parseError=L"هیچ ردیف داده‌ای یافت نشد."; return out; }
+    wchar_t delim=dx_detectDelim(rawLines[0]);
+    // header detection: if the first line has no digits in a national-id-shaped
+    // cell, treat it as a header and build a column map; else assume positional.
+    int colMap[8]; for(int i=0;i<8;i++) colMap[i]= (i<8?i:-1);   // default positional
+    bool positional=true;
+    {
+        auto f0=dx_split(rawLines[0],delim);
+        int mapped=0, mapTmp[16]; for(int i=0;i<16;i++) mapTmp[i]=-1;
+        for(size_t i=0;i<f0.size() && i<16;i++){
+            int c=dx_headerCol(f0[i]);
+            if(c>=0){ mapTmp[i]=c; mapped++; }
+        }
+        // require at least the national-id column to trust a header row
+        bool hasNid=false; for(size_t i=0;i<f0.size()&&i<16;i++) if(mapTmp[i]==0) hasNid=true;
+        if(mapped>=2 && hasNid){
+            positional=false;
+            // invert: colMap[canonical]=sourceIndex
+            for(int c=0;c<8;c++) colMap[c]=-1;
+            for(size_t i=0;i<f0.size()&&i<16;i++) if(mapTmp[i]>=0) colMap[mapTmp[i]]=(int)i;
+        }
+    }
+    size_t startRow = positional?0:1;
+    for(size_t li=startRow; li<rawLines.size(); li++){
+        auto f=dx_split(rawLines[li],delim);
+        auto get=[&](int canonical)->std::wstring{
+            int src = positional?canonical:colMap[canonical];
+            if(src<0 || src>=(int)f.size()) return std::wstring();
+            return trim(f[src]);
+        };
+        ImportPatientRow r;
+        r.nid    = get(0);
+        r.first  = get(1);
+        r.last   = get(2);
+        r.father = get(3);
+        r.gender = dx_normGender(get(4));
+        r.birth  = get(5);
+        r.mobile = get(6);
+        parseInsCsv(get(7),r.insurances);
+        // skip an obvious header that slipped through positional mode
+        if(positional && li==0 && !validNationalId(r.nid) && r.nid.find_first_of(L"0123456789۰۱۲۳۴۵۶۷۸۹")==std::wstring::npos)
+            continue;
+        out.push_back(std::move(r));
+    }
+    if(out.empty()) parseError=L"هیچ ردیف قابل‌واردکردنی استخراج نشد.";
+    return out;
+}
+ImportResult importPatientsFromFile(const std::wstring& path){
+    ImportResult res;
+    std::wstring err;
+    auto rows=parsePatientImportFile(path,err);
+    if(!err.empty() && rows.empty()){ res.error=err; res.ok=false; return res; }
+    res=importPatients(rows);
+    if(!err.empty() && res.error.empty()) res.error=err;
+    return res;
+}
+
+// ----------------------------------------------------------------------------
 //  ONLINE REGISTRY WEB-SERVICE (optional). Configure `registry_url` in
 //  data\settings.ini, e.g.  https://host/api/citizen?nid={NID}
 //  The endpoint must return a small UTF-8 key=value body. Recognised keys:

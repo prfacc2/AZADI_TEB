@@ -102,6 +102,10 @@ bool SectionDesign_Set(int sectionId, int designId);
 int  SectionDesign_Get(int sectionId);     // designId or 0
 // resolve the active design payload for a section (falls back to T01).
 bool SectionDesign_Resolve(int sectionId, PrintDesign& out);
+// §1.12.0 (§7): reconcile section<->design bindings with the live Sections
+// registry — detach orphaned/stale mappings and archive orphaned design files.
+// Returns the number of stale bindings/files removed.
+int  SectionDesign_Cleanup();
 
 // ---------------------------------------------------- appointment counters ---
 //  Atomically advance the counter for (section, today-jalali) and return the

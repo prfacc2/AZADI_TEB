@@ -134,6 +134,10 @@ struct SettingsWin {
     int               hotRow = -1;   // hovered card-row index (home page)
     int               downRow = -1;  // pressed card-row index
     bool              backHot = false, backDown = false;
+    // §1.12.0: full-page settings now scroll. `scrollY` is the current vertical
+    // offset (px, >=0); `contentH` is the laid-out content height of the page.
+    int               scrollY = 0;
+    int               contentH = 0;
 };
 
 #define IDC_BACK_BTN   6900
@@ -189,13 +193,30 @@ static std::vector<RowDef> homeRows(int mode){
 
 // ---------------------------------------------------------- geometry ---------
 static int g_scaleAvatar(){ return S(96); }
+// §1.12.0: the settings window is now a FULL-PAGE surface. To keep a clean,
+// modern look on wide monitors the actual content lives in a CENTERED COLUMN of
+// at most COLW px; the rest of the page is the flat #bg surface (no background
+// bleed from the screen behind — this is a top-level opaque window). The column
+// also carries the vertical scroll offset (sw->scrollY) so both the owner-drawn
+// rows AND the HWND child controls move together when scrolling.
+static int colW(){ return S(620); }
 static RECT contentRect(SettingsWin* sw){
     RECT rc; GetClientRect(sw->hwnd,&rc);
-    rc.top    += S(8);
-    rc.left   += S(8);
-    rc.right  -= S(8);
-    rc.bottom -= S(8);
-    return rc;
+    int w = colW(); if(w > rc.right - S(24)) w = rc.right - S(24);
+    int cx = rc.right/2;
+    RECT c;
+    c.left   = cx - w/2;
+    c.right  = cx + w/2;
+    c.top    = S(8) - (sw ? sw->scrollY : 0);   // scroll offset applied here
+    c.bottom = rc.bottom - S(8);
+    return c;
+}
+// content-column rect WITHOUT the scroll offset — used to compute total height
+// and to clamp scrolling. (top is the unscrolled origin.)
+static RECT contentRectUnscrolled(SettingsWin* sw){
+    RECT c=contentRect(sw);
+    if(sw) c.top += sw->scrollY;
+    return c;
 }
 static int rowH(){ return S(64); }
 static int rowGap(){ return S(8); }
@@ -203,14 +224,15 @@ static int rowGap(){ return S(8); }
 static int homeRowsTop(){ return S(96) + S(28) + S(58); }
 static RECT homeRowRect(SettingsWin* sw, int idx){
     RECT c=contentRect(sw);
-    int top = homeRowsTop() + idx*(rowH()+rowGap());
+    int top = c.top + homeRowsTop() + idx*(rowH()+rowGap());
     RECT r={ c.left+S(8), top, c.right-S(8), top+rowH() };
     return r;
 }
-// back button (top-LEFT, since this is an RTL app the visual "back" sits left)
+// back button (top-LEFT, since this is an RTL app the visual "back" sits left).
+// The back button does NOT scroll — it stays pinned to the top of the page.
 static RECT backBtnRect(SettingsWin* sw){
-    RECT c=contentRect(sw);
-    RECT r={ c.left+S(6), c.top+S(6), c.left+S(6)+S(40), c.top+S(6)+S(36) };
+    RECT c=contentRectUnscrolled(sw);
+    RECT r={ c.left+S(6), S(14), c.left+S(6)+S(40), S(14)+S(36) };
     return r;
 }
 
@@ -219,7 +241,12 @@ static RECT backBtnRect(SettingsWin* sw){
 //  title in WM_PAINT. They are intentionally compact reuses of the prior
 //  panel logic so no functionality regresses.
 
-static int subTop(SettingsWin* sw){ return contentRect(sw).top + S(52); }
+// Sub-pages reserve a pinned header band (back button + title) of S(52) at the
+// very top of the page; their scrollable content begins below it. Because
+// contentRect().top already carries the scroll offset, adding the header band
+// here makes child controls scroll under the pinned header.
+static int subHeaderH(){ return S(52); }
+static int subTop(SettingsWin* sw){ return contentRect(sw).top + subHeaderH(); }
 
 static void buildProfilePage(SettingsWin* sw){
     RECT c=contentRect(sw);
@@ -318,6 +345,65 @@ static void buildLauncherPage(SettingsWin* sw, const wchar_t* hint,
     sw->ctrls.push_back(b);
 }
 
+// §1.12.0: compute the unscrolled content height of the current page so we can
+// clamp scrolling and decide whether a scrollbar is needed. For sub-pages we
+// take the bottom-most child control; for the home page we sum the rows.
+static int pageContentHeight(SettingsWin* sw){
+    int top = subHeaderH();   // sub-pages reserve the pinned header band
+    if(curPage(sw)==PAGE_HOME){
+        std::vector<RowDef> rows=homeRows(sw->mode);
+        return homeRowsTop() + (int)rows.size()*(rowH()+rowGap()) + S(24);
+    }
+    // sub-page: find the lowest child bottom relative to the unscrolled origin.
+    RECT cu=contentRectUnscrolled(sw);
+    int maxBottom = top;
+    for(HWND ctl : sw->ctrls){
+        if(!ctl || !IsWindow(ctl)) continue;
+        RECT r; GetWindowRect(ctl,&r);
+        POINT p={r.left,r.bottom}; ScreenToClient(sw->hwnd,&p);
+        // convert client-y back to unscrolled-origin space
+        int unscrolledBottom = p.y + sw->scrollY - cu.top;
+        if(unscrolledBottom>maxBottom) maxBottom=unscrolledBottom;
+    }
+    return maxBottom + S(24);
+}
+
+// §1.12.0: clamp sw->scrollY into [0, maxScroll]. Returns true if it changed.
+static bool clampScroll(SettingsWin* sw){
+    RECT rc; GetClientRect(sw->hwnd,&rc);
+    int viewH = rc.bottom - S(8);
+    int maxScroll = sw->contentH - viewH;
+    if(maxScroll < 0) maxScroll = 0;
+    int old = sw->scrollY;
+    if(sw->scrollY > maxScroll) sw->scrollY = maxScroll;
+    if(sw->scrollY < 0)         sw->scrollY = 0;
+    return sw->scrollY != old;
+}
+
+// Configure the standard window vertical scrollbar to match the content.
+static void updateScrollbar(SettingsWin* sw){
+    RECT rc; GetClientRect(sw->hwnd,&rc);
+    int viewH = rc.bottom - S(8);
+    SCROLLINFO si; ZeroMemory(&si,sizeof(si)); si.cbSize=sizeof(si);
+    si.fMask=SIF_RANGE|SIF_PAGE|SIF_POS;
+    si.nMin=0;
+    si.nMax=(sw->contentH>0)?sw->contentH:0;
+    si.nPage=(viewH>0)?viewH:1;
+    si.nPos=sw->scrollY;
+    SetScrollInfo(sw->hwnd,SB_VERT,&si,TRUE);
+}
+
+// Re-place child controls / repaint after a scroll-offset change. We rebuild
+// the page layout (cheap — only a handful of controls) so every child picks up
+// the new contentRect().top, then repaint.
+static void buildPage(SettingsWin* sw);   // fwd
+static void scrollTo(SettingsWin* sw, int newY){
+    sw->scrollY = newY;
+    clampScroll(sw);
+    buildPage(sw);            // re-lay children at the new offset
+    updateScrollbar(sw);
+}
+
 // Build the controls for the current page. PAGE_HOME has no child controls
 // (rows are owner-drawn in WM_PAINT); sub-pages create their controls here.
 static void buildPage(SettingsWin* sw){
@@ -362,6 +448,10 @@ static void buildPage(SettingsWin* sw){
         break;
     }
     uikit::AzLayoutGuard_Verify(sw->hwnd);
+    // §1.12.0: recompute content height + sync the scrollbar after layout.
+    sw->contentH = pageContentHeight(sw);
+    clampScroll(sw);
+    updateScrollbar(sw);
     // After the WHOLE layout pass, a single repaint (no per-control invalidate).
     RedrawWindow(sw->hwnd,NULL,NULL,
         RDW_INVALIDATE|RDW_UPDATENOW|RDW_ALLCHILDREN|RDW_ERASE);
@@ -478,16 +568,22 @@ static const wchar_t* pageTitle(int page){
     }
 }
 
-static void paintSubHeader(HDC dc, SettingsWin* sw, RECT c){
+static void paintSubHeader(HDC dc, SettingsWin* sw, RECT /*c*/){
+    // §1.12.0: the sub-page header (back button + title) is PINNED — it uses the
+    // UNSCROLLED column rect so it never moves while the content below scrolls.
+    RECT cu=contentRectUnscrolled(sw);
+    // opaque header band so scrolled content never shows through behind it
+    RECT band={cu.left-S(8), 0, cu.right+S(8), S(14)+S(36)+S(6)};
+    HBRUSH bg=CreateSolidBrush(g_theme.bg); FillRect(dc,&band,bg); DeleteObject(bg);
     // back button (top-left) — animation-free, just hover/pressed fill.
     RECT b=backBtnRect(sw);
     COLORREF fill = sw->backDown? g_theme.surface2 : sw->backHot? g_theme.hover : g_theme.surface;
     gpRoundRectBg(dc,b,S(8),fill,g_theme.border,g_theme.bg);
     drawIcon(dc,ICO_BACK,b,g_theme.accent,S(2));
-    // page title (centered)
+    // page title (centered, pinned)
     SetBkMode(dc,TRANSPARENT);
     SelectObject(dc,g_fTitle); SetTextColor(dc,g_theme.text);
-    RECT tr={c.left+S(52),c.top+S(8),c.right-S(8),c.top+S(44)};
+    RECT tr={cu.left+S(52),S(14),cu.right-S(8),S(14)+S(36)};
     DrawTextW(dc,pageTitle(curPage(sw)),-1,&tr,
         DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
 }
@@ -507,11 +603,13 @@ static void paintWin(SettingsWin* sw, HDC dc0){
 static void pushPage(SettingsWin* sw, int page){
     sw->pageStack.push_back(page);
     sw->hotRow=sw->downRow=-1;
+    sw->scrollY=0;                 // §1.12.0: each new page starts at the top
     buildPage(sw);
 }
 static void popPage(SettingsWin* sw){
     if(!sw->pageStack.empty()) sw->pageStack.pop_back();
     sw->hotRow=sw->downRow=-1; sw->backHot=sw->backDown=false;
+    sw->scrollY=0;
     buildPage(sw);
 }
 
@@ -556,6 +654,30 @@ static LRESULT CALLBACK SettingsProc(HWND h,UINT m,WPARAM w,LPARAM l){
     case WM_ERASEBKGND: return 1;
     case WM_PAINT:{ PAINTSTRUCT ps; HDC dc=BeginPaint(h,&ps); if(sw) paintWin(sw,dc);
         EndPaint(h,&ps); return 0; }
+    case WM_SIZE:
+        if(sw){ clampScroll(sw); buildPage(sw); }
+        return 0;
+    case WM_MOUSEWHEEL:{
+        if(!sw) break;
+        int delta=GET_WHEEL_DELTA_WPARAM(w);
+        int step = (delta/WHEEL_DELTA) * S(48);
+        scrollTo(sw, sw->scrollY - step);
+        return 0; }
+    case WM_VSCROLL:{
+        if(!sw) break;
+        SCROLLINFO si; ZeroMemory(&si,sizeof(si)); si.cbSize=sizeof(si);
+        si.fMask=SIF_ALL; GetScrollInfo(h,SB_VERT,&si);
+        int pos=si.nPos;
+        switch(LOWORD(w)){
+        case SB_LINEUP:   pos-=S(36); break;
+        case SB_LINEDOWN: pos+=S(36); break;
+        case SB_PAGEUP:   pos-=si.nPage; break;
+        case SB_PAGEDOWN: pos+=si.nPage; break;
+        case SB_THUMBTRACK:
+        case SB_THUMBPOSITION: pos=si.nTrackPos; break;
+        }
+        scrollTo(sw,pos);
+        return 0; }
     case WM_MOUSEMOVE:{
         if(!sw) break;
         int mx=GET_X_LPARAM(l), my=GET_Y_LPARAM(l);
@@ -662,6 +784,14 @@ static LRESULT CALLBACK SettingsProc(HWND h,UINT m,WPARAM w,LPARAM l){
             else popPage(sw);
             return 0;
         }
+        if(sw && (w==VK_NEXT||w==VK_PRIOR||w==VK_HOME||w==VK_END)){
+            RECT rc; GetClientRect(h,&rc); int page=rc.bottom-S(8);
+            if(w==VK_NEXT)  scrollTo(sw,sw->scrollY+page);
+            else if(w==VK_PRIOR) scrollTo(sw,sw->scrollY-page);
+            else if(w==VK_HOME)  scrollTo(sw,0);
+            else if(w==VK_END)   scrollTo(sw,sw->contentH);
+            return 0;
+        }
         break;
     case WM_APP_THEME: InvalidateRect(h,NULL,TRUE); return 0;
     case WM_CLOSE: DestroyWindow(h); return 0;
@@ -689,16 +819,20 @@ static void openSettingsWindow(HWND hMain,const User& u,int mode){
     SettingsWin* sw=new SettingsWin();
     sw->user=u; sw->mode=mode; sw->hMain=hMain;
 
-    int W = S(560), H = S(680);
     const wchar_t* titleTxt =
         mode==SM_ADMIN?  L"\u062a\u0646\u0638\u06cc\u0645\u0627\u062a \u0645\u062f\u06cc\u0631\u06cc\u062a" :
         mode==SM_GUEST?  L"\u062a\u0646\u0638\u06cc\u0645\u0627\u062a" :
                          L"\u062a\u0646\u0638\u06cc\u0645\u0627\u062a \u067e\u0630\u06cc\u0631\u0634";
-    RECT pr; GetWindowRect(hMain,&pr);
-    int x=pr.left+((pr.right-pr.left)-W)/2, y=pr.top+((pr.bottom-pr.top)-H)/2;
-    // §E: WS_CLIPCHILDREN on the parent kills control-smearing on relayout.
-    HWND h=CreateWindowExW(WS_EX_DLGMODALFRAME,CLS,titleTxt,
-        WS_POPUP|WS_CAPTION|WS_SYSMENU|WS_CLIPCHILDREN,x,y,W,H,hMain,NULL,g_hInst,NULL);
+    // §1.12.0 (§1): settings now opens as a SEPARATE FULL-PAGE view. It covers
+    // the entire work area as an opaque WS_POPUP top-level window so the screen
+    // behind it (reception/management) is NOT visible — no background bleed. A
+    // standard vertical scrollbar (WS_VSCROLL) + WS_CLIPCHILDREN gives smooth,
+    // smear-free scrolling. The content is rendered in a centered column so it
+    // still reads as a clean, modern settings page on wide monitors.
+    RECT wa; SystemParametersInfoW(SPI_GETWORKAREA,0,&wa,0);
+    int x=wa.left, y=wa.top, W=wa.right-wa.left, H=wa.bottom-wa.top;
+    HWND h=CreateWindowExW(0,CLS,titleTxt,
+        WS_POPUP|WS_VISIBLE|WS_CLIPCHILDREN|WS_VSCROLL,x,y,W,H,hMain,NULL,g_hInst,NULL);
     sw->hwnd=h;
     SetWindowLongPtrW(h,GWLP_USERDATA,(LONG_PTR)sw);
     buildPage(sw);

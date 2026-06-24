@@ -149,8 +149,11 @@ static RecData* s_rd = NULL;             // single reception screen at a time
 // thin spacer so the tabs + form shift up and the whole form fits at 1024×600
 // without any scrollbar. (See requirement 3.1.)
 static int infoBarH(){ return S(6); }
-static int tabBarH(){ return S(40); }
-static int tabW()    { return S(210); }
+// v1.12.0 (§2.C): slightly slimmer tab strip + a touch more breathing room
+// between tabs and from the strip edge, for a cleaner, more modern header.
+static int tabBarH(){ return S(38); }
+static int tabW()    { return S(206); }
+static int tabGap()  { return S(8);  }
 
 // ---------------------------------------------------------------- billing --
 //  The program computes the bill ITSELF: if the secretary leaves the service
@@ -266,17 +269,24 @@ static void rcVMetrics(int H, int& y0, int& step, int& rh){
     // v1.3.0: caption band is S(20) tall and is drawn S(42) above the input
     // baseline (see WM_PAINT). To GUARANTEE a strictly-positive gap between the
     // previous row's input (which ends at base-step+rh) and THIS row's caption
-    // (which starts at base-42) we require:  step - rh >= 42 + 4(gap).
-    // step = rh + S(46) gives a +4px clear band → no overlap at any DPI rounding.
-    y0 = S(104); rh = S(26); step = rh + S(46);    // = S(72), +4px clearance band
+    // (which starts at base - RC_CAP_OFF) we require:
+    //     step - rh >= RC_CAP_OFF + RC_CAP_CLEAR(gap)
+    // v1.12.0: the well the painter draws extends from input.top - RC_WELL_PAD
+    // to input.bottom + RC_WELL_PAD (RC_WELL_PAD=S(4)). So the *previous* well
+    // bottom is base-step+rh+S(4). The caption band TOP is base-RC_CAP_OFF. The
+    // real clear gap is therefore  step - rh - RC_CAP_OFF - S(4). We now demand
+    // a STRICTLY-positive >=S(6) gap so the blue separator label can never be
+    // covered by the framed input well above it at any DPI rounding.
+    //   step >= rh + RC_CAP_OFF + S(4) + S(6) = rh + S(52)  (RC_CAP_OFF=S(42))
+    y0 = S(104); rh = S(26); step = rh + S(52);    // = S(78), >=S(6) clearance band
     int need = y0 + 8*step + S(96);
     if(H > 0 && need > H){
         int s2 = (H - y0 - S(96)) / 8;
-        if(s2 < S(62)) s2 = S(62);                 // hard floor: rh + 42 + 2 clear
+        if(s2 < S(66)) s2 = S(66);                 // hard floor: rh(20)+52-6=66
         if(s2 < step){
             step = s2;
-            // keep the no-overlap invariant: rh <= step - 44 (42 band + 2 clear)
-            rh = step - S(44); if(rh > S(26)) rh = S(26); if(rh < S(20)) rh = S(20);
+            // keep the no-overlap invariant: rh <= step - S(52) (42 cap + 4 pad + 6 clear)
+            rh = step - S(52); if(rh > S(26)) rh = S(26); if(rh < S(20)) rh = S(20);
         }
     }
 }
@@ -1880,7 +1890,7 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             // <= base-44, leaving a >=2px clear band above this caption's top
             // (base-42). The section-header rect therefore never intersects a
             // sibling input rect (the v1.2.x "blue label behind input" bug).
-            int scy=y0+secs[i].row*step-S(42);
+            int scy=y0+secs[i].row*step-S(42);   // RC_CAP_OFF = S(42)
             // icon flush-right, caption text stops well to its LEFT (no overlap)
             int icoW=S(18), gap=S(8);
             // paint the caption band background with the card surface FIRST so a
@@ -1906,7 +1916,13 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 POINT a={wr.left,wr.top}, b={wr.right,wr.bottom};
                 ScreenToClient(h,&a); ScreenToClient(h,&b);
                 int minH = a.y + (rh2>S(28)?rh2:S(34));
-                RECT well={a.x-S(7),a.y-S(4),b.x+S(7),
+                int wellTop = a.y-S(4);
+                // v1.12.0 SINGLE-SOURCE-OF-TRUTH GUARD: never let a framed input
+                // well rise into the field-label / blue-section-caption band that
+                // sits above it. The label baseline is input.top - S(20); we cap
+                // the well top at input.top - S(4) but additionally forbid it from
+                // ever covering a caption (which lives >= S(22) above the input).
+                RECT well={a.x-S(7),wellTop,b.x+S(7),
                            (b.y<minH)?minH:b.y+S(4)};
                 if(b.y<=a.y) continue;        // not yet laid out
                 bool focused = (inputs[i]==foc);
@@ -2239,9 +2255,9 @@ static void closeTab(TabPage* t){
 static RECT tabRect(HWND h, int i){
     RECT rc; GetClientRect(h,&rc);
     RECT r;
-    r.right = rc.right - S(8) - i*(tabW()+S(6));
+    r.right = rc.right - S(10) - i*(tabW()+tabGap());
     r.left  = r.right - tabW();
-    r.top   = infoBarH()+S(4);
+    r.top   = infoBarH()+S(3);
     r.bottom= infoBarH()+tabBarH()-S(2);
     return r;
 }
