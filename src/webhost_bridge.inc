@@ -97,6 +97,37 @@ static std::wstring wh_suppJson(){
         a+=o.done(); }
     return a+L"]";
 }
+// Catalog of common clinic services with a code + base Rial tariff. Returned to
+// the «افزودن خدمت» picker so the operator can add itemised services to a
+// reception. Self-contained (no external file required); can later be loaded
+// from data\services.csv without changing the bridge contract.
+struct WhService { const wchar_t* code; const wchar_t* name; long long price; };
+static const WhService WH_SERVICES[] = {
+    { L"9001", L"\u0648\u06cc\u0632\u06cc\u062a \u0639\u0645\u0648\u0645\u06cc",            2'500'000 }, // ویزیت عمومی
+    { L"9002", L"\u0648\u06cc\u0632\u06cc\u062a \u062a\u062e\u0635\u0635\u06cc",            3'500'000 }, // ویزیت تخصصی
+    { L"9003", L"\u0648\u06cc\u0632\u06cc\u062a \u0641\u0648\u0642 \u062a\u062e\u0635\u0635", 5'000'000 }, // ویزیت فوق تخصص
+    { L"9101", L"\u062a\u0632\u0631\u06cc\u0642 \u0639\u0636\u0644\u0627\u0646\u06cc",        450'000 },  // تزریق عضلانی
+    { L"9102", L"\u062a\u0632\u0631\u06cc\u0642 \u0648\u0631\u06cc\u062f\u06cc",              650'000 },  // تزریق وریدی
+    { L"9103", L"\u0633\u0631\u0645 \u062a\u0631\u0627\u067e\u06cc",                       1'200'000 }, // سرم تراپی
+    { L"9104", L"\u067e\u0627\u0646\u0633\u0645\u0627\u0646",                              800'000 },  // پانسمان
+    { L"9105", L"\u0628\u062e\u06cc\u0647",                                             1'500'000 }, // بخیه
+    { L"9201", L"\u0646\u0648\u0627\u0631 \u0642\u0644\u0628 (ECG)",                       700'000 },  // نوار قلب
+    { L"9202", L"\u0633\u0648\u0646\u0648\u06af\u0631\u0627\u0641\u06cc",                 2'800'000 }, // سونوگرافی
+    { L"9203", L"\u0631\u0627\u062f\u06cc\u0648\u06af\u0631\u0627\u0641\u06cc \u0633\u0627\u062f\u0647", 1'800'000 }, // رادیوگرافی ساده
+    { L"9301", L"\u0622\u0632\u0645\u0627\u06cc\u0634 \u062e\u0648\u0646 (CBC)",          900'000 },  // آزمایش خون CBC
+    { L"9302", L"\u0622\u0632\u0645\u0627\u06cc\u0634 \u0642\u0646\u062f \u062e\u0648\u0646", 350'000 }, // آزمایش قند خون
+    { L"9401", L"\u062f\u0646\u062f\u0627\u0646\u067e\u0632\u0634\u06a9\u06cc \u0639\u0645\u0648\u0645\u06cc", 2'000'000 }, // دندانپزشکی عمومی
+    { L"9402", L"\u062c\u0631\u0645\u200c\u06af\u06cc\u0631\u06cc",                       1'600'000 }, // جرم‌گیری
+};
+static const int N_WH_SERVICES = (int)(sizeof(WH_SERVICES)/sizeof(WH_SERVICES[0]));
+static std::wstring wh_servicesJson(){
+    std::wstring a=L"[";
+    for(int i=0;i<N_WH_SERVICES;i++){ if(i)a+=L",";
+        whjson::Obj o; o.num(L"idx",i); o.str(L"code",WH_SERVICES[i].code);
+        o.str(L"name",WH_SERVICES[i].name); o.num(L"price",WH_SERVICES[i].price);
+        a+=o.done(); }
+    return a+L"]";
+}
 static std::wstring wh_themeJson(){
     auto hex=[&](COLORREF c){ wchar_t b[12]; swprintf(b,12,L"#%02x%02x%02x",
         GetRValue(c),GetGValue(c),GetBValue(c)); return std::wstring(b); };
@@ -134,6 +165,7 @@ std::wstring WebHostBridge_BootPayload(int kind){
     o.raw(L"sections", wh_sectionsJson());
     o.raw(L"insurances", wh_insurancesJson());
     o.raw(L"supp", wh_suppJson());
+    o.raw(L"services", wh_servicesJson());
     if(kind==WH_APPOINTMENT){
         // doctors on shift today
         std::vector<DoctorDef> docs=todaysDoctors();
@@ -220,6 +252,8 @@ std::wstring WebHostBridge_Call(int kind, const std::wstring& verb,
         o.num(L"patientShare",patShare); o.num(L"paid",pay);
         return o.done();
     }
+    // ---- catalog of clinic services (for the «افزودن خدمت» picker) ----
+    if(verb==L"services"){ return wh_servicesJson(); }
     // ---- save a reception (validate + persist + remember patient) ----
     //  Also handles "saveAndPrint" which performs the SAME atomic save and then,
     //  ONLY when the save truly succeeded, prints the patient receipt. This is the
@@ -251,10 +285,13 @@ std::wstring WebHostBridge_Call(int kind, const std::wstring& verb,
         r.suppIdx    = (int)whjson::getNum(argsJson,L"supp");
         r.total      = whjson::getNum(argsJson,L"price");
         r.discount   = whjson::getNum(argsJson,L"discount");
-        // validation: a name is required.
+        // validation: a name is required. Log the precise reason so the operator
+        // (and the support log) can see WHY a registration was refused instead of
+        // the old opaque «خطا در ثبت».
         if(trim(r.firstName).empty() && trim(r.lastName).empty()){
+            WebHost_LogError(L"save",L"validation: empty name (first+last)");
             whjson::Obj o; o.boolean(L"ok",false);
-            o.str(L"error",L"\u0646\u0627\u0645 \u0628\u06cc\u0645\u0627\u0631 \u0627\u0644\u0632\u0627\u0645\u06cc \u0627\u0633\u062a.");
+            o.str(L"error",L"\u0646\u0627\u0645 \u0648 \u0646\u0627\u0645 \u062e\u0627\u0646\u0648\u0627\u062f\u06af\u06cc \u0628\u06cc\u0645\u0627\u0631 \u0627\u0644\u0632\u0627\u0645\u06cc \u0627\u0633\u062a.");
             return o.done();
         }
         // recompute the bill server-side (never trust the client totals).
@@ -276,9 +313,24 @@ std::wstring WebHostBridge_Call(int kind, const std::wstring& verb,
         // last-receipt store; otherwise the printed receipt shows a garbage/zero
         // «مبلغ نهایی». It mirrors the patient payable.
         r.finalTotal = r.paid;
-        int q=saveReception(r);
+        // persist the reception. saveReception() never throws here; a return of
+        // <=0 means the daily CSV could not be written (permission / disk). Log
+        // the exact failure so the cause is visible in webhost_errors.log.
+        int q=0;
+        try {
+            q = saveReception(r);
+        } catch(...){
+            WebHost_LogError(L"save-exc", L"exception thrown inside saveReception");
+            q = 0;
+        }
         bool ok = (q>0);
-        if(ok && validNationalId(r.nationalId)){
+        if(!ok){
+            WebHost_LogError(L"save",L"saveReception returned <=0 (CSV write failed?)");
+            whjson::Obj o; o.boolean(L"ok",false); o.num(L"queue",0);
+            o.str(L"error",L"\u062b\u0628\u062a \u067e\u0631\u0648\u0646\u062f\u0647 \u0646\u0627\u0645\u0648\u0641\u0642 \u0628\u0648\u062f \u2014 \u062f\u0633\u062a\u0631\u0633\u06cc \u0646\u0648\u0634\u062a\u0646 \u0631\u0627 \u0628\u0631\u0631\u0633\u06cc \u06a9\u0646\u06cc\u062f.");
+            return o.done();
+        }
+        if(validNationalId(r.nationalId)){
             std::vector<int> ins; if(insIdx>0) ins.push_back(insIdx);
             rememberPatient(r.nationalId,r.firstName,r.lastName,r.fatherName,
                             r.gender,r.birthDate,r.mobile,ins);
@@ -286,15 +338,26 @@ std::wstring WebHostBridge_Call(int kind, const std::wstring& verb,
         // saveReception() already persists last_receipt; keep an explicit call so
         // finalTotal is captured even if the internal save path changes.
         saveLastReceipt(r);
+        logLine(L"webhost reception saved queue=" + std::to_wstring(q) +
+                L" paid=" + std::to_wstring(r.paid));
         // Atomic save+print: print the patient receipt (kind 2) ONLY after a
         // confirmed save, using the in-memory record (never a re-read that could
         // race). Print failures never invalidate the registration result.
         bool printed=false;
-        if(ok && verb==L"saveAndPrint"){
-            printed = printReceipt(r, 2 /*قبض پذیرش*/, g_hFrame);
+        if(verb==L"saveAndPrint"){
+            try {
+                printed = printReceipt(r, 2 /*قبض پذیرش*/, g_hFrame);
+                if(!printed) WebHost_LogError(L"print",L"printReceipt returned false after save");
+            } catch(...){
+                WebHost_LogError(L"print-exc",L"exception during printReceipt");
+                printed = false;
+            }
         }
-        whjson::Obj o; o.boolean(L"ok",ok); o.num(L"queue",q); o.num(L"paid",r.paid);
-        if(verb==L"saveAndPrint") o.boolean(L"printed",printed);
+        whjson::Obj o; o.boolean(L"ok",true); o.num(L"queue",q); o.num(L"paid",r.paid);
+        if(verb==L"saveAndPrint"){
+            o.boolean(L"printed",printed);
+            if(!printed) o.str(L"printError",L"\u0631\u0633\u06cc\u062f \u0686\u0627\u067e \u0646\u0634\u062f \u2014 \u067e\u0631\u06cc\u0646\u062a\u0631 \u0631\u0627 \u0628\u0631\u0631\u0633\u06cc \u06a9\u0646\u06cc\u062f.");
+        }
         return o.done();
     }
     // ---- print the last receipt / a kind ----

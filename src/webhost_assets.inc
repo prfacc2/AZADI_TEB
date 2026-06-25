@@ -74,6 +74,10 @@ static std::wstring wh_svg(const wchar_t* name){
         body=L"<rect x='3' y='5' width='18' height='14' rx='2'/><circle cx='8.5' cy='11' r='2'/><path d='M5 16c.6-1.6 2-2 3.5-2s2.9.4 3.5 2'/><path d='M14 9h5M14 12h5M14 15h3'/>";
     else if(n==L"gender")
         body=L"<circle cx='10' cy='13' r='5'/><path d='M14 9l5-5M15 4h4v4'/>";
+    else if(n==L"box")
+        body=L"<path d='M3 7l9-4 9 4-9 4z'/><path d='M3 7v10l9 4 9-4V7'/><path d='M12 11v10'/>";
+    else if(n==L"trash")
+        body=L"<path d='M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13'/>";
     else
         body=L"<circle cx='12' cy='12' r='8'/>";
     return std::wstring(open)+body+L"</svg>";
@@ -312,7 +316,45 @@ static std::wstring wh_commonHead(){
     L"font-weight:800;z-index:1;font-size:12px;}"
     L"tbody tr:hover{background:var(--surface2);}"
     L"tr.cancel td{text-decoration:line-through;color:var(--textDim);}"
-    L".empty{padding:38px 14px;text-align:center;color:var(--textDim);font-size:14px;}"
+    L".empty{padding:30px 14px;text-align:center;color:var(--textDim);font-size:13.5px;}"
+    L".empty .box{width:54px;height:54px;margin:0 auto 10px;color:#c4cee0;}"
+    L".empty .box svg{width:54px;height:54px;}"
+    // ===================== SERVICE TABLE (center, per mock) ==============
+    // toolbar above the service grid: «افزودن خدمت» + a service search box.
+    L".svc-head{display:flex;align-items:center;gap:9px;flex-direction:row-reverse;"
+    L"margin:4px 0 11px;}"
+    L".svc-head .grow{flex:1 1 auto;}"
+    L".svc-search{position:relative;flex:0 0 230px;max-width:46%;}"
+    L".svc-search>svg{position:absolute;right:11px;top:50%;transform:translateY(-50%);"
+    L"width:16px;height:16px;color:var(--textDim);pointer-events:none;}"
+    L".svc-search input{padding-right:34px;height:38px;}"
+    L".svc-table{border:1px solid var(--border);border-radius:var(--r2);overflow:hidden;"
+    L"background:var(--surface);}"
+    L".svc-table table{width:100%;border-collapse:collapse;font-size:12.5px;}"
+    L".svc-table th{background:var(--surface2);color:var(--textDim);font-weight:800;"
+    L"padding:9px 8px;font-size:11.5px;border-bottom:1px solid var(--border);white-space:nowrap;}"
+    L".svc-table td{padding:8px;text-align:center;border-bottom:1px solid var(--border);"
+    L"font-weight:600;white-space:nowrap;}"
+    L".svc-table tbody tr:last-child td{border-bottom:none;}"
+    L".svc-table tbody tr:hover{background:var(--surface2);}"
+    L".svc-table .del{width:30px;height:30px;border-radius:8px;border:1px solid var(--border);"
+    L"background:#fde8e8;color:var(--danger);cursor:pointer;display:inline-flex;"
+    L"align-items:center;justify-content:center;padding:0;}"
+    L".svc-table .del svg{width:14px;height:14px;}"
+    L".svc-table .del:hover{background:#fbdcdc;}"
+    L".svc-table .name{text-align:right;font-weight:700;}"
+    L".svc-foot{display:flex;justify-content:space-between;padding:9px 10px;"
+    L"background:var(--surface2);border-top:1px solid var(--border);font-weight:800;font-size:12.5px;}"
+    // service picker popup (لیست خدمات)
+    L".svc-pop{position:absolute;z-index:60;top:42px;right:0;width:300px;max-height:280px;"
+    L"overflow:auto;background:var(--surface);border:1px solid var(--border);"
+    L"border-radius:var(--r2);box-shadow:var(--shadow);display:none;}"
+    L".svc-pop.open{display:block;}"
+    L".svc-pop .it{display:flex;justify-content:space-between;gap:8px;padding:9px 12px;"
+    L"cursor:pointer;border-bottom:1px solid var(--border);font-size:12.5px;}"
+    L".svc-pop .it:hover{background:var(--surface2);}"
+    L".svc-pop .it .nm{font-weight:700;}"
+    L".svc-pop .it .pr{color:var(--textDim);font-variant-numeric:tabular-nums;}"
     // ============================== TOAST ================================
     L".toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(8px);"
     L"background:var(--text);color:#fff;padding:12px 24px;border-radius:13px;"
@@ -483,6 +525,9 @@ static std::wstring wh_receptionScript(){
     L"<script type='text/javascript'>"
     // inline user-glyph for the avatar reset (matches wh_svg('user'))
     L"var AZ_USER_SVG=\"<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='8' r='4'/><path d='M4 20c0-4 4-6 8-6s8 2 8 6'/></svg>\";"
+    L"var AZ_TRASH_SVG=\"<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'><path d='M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13'/></svg>\";"
+    // catalog of services + the rows the operator has added to this reception.
+    L"var SVC_CATALOG=[]; var SVC_ROWS=[];"
     L"function setHeader(d){"
     L"  var sd=$('s_dept');if(sd)sd.innerHTML=esc(d.userDept||'\u2014');"
     L"  var ss=$('s_shift');if(ss)ss.innerHTML=esc(d.shift);"
@@ -491,6 +536,9 @@ static std::wstring wh_receptionScript(){
     // populate the base + supplemental insurance dropdowns from a payload, and
     // if the pushed payload was empty PULL the lists directly from C++ so the
     // selects are NEVER left empty (root-cause fix for the blank insurance list).
+    // We feed BOTH the right-panel «بیمه پایه» (#ins) AND the center «نوع بیمه
+    // پایه» (#baseType) from the same authoritative list, and the supplemental
+    // «نوع بیمه» (#insType) from the supplemental list, so no select is empty.
     L"function fillInsurance(d){"
     L"  var insArr=(d&&d.insurances&&d.insurances.length)?d.insurances:null;"
     L"  var supArr=(d&&d.supp&&d.supp.length)?d.supp:null;"
@@ -499,11 +547,17 @@ static std::wstring wh_receptionScript(){
     L"  if(!insArr)insArr=[{idx:0,name:'\\u0622\\u0632\\u0627\\u062f (\\u0628\\u062f\\u0648\\u0646 \\u0628\\u06cc\\u0645\\u0647)'}];"
     L"  if(!supArr)supArr=[{idx:0,name:'\\u0646\\u062f\\u0627\\u0631\\u062f'}];"
     L"  fillSel($('ins'),insArr,true); fillSel($('supp'),supArr,true);"
+    L"  fillSel($('baseType'),insArr,true); fillSel($('insType'),supArr,true);"
     L"}"
+    // services come from the boot payload, or are pulled on demand. Never empty.
+    L"function fillServices(d){"
+    L"  var arr=(d&&d.services&&d.services.length)?d.services:null;"
+    L"  if(!arr){ var rs=call('services'); if(rs&&rs.length)arr=rs; }"
+    L"  SVC_CATALOG=arr||[]; }"
     L"function azBoot(d){"
     L"  setHeader(d);"
-    L"  fillInsurance(d);"
-    L"  recalc(); var n=$('first'); if(n)n.focus();"
+    L"  fillInsurance(d); fillServices(d);"
+    L"  renderSvc(); recalc(); var n=$('first'); if(n)n.focus();"
     L"}"
     // helper: numeric value of a control, tolerant of missing nodes
     L"function v(id){var e=$(id);return e?e.value:'';}"
@@ -512,7 +566,42 @@ static std::wstring wh_receptionScript(){
     L"function moneyMask(el){if(!el)return;var raw=(''+el.value).replace(/[^0-9\\u06f0-\\u06f9]/g,'');"
     L"  raw=raw.replace(/[\\u06f0-\\u06f9]/g,function(d){return '\\u06f0\\u06f1\\u06f2\\u06f3\\u06f4\\u06f5\\u06f6\\u06f7\\u06f8\\u06f9'.indexOf(d);});"
     L"  if(raw==='') {el.value='';return;} el.value=fa(fmt(parseInt(raw,10)));}"
+    // ---- service table -------------------------------------------------
+    // sum of all service rows (مبلغ − تخفیف summed), used to drive «مبلغ خدمت».
+    L"function svcSum(){var t=0;for(var i=0;i<SVC_ROWS.length;i++){t+=Math.max(0,(SVC_ROWS[i].price||0)-(SVC_ROWS[i].discount||0));}return t;}"
+    L"function renderSvc(){var tb=$('svcBody');if(!tb)return;tb.innerHTML='';"
+    L"  if(!SVC_ROWS.length){var tr=document.createElement('tr');"
+    L"    tr.innerHTML=\"<td colspan='7'><div class='empty'><div class='box'>\"+\"<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M3 7l9-4 9 4-9 4z'/><path d='M3 7v10l9 4 9-4V7'/><path d='M12 11v10'/></svg>\"+\"</div>\\u0647\\u06cc\\u0686 \\u062e\\u062f\\u0645\\u062a\\u06cc \\u0627\\u0636\\u0627\\u0641\\u0647 \\u0646\\u0634\\u062f\\u0647 \\u0627\\u0633\\u062a.</div></td>\";"
+    L"    tb.appendChild(tr); var f=$('svcFoot'); if(f)f.style.display='none'; return; }"
+    L"  for(var i=0;i<SVC_ROWS.length;i++){var s=SVC_ROWS[i];var tr=document.createElement('tr');"
+    L"    var ins=Math.round((s.price||0)*svcInsPct()/100);"
+    L"    tr.innerHTML=\"<td>\"+fa(i+1)+\"</td><td>\"+esc(s.code)+\"</td><td class='name'>\"+esc(s.name)+\"</td>\"+"
+    L"      \"<td>\"+fa(fmt(s.price))+\"</td><td>\"+fa(fmt(s.discount||0))+\"</td><td>\"+fa(fmt(ins))+\"</td>\"+"
+    L"      \"<td><button type='button' class='del' onclick='delSvc(\"+i+\")'>\"+AZ_TRASH_SVG+\"</button></td>\";"
+    L"    tb.appendChild(tr); }"
+    L"  var f=$('svcFoot'); if(f){f.style.display='';var ss=$('svcSum');if(ss)ss.innerHTML=fa(fmt(svcSum()));}"
+    L"}"
+    L"function svcInsPct(){var r=call('bill',{price:1000000,discount:0,ptype:($('ptype')?$('ptype').selectedIndex:0),ntype:($('ntype')?$('ntype').selectedIndex:0),ins:parseInt(v('ins')||'0',10),supp:0});return (r&&r.mainShare)?Math.round(r.mainShare*100/1000000):0;}"
+    L"function addSvc(s){if(!s)return;SVC_ROWS.push({code:s.code,name:s.name,price:s.price||0,discount:0});"
+    L"  if(svcSum()>0)$('price').value=fa(fmt(svcSum()));"
+    L"  renderSvc();recalc();}"
+    L"function delSvc(i){SVC_ROWS.splice(i,1);"
+    L"  $('price').value=svcSum()>0?fa(fmt(svcSum())):'';renderSvc();recalc();}"
+    L"window.delSvc=delSvc;"
+    // service search popup
+    L"function svcPopOpen(q){var pop=$('svcPop');if(!pop)return;q=(q||'').replace(/^ +| +$/g,'');"
+    L"  var html='';var n=0;"
+    L"  for(var i=0;i<SVC_CATALOG.length;i++){var s=SVC_CATALOG[i];"
+    L"    if(q&&s.name.indexOf(q)<0&&(''+s.code).indexOf(q)<0)continue;"
+    L"    html+=\"<div class='it' onclick='pickSvc(\"+i+\")'><span class='nm'>\"+esc(s.name)+\"</span><span class='pr'>\"+fa(fmt(s.price))+\"</span></div>\";n++;}"
+    L"  if(!n)html=\"<div class='it'><span class='nm' style='color:var(--textDim)'>\\u0645\\u0648\\u0631\\u062f\\u06cc \\u06cc\\u0627\\u0641\\u062a \\u0646\\u0634\\u062f</span></div>\";"
+    L"  pop.innerHTML=html;pop.className='svc-pop open';}"
+    L"function svcPopClose(){var pop=$('svcPop');if(pop)pop.className='svc-pop';}"
+    L"function pickSvc(i){addSvc(SVC_CATALOG[i]);svcPopClose();var s=$('svcSearch');if(s)s.value='';}"
+    L"window.pickSvc=pickSvc;"
     L"function recalc(){"
+    // when services exist they are the authority for «مبلغ خدمت».
+    L"  if(SVC_ROWS.length){ $('price').value=fa(fmt(svcSum())); }"
     L"  var r=call('bill',{price:num(v('price')),discount:num(v('discount')),"
     L"    ptype:$('ptype').selectedIndex,ntype:$('ntype').selectedIndex,"
     L"    ins:parseInt(v('ins')||'0',10),supp:parseInt(v('supp')||'0',10)});"
@@ -553,12 +642,14 @@ static std::wstring wh_receptionScript(){
     L"  else if(!r.idValid){ toast('\u06a9\u062f \u0645\u0644\u06cc \u0646\u0627\u0645\u0639\u062a\u0628\u0631','bad'); }"
     L"  else { setPatient({},false); toast('\u0628\u06cc\u0645\u0627\u0631 \u062c\u062f\u06cc\u062f','');} }"
     L"function lookup(){lookupNid(v('nid'));}"
-    L"function clearForm(){var ids=['nid','first','last','father','birth','mobile','phone','address','price','discount','archive','file','book','insExp','docCode','docName','docRef'];"
+    L"function clearForm(){var ids=['nid','first','last','father','birth','mobile','phone','address','price','discount','archive','file','book','insExp','docCode','docName','docRef','svcSearch'];"
     L"  for(var i=0;i<ids.length;i++){var el=$(ids[i]);if(el)el.value='';}"
     L"  if($('gender'))$('gender').selectedIndex=0;"
     L"  if($('ptype'))$('ptype').selectedIndex=0; if($('ntype'))$('ntype').selectedIndex=0;"
     L"  if($('ins'))$('ins').selectedIndex=0; if($('supp'))$('supp').selectedIndex=0;"
+    L"  if($('baseType'))$('baseType').selectedIndex=0; if($('insType'))$('insType').selectedIndex=0;"
     L"  if($('insBranch'))$('insBranch').selectedIndex=0;"
+    L"  SVC_ROWS=[]; renderSvc(); svcPopClose();"
     L"  var be=$('btnErr'); if(be)be.style.display='none';"
     L"  setPatient({},false); recalc();"
     L"  var n=$('first'); if(n)n.focus();}"
@@ -573,7 +664,9 @@ static std::wstring wh_receptionScript(){
     L"    insName:(insSel&&insSel.options[insSel.selectedIndex])?insSel.options[insSel.selectedIndex].text:'',"
     L"    suppName:(suppSel&&suppSel.options[suppSel.selectedIndex])?suppSel.options[suppSel.selectedIndex].text:'',"
     L"    ins:parseInt((insSel?insSel.value:'0')||'0',10),supp:parseInt((suppSel?suppSel.value:'0')||'0',10),"
-    L"    price:num(v('price')),discount:num(v('discount'))};}"
+    L"    services:svcNames(),price:num(v('price')),discount:num(v('discount'))};}"
+    // a compact «code:name» list of added services for the saved record/receipt.
+    L"function svcNames(){var a=[];for(var i=0;i<SVC_ROWS.length;i++){a.push(SVC_ROWS[i].name);}return a.join(' \u060c ');}"
     // PRIMARY action: atomic save + print of the receipt. C++ saves first and
     // ONLY prints when the save truly succeeded — this is the fix for the old
     // «چاپ → خطای ثبت» bug (no two-step race, no print against a stale record).
@@ -611,12 +704,27 @@ static std::wstring wh_receptionScript(){
     L"  on('birth','onkeyup',function(e){var ev=e||window.event; if(ev.ctrlKey||ev.metaKey)return true; dateFormat($('birth'));});"
     L"  on('price','onkeyup',function(){moneyMask($('price'));recalc();}); "
     L"  on('discount','onkeyup',function(){moneyMask($('discount'));recalc();});"
-    L"  on('ptype','onchange',function(){$('price').value='';recalc();});"
-    L"  on('ntype','onchange',function(){$('price').value='';recalc();});"
+    L"  on('ptype','onchange',function(){if(!SVC_ROWS.length)$('price').value='';recalc();});"
+    L"  on('ntype','onchange',function(){if(!SVC_ROWS.length)$('price').value='';recalc();});"
     L"  on('ins','onchange',recalc); on('supp','onchange',recalc);"
+    // «نوع بیمه پایه» (center) mirrors onto the authoritative #ins select used by
+    // the bill engine; «نوع بیمه» mirrors onto #supp. Keeps a single source of
+    // truth while showing the fields exactly where the mock places them.
+    L"  on('baseType','onchange',function(){var e=$('baseType');if($('ins'))$('ins').value=e.value;renderSvc();recalc();});"
+    L"  on('insType','onchange',function(){var e=$('insType');if($('supp'))$('supp').value=e.value;recalc();});"
     L"  on('btnSave','onclick',azSubmit); on('btnNew','onclick',clearForm);"
     L"  on('btnClear','onclick',clearForm);"
-    L"  on('btnErr','onclick',azSubmit);"
+    L"  on('btnCancel','onclick',clearForm);"
+    L"  on('btnErr','onclick',function(){var be=$('btnErr');if(be)be.style.display='none';});"
+    // service table controls
+    L"  on('btnAddSvc','onclick',function(){svcPopOpen(v('svcSearch'));var s=$('svcSearch');if(s)s.focus();});"
+    L"  on('svcSearch','onkeyup',function(e){var ev=e||window.event;var k=ev.keyCode||ev.which;"
+    L"    if(k===27){svcPopClose();return;} svcPopOpen(v('svcSearch'));});"
+    L"  on('svcSearch','onfocus',function(){svcPopOpen(v('svcSearch'));});"
+    L"  document.onclick=function(e){e=e||window.event;var t=e.target||e.srcElement;var pop=$('svcPop');"
+    L"    if(!pop||pop.className.indexOf('open')<0)return;"
+    L"    var n=t;var inside=false;while(n){if(n.id==='svcPop'||n.id==='svcSearch'||n.id==='btnAddSvc'){inside=true;break;}n=n.parentNode;}"
+    L"    if(!inside)svcPopClose();};"
     L"  on('p_ins','onclick',function(){doPrint(0);});"
     L"  on('p_rx','onclick',function(){doPrint(1);});"
     L"  on('p_last','onclick',function(){var r=call('printLast'); if(!r||r.ok!==true)toast(r&&r.error?r.error:'\u0686\u0627\u067e \u0627\u0646\u062c\u0627\u0645 \u0646\u0634\u062f','bad');});"
@@ -637,8 +745,8 @@ static std::wstring wh_receptionScript(){
     // is always populated (header pills + insurance lists + tariff).
     L"function selfHydrate(){ if(AZ.ready)return; var d=call('boot');"
     L"  if(d&&d.event==='boot'){ try{azReceive(JSON.stringify(d));}catch(e){ try{azBoot(d);AZ.ready=true;}catch(_){} } }"
-    L"  else { fillInsurance(null); recalc(); } }"
-    L"setTimeout(selfHydrate,350); setTimeout(function(){ if(!$('ins')||!$('ins').options.length)fillInsurance(null); },900);"
+    L"  else { fillInsurance(null); fillServices(null); renderSvc(); recalc(); } }"
+    L"setTimeout(selfHydrate,350); setTimeout(function(){ if(!$('ins')||!$('ins').options.length){fillInsurance(null);fillServices(null);renderSvc();} },900);"
     L"</script>";
 }
 
@@ -819,12 +927,36 @@ static std::wstring wh_receptionHtml(){
          L"<div class='fld f-money'><label>\u062a\u062e\u0641\u06cc\u0641 (\u0631\u06cc\u0627\u0644)</label>"
          L"<div class='ic-in'>"+wh_svg(L"receipt")+L"<input id='discount' class='ltr' data-nav inputmode='numeric' placeholder='\u0645\u0628\u0644\u063a \u062a\u062e\u0641\u06cc\u0641 \u0631\u0627 \u0648\u0627\u0631\u062f \u06a9\u0646\u06cc\u062f'></div></div>"
          L"</div>";
-    // ----- bottom action bar (به ترتیب موکاپ، چپ‌به‌راست) -----
+    // ----- service table toolbar: «افزودن خدمت» + «جستجوی خدمت» -----
+    h += L"<div class='svc-head'>"
+         L"<div class='grow'></div>"
+         L"<div class='svc-search'>"+wh_svg(L"search")+
+         L"<input id='svcSearch' placeholder='\u062c\u0633\u062a\u062c\u0648\u06cc \u062e\u062f\u0645\u062a' autocomplete='off'>"
+         L"<div class='svc-pop' id='svcPop'></div></div>"
+         L"<button class='btn softblue sm' id='btnAddSvc' type='button'>"+wh_svg(L"plus")+L"\u0627\u0641\u0632\u0648\u062f\u0646 \u062e\u062f\u0645\u062a</button>"
+         L"</div>";
+    // ----- service grid (ردیف/کد خدمت/نام خدمت/مبلغ/تخفیف/سهم بیمه/عملیات) -----
+    h += L"<div class='svc-table'>"
+         L"<table><thead><tr>"
+         L"<th style='width:42px'>\u0631\u062f\u06cc\u0641</th>"
+         L"<th style='width:74px'>\u06a9\u062f \u062e\u062f\u0645\u062a</th>"
+         L"<th class='name'>\u0646\u0627\u0645 \u062e\u062f\u0645\u062a</th>"
+         L"<th>\u0645\u0628\u0644\u063a (\u0631\u06cc\u0627\u0644)</th>"
+         L"<th>\u062a\u062e\u0641\u06cc\u0641 (\u0631\u06cc\u0627\u0644)</th>"
+         L"<th>\u0633\u0647\u0645 \u0628\u06cc\u0645\u0647 (\u0631\u06cc\u0627\u0644)</th>"
+         L"<th style='width:54px'>\u0639\u0645\u0644\u06cc\u0627\u062a</th>"
+         L"</tr></thead><tbody id='svcBody'></tbody></table>"
+         L"<div class='svc-foot' id='svcFoot' style='display:none'>"
+         L"<span>\u062c\u0645\u0639 \u062e\u062f\u0645\u0627\u062a</span>"
+         L"<b id='svcSum' style='font-variant-numeric:tabular-nums'>0</b></div>"
+         L"</div>";
+    // ----- bottom action bar: انصراف · پاک کردن · پذیرش جدید · ثبت پذیرش -----
     h += L"<div class='footbar'>"
-         L"<button class='btn primary lg' style='flex:2 1 300px' id='btnSave' data-nav data-enter='submit'>"+wh_svg(L"check")+L"\u062b\u0628\u062a \u067e\u0630\u06cc\u0631\u0634 \u0648 \u0635\u062f\u0648\u0631 \u0642\u0628\u0636</button>"
-         L"<button class='btn errpill lg' style='flex:0 1 130px;display:none' id='btnErr'>"+wh_svg(L"x")+L"\u062e\u0637\u0627 \u062f\u0631 \u062b\u0628\u062a</button>"
-         L"<button class='btn softblue lg' style='flex:1 1 150px' id='btnNew' data-nav>"+wh_svg(L"plus")+L"\u067e\u0630\u06cc\u0631\u0634 \u062c\u062f\u06cc\u062f</button>"
-         L"<button class='btn lg' style='flex:0 1 130px' id='btnClear' data-nav>"+wh_svg(L"refresh")+L"\u067e\u0627\u06a9 \u06a9\u0631\u062f\u0646</button>"
+         L"<button class='btn primary lg' style='flex:2 1 290px' id='btnSave' data-nav data-enter='submit'>"+wh_svg(L"check")+L"\u062b\u0628\u062a \u067e\u0630\u06cc\u0631\u0634 \u0648 \u0635\u062f\u0648\u0631 \u0642\u0628\u0636</button>"
+         L"<button class='btn errpill lg' style='flex:0 1 140px;display:none' id='btnErr'>"+wh_svg(L"x")+L"\u062e\u0637\u0627 \u062f\u0631 \u062b\u0628\u062a</button>"
+         L"<button class='btn softblue lg' style='flex:1 1 140px' id='btnNew' data-nav>"+wh_svg(L"plus")+L"\u067e\u0630\u06cc\u0631\u0634 \u062c\u062f\u06cc\u062f</button>"
+         L"<button class='btn lg' style='flex:0 1 120px' id='btnClear' data-nav>"+wh_svg(L"refresh")+L"\u067e\u0627\u06a9 \u06a9\u0631\u062f\u0646</button>"
+         L"<button class='btn lg' style='flex:0 1 110px' id='btnCancel'>"+wh_svg(L"x")+L"\u0627\u0646\u0635\u0631\u0627\u0641</button>"
          L"</div>";
     h += L"</div>";   // card fill
     h += L"</div>";   // zone-center
