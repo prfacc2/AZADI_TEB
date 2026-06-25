@@ -74,24 +74,57 @@ static bool sec_writeAll(const std::vector<Section>& v){
     return writeFileUtf8(sec_path(), out, false);
 }
 
+// v1.17.0: one-time migration. Earlier builds (≤1.16.1) seeded NINE demo
+// departments (REC01/REC02/APR01/INJ01/LAB01/PHR01/BIL01/RAD01/PHY01) that were
+// never actually defined by the clinic. If the stored file is EXACTLY that
+// untouched demo set, collapse it to the single real «پذیرش» section so the
+// print-designer picker stops listing phantom departments. If the admin has
+// touched the set in any way (added/removed/renamed), we leave it untouched.
+static bool sec_isLegacyDemoSet(const std::vector<Section>& v){
+    static const wchar_t* demo[] = {
+        L"REC01",L"REC02",L"APR01",L"INJ01",L"LAB01",
+        L"PHR01",L"BIL01",L"RAD01",L"PHY01" };
+    const int N = (int)(sizeof(demo)/sizeof(demo[0]));
+    if((int)v.size() != N) return false;
+    // codes must match the demo set exactly (order-independent)
+    for(int i=0;i<N;i++){
+        bool found=false;
+        for(const auto& s : v) if(s.code==demo[i]){ found=true; break; }
+        if(!found) return false;
+    }
+    return true;
+}
+
 void Sections_Init(){
     std::vector<Section> v = sec_readAll();
+
+    // Migrate an untouched legacy demo set down to the single real section.
+    if(!v.empty() && sec_isLegacyDemoSet(v) &&
+       getSetting(L"sections_demo_migrated", L"") != L"1"){
+        std::wstring now = sec_now();
+        std::vector<Section> only;
+        Section x; x.id=1; x.code=L"REC01";
+        x.name_fa=L"\u067e\u0630\u06cc\u0631\u0634"; x.kind=L"reception";
+        x.is_active=1; x.created_at=now; x.updated_at=now;
+        only.push_back(x);
+        sec_writeAll(only);
+        setSetting(L"sections_demo_migrated", L"1");
+        return;
+    }
+
     if(!v.empty()) return;     // already seeded
     struct Seed { const wchar_t* code; const wchar_t* name; const wchar_t* kind; };
-    // §7 (1.14.0): seeds use the stable category-code scheme
-    // (REC/APR/LAB/INJ/PHR/BIL/RAD/PHY). Codes are durable routing/sync keys;
-    // the Persian names are display-only and may be renamed later without
-    // breaking any binding.
+    // §7 (1.14.0): seeds use the stable category-code scheme. Codes are durable
+    // routing/sync keys; the Persian names are display-only.
+    //
+    // v1.17.0 — ONLY the single REAL, DEFINED section is seeded: «پذیرش». The
+    // clinic has exactly one reception section, so the print-designer section
+    // picker (and every other consumer) must surface exactly one row, never a
+    // list of departments that were never created. Additional sections are
+    // added by the admin from the management panel and persist in sections.dat
+    // — they are NOT fabricated here.
     static const Seed seeds[] = {
-        { L"REC01", L"\u067e\u0630\u06cc\u0631\u0634 \u0645\u0631\u06a9\u0632\u06cc", L"reception" },
-        { L"REC02", L"\u067e\u0630\u06cc\u0631\u0634 \u0637\u0628\u0642\u0647 \u06f1", L"reception" },
-        { L"APR01", L"\u0646\u0648\u0628\u062a\u200c\u062f\u0647\u06cc", L"appointment" },
-        { L"INJ01", L"\u062a\u0632\u0631\u06cc\u0642\u0627\u062a \u0648 \u067e\u0627\u0646\u0633\u0645\u0627\u0646", L"injection" },
-        { L"LAB01", L"\u0622\u0632\u0645\u0627\u06cc\u0634\u06af\u0627\u0647", L"lab" },
-        { L"PHR01", L"\u062f\u0627\u0631\u0648\u062e\u0627\u0646\u0647", L"pharmacy" },
-        { L"BIL01", L"\u0635\u0646\u062f\u0648\u0642 / \u062d\u0633\u0627\u0628\u062f\u0627\u0631\u06cc", L"billing" },
-        { L"RAD01", L"\u0631\u0627\u062f\u06cc\u0648\u0644\u0648\u0698\u06cc", L"radiology" },
-        { L"PHY01", L"\u0641\u06cc\u0632\u06cc\u0648\u062a\u0631\u0627\u067e\u06cc", L"physio" },
+        { L"REC01", L"\u067e\u0630\u06cc\u0631\u0634", L"reception" },
     };
     std::wstring now = sec_now();
     int id=1;

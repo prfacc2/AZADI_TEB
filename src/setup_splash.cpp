@@ -24,9 +24,6 @@
 // ============================================================================
 #include "app.h"   // brings in <windows.h>, <string>, and the project decls
 
-// from webhost.cpp
-extern void WebHost_SetBrowserEmulation();
-extern bool WebHost_Available();
 // from handlers.cpp
 extern void installVazirFont();
 
@@ -55,22 +52,12 @@ static void ssSet(SetupState* s, int pct, const wchar_t* step){
 // and whenever the stored "setup_done_version" differs from the current build,
 // so a freshly-deployed EXE always re-applies the browser-emulation key.
 static bool ssNeedsRun(){
+    //  v1.17.0: the only state we track is whether prerequisites were prepared
+    //  for THIS build. There is no longer any browser-emulation registry key to
+    //  validate (the HTML/MSHTML layer was retired in favour of a 100% native
+    //  C++ UI), so a simple version compare is sufficient and instant.
     std::wstring done = getSetting(L"setup_done_version", L"");
-    if(done != std::wstring(APP_VERSION_W)) return true;
-    // Even when marked done, defensively re-check the emulation key is present;
-    // a roaming-profile copy or a registry cleaner can drop it. Cheap probe:
-    HKEY hk=NULL;
-    const wchar_t* SUB =
-        L"Software\\Microsoft\\Internet Explorer\\Main\\FeatureControl\\FEATURE_BROWSER_EMULATION";
-    if(RegOpenKeyExW(HKEY_CURRENT_USER, SUB, 0, KEY_READ, &hk)!=ERROR_SUCCESS)
-        return true;
-    wchar_t path[MAX_PATH]={0}; GetModuleFileNameW(NULL,path,MAX_PATH);
-    const wchar_t* exe=path; for(const wchar_t* p=path;*p;++p) if(*p==L'\\'||*p==L'/') exe=p+1;
-    DWORD cur=0, cb=sizeof(cur), type=0; bool ok=false;
-    if(RegQueryValueExW(hk,exe,NULL,&type,(LPBYTE)&cur,&cb)==ERROR_SUCCESS
-       && type==REG_DWORD && cur>=11000) ok=true;
-    RegCloseKey(hk);
-    return !ok;
+    return done != std::wstring(APP_VERSION_W);
 }
 
 // ----------------------------------------------------------------------------
@@ -88,30 +75,24 @@ static DWORD WINAPI ssWorker(LPVOID p){
     logsDir();   // auto-creates <exe>\logs
     Sleep(220);
 
-    ssSet(s, 26, L"نصب فونت فارسی (Vazirmatn)…");
+    ssSet(s, 34, L"نصب فونت فارسی (Vazirmatn)…");
     installVazirFont();
-    Sleep(260);
+    Sleep(300);
 
-    ssSet(s, 52, L"پیکربندی موتور نمایش (Trident / IE11)…");
-    // THE important step: register this EXE for IE11 standards mode so the
-    // hybrid HTML reception surface renders modern CSS/JS and the bridge works.
-    WebHost_SetBrowserEmulation();
-    Sleep(320);
-
-    ssSet(s, 78, L"بررسی در دسترس بودن مرورگر داخلی…");
-    // WebHost_Available() is itself a guarded CoCreateInstance probe.
-    bool ok=false;
-    try { ok = WebHost_Available(); } catch(...){ ok=false; }
-    s->webOk = ok;
-    Sleep(260);
+    ssSet(s, 70, L"آماده‌سازی رابط کاربری بومی (C++)…");
+    //  v1.17.0: the interface is rendered fully in native C++ (Win32/GDI) — no
+    //  embedded browser, no Trident/IE registry key, no C++↔JS bridge. Nothing
+    //  external to configure here; the native engine is always available.
+    s->webOk = false;
+    Sleep(300);
 
     ssSet(s, 94, L"تکمیل راه‌اندازی…");
     // mark this build's setup complete so next launch is instant.
     setSetting(L"setup_done_version", APP_VERSION_W);
-    logLine(std::wstring(L"setup: prerequisites prepared (web=")+(ok?L"ok":L"fallback")+L")");
+    logLine(L"setup: prerequisites prepared (native C++ UI)");
     Sleep(200);
 
-    ssSet(s, 100, ok ? L"آماده است" : L"آماده است (حالت سازگار)");
+    ssSet(s, 100, L"آماده است");
     Sleep(260);
     InterlockedExchange(&s->done, 1);
     return 0;
@@ -240,11 +221,8 @@ bool RunSetupSplash(HINSTANCE hInst){
     // Fast path: already prepared for this build → just (idempotently) ensure
     // the emulation key + folders without any UI, then return availability.
     if(!ssNeedsRun()){
-        WebHost_SetBrowserEmulation();   // cheap, idempotent
-        dataDir(); logsDir();
-        bool ok=false;
-        try { ok=WebHost_Available(); } catch(...){ ok=false; }
-        return ok;
+        dataDir(); logsDir();            // idempotently ensure writable folders
+        return false;                    // native UI — no web host
     }
 
     SetupState st; g_ss=&st;

@@ -5,6 +5,63 @@
 
 ---
 
+## 1.17.0 — 2026-06-25
+
+> **بازنویسی کامل صفحهٔ «پذیرش بیمار» به‌صورت ۱۰۰٪ C++ بومی و حذف کامل HTML/MSHTML.**
+> هدف: حذف وابستگی به موتور IE/Trident، رفع کرش طراح چاپ، اصلاح لیست بخش‌ها و
+> بیمه‌ها، اسکرول روان، و ساخت EXE سبک‌تر و پایدارتر.
+
+### Removed — حذف کامل HTML و موتور MSHTML/Trident
+- فایل‌های میزبان وب و دارایی‌های HTML/CSS/JS حذف فیزیکی شدند:
+  `src/webhost.cpp`, `src/webhost.h`, `src/webhost_assets.inc`,
+  `src/webhost_bridge.inc`, `src/webhost_host.inc`, `src/webhost_run.inc`.
+- `build.sh`: `src/webhost.cpp` از فهرست `SRCS` حذف شد؛ دیگر هیچ کد HTML
+  کامپایل نمی‌شود. خروجی EXE از ~۳٫۲MB به ~۲٫۹MB کاهش یافت و وابستگی
+  IE/Trident به‌طور کامل قطع شد (تک‌موتوره و crash-safe).
+
+### Changed — رابط پذیرش/نوبت ۱۰۰٪ بومی (`src/reception.cpp`)
+- تب «پذیرش» و تب «نوبت» دیگر `WebHost_Create` را صدا نمی‌زنند؛ همیشه فرم
+  بومی C++ (GDI+/Win32، دابل‌بافر) رندر می‌شود. `include` مربوط به
+  `webhost.h` حذف شد.
+- ثبت و چاپ قبض (`ID_F_SUBMIT`) به‌صورت کامل بومی و کاربردی: اعتبارسنجی
+  فیلدهای لازم، `saveReception`, `rememberPatient`, طراحی/چاپ قبض و باز کردن
+  کشوی پول.
+
+### Changed — راه‌اندازی سبک‌تر (`src/setup_splash.cpp`, `src/main.cpp`)
+- تمام ارجاع‌های `WebHost_*` و کلید رجیستری `FEATURE_BROWSER_EMULATION`
+  حذف شدند. مرحلهٔ آماده‌سازی اکنون فقط فونت فارسی + پوشه‌های `data/`,
+  `logs/` را آماده می‌کند و پیام «آماده‌سازی رابط کاربری بومی (C++)…» نشان
+  می‌دهد.
+
+### Fixed — رفع کرش طراح چاپ `STATUS_LONGJUMP` (`src/print_designer_ui.inc`)
+- مکانیزم «containment» مبتنی بر `setjmp/longjmp` داخل VEH حذف شد. روی
+  زنجیرهٔ MinGW (DWARF/SEH) فراخوانی `longjmp()` از داخل VEH باعث برخاستن
+  استثنای دوم در `RtlUnwind` و کرش `0x80000026` می‌شد. اکنون حلقهٔ مودال
+  ساده‌ی Win32 بدون پرش غیرمحلی استفاده می‌شود؛ نقص‌های واقعی از پیش با
+  null-check و فونت/طرح ایمن مهار شده‌اند.
+
+### Fixed — فهرست بخش‌ها فقط بخش‌های واقعی (`src/sections.cpp`)
+- دانهٔ اولیه از ۹ بخش نمایشی به **۱ بخش واقعی** («پذیرش») کاهش یافت تا در
+  «تنظیمات → طراحی چاپگر» فقط بخش‌های تعریف‌شده دیده شوند. مهاجرت خودکار
+  برای داده‌های قدیمیِ دست‌نخورده (کلید `sections_demo_migrated`).
+
+### Fixed — اسکرول روان (`src/reception.cpp`)
+- در `WM_VSCROLL` و `WM_MOUSEWHEEL` پس از `tabPageLayout` + `InvalidateRect`
+  فراخوانی `UpdateWindow(h)` افزوده شد تا رسم در همان فریم تخلیه شود و
+  هم‌پوشانی/پارگی هنگام اسکرول از بین برود (فرم دارای `WS_CLIPCHILDREN` و
+  رسم دابل‌بافر است).
+
+### Changed — نسخه‌بندی
+- `src/app.h`: `APP_VERSION_W = L"1.17.0"`.
+- `src/app.rc`: `FILEVERSION/PRODUCTVERSION = 1,17,0,0` و رشته‌های نسخه.
+- `update/version.txt`: `1.17.0`.
+
+### Build
+- خروجی: `build/AzadiTeb.exe` (PE32/i386، استاتیک، ~۲٫۹MB) جایگزین نسخهٔ
+  قبلی شد؛ `AzadiTeb.exe.sha256` به‌روزرسانی شد.
+
+---
+
 ## 1.16.1 — 2026-06-25
 
 > **تطبیق دقیق ظاهر صفحهٔ پذیرش با طرح مرجع + نوار راه‌اندازی پیش‌نیازها برای هر کلاینت.**

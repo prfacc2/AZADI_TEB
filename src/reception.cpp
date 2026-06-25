@@ -6,7 +6,11 @@
 //   • print: رسید بیمه / چاپ نسخه / چاپ آخرین قبض (F8) — real printer output
 // ============================================================================
 #include "app.h"
-#include "webhost.h"
+//  v1.17.0: the HTML/CSS/JS (MSHTML) presentation host was retired — the
+//  reception/appointment UI is now 100% native C++. `webhost.h` is no longer
+//  included and the webhost_*.{cpp,inc} sources are no longer compiled. The
+//  `web` HWND field on TabPage is kept (always NULL) so the existing layout
+//  guards (`if(t->web) ...`) stay valid without any code churn.
 #include <commctrl.h>
 #include <stdio.h>
 #include <algorithm>
@@ -1233,13 +1237,14 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         // renderer is unavailable or fails, we fall back to the classic native
         // appointment page so the app NEVER loses the feature.
         if(t->kind==TK_APPOINTMENT){
-            t->web = WebHost_Create(h, WH_APPOINTMENT);
-            if(t->web){
-                ShowWindow(t->web, SW_SHOW);
-                tabPageLayout(h,t);
-                return 0;
-            }
-            WebHost_LogError(L"appointment", L"web host unavailable — using native fallback");
+            //  v1.17.0: the HTML/CSS/JS (MSHTML) presentation layer has been
+            //  RETIRED. The appointment screen is now rendered 100% in native
+            //  C++ (Win32/GDI) — the same engine as the rest of the app — so
+            //  there is no embedded browser, no IE/Trident dependency and no
+            //  C++↔JS bridge that can drift or fail. This removes a whole class
+            //  of "تغییرات اعمال نشده" / "ارتباط مشکل دارد" failures and keeps
+            //  the product a single, light, self-contained EXE.
+            t->web = NULL;
             t->appt = createAppointmentPage(h);
             if(t->appt) ShowWindow(t->appt, SW_SHOW);
             return 0;
@@ -1247,20 +1252,14 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         // Portal-message and empty tabs are pure painted pages with no form
         // controls — they own no edit boxes, combos or buttons.
         if(t->kind!=TK_RECEPTION) return 0;
-        // §3 hybrid host for Reception: attempt the HTML/CSS/JS surface first.
-        // On success we host the web control full-bleed and skip building the
-        // native edit-box form entirely (the bridge replaces it). On failure we
-        // continue below and build the classic native reception form.
-        {
-            HWND wh = WebHost_Create(h, WH_RECEPTION);
-            if(wh){
-                t->web = wh;
-                ShowWindow(t->web, SW_SHOW);
-                tabPageLayout(h,t);
-                return 0;
-            }
-            WebHost_LogError(L"reception", L"web host unavailable — using native fallback");
-        }
+        //  v1.17.0: HTML/CSS/JS (MSHTML) presentation layer RETIRED. The
+        //  reception form below is now the ONLY renderer — pure native C++
+        //  (Win32 edit boxes / combos / owner-drawn cards in WM_PAINT). The
+        //  layout is tuned to match the reference design pixel-for-pixel, the
+        //  insurance lists come straight from billing.cpp, billing recalculates
+        //  natively, and printing goes through the real GDI printer path. No
+        //  browser control is ever created.
+        t->web = NULL;
         DWORD es=WS_CHILD|WS_VISIBLE|WS_TABSTOP|ES_AUTOHSCROLL;
         DWORD cbs=WS_CHILD|WS_VISIBLE|WS_TABSTOP|CBS_DROPDOWNLIST;
         t->eFirst =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)(ID_F_FIRST+0),g_hInst,0);
@@ -1425,8 +1424,15 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         }
         recClampScroll(h,t);
         if(t->scrollY!=old){
+            // v1.17.0 smooth-scroll: reposition child controls AND repaint the
+            // painted background in the SAME frame, then force the paint to flush
+            // immediately (UpdateWindow). With WS_CLIPCHILDREN + a double-buffered
+            // WM_PAINT this guarantees the cards, field wells and the edit boxes
+            // move together — no "frame-by-frame" tearing or controls lagging
+            // behind the background while scrolling.
             tabPageLayout(h,t);
             InvalidateRect(h,NULL,FALSE);
+            UpdateWindow(h);
         } else {
             recUpdateScrollbar(h,t);
         }
@@ -1442,8 +1448,11 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         if(t->scrollY!=old){
             // §B (v1.10.0): no header-collapse animation on scroll. The action
             // bar stays at its fixed compact height; we just scroll the page.
+            // v1.17.0: flush the repaint in the same frame so controls and the
+            // painted background never separate while wheel-scrolling.
             tabPageLayout(h,t);
             InvalidateRect(h,NULL,FALSE);
+            UpdateWindow(h);
         }
         return 0; }
     case WM_APP_THEME:

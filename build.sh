@@ -18,6 +18,11 @@ $RES -O coff -i src/app.rc -o obj/app.res
 echo "[2/3] Compiling C++..."
 # Release 1.4.0 sources (new: sections, print_designer*, user_settings,
 # net_sync, profile_requests, backup_log_viewer).
+# v1.17.0: the HTML/CSS/JS (MSHTML) presentation host has been RETIRED. The
+# reception / appointment UI is now rendered 100% in native C++ (Win32/GDI), so
+# src/webhost.cpp (and its webhost_*.inc includes + embedded HTML/CSS/JS in
+# webhost_assets.inc) are no longer compiled. This removes the IE/Trident
+# dependency, shrinks the EXE, and makes the UI single-engine + crash-safe.
 SRCS="src/main.cpp src/util.cpp src/handlers.cpp src/theme.cpp src/users.cpp \
       src/billing.cpp src/calculator.cpp src/dialogs.cpp src/update.cpp \
       src/admin.cpp src/reception.cpp src/gdiplus.cpp src/settings.cpp \
@@ -26,7 +31,7 @@ SRCS="src/main.cpp src/util.cpp src/handlers.cpp src/theme.cpp src/users.cpp \
       src/backup_log.cpp src/sections.cpp src/print_designer.cpp \
       src/user_settings.cpp src/net_sync.cpp src/profile_requests.cpp \
       src/backup_log_viewer.cpp src/backup_mtf.cpp src/saved_messages.cpp \
-      src/webhost.cpp src/setup_splash.cpp"
+      src/setup_splash.cpp"
 
 $CXX -std=c++17 -O2 -s -municode -mwindows \
     -DUNICODE -D_UNICODE -D_WIN32_IE=0x0700 \

@@ -913,13 +913,12 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
     INITCOMMONCONTROLSEX icc={sizeof(icc),ICC_STANDARD_CLASSES|ICC_LISTVIEW_CLASSES|ICC_TAB_CLASSES};
     InitCommonControlsEx(&icc);
 
-    // v1.16.1: first-run / prerequisite preparation splash. Installs the
-    // Vazirmatn font, registers this EXE for IE11 standards mode (the key reason
-    // the hybrid HTML reception surface + C++↔JS bridge works on a client at
-    // all), ensures data/ & logs/ exist (root cause of save errors), and probes
-    // MSHTML availability. Shows a branded progress bar on first run / after a
-    // version bump; returns instantly on subsequent runs. Replaces the bare
-    // installVazirFont() + WebHost_SetBrowserEmulation() calls.
+    // v1.17.0: first-run / prerequisite preparation splash. Installs the
+    // Vazirmatn font and ensures data/ & logs/ exist (root cause of save
+    // errors). The interface is now 100% native C++ (the HTML/MSHTML layer was
+    // retired), so there is no browser-emulation registry key or MSHTML probe.
+    // Shows a branded progress bar on first run / after a version bump; returns
+    // instantly on subsequent runs.
     RunSetupSplash(hInst);
     gdipStartup();                   // v1.3.0: GDI+ rendering layer
     seedDefaultDepts();              // v1.4.1: ensure «پذیرش» category exists
