@@ -62,6 +62,9 @@
 #define ID_F_DOCNAME     664
 #define ID_F_DOCSEARCH   665
 #define ID_F_RESET       666   // v1.4.0 (§6): پاک کردن فرم (Ctrl+R)
+#define ID_F_NEW         667   // v1.18.0: «پذیرش جدید» — فرم تازه (ردیف دکمه‌های پایین)
+#define ID_F_SVC_ADD     668   // v1.18.0: «افزودن خدمت» به جدول خدمات
+#define ID_F_SVC_SEARCH  669   // v1.18.0: جستجوی خدمت
 
 // ============================================================== TAB PAGE ===
 enum TabKind {
@@ -80,6 +83,9 @@ struct TabPage {
     HWND ePrice,eDiscount;
     HWND bSubmit,bPrtIns,bPrtRx,bPrtLast,bClose,bInquiry;
     HWND bReset;   // v1.4.0 (§6) reset/clear form
+    HWND bNew;     // v1.18.0: «پذیرش جدید» (ردیف دکمه‌های پایین فرم)
+    HWND bSvcAdd;  // v1.18.0: «افزودن خدمت» بالای جدول خدمات
+    HWND eSvcSearch;// v1.18.0: جستجوی خدمت
     HWND chkIns;             // «دارای بیمه» — کنار کد ملی، پیش‌فرض تیک‌خورده
     HWND appt;               // نوبت‌دهی child page (kind==TK_APPOINTMENT)
     //  v1.13.0 (§3/§4): the hybrid HTML/CSS/JS presentation host. When non-NULL
@@ -211,102 +217,129 @@ static void recalc(TabPage* t){
 }
 
 // ------------------------------------------------------------- tab layout --
-// Manual RTL, plain (non-mirrored) coordinates.
-//   Page layout (RTL):
-//     ┌─ billing card ─┐  ┌──────────── form card (RIGHT, wide) ────────────┐
-//     │ (LEFT, fixed)  │  │  patient sections, two columns                  │
-//     │  print buttons │  └─────────────────────────────────────────────────┘
-//     └────────────────┘
-//   The billing / print card sits on the LEFT so the print actions live on the
-//   left edge (per requirement); the patient form fills the wide right area.
-static const int RC_OUT = 18;   // outer page padding
-static const int RC_GAP = 16;   // gap between form card and billing card
-static const int RC_IN  = 22;   // inner card padding
-static const int BILL_W = 340;  // billing card width
-static const int INFO_W = 320;  // right info-panel width (v1.6.0)
+//  v1.18.0 — PIXEL-MATCH REDESIGN of the reception screen to the reference
+//  mock-up. Three columns (RTL):
+//     ┌─ billing (LEFT) ─┐ ┌──── center form (WIDE) ────┐ ┌─ info (RIGHT) ─┐
+//     │ صورتحساب          │ │  «مشخصات بیمار» card        │ │ avatar/بیمه/.. │
+//     │ چک پرداختی        │ │  «بیمه و نوبت» card         │ │                │
+//     │ چاپ buttons       │ │  services table             │ │                │
+//     └──────────────────┘ │  4 action buttons row       │ └────────────────┘
+//                          └─────────────────────────────┘
+//  The center column is built from two stacked white sub-cards (3-column grid
+//  for identity/contact, 4-column for appointment/insurance), a services table
+//  with an empty-state, and a row of four action buttons. The exact spacing,
+//  border radii, label-with-red-asterisk and light input wells reproduce the
+//  reference design.
+static const int RC_OUT = 16;   // outer page padding
+static const int RC_GAP = 14;   // gap between the three columns
+static const int RC_IN  = 20;   // inner card padding (center cards)
+static const int BILL_W = 196;  // billing card width  (LEFT)
+static const int INFO_W = 210;  // right info-panel width
 
-//  infoL/infoR give the right info-panel bounds (0 if it doesn't fit).
+//  ----- horizontal metrics: the three column bounds + center grid columns.
+//  cx[0..2] = LEFT edges of the 3 center columns (col 0 is the RIGHT-most in
+//  RTL reading order); ccolW = width of each center column.
+struct RecH {
+    int billL, billR;        // LEFT billing card
+    int infoL, infoR;        // RIGHT info panel
+    int cardL, cardR;        // center column outer bounds
+    int formL, formR;        // center inner (padded) bounds
+    int fw;                  // inner form width
+    int ccolW;               // one center grid column width (of 3)
+    int cgap;                // gap between center grid columns
+    bool stacked;            // narrow screen → drop side panels
+};
+static void rcH(int W, RecH& m){
+    int pad=S(RC_OUT);
+    m.billL = pad;
+    m.billR = m.billL + S(BILL_W);
+    m.infoR = W - pad;
+    m.infoL = m.infoR - S(INFO_W);
+    m.cardL = m.billR + S(RC_GAP);
+    m.cardR = m.infoL - S(RC_GAP);
+    m.stacked = (m.cardR - m.cardL) < S(420);
+    if(m.stacked){
+        m.billL=m.billR=0; m.infoL=m.infoR=0;
+        m.cardL=pad; m.cardR=W-pad;
+    }
+    m.formL = m.cardL + S(RC_IN);
+    m.formR = m.cardR - S(RC_IN);
+    m.fw    = m.formR - m.formL;
+    m.cgap  = S(14);
+    m.ccolW = (m.fw - 2*m.cgap) / 3;
+}
+//  Back-compat shim used by a couple of remaining callers (old signature).
 static void rcMetrics2(int W, int& cardL, int& cardR, int& billL, int& billR,
                        int& infoL, int& infoR, int& colW, int& xr, int& xl,
                        bool& stacked){
-    int pad=S(RC_OUT);
-    // billing/print card on the LEFT, info panel on the RIGHT, form in middle
-    billL = pad;
-    billR = billL + S(BILL_W);
-    infoR = W - pad;
-    infoL = infoR - S(INFO_W);
-    cardL = billR + S(RC_GAP);
-    cardR = infoL - S(RC_GAP);
-    int fw = (cardR - S(RC_IN)) - (cardL + S(RC_IN));
-    stacked = fw < S(320);
-    if(stacked){
-        // drop the side panels and let the form fill the page
-        billL = billR = 0; infoL = infoR = 0;
-        cardL = pad; cardR = W - pad;
-        fw = (cardR-S(RC_IN))-(cardL+S(RC_IN));
-    }
-    colW = (fw - S(18))/2;
-    xr = (cardR - S(RC_IN)) - colW;            // right column (RTL first field)
-    xl = cardL + S(RC_IN);                     // left column
+    RecH m; rcH(W,m);
+    cardL=m.cardL; cardR=m.cardR; billL=m.billL; billR=m.billR;
+    infoL=m.infoL; infoR=m.infoR; stacked=m.stacked;
+    colW=m.ccolW; xr=m.formR-m.ccolW; xl=m.formL;
 }
-//  Back-compat wrapper for callers that don't need the info panel bounds.
-static void rcMetrics(int W, int& cardL, int& cardR, int& billL, int& billR,
-                      int& colW, int& xr, int& xl, bool& stacked){
-    int infoL,infoR;
-    rcMetrics2(W,cardL,cardR,billL,billR,infoL,infoR,colW,xr,xl,stacked);
+
+//  ----- vertical layout of the center column (single source of truth shared
+//  by the painter and the control positioner). All y are virtual (pre-scroll).
+struct CenterV {
+    int rh;                  // input height
+    // card 1 «مشخصات بیمار»
+    int c1Top, c1Bot, c1HdrY;
+    int r1y[3];              // baseline (input top) of the 3 identity rows
+    // card 2 «بیمه و نوبت»
+    int c2Top, c2Bot, c2HdrY;
+    int r2y;                 // first row (4 cols) input top
+    int r2by;                // second row (مبلغ/تخفیف) input top
+    // services card
+    int tTop, tBot, tHdrY;   // table card bounds + toolbar row
+    int toolY;               // toolbar (افزودن خدمت + جستجو) input top
+    int theadY;              // table header row top
+    int tbodyY, tbodyBot;    // table body bounds
+    // bottom buttons row
+    int btnY, btnH;
+    int totalBot;            // total content bottom
+};
+static void computeCenterV(const RecH& m, CenterV& v){
+    (void)m;
+    const int rh   = S(34);          // input height (matches reference)
+    const int lbl  = S(20);          // label band above each input
+    const int rgap = S(16);          // gap between grid rows
+    v.rh = rh;
+    int y = S(RC_OUT);
+    // ----- card 1: مشخصات بیمار -----
+    v.c1Top = y;
+    v.c1HdrY = y + S(14);
+    int rowsTop = y + S(44);         // below header + hairline
+    for(int i=0;i<3;i++) v.r1y[i] = rowsTop + lbl + i*(lbl+rh+rgap);
+    v.c1Bot = v.r1y[2] + rh + S(16);
+    y = v.c1Bot + S(12);
+    // ----- card 2: بیمه و نوبت -----
+    v.c2Top = y;
+    v.c2HdrY = y + S(14);
+    int c2rowsTop = y + S(44);
+    v.r2y  = c2rowsTop + lbl;
+    v.r2by = v.r2y + rh + rgap + lbl;
+    v.c2Bot = v.r2by + rh + S(16);
+    y = v.c2Bot + S(12);
+    // ----- services table card -----
+    v.tTop = y;
+    v.toolY = y + S(12);             // toolbar buttons
+    v.theadY = v.toolY + rh + S(12); // table header strip
+    v.tbodyY = v.theadY + S(34);
+    v.tbodyBot = v.tbodyY + S(120);  // empty-state body height
+    v.tBot = v.tbodyBot + S(12);
+    y = v.tBot + S(14);
+    // ----- bottom action buttons -----
+    v.btnH = S(44);
+    v.btnY = y;
+    v.totalBot = v.btnY + v.btnH + S(14);
 }
-//  Vertical metrics adapt to available height so the form never overflows on
-//  small / low-res monitors (responsive requirement).
-static void rcVMetrics(int H, int& y0, int& step, int& rh){
-    // y0 must clear: card top (S16) + header (≈S46) + separator (S52) and then
-    // leave room above the first row for its section caption. Start ~S132.
-    //
-    // Per-row anatomy (offsets are measured from the row baseline = y0+row*step):
-    //   section caption .. baseline-S(44)  (only rows 0,3,5,7; height S(20))
-    //   field label ..... baseline-S(20)   (height S(18))
-    //   input ........... baseline         (height rh)
-    //
-    // To guarantee the NEXT row's caption never collides with the CURRENT row's
-    // input we need:   step - S(44) - rh >= S(8)   →   step >= rh + S(52).
-    // With rh=S(34) that means step >= S(86). We honour that on roomy screens and
-    // shrink gracefully (keeping the no-overlap invariant) on short ones.
-    // v1.9.0: slightly SHORTER inputs (rh 34→30) + MORE label breathing room
-    // (gap 52→56). Invariant step >= rh + S(54) still holds → zero overlap.
-    // v1.10.0: compact metrics so the whole reception form fits at 1024×600
-    // WITHOUT scrolling. Slimmer inputs (26px) and tighter row spacing. The
-    // no-overlap invariant is  step >= rh + S(40)  (caption band S(44)→S(40),
-    // label band stays). We start tight and only shrink further on very short
-    // screens — never grow a scrollbar in the common resolutions.
-    // v1.3.0: caption band is S(20) tall and is drawn S(42) above the input
-    // baseline (see WM_PAINT). To GUARANTEE a strictly-positive gap between the
-    // previous row's input (which ends at base-step+rh) and THIS row's caption
-    // (which starts at base - RC_CAP_OFF) we require:
-    //     step - rh >= RC_CAP_OFF + RC_CAP_CLEAR(gap)
-    // v1.12.0: the well the painter draws extends from input.top - RC_WELL_PAD
-    // to input.bottom + RC_WELL_PAD (RC_WELL_PAD=S(4)). So the *previous* well
-    // bottom is base-step+rh+S(4). The caption band TOP is base-RC_CAP_OFF. The
-    // real clear gap is therefore  step - rh - RC_CAP_OFF - S(4). We now demand
-    // a STRICTLY-positive >=S(6) gap so the blue separator label can never be
-    // covered by the framed input well above it at any DPI rounding.
-    //   step >= rh + RC_CAP_OFF + S(4) + S(6) = rh + S(52)  (RC_CAP_OFF=S(42))
-    y0 = S(104); rh = S(26); step = rh + S(52);    // = S(78), >=S(6) clearance band
-    int need = y0 + 8*step + S(96);
-    if(H > 0 && need > H){
-        int s2 = (H - y0 - S(96)) / 8;
-        if(s2 < S(66)) s2 = S(66);                 // hard floor: rh(20)+52-6=66
-        if(s2 < step){
-            step = s2;
-            // keep the no-overlap invariant: rh <= step - S(52) (42 cap + 4 pad + 6 clear)
-            rh = step - S(52); if(rh > S(26)) rh = S(26); if(rh < S(20)) rh = S(20);
-        }
-    }
-}
-//  Natural (uncompressed) full height the reception form needs, so the page can
-//  decide whether to show a vertical scrollbar. Includes the submit button and
-//  bottom padding.
-static int rcFormContentH(int H){
-    int y0,step,rh; rcVMetrics(H,y0,step,rh);
-    return y0 + 8*step + S(6) + S(46) + S(16);   // last row + submit + pad
+//  Natural (uncompressed) full height the center form needs, so the page can
+//  decide whether to show a vertical scrollbar. Width is taken from the current
+//  client when known; H is unused now (kept for the existing call sites).
+static int rcFormContentH(int W){
+    RecH m; rcH(W>0?W:S(1024),m);
+    CenterV v; computeCenterV(m,v);
+    return v.totalBot + S(RC_OUT);
 }
 // ----------------------------------------------------------------------------
 //  Unified RIGHT INFO-PANEL layout.  A SINGLE source of truth shared by the
@@ -340,36 +373,39 @@ struct InfoLayout {
     int rh2, gp, btnW, lblH;
 };
 static void computeInfoLayout(int infoL, int infoR, int H, InfoLayout& L){
-    int ipad=S(16);
+    int ipad=S(14);
     L.iL=infoL+ipad; L.iR=infoR-ipad; L.iw=L.iR-L.iL;
     L.cardTop=S(16); L.cardBot=H-S(16);
-    L.rh2=S(28); L.gp=S(6); L.btnW=S(78); L.lblH=S(16);
+    L.rh2=S(30); L.gp=S(6); L.btnW=S(54); L.lblH=S(15);
     // --- header zone (matches painter) ---
-    L.avR=S(44); L.avCx=(L.iL+L.iR)/2; L.avCy=L.cardTop+S(14)+L.avR;
-    int y=L.avCy+L.avR+S(12);
-    L.chipH=S(26); L.chipY=y;            y+=L.chipH+S(8);
-    L.boxH =S(28); L.boxY =y;            y+=L.boxH +S(8);
-    L.psH  =S(20); L.psY  =y;            y+=L.psH  +S(14);
-    int lblGap=S(2);   // gap between a label line and its control
+    //  smaller avatar + «بیمار جدید/بدون سابقه» caption + green «نسخه الکترونیک»
+    //  chip + a row of two counter boxes (نسخه سرپایی / نسخه الکترونیکی).
+    L.avR=S(30); L.avCx=(L.iL+L.iR)/2; L.avCy=L.cardTop+S(12)+L.avR;
+    int y=L.avCy+L.avR+S(8);
+    y += S(36);                          // «بیمار جدید» + «بدون سابقه» two lines
+    L.chipH=S(24); L.chipY=y;            y+=L.chipH+S(10);
+    L.boxH =S(42); L.boxY =y;            y+=L.boxH +S(14); // two counter boxes
+    L.psH  =0;     L.psY  =y;                                // unused now
+    int lblGap=S(1);   // gap between a label line and its control
     int rowGap=S(8);   // gap between control rows
-    int grpGap=S(16);  // gap before next group title
+    int grpGap=S(14);  // gap before next group title
     auto labelled=[&](int& lblY,int& ctlY){
         lblY=y; y+=L.lblH+lblGap; ctlY=y; y+=L.rh2+rowGap;
     };
-    // group 1
-    L.g1TitleY=y; y+=S(24);
+    // group 1 — کلیدهای جستجو
+    L.g1TitleY=y; y+=S(22);
     labelled(L.archiveLblY,L.archiveY);
     labelled(L.fileLblY,   L.fileY);
     y+=grpGap-rowGap;
-    // group 2
-    L.g2TitleY=y; y+=S(24);
+    // group 2 — بیمه
+    L.g2TitleY=y; y+=S(22);
     labelled(L.bookLblY, L.bookY);
     labelled(L.validLblY,L.validY);
     labelled(L.rxLblY,   L.rxY);
     labelled(L.suppLblY, L.suppY);
     y+=grpGap-rowGap;
-    // group 3
-    L.g3TitleY=y; y+=S(24);
+    // group 3 — پزشک معالج
+    L.g3TitleY=y; y+=S(22);
     labelled(L.docCodeLblY,L.docCodeY);
     labelled(L.docNameLblY,L.docNameY);
 }
@@ -379,17 +415,16 @@ static void computeInfoLayout(int infoL, int infoR, int H, InfoLayout& L){
 //  is taller than the client area the page scrolls; the cards grow to this VH so
 //  their rounded bottom edge is always below the last control.
 static int recPageVH(int W, int H){
-    int cardL,cardR,billL,billR,infoL,infoR,colW,xr,xl; bool stacked;
-    rcMetrics2(W,cardL,cardR,billL,billR,infoL,infoR,colW,xr,xl,stacked);
-    int formH = rcFormContentH(H);
+    RecH m; rcH(W,m);
+    int formH = rcFormContentH(W);
     int infoH = 0;
-    if(!stacked && infoR>infoL){
-        InfoLayout L; computeInfoLayout(infoL,infoR,H,L);
-        infoH = L.docNameY + L.rh2 + S(40);   // last control + bottom («انجام دهنده») room
+    if(!m.stacked && m.infoR>m.infoL){
+        InfoLayout L; computeInfoLayout(m.infoL,m.infoR,H,L);
+        infoH = L.docNameY + L.rh2 + S(40);   // last control + bottom room
     }
-    int billH = S(16)+S(62)+S(360)+S(214)+S(16);   // billing rows + buttons block
+    int billH = S(16)+S(360)+S(210)+S(16);     // billing rows + print block
     int need = formH; if(infoH>need) need=infoH; if(billH>need) need=billH;
-    need += S(16);                                   // top padding mirror
+    need += S(16);                                   // bottom padding mirror
     return need>H ? need : H;
 }
 //  Clamp & return the current scroll offset for the page.
@@ -428,79 +463,101 @@ static void tabPageLayout(HWND h, TabPage* t){
     RECT rc; GetClientRect(h,&rc);
     int W=rc.right, H=rc.bottom;
     if(W<=0 || H<=0) return;
-    int cardL,cardR,billL,billR,infoL,infoR,colW,xr,xl; bool stacked;
-    rcMetrics2(W,cardL,cardR,billL,billR,infoL,infoR,colW,xr,xl,stacked);
-    int y0,step,rh; rcVMetrics(H,y0,step,rh);
-    int formLeft = cardL+S(RC_IN);
-    int formRight= cardR-S(RC_IN);
-    int fw = formRight - formLeft;
+    RecH m; rcH(W,m);
+    CenterV v; computeCenterV(m,v);
     recClampScroll(h,t);
     const int sy=t->scrollY;          // scroll offset (subtract from every y)
-    y0 -= sy;                          // shift the whole form up by scroll
     recUpdateScrollbar(h,t);
 
-    // Section 1: هویت بیمار (rows 0..2)
-    MoveWindow(t->eFirst, xr, y0,          colW, rh, TRUE);
-    MoveWindow(t->eLast,  xl, y0,          colW, rh, TRUE);
-    MoveWindow(t->eNid,   xr, y0+step,     colW, rh, TRUE);
-    MoveWindow(t->eFather,xl, y0+step,     colW, rh, TRUE);
-    MoveWindow(t->eBirth, xr, y0+2*step,   colW, rh, TRUE);
-    MoveWindow(t->cGender,xl, y0+2*step,   colW, S(200), TRUE);
-    // Section 2: تماس (rows 3..4)
-    MoveWindow(t->eMobile,xr, y0+3*step,   colW, rh, TRUE);
-    MoveWindow(t->ePhone, xl, y0+3*step,   colW, rh, TRUE);
-    MoveWindow(t->eAddr,  formLeft, y0+4*step, fw, rh, TRUE);
-    // Section 3: نوبت و بیمه (rows 5..6)
-    MoveWindow(t->cPType, xr, y0+5*step,   colW, S(200), TRUE);
-    MoveWindow(t->cNType, xl, y0+5*step,   colW, S(200), TRUE);
-    // «دارای بیمه» checkbox sits ABOVE the insurance combo (right column) and
-    // doubles as that field's header (the painted "بیمه اصلی" label is omitted
-    // here to avoid a checkbox-over-label collision). It spans the full column
-    // width so — with BS_RIGHTBUTTON|BS_RIGHT — its check glyph lines up with the
-    // RTL leading (right) edge of the combo directly below it.
-    MoveWindow(t->chkIns, xr, y0+6*step-S(20), colW, S(18), TRUE);
-    MoveWindow(t->cIns,   xr, y0+6*step,   colW, S(240), TRUE);
-    MoveWindow(t->cSupp,  xl, y0+6*step,   colW, S(240), TRUE);
-    // Section 4: مبلغ (row 7)
-    MoveWindow(t->ePrice, xr, y0+7*step,   colW, rh, TRUE);
-    MoveWindow(t->eDiscount,xl,y0+7*step,  colW, rh, TRUE);
-    // submit
-    MoveWindow(t->bSubmit,formLeft, y0+8*step+S(6), fw, S(46), TRUE);
-    // v1.4.0 (§6): reset/clear button directly under submit (full form width)
-    MoveWindow(t->bReset, formLeft, y0+8*step+S(6)+S(52), fw, S(34), TRUE);
+    const int rh = v.rh;
+    const int cgap = m.cgap, cw = m.ccolW;
+    // RTL: column 0 sits at the RIGHT, column 2 at the LEFT.
+    auto colX=[&](int c){ return m.formR - (c+1)*cw - c*cgap; };
+    const int cx0 = colX(0), cx1 = colX(1), cx2 = colX(2);
+    #define Y(yy) ((yy)-sy)
 
-    // billing panel buttons (bottom of billing card). Pinned to the virtual
-    // page height so they track the card bottom and scroll with the page.
+    // ===== card 1: مشخصات بیمار (3-column grid) =====
+    // row0: نام(col0) | نام خانوادگی(col1) | کد ملی(col2)
+    MoveWindow(t->eFirst, cx0, Y(v.r1y[0]), cw, rh, TRUE);
+    MoveWindow(t->eLast,  cx1, Y(v.r1y[0]), cw, rh, TRUE);
+    MoveWindow(t->eNid,   cx2, Y(v.r1y[0]), cw, rh, TRUE);
+    // row1: نام پدر(col0) | تاریخ تولد(col1) | جنسیت(col2)
+    MoveWindow(t->eFather,cx0, Y(v.r1y[1]), cw, rh, TRUE);
+    MoveWindow(t->eBirth, cx1, Y(v.r1y[1]), cw, rh, TRUE);
+    MoveWindow(t->cGender,cx2, Y(v.r1y[1]), cw, S(200), TRUE);
+    // row2: شماره موبایل(col0) | تلفن ثابت(col1) | آدرس(col2)
+    MoveWindow(t->eMobile,cx0, Y(v.r1y[2]), cw, rh, TRUE);
+    MoveWindow(t->ePhone, cx1, Y(v.r1y[2]), cw, rh, TRUE);
+    MoveWindow(t->eAddr,  cx2, Y(v.r1y[2]), cw, rh, TRUE);
+
+    // ===== card 2: بیمه و نوبت (4-column row then 2-column row) =====
+    // 4 columns across the full inner width.
+    int gw = (m.fw - 3*cgap)/4;
+    auto gx=[&](int c){ return m.formR - (c+1)*gw - c*cgap; };
+    MoveWindow(t->cPType, gx(0), Y(v.r2y), gw, S(200), TRUE);  // نوع پذیرش
+    MoveWindow(t->cNType, gx(1), Y(v.r2y), gw, S(200), TRUE);  // نوع نوبت
+    MoveWindow(t->cIns,   gx(2), Y(v.r2y), gw, S(240), TRUE);  // نوع بیمه
+    MoveWindow(t->cSupp,  gx(3), Y(v.r2y), gw, S(240), TRUE);  // نوع بیمه پایه
+    // second row: مبلغ خدمت | تخفیف (each spans 2 of the 4 columns)
+    int hw = (m.fw - cgap)/2;
+    MoveWindow(t->ePrice,    m.formR-hw,        Y(v.r2by), hw, rh, TRUE);
+    MoveWindow(t->eDiscount, m.formL,           Y(v.r2by), hw, rh, TRUE);
+    // «دارای بیمه» checkbox is folded into the insurance flow; hide the visual
+    // duplicate in the reference design (the painted labels carry the meaning).
+    ShowWindow(t->chkIns, SW_HIDE);
+
+    // ===== services table toolbar =====
+    // «افزودن خدمت» button (left) + search box (to its right)
+    int addW = S(108);
+    MoveWindow(t->bSvcAdd,   m.formL,            Y(v.toolY), addW, rh, TRUE);
+    MoveWindow(t->eSvcSearch,m.formL+addW+cgap,  Y(v.toolY), S(180), rh, TRUE);
+
+    // ===== bottom action buttons row (4 buttons) =====
+    // ثبت پذیرش و صدور قبض (widest) | پاک کردن | پذیرش جدید | انصراف
+    {
+        int gap = S(10);
+        int small = S(118);
+        int wideW = m.fw - 3*(small+gap);
+        if(wideW < S(200)) wideW = S(200);
+        int x = m.formR;                 // start at the right edge (RTL)
+        // submit is the RIGHT-most & widest
+        x -= wideW; MoveWindow(t->bSubmit, x, Y(v.btnY), wideW, v.btnH, TRUE);
+        x -= gap+small; MoveWindow(t->bReset, x, Y(v.btnY), small, v.btnH, TRUE);
+        x -= gap+small; MoveWindow(t->bNew,   x, Y(v.btnY), small, v.btnH, TRUE);
+        x -= gap+small; MoveWindow(t->bClose, x, Y(v.btnY), small, v.btnH, TRUE);
+        ShowWindow(t->bSubmit,SW_SHOW); ShowWindow(t->bReset,SW_SHOW);
+        ShowWindow(t->bNew,SW_SHOW);    ShowWindow(t->bClose,SW_SHOW);
+        ShowWindow(t->bSvcAdd,SW_SHOW); ShowWindow(t->eSvcSearch,SW_SHOW);
+    }
+
+    // billing panel print buttons (bottom of LEFT billing card). Pinned to the
+    // virtual page height so they track the card bottom and scroll with the page.
     int VH = recPageVH(W,H);
-    if(!stacked){
-        int bx = billL + S(16), byy = VH - S(214) - sy;
-        int bbw = (billR-billL) - S(32);
+    if(!m.stacked){
+        int bx = m.billL + S(12), byy = VH - S(186) - sy;
+        int bbw = (m.billR-m.billL) - S(24);
         MoveWindow(t->bPrtIns, bx, byy,        bbw, S(40), TRUE);
         MoveWindow(t->bPrtRx,  bx, byy+S(48),  bbw, S(40), TRUE);
         MoveWindow(t->bPrtLast,bx, byy+S(96),  bbw, S(40), TRUE);
-        MoveWindow(t->bClose,  bx, byy+S(152), bbw, S(42), TRUE);
         ShowWindow(t->bPrtIns,SW_SHOW); ShowWindow(t->bPrtRx,SW_SHOW);
-        ShowWindow(t->bPrtLast,SW_SHOW); ShowWindow(t->bClose,SW_SHOW);
-        // v1.9.0: the «استعلام بیمه» button is removed from the invoice panel —
-        // it overlapped the final-amount field. Identity/insurance inquiry is
-        // still available by entering the national code and pressing Enter.
+        ShowWindow(t->bPrtLast,SW_SHOW);
         ShowWindow(t->bInquiry,SW_HIDE);
     } else {
-        // stacked: inquiry button also hidden (see note above).
         ShowWindow(t->bInquiry,SW_HIDE);
         ShowWindow(t->bPrtIns,SW_HIDE); ShowWindow(t->bPrtRx,SW_HIDE);
-        ShowWindow(t->bPrtLast,SW_HIDE); ShowWindow(t->bClose,SW_HIDE);
+        ShowWindow(t->bPrtLast,SW_HIDE);
     }
+    #undef Y
 
     // ====================== RIGHT INFO PANEL layout ======================
     HWND infoCtls[]={t->eArchive,t->bArchiveGo,t->eFile,t->bFileGo,t->eBookNo,
         t->chkBookNo,t->eValid,t->chkValidAuto,t->eRxDate,t->chkRxAuto,
         t->cSuppPanel,t->eSuppPct,t->bSuppGo,t->eDocCode,t->eDocName,t->bDocSearch};
-    if(stacked || infoR<=infoL){
+    if(m.stacked || m.infoR<=m.infoL){
         for(HWND c: infoCtls) if(c) ShowWindow(c,SW_HIDE);
     } else {
         for(HWND c: infoCtls) if(c) ShowWindow(c,SW_SHOW);
-        InfoLayout L; computeInfoLayout(infoL,infoR,H,L);
+        InfoLayout L; computeInfoLayout(m.infoL,m.infoR,H,L);
         const int iL=L.iL, iw=L.iw, rh2=L.rh2, gp=L.gp, btnW=L.btnW;
         // --- search keys group ---  (all info-panel controls also scroll)
         MoveWindow(t->bArchiveGo, iL, L.archiveY-sy, btnW, rh2, TRUE);
@@ -1176,29 +1233,37 @@ static void paintInfoPanel(HDC dc, TabPage* t, int infoL, int infoR, int H, int 
     bool female = (SendMessageW(t->cGender,CB_GETCURSEL,0,0)==1);
     // --- avatar (neutral gray, perfectly centred) ---
     drawGuestAvatar(dc,L.avCx,SY(L.avCy),L.avR,female);
-    // --- نسخه الکترونیک chip ---
-    { RECT chip={iL,SY(L.chipY),iR,SY(L.chipY)+L.chipH};
-      gpRoundRectBg(dc,chip,S(8),g_theme.accent,CLR_INVALID,g_theme.surface);
-      SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.accentText);
+    // --- «بیمار جدید» + «بدون سابقه» caption ---
+    { int capY=SY(L.avCy)+L.avR+S(8);
+      SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.text);
+      RECT t1={iL,capY,iR,capY+S(20)};
+      DrawTextW(dc,L"بیمار جدید",-1,&t1,DT_CENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+      SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
+      RECT t2={iL,capY+S(18),iR,capY+S(34)};
+      DrawTextW(dc,L"بدون سابقه",-1,&t2,DT_CENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX); }
+    // --- نسخه الکترونیک chip (GREEN, soft fill) ---
+    { RECT chip={iL+L.iw/4,SY(L.chipY),iR-L.iw/4,SY(L.chipY)+L.chipH};
+      COLORREF gfill=blendColor(g_theme.success,g_theme.surface,78);
+      fillRoundRect(dc,chip,S(12),gfill,blendColor(g_theme.success,g_theme.surface,40));
+      SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.success);
       DrawTextW(dc,L"نسخه الکترونیک",-1,&chip,
           DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX); }
-    // --- قبض - ماه / بارکد ---
-    { RECT box={iL,SY(L.boxY),iR,SY(L.boxY)+L.boxH};
-      gpRoundRectBg(dc,box,S(8),g_theme.inputBg,g_theme.border,g_theme.surface);
-      SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
-      SYSTEMTIME st=iranNow(); int jy,jm,jd;
-      gregToJalali(st.wYear,st.wMonth,st.wDay,jy,jm,jd);
-      wchar_t b[64]; swprintf(b,64,L"قبض - ماه %d  /  بارکد",jm);
-      RECT tr=box; tr.right-=S(8);
-      DrawTextW(dc,toFaDigits(b).c_str(),-1,&tr,
-          DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX); }
-    // --- P : 0   S : 0 counters ---
-    { SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.text);
-      int pCount=countTodayReceptions();
-      wchar_t b[40]; swprintf(b,40,L"P : %d        S : %d",pCount,detectShift());
-      RECT tr={iL,SY(L.psY),iR,SY(L.psY)+L.psH};
-      DrawTextW(dc,toFaDigits(b).c_str(),-1,&tr,
-          DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX); }
+    // --- two counter boxes: نسخه (سرپایی) | نسخه (الکترونیکی) ---
+    { int half=(L.iw-S(8))/2;
+      RECT bL={iL,SY(L.boxY),iL+half,SY(L.boxY)+L.boxH};
+      RECT bR={iR-half,SY(L.boxY),iR,SY(L.boxY)+L.boxH};
+      for(int k=0;k<2;k++){
+          RECT bx = k==0?bR:bL;          // RTL: first box on the RIGHT
+          fillRoundRect(dc,bx,S(8),g_theme.inputBg,g_theme.border);
+          SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
+          RECT lr={bx.left,bx.top+S(4),bx.right,bx.top+S(20)};
+          DrawTextW(dc,k==0?L"نسخه (سرپایی)":L"نسخه (الکترونیکی)",-1,&lr,
+              DT_CENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+          SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.text);
+          RECT vr={bx.left,bx.top+S(20),bx.right,bx.bottom-S(2)};
+          DrawTextW(dc,L"0",-1,&vr,DT_CENTER|DT_SINGLELINE|DT_NOPREFIX);
+      }
+    }
     // group titles + per-row field captions — share the SAME layout as controls
     paintInfoGroup(dc,iL,iR,SY(L.g1TitleY),L"کلیدهای جستجو",ICO_ID);
     paintInfoLabel(dc,iL,iR,SY(L.archiveLblY),L"شماره بایگانی");
@@ -1305,12 +1370,20 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             SendMessageW(t->cSupp,CB_ADDSTRING,0,(LPARAM)SUPP_INSURANCES[i].name);
         SendMessageW(t->cSupp,CB_SETCURSEL,0,0);
 
+        // bottom action row (matches reference): ثبت (primary) | پاک کردن |
+        // پذیرش جدید | انصراف
         t->bSubmit =createFlatButton(h,ID_F_SUBMIT,L"ثبت پذیرش و صدور قبض",ICO_SAVE,BS_PRIMARY,0,0,10,10);
+        t->bReset  =createFlatButton(h,ID_F_RESET,L"پاک کردن",ICO_REFRESH,BS_OUTLINE,0,0,10,10);
+        t->bNew    =createFlatButton(h,ID_F_NEW,L"پذیرش جدید",ICO_NONE,BS_OUTLINE,0,0,10,10);
+        t->bClose  =createFlatButton(h,ID_F_CLOSE,L"انصراف",ICO_X,BS_OUTLINE,0,0,10,10);
+        // services table toolbar
+        t->bSvcAdd =createFlatButton(h,ID_F_SVC_ADD,L"افزودن خدمت",ICO_NONE,BS_OUTLINE,0,0,10,10);
+        t->eSvcSearch=CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)ID_F_SVC_SEARCH,g_hInst,0);
+        SendMessageW(t->eSvcSearch,WM_SETFONT,(WPARAM)g_fUI,TRUE);
+        // print actions (LEFT billing card)
         t->bPrtIns =createFlatButton(h,ID_F_PRT_INS,L"رسید بیمه",ICO_PRINT,BS_OUTLINE,0,0,10,10);
         t->bPrtRx  =createFlatButton(h,ID_F_PRT_RX,L"چاپ نسخه",ICO_PRINT,BS_OUTLINE,0,0,10,10);
         t->bPrtLast=createFlatButton(h,ID_F_PRT_LAST,L"چاپ آخرین قبض (F8)",ICO_PRINT,BS_OUTLINE,0,0,10,10);
-        t->bClose  =createFlatButton(h,ID_F_CLOSE,L"خروج (بستن تب)",ICO_LOGOUT,BS_DANGER,0,0,10,10);
-        t->bReset  =createFlatButton(h,ID_F_RESET,L"پاک کردن فرم (Ctrl+R)",ICO_REFRESH,BS_OUTLINE,0,0,10,10);
         t->bInquiry=createFlatButton(h,ID_F_INQUIRY,L"استعلام بیمه",ICO_SHIELD,BS_OUTLINE,0,0,10,10);
         // v1.4.1: real raster icons on the print-action buttons (left card)
         setFlatButtonImage(t->bPrtIns, IMG_IC_SHIELD);
@@ -1319,10 +1392,13 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         // blend button corners: submit sits on the form card (surface); the
         // billing/print buttons sit on the page background (bg).
         setFlatButtonBg(t->bSubmit, g_theme.surface);
+        setFlatButtonBg(t->bReset,  g_theme.surface);
+        setFlatButtonBg(t->bNew,    g_theme.surface);
+        setFlatButtonBg(t->bClose,  g_theme.surface);
+        setFlatButtonBg(t->bSvcAdd, g_theme.surface);
         setFlatButtonBg(t->bPrtIns, g_theme.surface);
         setFlatButtonBg(t->bPrtRx,  g_theme.surface);
         setFlatButtonBg(t->bPrtLast,g_theme.surface);
-        setFlatButtonBg(t->bClose,  g_theme.surface);
         setFlatButtonBg(t->bInquiry,g_theme.surface);
 
         // birth-date uses the smart Jalali mask (digits-only, auto slashes)
@@ -1634,9 +1710,23 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             else MessageBoxW(h,L"ابتدا یک پذیرش ثبت کنید.",L"چاپ نسخه",MB_OK|MB_ICONINFORMATION);
         }
         else if(id==ID_F_PRT_LAST) printLastReceipt(h);
-        else if(id==ID_F_RESET){                       // v1.4.0 (§6) clear form
+        else if(id==ID_F_RESET){                       // پاک کردن
             resetForm(t);
             t->lastMsg=L"فرم پاک شد."; t->msgCol=g_theme.textDim;
+            InvalidateRect(h,NULL,FALSE);
+        }
+        else if(id==ID_F_NEW){                          // پذیرش جدید
+            resetForm(t);
+            t->lastMsg=L"پذیرش جدید — اطلاعات بیمار را وارد کنید.";
+            t->msgCol=g_theme.accent;
+            SetFocus(t->eFirst);
+            InvalidateRect(h,NULL,FALSE);
+        }
+        else if(id==ID_F_SVC_ADD || id==ID_F_SVC_SEARCH){
+            // خدمات: placeholder until the service catalogue UI lands — for now
+            // the price field on the «بیمه و نوبت» card drives the bill.
+            t->lastMsg=L"مبلغ خدمت را در بخش «بیمه و نوبت» وارد کنید.";
+            t->msgCol=g_theme.textDim;
             InvalidateRect(h,NULL,FALSE);
         }
         else if(id==ID_F_CLOSE) closeTab(t);
@@ -1889,227 +1979,197 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             return 0;
         }
 
-        int cardL,cardR,billL,billR,infoL,infoR,colW,xr,xl; bool stacked;
-        rcMetrics2(rc.right,cardL,cardR,billL,billR,infoL,infoR,colW,xr,xl,stacked);
-        int y0,step,rh2; rcVMetrics(rc.bottom,y0,step,rh2);
-        int formLeft = cardL+S(RC_IN), formRight = cardR-S(RC_IN);
-        int fw = formRight-formLeft;
-        // v2: scroll offset + virtual page height (cards grow to content)
+        RecH m; rcH(rc.right,m);
+        CenterV v; computeCenterV(m,v);
+        recalc(t);
         recClampScroll(h,t);
         const int sy=t->scrollY;
         int VH=recPageVH(rc.right,rc.bottom);
-        int cardTop = S(16)-sy;
-        int cardBot = VH-S(16)-sy;
-        y0 -= sy;
+        #define Y(yy) ((yy)-sy)
 
         // ============ RIGHT INFO PANEL ============
-        if(!stacked && infoR>infoL) paintInfoPanel(dc,t,infoL,infoR,VH-sy,sy);
+        if(!m.stacked && m.infoR>m.infoL) paintInfoPanel(dc,t,m.infoL,m.infoR,VH-sy,sy);
 
-        // ============ FORM CARD (left, wide) ============
-        RECT fcard={cardL,cardTop,cardR,cardBot};
-        gpRoundRectBg(dc,fcard,S(16),g_theme.surface,g_theme.border,g_theme.bg);
-        // card header bar (vector icon + title — no emoji font dependency).
-        // The icon sits flush at the right edge; the title's RIGHT edge stops a
-        // clear gap to the LEFT of the icon so they never overlap (RTL layout).
-        { int icoW=S(24), gap=S(10);
-          RECT hi={formRight-icoW,fcard.top+S(16),formRight,fcard.top+S(40)};
-          drawIcon(dc,ICO_USER,hi,g_theme.accent,S(2));
-          SetTextColor(dc,g_theme.text);
-          SelectObject(dc,g_fTitle);
-          RECT ht={formLeft,fcard.top+S(14),formRight-icoW-gap,fcard.top+S(46)};
-          DrawTextW(dc,L"مشخصات و پذیرش بیمار",-1,&ht,
-              DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX); }
-        // header separator
-        { HPEN pn=CreatePen(PS_SOLID,1,g_theme.border);
-          HGDIOBJ op=SelectObject(dc,pn);
-          MoveToEx(dc,formLeft,fcard.top+S(52),0); LineTo(dc,formRight,fcard.top+S(52));
-          SelectObject(dc,op); DeleteObject(pn); }
+        // ---- shared helpers for the center cards ----
+        const int formL=m.formL, formR=m.formR, fw=m.fw;
+        const int rh=v.rh, cgap=m.cgap, cw=m.ccolW;
+        auto colX=[&](int c){ return formR - (c+1)*cw - c*cgap; };
+        //  draw a white sub-card with a header (icon flush-right + title).
+        auto subcard=[&](int top,int bot,const wchar_t* title,int icon){
+            RECT cr={m.cardL,Y(top),m.cardR,Y(bot)};
+            gpRoundRectBg(dc,cr,S(14),g_theme.surface,g_theme.border,g_theme.bg);
+            int icoW=S(18);
+            RECT hi={formR-icoW,cr.top+S(14),formR,cr.top+S(32)};
+            drawIcon(dc,icon,hi,g_theme.accent,S(2));
+            SetTextColor(dc,g_theme.text); SelectObject(dc,g_fUIB);
+            RECT ht={formL,cr.top+S(12),formR-icoW-S(8),cr.top+S(34)};
+            DrawTextW(dc,title,-1,&ht,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+        };
+        //  draw a field label (with optional red required asterisk) above (x,y).
+        auto fieldLabel=[&](int x,int y,int w,const wchar_t* txt,bool req){
+            SelectObject(dc,g_fSmall);
+            // measure the label so the asterisk can sit just to its LEFT (RTL).
+            RECT lr={x,Y(y),x+w,Y(y)+S(16)};
+            SetTextColor(dc,g_theme.textDim);
+            DrawTextW(dc,txt,-1,&lr,DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+            if(req){
+                SIZE sz; GetTextExtentPoint32W(dc,txt,(int)wcslen(txt),&sz);
+                int ax = x+w - sz.cx - S(8);
+                SetTextColor(dc,g_theme.danger);
+                RECT ar={ax-S(10),Y(y),ax,Y(y)+S(16)};
+                DrawTextW(dc,L"*",-1,&ar,DT_RIGHT|DT_SINGLELINE|DT_NOPREFIX);
+            }
+        };
 
-        // --- section captions (accent caption + vector icon above group) ---
-        struct SEC{const wchar_t* s; int row; int icon;};
-        SEC secs[4]={ {L"هویت بیمار",0,ICO_ID},
-                      {L"اطلاعات تماس",3,ICO_PHONE},
-                      {L"نوبت و بیمه",5,ICO_SHIELD},
-                      {L"مبلغ و تخفیف",7,ICO_RECEIPT} };
-        SelectObject(dc,g_fUIB);
-        for(int i=0;i<4;i++){
-            // v1.3.0: caption sits S(42) above the input baseline. With
-            // step = rh + S(46) the previous input ends at base-46+rh = base-46
-            // ..wait rh<=step-44 so previous-input-bottom = base-step+rh
-            // <= base-44, leaving a >=2px clear band above this caption's top
-            // (base-42). The section-header rect therefore never intersects a
-            // sibling input rect (the v1.2.x "blue label behind input" bug).
-            int scy=y0+secs[i].row*step-S(42);   // RC_CAP_OFF = S(42)
-            // icon flush-right, caption text stops well to its LEFT (no overlap)
-            int icoW=S(18), gap=S(8);
-            // paint the caption band background with the card surface FIRST so a
-            // stale prior frame can never bleed under the blue label.
-            RECT band={formLeft,scy,formRight,scy+S(20)};
-            { HBRUSH bb=CreateSolidBrush(g_theme.surface);
-              FillRect(dc,&band,bb); DeleteObject(bb); }
-            RECT si={formRight-icoW,scy+S(1),formRight,scy+S(19)};
-            drawIcon(dc,secs[i].icon,si,g_theme.accent,S(2));
-            SetTextColor(dc,g_theme.accent);
-            RECT sr={formLeft,scy,formRight-icoW-gap,scy+S(20)};
-            DrawTextW(dc,secs[i].s,-1,&sr,DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+        // ============ CARD 1: مشخصات بیمار (3-column grid) ============
+        subcard(v.c1Top,v.c1Bot,L"مشخصات بیمار",ICO_USER);
+        // labels (col0=right, col2=left)
+        fieldLabel(colX(0),v.r1y[0]-S(20),cw,L"نام",true);
+        fieldLabel(colX(1),v.r1y[0]-S(20),cw,L"نام خانوادگی",true);
+        fieldLabel(colX(2),v.r1y[0]-S(20),cw,L"کد ملی",true);
+        fieldLabel(colX(0),v.r1y[1]-S(20),cw,L"نام پدر",false);
+        fieldLabel(colX(1),v.r1y[1]-S(20),cw,L"تاریخ تولد",false);
+        fieldLabel(colX(2),v.r1y[1]-S(20),cw,L"جنسیت",false);
+        fieldLabel(colX(0),v.r1y[2]-S(20),cw,L"شماره موبایل",true);
+        fieldLabel(colX(1),v.r1y[2]-S(20),cw,L"تلفن ثابت",false);
+        fieldLabel(colX(2),v.r1y[2]-S(20),cw,L"آدرس",false);
+
+        // ============ CARD 2: بیمه و نوبت (4-col then 2-col) ============
+        subcard(v.c2Top,v.c2Bot,L"بیمه و نوبت",ICO_SHIELD);
+        { int gw=(fw-3*cgap)/4;
+          auto gx=[&](int c){ return formR-(c+1)*gw-c*cgap; };
+          fieldLabel(gx(0),v.r2y-S(20),gw,L"نوع پذیرش",false);
+          fieldLabel(gx(1),v.r2y-S(20),gw,L"نوع نوبت",false);
+          fieldLabel(gx(2),v.r2y-S(20),gw,L"نوع بیمه",false);
+          fieldLabel(gx(3),v.r2y-S(20),gw,L"نوع بیمه پایه",false);
+          int hw=(fw-cgap)/2;
+          fieldLabel(formR-hw,v.r2by-S(20),hw,L"مبلغ خدمت (ریال)",true);
+          fieldLabel(formL,   v.r2by-S(20),hw,L"تخفیف (ریال)",false);
         }
 
-        // --- framed input wells behind every field (modern flat look) ---
+        // ============ CARD 3: services table ============
+        {
+            RECT cr={m.cardL,Y(v.tTop),m.cardR,Y(v.tBot)};
+            gpRoundRectBg(dc,cr,S(14),g_theme.surface,g_theme.border,g_theme.bg);
+            // table header strip
+            RECT head={formL,Y(v.theadY),formR,Y(v.theadY)+S(30)};
+            fillRoundRect(dc,head,S(8),g_theme.surface2,g_theme.border);
+            SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
+            // 7 columns (RTL): ردیف | کد خدمت | نام خدمت | مبلغ | تخفیف | سهم بیمه | عملیات
+            const wchar_t* cols[7]={L"ردیف",L"کد خدمت",L"نام خدمت",
+                L"مبلغ (ریال)",L"تخفیف (ریال)",L"سهم بیمه (ریال)",L"عملیات"};
+            int weights[7]={6,12,24,16,16,16,10};
+            int wsum=0; for(int i=0;i<7;i++) wsum+=weights[i];
+            int x=formR;   // start at RIGHT (RTL)
+            for(int i=0;i<7;i++){
+                int colw=(fw*weights[i])/wsum;
+                RECT hr={x-colw+S(4),head.top,x-S(4),head.bottom};
+                DrawTextW(dc,cols[i],-1,&hr,DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+                x-=colw;
+            }
+            // empty-state: centred box icon + caption
+            int ecx=(formL+formR)/2, ecy=Y(v.tbodyY)+(v.tbodyBot-v.tbodyY)/2-S(8);
+            { // simple open-box glyph
+              COLORREF gc=blendColor(g_theme.textDim,g_theme.surface,55);
+              HPEN pn=CreatePen(PS_SOLID,S(2),gc);
+              HGDIOBJ op=SelectObject(dc,pn);
+              HGDIOBJ ob=SelectObject(dc,GetStockObject(NULL_BRUSH));
+              int bw=S(34), bh=S(24);
+              // box body
+              Rectangle(dc,ecx-bw/2,ecy-bh/2,ecx+bw/2,ecy+bh/2);
+              // lid flaps
+              MoveToEx(dc,ecx-bw/2,ecy-bh/2,0); LineTo(dc,ecx-bw/4,ecy-bh/2-S(8));
+              LineTo(dc,ecx+bw/4,ecy-bh/2-S(8)); LineTo(dc,ecx+bw/2,ecy-bh/2);
+              SelectObject(dc,op); SelectObject(dc,ob); DeleteObject(pn);
+            }
+            SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
+            RECT er={formL,ecy+S(22),formR,ecy+S(42)};
+            DrawTextW(dc,L"هیچ خدمتی اضافه نشده است.",-1,&er,
+                DT_CENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+        }
+
+        // ============ framed input wells behind every center control ========
         {
             HWND inputs[16]={t->eFirst,t->eLast,t->eNid,t->eFather,t->eBirth,
                 t->cGender,t->eMobile,t->ePhone,t->eAddr,t->cPType,t->cNType,
-                t->cIns,t->cSupp,t->ePrice,t->eDiscount,0};
+                t->cIns,t->cSupp,t->ePrice,t->eDiscount,t->eSvcSearch};
             HWND foc=GetFocus();
-            for(int i=0;inputs[i];i++){
+            for(int i=0;i<16;i++){
+                if(!inputs[i]) continue;
                 RECT wr; GetWindowRect(inputs[i],&wr);
                 POINT a={wr.left,wr.top}, b={wr.right,wr.bottom};
                 ScreenToClient(h,&a); ScreenToClient(h,&b);
-                int minH = a.y + (rh2>S(28)?rh2:S(34));
-                int wellTop = a.y-S(4);
-                // v1.12.0 SINGLE-SOURCE-OF-TRUTH GUARD: never let a framed input
-                // well rise into the field-label / blue-section-caption band that
-                // sits above it. The label baseline is input.top - S(20); we cap
-                // the well top at input.top - S(4) but additionally forbid it from
-                // ever covering a caption (which lives >= S(22) above the input).
-                RECT well={a.x-S(7),wellTop,b.x+S(7),
-                           (b.y<minH)?minH:b.y+S(4)};
-                if(b.y<=a.y) continue;        // not yet laid out
+                if(b.y<=a.y) continue;
+                int wellBot = a.y + rh;          // clamp to a single row height
+                RECT well={a.x-S(6),a.y-S(4),b.x+S(6),wellBot+S(4)};
                 bool focused = (inputs[i]==foc);
-                // v1.7.0: when an inquiry could NOT verify the identity, the
-                // name (i==0) and surname (i==1) wells show a danger border so
-                // the operator clearly sees they must enter/check them by hand.
-                // v1.9.0: also mark any REQUIRED field that was left empty on the
-                // last submit attempt (invalidMask).
                 bool invalid = (t->idChecked && !t->idVerified && (i==0||i==1))
                              || (t->invalidMask & (1<<i));
-                // v1.8.0 UI: a focused field gets a THIN, soft-RED hairline ring
-                // (never the harsh default black EDIT border). When the field is
-                // not focused the ring fades back to the normal subtle border.
-                // v1.9.0: an INVALID field shows ONLY a single very-thin red
-                // hairline — no glow, no second/brighter ring.
-                COLORREF focusRing = blendColor(g_theme.danger, g_theme.inputBg, 60);
                 COLORREF bord = invalid ? g_theme.danger
-                              : focused ? focusRing : g_theme.border;
+                              : focused ? g_theme.accent : g_theme.border;
                 fillRoundRect(dc,well,S(8),g_theme.inputBg,bord);
             }
         }
 
-        // field labels (above each control)
-        SelectObject(dc,g_fSmall);
-        SetTextColor(dc,g_theme.textDim);
-        struct LBL{const wchar_t* s;int x,y,w;};
-        LBL Ls[16]={
-            {L"نام",xr,y0-S(20),colW},{L"نام خانوادگی",xl,y0-S(20),colW},
-            {L"کد ملی",xr,y0+step-S(20),colW},{L"نام پدر",xl,y0+step-S(20),colW},
-            {L"تاریخ تولد (مثال: ۱۳۴۰ ۵ ۲۰)",xr,y0+2*step-S(20),colW},{L"جنسیت",xl,y0+2*step-S(20),colW},
-            {L"تلفن همراه",xr,y0+3*step-S(20),colW},{L"تلفن ثابت",xl,y0+3*step-S(20),colW},
-            {L"آدرس",formLeft,y0+4*step-S(20),fw},{NULL,0,0,0},
-            {L"نوع بیمار",xr,y0+5*step-S(20),colW},{L"نوع نوبت",xl,y0+5*step-S(20),colW},
-            // NOTE: the right-column slot at row 6 is the «دارای بیمه» checkbox
-            // (which doubles as the main-insurance field header) — so we DON'T
-            // paint a separate "بیمه اصلی" label there (it would sit under the
-            // checkbox). Only the supplementary-insurance label is painted.
-            {NULL,0,0,0},{L"بیمه مکمل",xl,y0+6*step-S(20),colW},
-            {L"مبلغ خدمت (ریال)",xr,y0+7*step-S(20),colW},{L"تخفیف (ریال)",xl,y0+7*step-S(20),colW},
-        };
-        for(int i=0;i<16;i++){
-            if(!Ls[i].s) continue;
-            RECT lr={Ls[i].x,Ls[i].y,Ls[i].x+Ls[i].w,Ls[i].y+S(18)};
-            DrawTextW(dc,Ls[i].s,-1,&lr,DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
-        }
-        // auto date note (chip)
-        SYSTEMTIME st=iranNow();
-        std::wstring dn=L"تاریخ نوبت (خودکار): "+toFaDigits(jalaliDateShort(st))
-            +L"   \u2014   ساعت "+toFaDigits(iranTimeStr(st,false))
-            +L"   \u2014   شیفت "+shiftName(g_session.shift);
-        SetTextColor(dc,g_theme.accent);
-        SelectObject(dc,g_fSmall);
-        { int icoW=S(16), gap=S(8);
-          RECT di={formRight-icoW,y0+8*step+S(62),formRight,y0+8*step+S(78)};
-          drawIcon(dc,ICO_CAL,di,g_theme.accent,S(2));
-          RECT dnr={formLeft,y0+8*step+S(62),formRight-icoW-gap,y0+8*step+S(84)};
-          DrawTextW(dc,dn.c_str(),-1,&dnr,DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX); }
-        // status message
+        // ============ status message (above the buttons) ============
         if(t && !t->lastMsg.empty()){
-            SetTextColor(dc,t->msgCol);
-            SelectObject(dc,g_fUIB);
-            RECT mr2={formLeft,y0+8*step+S(86),formRight,y0+8*step+S(132)};
+            SetTextColor(dc,t->msgCol); SelectObject(dc,g_fSmall);
+            RECT mr2={formL,Y(v.btnY)-S(18),formR,Y(v.btnY)-S(2)};
             DrawTextW(dc,t->lastMsg.c_str(),-1,&mr2,
-                DT_RIGHT|DT_WORDBREAK|DT_RTLREADING|DT_NOPREFIX);
+                DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
         }
 
-        // ============ BILLING CARD (pinned to the right edge) ============
-        if(!stacked && t){
-            recalc(t);
-            RECT card={billL,cardTop,billR,cardBot};
-            gpRoundRectBg(dc,card,S(16),g_theme.surface,g_theme.border,g_theme.bg);
-            // header (icon flush-right, title to its left — no overlap)
-            { int icoW=S(24), gap=S(10);
-              RECT bi={card.right-S(16)-icoW,card.top+S(16),card.right-S(16),card.top+S(40)};
+        // ============ LEFT BILLING CARD (صورتحساب) ============
+        if(!m.stacked && t){
+            RECT card={m.billL,Y(S(RC_OUT)),m.billR,VH-S(RC_OUT)-sy};
+            gpRoundRectBg(dc,card,S(14),g_theme.surface,g_theme.border,g_theme.bg);
+            int bl=card.left+S(12), br=card.right-S(12);
+            // header
+            { int icoW=S(18);
+              RECT bi={br-icoW,card.top+S(12),br,card.top+S(30)};
               drawIcon(dc,ICO_RECEIPT,bi,g_theme.accent,S(2));
-              SetTextColor(dc,g_theme.text);
-              SelectObject(dc,g_fTitle);
-              RECT bt={card.left+S(16),card.top+S(14),card.right-S(16)-icoW-gap,card.top+S(46)};
-              DrawTextW(dc,L"صدور قبض",-1,&bt,
+              SetTextColor(dc,g_theme.text); SelectObject(dc,g_fUIB);
+              RECT bt={bl,card.top+S(10),br-icoW-S(6),card.top+S(32)};
+              DrawTextW(dc,L"صورتحساب",-1,&bt,
                   DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX); }
-            { HPEN pn=CreatePen(PS_SOLID,1,g_theme.border);
-              HGDIOBJ op=SelectObject(dc,pn);
-              MoveToEx(dc,card.left+S(16),card.top+S(52),0);
-              LineTo(dc,card.right-S(16),card.top+S(52));
-              SelectObject(dc,op); DeleteObject(pn); }
-
-            // helper to draw a key/value money row
-            auto money=[&](int& ry,const wchar_t* k,long long v,
-                           bool head,bool strong){
-                if(head){
-                    SetTextColor(dc,g_theme.accent);
-                    SelectObject(dc,g_fUIB);
-                    RECT hr={card.left+S(16),ry,card.right-S(16),ry+S(24)};
-                    DrawTextW(dc,k,-1,&hr,DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
-                    ry+=S(30); return;
-                }
-                SetTextColor(dc, strong?g_theme.success:g_theme.textDim);
-                SelectObject(dc, strong?g_fUIB:g_fUI);
-                RECT kr={card.left+S(16),ry,card.right-S(16),ry+S(24)};
-                DrawTextW(dc,k,-1,&kr,DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
-                SetTextColor(dc, strong?g_theme.success:g_theme.text);
-                std::wstring v2=toFaDigits(formatMoney(v))+L" ریال";
-                DrawTextW(dc,v2.c_str(),-1,&kr,DT_LEFT|DT_SINGLELINE|DT_NOPREFIX);
-                ry+= strong?S(30):S(26);
+            // money row helper (key right, value left)
+            auto row=[&](int& ry,const wchar_t* k,long long val){
+                SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
+                RECT kr={bl,ry,br,ry+S(20)};
+                DrawTextW(dc,k,-1,&kr,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+                SetTextColor(dc,g_theme.text);
+                std::wstring vs=toFaDigits(formatMoney(val))+L" ریال";
+                DrawTextW(dc,vs.c_str(),-1,&kr,DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX);
+                ry+=S(26);
             };
-            auto sep=[&](int& ry){
-                HPEN pn=CreatePen(PS_DOT,1,g_theme.border);
-                HGDIOBJ op=SelectObject(dc,pn);
-                MoveToEx(dc,card.left+S(16),ry+S(2),0);
-                LineTo(dc,card.right-S(16),ry+S(2));
-                SelectObject(dc,op); DeleteObject(pn);
-                ry+=S(12);
-            };
-
-            int ry=card.top+S(62);
-            money(ry,L"بیمه اصلی",0,true,false);
-            money(ry,L"سهم بیمه",t->mainShare,false,false);
-            money(ry,L"جمع کل",t->total,false,false);
-            money(ry,L"سهم بیمار",t->patientShare,false,false);
-            sep(ry);
-            money(ry,L"بیمه مکمل",0,true,false);
-            money(ry,L"مابه‌التفاوت پایه",t->baseDiff,false,false);
-            money(ry,L"سهم سازمان",t->orgShare,false,false);
-            sep(ry);
-            money(ry,L"مبلغ نهایی",0,true,false);
-            money(ry,L"جمع کل",t->total,false,false);
-            money(ry,L"تخفیف",t->patientShare - t->paid,false,false);
-            // big "payable" highlight chip
-            RECT pay={card.left+S(16),ry+S(2),card.right-S(16),ry+S(46)};
-            fillRoundRect(dc,pay,S(10),
-                g_dark?RGB(20,52,40):RGB(232,248,240),g_theme.success);
-            SetTextColor(dc,g_theme.success);
-            SelectObject(dc,g_fUIB);
+            int ry=card.top+S(42);
+            row(ry,L"بیمه اصلی",0);
+            row(ry,L"سهم بیمه",t->mainShare);
+            row(ry,L"جمع کل",t->total);
+            row(ry,L"بیمه مکمل",0);
+            row(ry,L"مابه‌التفاوت پایه",t->baseDiff);
+            row(ry,L"سهم سازمان",t->orgShare);
+            row(ry,L"مبلغ نهایی",t->patientShare);
+            row(ry,L"تخفیف",t->patientShare - t->paid);
+            // dark navy «چک پرداختی» highlighted row
+            RECT pay={bl,ry+S(4),br,ry+S(44)};
+            fillRoundRect(dc,pay,S(8),g_theme.text,CLR_INVALID);
+            SetTextColor(dc,RGB(255,255,255)); SelectObject(dc,g_fUIB);
             RECT pk={pay.left+S(10),pay.top,pay.right-S(10),pay.bottom};
-            DrawTextW(dc,L"پرداختی",-1,&pk,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+            DrawTextW(dc,L"چک پرداختی",-1,&pk,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
             std::wstring pv=toFaDigits(formatMoney(t->paid))+L" ریال";
             DrawTextW(dc,pv.c_str(),-1,&pk,DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX);
+            // «چاپ» group title above the print buttons (which are positioned by
+            // tabPageLayout near the card bottom).
+            int prTop = VH - S(186) - sy - S(26);
+            SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.text);
+            int icoW=S(16);
+            RECT pi={br-icoW,prTop,br,prTop+S(18)};
+            drawIcon(dc,ICO_PRINT,pi,g_theme.accent,S(2));
+            RECT pt={bl,prTop,br-icoW-S(6),prTop+S(18)};
+            DrawTextW(dc,L"چاپ",-1,&pt,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
         }
+        #undef Y
         BitBlt(dc0,0,0,rc.right,rc.bottom,dc,0,0,SRCCOPY);
         SelectObject(dc,obm); DeleteObject(bmp); DeleteDC(dc);
         EndPaint(h,&ps);
