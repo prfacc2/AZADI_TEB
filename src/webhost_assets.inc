@@ -58,6 +58,22 @@ static std::wstring wh_svg(const wchar_t* name){
         body=L"<path d='M4 15l7-7 6 6-5 5H8z'/><path d='M9 21h11'/>";
     else if(n==L"x")
         body=L"<path d='M6 6l12 12M18 6L6 18'/>";
+    else if(n==L"check")
+        body=L"<path d='M5 13l4 4L19 7'/>";
+    else if(n==L"refresh")
+        body=L"<path d='M4 4v5h5'/><path d='M20 20v-5h-5'/><path d='M19 9a7 7 0 0 0-12-3L4 9'/><path d='M5 15a7 7 0 0 0 12 3l3-3'/>";
+    else if(n==L"calendar")
+        body=L"<rect x='4' y='5' width='16' height='16' rx='2'/><path d='M4 9h16M9 3v4M15 3v4'/>";
+    else if(n==L"phone")
+        body=L"<path d='M5 4h3l2 5-2 1a11 11 0 0 0 5 5l1-2 5 2v3a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z'/>";
+    else if(n==L"mobile")
+        body=L"<rect x='7' y='3' width='10' height='18' rx='2'/><path d='M11 18h2'/>";
+    else if(n==L"map")
+        body=L"<path d='M12 21s-7-6.4-7-11a7 7 0 0 1 14 0c0 4.6-7 11-7 11z'/><circle cx='12' cy='10' r='2.4'/>";
+    else if(n==L"id")
+        body=L"<rect x='3' y='5' width='18' height='14' rx='2'/><circle cx='8.5' cy='11' r='2'/><path d='M5 16c.6-1.6 2-2 3.5-2s2.9.4 3.5 2'/><path d='M14 9h5M14 12h5M14 15h3'/>";
+    else if(n==L"gender")
+        body=L"<circle cx='10' cy='13' r='5'/><path d='M14 9l5-5M15 4h4v4'/>";
     else
         body=L"<circle cx='12' cy='12' r='8'/>";
     return std::wstring(open)+body+L"</svg>";
@@ -80,23 +96,20 @@ static std::wstring wh_commonHead(){
     // 2026 medical palette — White + Blue per spec:
     //   bg #F5F8FD · primary #2E7DFF · secondary #4DA3FF · accent #1E5EFF ·
     //   success #18B75A · danger #E53935 · border #DCE7F5 · navy text.
-    L":root{--bg:#f5f8fd;--surface:#ffffff;--surfaceTop:#ffffff;--surface2:#f1f6fd;"
-    L"--border:#dce7f5;--text:#13294b;--textDim:#6b7d99;--accent:#2e7dff;"
-    L"--accent2:#1e5eff;--accent3:#4da3ff;--accentText:#ffffff;--danger:#e53935;--success:#18b75a;"
-    L"--warn:#f59e0b;--inputBg:#ffffff;--inputText:#13294b;"
-    L"--r:20px;--r2:13px;--r3:10px;--sp:14px;--sp2:10px;--sp3:7px;"
-    L"--shadow:0 1px 2px rgba(30,94,255,.05),0 14px 34px rgba(30,94,255,.09);"
-    L"--shadowSm:0 1px 3px rgba(30,94,255,.08);"
-    L"--ring:0 0 0 3px rgba(46,125,255,.22);}"
+    L":root{--bg:#f5f7fa;--surface:#ffffff;--surfaceTop:#ffffff;--surface2:#f3f6fb;"
+    L"--border:#e6ebf2;--text:#1f2a44;--textDim:#8a94a6;--accent:#2b6df4;"
+    L"--accent2:#1f5ce0;--accent3:#5b94f7;--accentText:#ffffff;--danger:#ef4444;--success:#22c55e;"
+    L"--warn:#f59e0b;--inputBg:#ffffff;--inputText:#1f2a44;"
+    L"--r:16px;--r2:11px;--r3:9px;--sp:14px;--sp2:10px;--sp3:7px;"
+    L"--shadow:0 1px 2px rgba(31,42,68,.04),0 8px 24px rgba(31,42,68,.06);"
+    L"--shadowSm:0 1px 3px rgba(31,42,68,.05);"
+    L"--ring:0 0 0 3px rgba(43,109,244,.16);}"
     // ============================ RESET / BASE ===========================
     L"*{box-sizing:border-box;-ms-user-select:none;}"
     L"html,body{height:100%;margin:0;}"
     L"body{font-family:Vazirmatn,Vazir,Tahoma,'Segoe UI',sans-serif;direction:rtl;"
-    L"background:"
-      L"radial-gradient(1300px 600px at 92% -12%,rgba(46,125,255,.13),transparent 60%),"
-      L"radial-gradient(1000px 560px at 3% 112%,rgba(77,163,255,.10),transparent 60%),"
-      L"var(--bg);"
-    L"color:var(--text);font-size:14.5px;overflow:hidden;line-height:1.55;"
+    L"background:var(--bg);"
+    L"color:var(--text);font-size:14px;overflow:hidden;line-height:1.55;"
     L"-ms-overflow-style:none;}"
     L"::-webkit-scrollbar{width:10px;height:10px;}"
     L"::-webkit-scrollbar-thumb{background:#cdd8e8;border-radius:7px;}"
@@ -121,9 +134,9 @@ static std::wstring wh_commonHead(){
     // ========================== THREE-ZONE GRID ==========================
     L".grid{flex:1 1 auto;display:flex;gap:13px;min-height:0;align-items:stretch;}"
     L".zone{display:flex;flex-direction:column;gap:13px;min-height:0;}"
-    L".zone-left{flex:0 0 270px;}"
+    L".zone-left{flex:0 0 250px;}"
     L".zone-center{flex:1 1 auto;min-width:0;}"
-    L".zone-right{flex:0 0 308px;}"
+    L".zone-right{flex:0 0 290px;}"
     L".zone.scroll{overflow:auto;padding-bottom:2px;}"
     // ============================= CARDS =================================
     L".card{background:var(--surface);border:1px solid var(--border);"
@@ -131,26 +144,35 @@ static std::wstring wh_commonHead(){
     L"position:relative;}"
     L".card.tight{padding:13px 14px;}"
     L".card.flex,.card.fill{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;}"
-    L".sect{font-weight:800;color:var(--text);margin:0 0 13px;font-size:14px;"
-    L"display:flex;align-items:center;gap:9px;}"
-    L".sect .ic{width:28px;height:28px;flex:0 0 auto;border-radius:9px;"
-    L"background:linear-gradient(135deg,rgba(46,125,255,.16),rgba(46,125,255,.06));"
-    L"color:var(--accent);display:flex;align-items:center;justify-content:center;"
-    L"font-size:15px;}"
-    L".sect .ic svg{width:16px;height:16px;}"
-    L".sect .acc{width:4px;height:17px;border-radius:3px;flex:0 0 auto;"
-    L"background:linear-gradient(180deg,var(--accent),var(--accent2));}"
-    L".sect.mt{margin-top:15px;padding-top:14px;border-top:1px solid var(--border);}"
+    // section header: title on the RIGHT (icon to its left, matching the mock).
+    L".sect{font-weight:800;color:var(--text);margin:0 0 14px;font-size:15px;"
+    L"display:flex;align-items:center;gap:8px;flex-direction:row-reverse;"
+    L"justify-content:flex-start;}"
+    L".sect .ic{width:26px;height:26px;flex:0 0 auto;border-radius:8px;"
+    L"background:transparent;color:var(--accent);display:flex;align-items:center;"
+    L"justify-content:center;font-size:15px;}"
+    L".sect .ic svg{width:19px;height:19px;}"
+    L".sect .acc{display:none;}"
+    L".sect.mt{margin-top:16px;padding-top:15px;border-top:1px solid var(--border);}"
     // ============================ FORM LAYOUT ============================
     // Field widths are sized to the *realistic content length* of each field:
     //   نام/نام خانوادگی ~ medium, کد ملی = 10 digits, جنسیت = short select,
     //   نام پدر ~ medium, تاریخ تولد = fixed 10 chars, موبایل = 11, تلفن = ~11,
     //   آدرس = full line.
-    L".row{display:flex;flex-wrap:wrap;gap:11px;margin-bottom:11px;}"
+    L".row{display:flex;flex-wrap:wrap;gap:13px;margin-bottom:14px;}"
     L".row:last-child{margin-bottom:0;}"
     L".fld{display:flex;flex-direction:column;min-width:0;}"
-    L".fld label{font-size:12px;color:var(--textDim);margin-bottom:5px;"
+    L".fld label{font-size:12.5px;color:var(--textDim);margin-bottom:6px;"
     L"font-weight:700;padding-right:3px;}"
+    // required-field red asterisk
+    L".fld label .req{color:var(--danger);font-weight:800;margin-right:2px;}"
+    // input-with-inner-icon: the icon sits inside the field on the RIGHT (RTL),
+    // text padded away from it. Matches the ChatGPT mock exactly.
+    L".ic-in{position:relative;}"
+    L".ic-in>svg{position:absolute;right:11px;top:50%;transform:translateY(-50%);"
+    L"width:17px;height:17px;color:var(--textDim);pointer-events:none;}"
+    L".ic-in input,.ic-in select{padding-right:36px;}"
+    L".ic-in select{padding-right:36px;}"
     // sizing helpers (flex-basis tuned to content)
     L".f-name{flex:1 1 160px;}"          // نام
     L".f-family{flex:1 1 190px;}"        // نام خانوادگی
@@ -168,9 +190,9 @@ static std::wstring wh_commonHead(){
     L".fld.wide{flex:1 1 100%;}"
     L".fld.xs{flex:0 0 96px;}"
     // ============================== CONTROLS =============================
-    L"input,select,textarea{width:100%;height:40px;border:1px solid var(--border);"
-    L"border-radius:var(--r2);background:var(--inputBg);color:var(--inputText);"
-    L"padding:0 12px;font-family:inherit;font-size:14px;font-weight:600;outline:none;"
+    L"input,select,textarea{width:100%;height:42px;border:1px solid var(--border);"
+    L"border-radius:var(--r2);background:var(--surface2);color:var(--inputText);"
+    L"padding:0 13px;font-family:inherit;font-size:13.5px;font-weight:600;outline:none;"
     L"transition:border-color .12s,box-shadow .12s,background .12s;}"
     L"select{cursor:pointer;padding-left:30px;font-weight:700;"
     L"background-image:url(\"data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='11' height='7'%3E%3Cpath d='M0 0l5.5 7 5.5-7z' fill='%23889'/%3E%3C/svg%3E\");"
@@ -182,7 +204,7 @@ static std::wstring wh_commonHead(){
     L"input[readonly]{background:var(--surface2);color:var(--textDim);cursor:default;}"
     L"input.ltr{direction:ltr;text-align:right;letter-spacing:.4px;}"
     L"input.ltr.center{text-align:center;}"
-    L"input::-ms-clear{display:none;}input::placeholder{color:#a6b2c5;font-weight:500;}"
+    L"input::-ms-clear{display:none;}input::placeholder,textarea::placeholder{color:#b3bccb;font-weight:500;}"
     // a field with an inline action button (e.g. کد ملی + استعلام)
     L".ig{display:flex;gap:7px;}"
     L".ig input{flex:1 1 auto;min-width:0;}"
@@ -197,13 +219,19 @@ static std::wstring wh_commonHead(){
     L".btn:active{transform:translateY(1px);}"
     L".btn:focus{box-shadow:var(--ring);}"
     L".btn .hint{font-size:11px;font-weight:600;opacity:.72;}"
-    // primary call-to-action: ACCENT BLUE (harmonised with the theme).
-    L".btn.primary{background:linear-gradient(135deg,var(--accent),var(--accent2));"
-    L"border-color:var(--accent2);color:var(--accentText);box-shadow:0 8px 20px rgba(31,111,229,.28);}"
-    L".btn.primary:hover{filter:brightness(1.06);}"
+    // primary call-to-action: solid ACCENT BLUE (matches the mock).
+    L".btn.primary{background:var(--accent);"
+    L"border-color:var(--accent);color:var(--accentText);box-shadow:0 6px 16px rgba(43,109,244,.24);}"
+    L".btn.primary:hover{background:var(--accent2);border-color:var(--accent2);}"
     L".btn.success{background:linear-gradient(135deg,var(--success),#0c8f54);"
     L"border-color:#0c8f54;color:#fff;box-shadow:0 8px 20px rgba(15,166,99,.26);}"
     L".btn.success:hover{filter:brightness(1.05);}"
+    // soft-blue secondary action («پذیرش جدید»): light blue tint, blue text.
+    L".btn.softblue{background:#e9f0fd;border-color:#d6e4fb;color:var(--accent);box-shadow:none;}"
+    L".btn.softblue:hover{background:#dde9fc;}"
+    // soft error status pill («خطا در ثبت»): pink bg + red text.
+    L".btn.errpill{background:#fde8e8;border-color:#f8d2d2;color:var(--danger);box-shadow:none;}"
+    L".btn.errpill:hover{background:#fbdcdc;}"
     L".btn.danger{background:var(--danger);border-color:var(--danger);color:#fff;}"
     L".btn.ghost{background:transparent;border-color:transparent;color:var(--textDim);"
     L"box-shadow:none;}"
@@ -231,25 +259,25 @@ static std::wstring wh_commonHead(){
     L".actions{display:flex;gap:11px;flex-wrap:wrap;margin-top:auto;"
     L"padding-top:14px;flex-direction:row-reverse;}"
     // ===================== AVATAR / PATIENT CARD (right) =================
-    L".pcard{text-align:center;background:"
-    L"linear-gradient(180deg,rgba(31,111,229,.07),transparent 70%),var(--surface);}"
-    L".avatar{width:70px;height:70px;border-radius:50%;margin:0 auto 8px;"
-    L"background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;"
-    L"display:flex;align-items:center;justify-content:center;font-size:29px;"
-    L"font-weight:800;box-shadow:0 8px 18px rgba(31,111,229,.32);"
-    L"border:3px solid var(--surface);}"
-    L".pname{font-weight:800;font-size:15px;}"
-    L".psub{color:var(--textDim);font-size:12px;margin-top:3px;}"
-    L".chip{display:inline-flex;align-items:center;gap:5px;padding:5px 12px;"
+    L".pcard{text-align:center;}"
+    L".avatar{width:78px;height:78px;border-radius:50%;margin:2px auto 10px;"
+    L"background:#e9f0fd;color:var(--accent);"
+    L"display:flex;align-items:center;justify-content:center;font-size:30px;"
+    L"font-weight:800;border:1px solid #dce7fb;}"
+    L".avatar svg{width:38px;height:38px;}"
+    L".pname{font-weight:800;font-size:16px;}"
+    L".psub{color:var(--textDim);font-size:12.5px;margin-top:3px;}"
+    L".chip{display:inline-flex;align-items:center;gap:6px;padding:7px 16px;"
     L"border-radius:999px;background:var(--surface2);color:var(--textDim);"
-    L"font-size:11.5px;font-weight:700;margin:9px 3px 0;border:1px solid var(--border);}"
-    L".chip.ok{background:rgba(15,166,99,.12);color:var(--success);"
-    L"border-color:rgba(15,166,99,.25);}"
-    L".pcounts{display:flex;gap:8px;margin-top:11px;flex-wrap:wrap;}"
-    L".pcounts .c{flex:1 1 30%;background:var(--surface2);border:1px solid var(--border);"
-    L"border-radius:var(--r2);padding:8px 4px;text-align:center;}"
-    L".pcounts .c .k{font-size:10.5px;color:var(--textDim);font-weight:700;}"
-    L".pcounts .c .v{font-size:16px;font-weight:800;margin-top:2px;"
+    L"font-size:12px;font-weight:700;margin:12px auto 0;border:1px solid var(--border);}"
+    L".chip svg{width:15px;height:15px;}"
+    L".chip.ok{background:#e9f9ef;color:#16a34a;border-color:#c6f0d4;}"
+    // two equal version boxes ((سرپایی) / (الکترونیکی))
+    L".pcounts{display:flex;gap:9px;margin-top:13px;}"
+    L".pcounts .c{flex:1 1 50%;background:var(--surface2);border:1px solid var(--border);"
+    L"border-radius:var(--r2);padding:11px 6px;text-align:center;}"
+    L".pcounts .c .k{font-size:11.5px;color:var(--textDim);font-weight:700;}"
+    L".pcounts .c .v{font-size:20px;font-weight:800;margin-top:3px;color:var(--accent);"
     L"font-variant-numeric:tabular-nums;}"
     // patient status mini-widgets (electronic version / status / insurance state)
     L".pstat{display:flex;flex-direction:column;gap:7px;margin-top:11px;}"
@@ -261,19 +289,18 @@ static std::wstring wh_commonHead(){
     L".pstat .w .v.on{color:var(--success);} .pstat .w .v.off{color:var(--textDim);}"
     // ============================= BILLING (left) ========================
     L".bill .line{display:flex;justify-content:space-between;align-items:center;"
-    L"padding:8px 2px;border-bottom:1px dashed var(--border);font-size:13.5px;}"
-    L".bill .line:last-of-type{border-bottom:none;}"
-    L".bill .line span{color:var(--textDim);font-weight:600;}"
-    L".bill .line b{font-variant-numeric:tabular-nums;font-weight:800;}"
+    L"padding:9px 2px;font-size:13px;}"
+    L".bill .line span{color:var(--text);font-weight:600;}"
+    L".bill .line b{font-variant-numeric:tabular-nums;font-weight:700;color:var(--textDim);}"
     L".bill .line .u{font-size:10.5px;color:var(--textDim);font-weight:600;margin-right:3px;}"
-    L".bill .grp{font-size:11.5px;font-weight:800;color:var(--accent);"
-    L"margin:11px 0 3px;letter-spacing:.2px;}"
-    L".bill .grp:first-child{margin-top:0;}"
-    L".bill .pay{margin-top:13px;"
-    L"background:linear-gradient(135deg,var(--success),#0c8f54);"
-    L"color:#fff;border-radius:var(--r2);padding:13px 15px;display:flex;"
-    L"justify-content:space-between;align-items:center;font-weight:800;font-size:18px;"
-    L"box-shadow:0 8px 20px rgba(15,166,99,.30);}"
+    L".bill .grp{display:none;}"
+    // payable row — solid BLUE pill (matches the mock «پرداختی»)
+    L".bill .pay{margin-top:12px;"
+    L"background:linear-gradient(135deg,var(--accent),var(--accent2));"
+    L"color:#fff;border-radius:var(--r2);padding:14px 16px;display:flex;"
+    L"justify-content:space-between;align-items:center;font-weight:800;font-size:16px;"
+    L"box-shadow:0 8px 20px rgba(43,109,244,.26);}"
+    L".bill .pay span{color:#fff;}"
     L".bill .pay b{font-variant-numeric:tabular-nums;}"
     // =========================== APPOINTMENT TABLE =======================
     L".tablewrap{flex:1 1 auto;overflow:auto;border:1px solid var(--border);"
@@ -454,6 +481,8 @@ static std::wstring wh_commonScript(){
 static std::wstring wh_receptionScript(){
     return
     L"<script type='text/javascript'>"
+    // inline user-glyph for the avatar reset (matches wh_svg('user'))
+    L"var AZ_USER_SVG=\"<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='8' r='4'/><path d='M4 20c0-4 4-6 8-6s8 2 8 6'/></svg>\";"
     L"function setHeader(d){"
     L"  var sd=$('s_dept');if(sd)sd.innerHTML=esc(d.userDept||'\u2014');"
     L"  var ss=$('s_shift');if(ss)ss.innerHTML=esc(d.shift);"
@@ -488,9 +517,11 @@ static std::wstring wh_receptionScript(){
     L"    ptype:$('ptype').selectedIndex,ntype:$('ntype').selectedIndex,"
     L"    ins:parseInt(v('ins')||'0',10),supp:parseInt(v('supp')||'0',10)});"
     L"  if(!r||typeof r.price==='undefined')return;"
-    L"  var U=\"<span class='u'>\\u0631\\u06cc\\u0627\\u0644</span>\";"
+    L"  var U=\"<span class='u'>\\u062a\\u0648\\u0645\\u0627\\u0646</span>\";"
     L"  function st(id,val){var e=$(id);if(e)e.innerHTML=fa(fmt(val))+U;}"
     L"  st('b_total',r.price); st('b_main',r.mainShare);"
+    L"  st('b_sum',r.price);"
+    L"  st('b_supp',r.suppShare||0);"
     L"  st('b_diff',r.baseDiff); st('b_org',r.orgShare);"
     L"  st('b_pat',r.patientShare); st('b_disc',num(v('discount')));"
     L"  if($('b_paid'))$('b_paid').innerHTML=fa(fmt(r.paid));"
@@ -509,7 +540,7 @@ static std::wstring wh_receptionScript(){
     L"    if(sb)sb.innerHTML=esc((r.gender||'')+(r.birth?(' \u00b7 '+r.birth):''));"
     L"    statW('w_status','\u062f\u0627\u0631\u0627\u06cc \u0633\u0627\u0628\u0642\u0647',true);"
     L"    statW('w_ins','\u062f\u0627\u0631\u0627\u06cc \u0628\u06cc\u0645\u0647',true);}"
-    L"  else{if(a)a.innerHTML='?';if(nm)nm.innerHTML='\u0628\u06cc\u0645\u0627\u0631 \u062c\u062f\u06cc\u062f';if(sb)sb.innerHTML='\u0628\u062f\u0648\u0646 \u0633\u0627\u0628\u0642\u0647';"
+    L"  else{if(a)a.innerHTML=AZ_USER_SVG;if(nm)nm.innerHTML='\u0628\u06cc\u0645\u0627\u0631 \u062c\u062f\u06cc\u062f';if(sb)sb.innerHTML='\u0628\u062f\u0648\u0646 \u0633\u0627\u0628\u0642\u0647';"
     L"    statW('w_status','\u062c\u062f\u06cc\u062f',false);"
     L"    statW('w_ins','\u0646\u0627\u0645\u0634\u062e\u0635',false);"
     L"    if($('w_file'))$('w_file').innerHTML='\u2014';}}"
@@ -522,12 +553,15 @@ static std::wstring wh_receptionScript(){
     L"  else if(!r.idValid){ toast('\u06a9\u062f \u0645\u0644\u06cc \u0646\u0627\u0645\u0639\u062a\u0628\u0631','bad'); }"
     L"  else { setPatient({},false); toast('\u0628\u06cc\u0645\u0627\u0631 \u062c\u062f\u06cc\u062f','');} }"
     L"function lookup(){lookupNid(v('nid'));}"
-    L"function clearForm(){var ids=['nid','nidSearch','first','last','father','birth','mobile','phone','address','price','discount','archive','file','book','insExp','insBranch','docCode','docName','docRef'];"
+    L"function clearForm(){var ids=['nid','first','last','father','birth','mobile','phone','address','price','discount','archive','file','book','insExp','docCode','docName','docRef'];"
     L"  for(var i=0;i<ids.length;i++){var el=$(ids[i]);if(el)el.value='';}"
+    L"  if($('gender'))$('gender').selectedIndex=0;"
     L"  if($('ptype'))$('ptype').selectedIndex=0; if($('ntype'))$('ntype').selectedIndex=0;"
     L"  if($('ins'))$('ins').selectedIndex=0; if($('supp'))$('supp').selectedIndex=0;"
+    L"  if($('insBranch'))$('insBranch').selectedIndex=0;"
+    L"  var be=$('btnErr'); if(be)be.style.display='none';"
     L"  setPatient({},false); recalc();"
-    L"  var n=$('nid'); if(n)n.focus();}"
+    L"  var n=$('first'); if(n)n.focus();}"
     // collect the full reception payload from the form (shared by save & print).
     L"function collect(){var insSel=$('ins'),suppSel=$('supp');var pt=$('ptype'),nt=$('ntype');"
     L"  return {first:v('first'),last:v('last'),nid:v('nid'),"
@@ -544,11 +578,13 @@ static std::wstring wh_receptionScript(){
     // ONLY prints when the save truly succeeded — this is the fix for the old
     // «چاپ → خطای ثبت» bug (no two-step race, no print against a stale record).
     L"function azSubmit(){"
+    L"  var be=$('btnErr');"
     L"  var r=call('saveAndPrint',collect());"
-    L"  if(r.ok){ var m='\u067e\u0630\u06cc\u0631\u0634 \u062b\u0628\u062a \u0634\u062f \u2014 \u0646\u0648\u0628\u062a '+fa(r.queue);"
+    L"  if(r.ok){ if(be)be.style.display='none';"
+    L"    var m='\u067e\u0630\u06cc\u0631\u0634 \u062b\u0628\u062a \u0634\u062f \u2014 \u0646\u0648\u0628\u062a '+fa(r.queue);"
     L"    if(r.printed)m+=' \u00b7 \u0631\u0633\u06cc\u062f \u0686\u0627\u067e \u0634\u062f';"
     L"    toast(m,'ok'); clearForm(); }"
-    L"  else { toast(r.error||'\u062e\u0637\u0627 \u062f\u0631 \u062b\u0628\u062a \u067e\u0630\u06cc\u0631\u0634','bad'); } }"
+    L"  else { if(be)be.style.display=''; toast(r.error||'\u062e\u0637\u0627 \u062f\u0631 \u062b\u0628\u062a \u067e\u0630\u06cc\u0631\u0634','bad'); } }"
     L"window.azSubmit=azSubmit;"
     // save WITHOUT printing (kept for completeness / future use).
     L"function azSave(){var r=call('saveReception',collect());"
@@ -580,15 +616,12 @@ static std::wstring wh_receptionScript(){
     L"  on('ins','onchange',recalc); on('supp','onchange',recalc);"
     L"  on('btnSave','onclick',azSubmit); on('btnNew','onclick',clearForm);"
     L"  on('btnClear','onclick',clearForm);"
-    L"  on('btnCancel','onclick',function(){clearForm();toast('\u0627\u0646\u0635\u0631\u0627\u0641 \u2014 \u0641\u0631\u0645 \u067e\u0627\u06a9 \u0634\u062f','');});"
+    L"  on('btnErr','onclick',azSubmit);"
     L"  on('p_ins','onclick',function(){doPrint(0);});"
     L"  on('p_rx','onclick',function(){doPrint(1);});"
     L"  on('p_last','onclick',function(){var r=call('printLast'); if(!r||r.ok!==true)toast(r&&r.error?r.error:'\u0686\u0627\u067e \u0627\u0646\u062c\u0627\u0645 \u0646\u0634\u062f','bad');});"
     L"  on('p_reprint','onclick',function(){var r=call('print',{kind:2}); if(!r||r.ok!==true)toast(r&&r.error?r.error:'\u0686\u0627\u067e \u0627\u0646\u062c\u0627\u0645 \u0646\u0634\u062f','bad'); else toast('\u0686\u0627\u067e \u0645\u062c\u062f\u062f \u0627\u0646\u062c\u0627\u0645 \u0634\u062f','ok');});"
-    L"  on('btnSearch','onclick',function(){var n=$('nid'); if(n){n.focus();lookup();}});"
-    L"  on('q_nid','onclick',function(){lookupNid(v('nidSearch'));});"
-    L"  on('nidSearch','onkeyup',function(e){var k=(e||window.event).keyCode; if(k===13){lookupNid(v('nidSearch'));} else if(v('nidSearch').length===10){lookupNid(v('nidSearch'));}});"
-    L"  on('q_archive','onclick',function(){toast('\u062c\u0633\u062a\u062c\u0648 \u0628\u0631 \u0627\u0633\u0627\u0633 \u0634\u0645\u0627\u0631\u0647 \u0628\u06cc\u0645\u0647','');});"
+    L"  on('q_archive','onclick',function(){toast('\u062c\u0633\u062a\u062c\u0648 \u0628\u0631 \u0627\u0633\u0627\u0633 \u0634\u0645\u0627\u0631\u0647 \u067e\u0644\u0627\u06a9\u06cc\u0646','');});"
     L"  on('q_file','onclick',function(){toast('\u062c\u0633\u062a\u062c\u0648 \u0628\u0631 \u0627\u0633\u0627\u0633 \u0634\u0645\u0627\u0631\u0647 \u067e\u0631\u0648\u0646\u062f\u0647','');});"
     // Ctrl+R clears the form (= «پذیرش جدید»). Ctrl+A inside an input must NOT be
     // hijacked, so we only intercept Ctrl+R / Ctrl+Enter and otherwise fall back
@@ -678,54 +711,60 @@ static std::wstring wh_receptionHtml(){
     h += L"<div class='grid'>";
 
     // ============================ RIGHT ZONE =============================
-    // patient identity card (photo, status widgets, visit counts, file no),
-    // search keys (icon buttons), insurance, doctor.
+    // patient identity card (avatar, green e-prescription chip, two version
+    // boxes), search keys (با دکمه استعلام), insurance, doctor.
     h += L"<div class='zone zone-right scroll'>";
-    h += L"<div class='card tight pcard'>"
-         L"<div class='avatar' id='p_avatar'>?</div>"
+    h += L"<div class='card pcard'>"
+         L"<div class='avatar' id='p_avatar'>"+wh_svg(L"user")+L"</div>"
          L"<div class='pname' id='p_name'>\u0628\u06cc\u0645\u0627\u0631 \u062c\u062f\u06cc\u062f</div>"
          L"<div class='psub' id='p_sub'>\u0628\u062f\u0648\u0646 \u0633\u0627\u0628\u0642\u0647</div>"
-         // status mini-widgets
-         L"<div class='pstat'>"
-         L"<div class='w'><span class='k'>\u0646\u0633\u062e\u0647 \u0627\u0644\u06a9\u062a\u0631\u0648\u0646\u06cc\u06a9</span><span class='v on' id='w_ev'>\u0641\u0639\u0627\u0644</span></div>"
-         L"<div class='w'><span class='k'>\u0648\u0636\u0639\u06cc\u062a \u0628\u06cc\u0645\u0627\u0631</span><span class='v off' id='w_status'>\u062c\u062f\u06cc\u062f</span></div>"
-         L"<div class='w'><span class='k'>\u0648\u0636\u0639\u06cc\u062a \u0628\u06cc\u0645\u0647</span><span class='v off' id='w_ins'>\u0646\u0627\u0645\u0634\u062e\u0635</span></div>"
-         L"<div class='w'><span class='k'>\u0634\u0645\u0627\u0631\u0647 \u067e\u0631\u0648\u0646\u062f\u0647</span><span class='v' id='w_file'>\u2014</span></div>"
-         L"</div>"
+         L"<div class='chip ok' id='w_ev'>"+wh_svg(L"check")+L"\u0646\u0633\u062e\u0647 \u0627\u0644\u06a9\u062a\u0631\u0648\u0646\u06cc\u06a9</div>"
          L"<div class='pcounts'>"
-         L"<div class='c'><div class='k'>\u062a\u0639\u062f\u0627\u062f \u0648\u06cc\u0632\u06cc\u062a</div><div class='v' id='p_visits'>0</div></div>"
-         L"<div class='c'><div class='k'>\u0642\u0628\u0636</div><div class='v' id='p_p'>0</div></div>"
-         L"<div class='c'><div class='k'>\u0633\u0631\u067e\u0627\u06cc\u06cc</div><div class='v' id='p_s'>0</div></div>"
+         L"<div class='c'><div class='k'>\u0646\u0633\u062e\u0647 (\u0633\u0631\u067e\u0627\u06cc\u06cc)</div><div class='v' id='p_s'>0</div></div>"
+         L"<div class='c'><div class='k'>\u0646\u0633\u062e\u0647 (\u0627\u0644\u06a9\u062a\u0631\u0648\u0646\u06cc\u06a9\u06cc)</div><div class='v' id='p_p'>0</div></div>"
          L"</div>"
+         // hidden status widgets kept for JS hydration compatibility
+         L"<div class='pstat' style='display:none'>"
+         L"<span id='w_status'></span><span id='w_ins'></span><span id='w_file'></span>"
+         L"<span id='p_visits'></span></div>"
          L"</div>";
-    h += L"<div class='card tight'>"
-         L"<div class='sect'><span class='acc'></span><span class='ic'>"+wh_svg(L"search")+L"</span>\u062c\u0633\u062a\u062c\u0648 \u0628\u06cc\u0645\u0627\u0631</div>"
+    h += L"<div class='card'>"
+         L"<div class='sect'><span class='ic'>"+wh_svg(L"search")+L"</span>\u06a9\u0644\u06cc\u062f\u0647\u0627\u06cc \u062c\u0633\u062a\u062c\u0648</div>"
+         L"<div class='row'><div class='fld wide'><label>\u0634\u0645\u0627\u0631\u0647 \u067e\u0644\u0627\u06a9\u06cc\u0646</label>"
+         L"<div class='ig'><input id='archive' class='ltr' inputmode='numeric'>"
+         L"<button class='btn softblue sm' id='q_archive'>\u0627\u0633\u062a\u0639\u0644\u0627\u0645</button></div></div></div>"
          L"<div class='row'><div class='fld wide'><label>\u0634\u0645\u0627\u0631\u0647 \u067e\u0631\u0648\u0646\u062f\u0647</label>"
          L"<div class='ig'><input id='file' class='ltr' inputmode='numeric'>"
-         L"<button class='btn ic-btn' id='q_file' title='\u0627\u0633\u062a\u0639\u0644\u0627\u0645'>"+wh_svg(L"search")+L"</button></div></div></div>"
-         L"<div class='row'><div class='fld wide'><label>\u0634\u0645\u0627\u0631\u0647 \u0628\u06cc\u0645\u0647</label>"
-         L"<div class='ig'><input id='archive' class='ltr' inputmode='numeric'>"
-         L"<button class='btn ic-btn' id='q_archive' title='\u0627\u0633\u062a\u0639\u0644\u0627\u0645'>"+wh_svg(L"search")+L"</button></div></div></div>"
-         L"<div class='row'><div class='fld wide'><label>\u062c\u0633\u062a\u062c\u0648 \u0628\u0627 \u06a9\u062f \u0645\u0644\u06cc</label>"
-         L"<div class='ig'><input id='nidSearch' class='ltr' maxlength='10' inputmode='numeric'>"
-         L"<button class='btn ic-btn' id='q_nid' title='\u0627\u0633\u062a\u0639\u0644\u0627\u0645'>"+wh_svg(L"search")+L"</button></div></div></div>"
+         L"<button class='btn softblue sm' id='q_file'>\u0627\u0633\u062a\u0639\u0644\u0627\u0645</button></div></div></div>"
          L"</div>";
-    h += L"<div class='card tight'>"
-         L"<div class='sect'><span class='acc'></span><span class='ic'>"+wh_svg(L"shield")+L"</span>\u0628\u06cc\u0645\u0647</div>"
-         L"<div class='row'><div class='fld wide'><label>\u0628\u06cc\u0645\u0647 \u0627\u0635\u0644\u06cc</label><select id='ins' data-nav></select></div></div>"
-         L"<div class='row'><div class='fld wide'><label>\u0628\u06cc\u0645\u0647 \u0645\u06a9\u0645\u0644</label><select id='supp' data-nav></select></div></div>"
-         L"<div class='row'><div class='fld f-half'><label>\u0634 \u062f\u0641\u062a\u0631\u0686\u0647</label><input id='book' class='ltr' inputmode='numeric'></div>"
-         L"<div class='fld f-half'><label>\u0634\u0639\u0628\u0647 \u0628\u06cc\u0645\u0647</label><input id='insBranch'></div></div>"
-         L"<div class='row'><div class='fld f-half'><label>\u062a\u0627\u0631\u06cc\u062e \u0627\u0639\u062a\u0628\u0627\u0631</label><input id='insExp' class='ltr center' placeholder='____/__/__'></div>"
-         L"<div class='fld f-half'><label>\u062f\u0631\u0635\u062f \u067e\u0648\u0634\u0634</label><input id='insCov' class='ltr center' inputmode='numeric' readonly></div></div>"
-         L"</div>";
-    h += L"<div class='card tight'>"
-         L"<div class='sect'><span class='acc'></span><span class='ic'>"+wh_svg(L"stethoscope")+L"</span>\u067e\u0632\u0634\u06a9 \u0645\u0639\u0627\u0644\u062c</div>"
+    h += L"<div class='card'>"
+         L"<div class='sect'><span class='ic'>"+wh_svg(L"shield")+L"</span>\u0628\u06cc\u0645\u0647</div>"
          L"<div class='row'>"
-         L"<div class='fld xs'><label>\u06a9\u062f \u0646\u0638\u0627\u0645</label><input id='docCode' class='ltr' inputmode='numeric'></div>"
-         L"<div class='fld'><label>\u0646\u0627\u0645 \u067e\u0632\u0634\u06a9</label><input id='docName'></div>"
+         L"<div class='fld f-half'><label>\u0628\u06cc\u0645\u0647 \u067e\u0627\u06cc\u0647</label>"
+         L"<div class='ic-in'>"+wh_svg(L"shield")+L"<select id='ins' data-nav></select></div></div>"
+         L"<div class='fld f-half'><label>\u0646\u0648\u0639 \u0628\u06cc\u0645\u0647 \u067e\u0627\u06cc\u0647</label>"
+         L"<div class='ic-in'>"+wh_svg(L"shield")+L"<select id='ins2' data-nav><option>\u0627\u0646\u062a\u062e\u0627\u0628 \u06a9\u0646\u06cc\u062f</option></select></div></div></div>"
+         L"<div class='row'>"
+         L"<div class='fld f-half'><label>\u0628\u06cc\u0645\u0647 \u0645\u06a9\u0645\u0644</label>"
+         L"<div class='ic-in'>"+wh_svg(L"shield")+L"<select id='supp' data-nav></select></div></div>"
+         L"<div class='fld f-half'><label>\u0634\u0639\u0628\u0647 \u0637\u0631\u0641 \u0642\u0631\u0627\u0631\u062f\u0627\u062f</label>"
+         L"<div class='ic-in'>"+wh_svg(L"layers")+L"<select id='insBranch'><option>\u0627\u0646\u062a\u062e\u0627\u0628 \u06a9\u0646\u06cc\u062f</option></select></div></div></div>"
+         L"<div class='row'>"
+         L"<div class='fld f-half'><label>\u062a\u0627\u0631\u06cc\u062e \u0627\u0639\u062a\u0628\u0627\u0631</label>"
+         L"<div class='ic-in'>"+wh_svg(L"calendar")+L"<input id='insExp' class='ltr center' placeholder='\u0627\u0646\u062a\u062e\u0627\u0628 \u062a\u0627\u0631\u06cc\u062e'></div></div>"
+         L"<div class='fld f-half'><label>\u062f\u0631\u0635\u062f \u067e\u0648\u0634\u0634</label>"
+         L"<div class='ic-in'>"+wh_svg(L"shield")+L"<input id='insCov' class='ltr center' inputmode='numeric' readonly></div></div></div>"
+         L"<input id='book' type='hidden'>"
+         L"</div>";
+    h += L"<div class='card'>"
+         L"<div class='sect'><span class='ic'>"+wh_svg(L"stethoscope")+L"</span>\u067e\u0632\u0634\u06a9 \u0645\u0639\u0627\u0644\u062c</div>"
+         L"<div class='row'>"
+         L"<div class='fld f-half'><label>\u06a9\u062f \u0646\u0638\u0627\u0645</label>"
+         L"<div class='ic-in'>"+wh_svg(L"id")+L"<input id='docCode' class='ltr' inputmode='numeric' placeholder='\u06a9\u062f \u0646\u0638\u0627\u0645 \u0631\u0627 \u0648\u0627\u0631\u062f \u06a9\u0646\u06cc\u062f'></div></div>"
+         L"<div class='fld f-half'><label>\u0646\u0627\u0645 \u067e\u0632\u0634\u06a9</label>"
+         L"<div class='ic-in'>"+wh_svg(L"stethoscope")+L"<input id='docName' placeholder='\u0646\u0627\u0645 \u067e\u0632\u0634\u06a9 \u0631\u0627 \u0648\u0627\u0631\u062f \u06a9\u0646\u06cc\u062f'></div></div>"
          L"</div>"
-         L"<div class='row'><div class='fld wide'><label>\u067e\u0632\u0634\u06a9 \u0627\u0631\u062c\u0627\u0639\u200c\u062f\u0647\u0646\u062f\u0647</label><input id='docRef'></div></div>"
+         L"<input id='docRef' type='hidden'>"
          L"</div>";
     h += L"</div>";   // zone-right
 
@@ -733,45 +772,59 @@ static std::wstring wh_receptionHtml(){
     // patient identity + insurance/visit form + service info + primary actions.
     h += L"<div class='zone zone-center scroll'>";
     h += L"<div class='card fill'>";
-    h += L"<div class='sect'><span class='acc'></span><span class='ic'>"+wh_svg(L"user")+L"</span>\u0645\u0634\u062e\u0635\u0627\u062a \u0628\u06cc\u0645\u0627\u0631</div>";
-    // Row 1: نام، نام خانوادگی، کد ملی (با استعلام)
+    h += L"<div class='sect'><span class='ic'>"+wh_svg(L"user")+L"</span>\u0645\u0634\u062e\u0635\u0627\u062a \u0628\u06cc\u0645\u0627\u0631</div>";
+    // Row 1: نام*، نام خانوادگی*، کد ملی*
     h += L"<div class='row'>"
-         L"<div class='fld f-name'><label>\u0646\u0627\u0645</label><input id='first' data-nav></div>"
-         L"<div class='fld f-family'><label>\u0646\u0627\u0645 \u062e\u0627\u0646\u0648\u0627\u062f\u06af\u06cc</label><input id='last' data-nav></div>"
-         L"<div class='fld f-nid'><label>\u06a9\u062f \u0645\u0644\u06cc</label>"
-         L"<div class='ig'><input id='nid' class='ltr' data-nav maxlength='10' inputmode='numeric'>"
-         L"<button class='btn ic-btn' id='btnSearch' title='\u0627\u0633\u062a\u0639\u0644\u0627\u0645'>"+wh_svg(L"search")+L"</button></div></div>"
+         L"<div class='fld f-name'><label>\u0646\u0627\u0645 <span class='req'>*</span></label>"
+         L"<div class='ic-in'>"+wh_svg(L"user")+L"<input id='first' data-nav placeholder='\u0646\u0627\u0645 \u0631\u0627 \u0648\u0627\u0631\u062f \u06a9\u0646\u06cc\u062f'></div></div>"
+         L"<div class='fld f-family'><label>\u0646\u0627\u0645 \u062e\u0627\u0646\u0648\u0627\u062f\u06af\u06cc <span class='req'>*</span></label>"
+         L"<div class='ic-in'>"+wh_svg(L"user")+L"<input id='last' data-nav placeholder='\u0646\u0627\u0645 \u062e\u0627\u0646\u0648\u0627\u062f\u06af\u06cc \u0631\u0627 \u0648\u0627\u0631\u062f \u06a9\u0646\u06cc\u062f'></div></div>"
+         L"<div class='fld f-nid'><label>\u06a9\u062f \u0645\u0644\u06cc <span class='req'>*</span></label>"
+         L"<div class='ic-in'>"+wh_svg(L"id")+L"<input id='nid' class='ltr' data-nav maxlength='10' inputmode='numeric' placeholder='\u06a9\u062f \u0645\u0644\u06cc \u0631\u0627 \u0648\u0627\u0631\u062f \u06a9\u0646\u06cc\u062f'></div></div>"
          L"</div>";
-    // Row 2: نام پدر، تاریخ تولد، جنسیت
+    // Row 2: نام پدر، تاریخ تولد*، جنسیت
     h += L"<div class='row'>"
-         L"<div class='fld f-father'><label>\u0646\u0627\u0645 \u067e\u062f\u0631</label><input id='father' data-nav></div>"
-         L"<div class='fld f-birth'><label>\u062a\u0627\u0631\u06cc\u062e \u062a\u0648\u0644\u062f</label><input id='birth' class='ltr center' data-nav maxlength='10' inputmode='numeric' placeholder='____/__/__'></div>"
-         L"<div class='fld f-gender'><label>\u062c\u0646\u0633\u06cc\u062a</label><select id='gender' data-nav><option>\u0645\u0631\u062f</option><option>\u0632\u0646</option></select></div>"
+         L"<div class='fld f-father'><label>\u0646\u0627\u0645 \u067e\u062f\u0631</label>"
+         L"<div class='ic-in'>"+wh_svg(L"user")+L"<input id='father' data-nav placeholder='\u0646\u0627\u0645 \u067e\u062f\u0631 \u0631\u0627 \u0648\u0627\u0631\u062f \u06a9\u0646\u06cc\u062f'></div></div>"
+         L"<div class='fld f-birth'><label>\u062a\u0627\u0631\u06cc\u062e \u062a\u0648\u0644\u062f <span class='req'>*</span></label>"
+         L"<div class='ic-in'>"+wh_svg(L"calendar")+L"<input id='birth' class='ltr center' data-nav maxlength='10' inputmode='numeric' placeholder='\u0627\u0646\u062a\u062e\u0627\u0628 \u062a\u0627\u0631\u06cc\u062e \u062a\u0648\u0644\u062f'></div></div>"
+         L"<div class='fld f-gender'><label>\u062c\u0646\u0633\u06cc\u062a</label>"
+         L"<div class='ic-in'>"+wh_svg(L"gender")+L"<select id='gender' data-nav><option value='' disabled selected>\u0627\u0646\u062a\u062e\u0627\u0628 \u06a9\u0646\u06cc\u062f</option><option>\u0645\u0631\u062f</option><option>\u0632\u0646</option></select></div></div>"
          L"</div>";
     // Row 3: موبایل، تلفن ثابت، آدرس (آدرس عریض)
     h += L"<div class='row'>"
-         L"<div class='fld f-mobile'><label>\u0645\u0648\u0628\u0627\u06cc\u0644</label><input id='mobile' class='ltr' data-nav maxlength='11' inputmode='numeric'></div>"
-         L"<div class='fld f-phone'><label>\u062a\u0644\u0641\u0646 \u062b\u0627\u0628\u062a</label><input id='phone' class='ltr' data-nav inputmode='numeric'></div>"
-         L"<div class='fld f-addr'><label>\u0622\u062f\u0631\u0633</label><input id='address' data-nav></div>"
+         L"<div class='fld f-mobile'><label>\u0634\u0645\u0627\u0631\u0647 \u0645\u0648\u0628\u0627\u06cc\u0644</label>"
+         L"<div class='ic-in'>"+wh_svg(L"mobile")+L"<input id='mobile' class='ltr' data-nav maxlength='11' inputmode='numeric' placeholder='\u0634\u0645\u0627\u0631\u0647 \u0645\u0648\u0628\u0627\u06cc\u0644 \u0631\u0627 \u0648\u0627\u0631\u062f \u06a9\u0646\u06cc\u062f'></div></div>"
+         L"<div class='fld f-phone'><label>\u062a\u0644\u0641\u0646 \u062b\u0627\u0628\u062a</label>"
+         L"<div class='ic-in'>"+wh_svg(L"phone")+L"<input id='phone' class='ltr' data-nav inputmode='numeric' placeholder='\u0634\u0645\u0627\u0631\u0647 \u062a\u0644\u0641\u0646 \u062b\u0627\u0628\u062a \u0631\u0627 \u0648\u0627\u0631\u062f \u06a9\u0646\u06cc\u062f'></div></div>"
+         L"<div class='fld f-addr'><label>\u0622\u062f\u0631\u0633</label>"
+         L"<div class='ic-in'>"+wh_svg(L"map")+L"<input id='address' data-nav placeholder='\u0622\u062f\u0631\u0633 \u0645\u062d\u0644 \u0633\u06a9\u0648\u0646\u062a \u0631\u0627 \u0648\u0627\u0631\u062f \u06a9\u0646\u06cc\u062f'></div></div>"
          L"</div>";
-    // ----- medical / visit info -----
-    h += L"<div class='sect mt'><span class='acc'></span><span class='ic'>"+wh_svg(L"clipboard")+L"</span>\u0627\u0637\u0644\u0627\u0639\u0627\u062a \u062f\u0631\u0645\u0627\u0646\u06cc \u0648 \u0646\u0648\u0628\u062a</div>";
+    // ----- بیمه و نوبت -----
+    h += L"<div class='sect mt'><span class='ic'>"+wh_svg(L"shield")+L"</span>\u0628\u06cc\u0645\u0647 \u0648 \u0646\u0648\u0628\u062a</div>";
     h += L"<div class='row'>"
-         L"<div class='fld f-sel'><label>\u0646\u0648\u0639 \u0628\u06cc\u0645\u0627\u0631</label><select id='ptype' data-nav><option>\u0639\u0627\u062f\u06cc</option><option>\u0633\u0631\u067e\u0627\u06cc\u06cc</option><option>\u0628\u0633\u062a\u0631\u06cc</option></select></div>"
-         L"<div class='fld f-sel'><label>\u0646\u0648\u0639 \u0646\u0648\u0628\u062a</label><select id='ntype' data-nav><option>\u0639\u0627\u062f\u06cc</option><option>\u0627\u0648\u0631\u0698\u0627\u0646\u0633</option><option>\u067e\u0631\u0633\u0646\u0644\u06cc</option></select></div>"
+         L"<div class='fld f-sel'><label>\u0646\u0648\u0639 \u0628\u06cc\u0645\u0647 \u067e\u0627\u06cc\u0647</label>"
+         L"<div class='ic-in'>"+wh_svg(L"shield")+L"<select id='baseType'><option>\u0627\u0646\u062a\u062e\u0627\u0628 \u06a9\u0646\u06cc\u062f</option></select></div></div>"
+         L"<div class='fld f-sel'><label>\u0646\u0648\u0639 \u0628\u06cc\u0645\u0647</label>"
+         L"<div class='ic-in'>"+wh_svg(L"shield")+L"<select id='insType'><option>\u0627\u0646\u062a\u062e\u0627\u0628 \u06a9\u0646\u06cc\u062f</option></select></div></div>"
+         L"<div class='fld f-sel'><label>\u0646\u0648\u0639 \u0646\u0648\u0628\u062a</label>"
+         L"<div class='ic-in'>"+wh_svg(L"calendar")+L"<select id='ntype' data-nav><option>\u0639\u0627\u062f\u06cc</option><option>\u0627\u0648\u0631\u0698\u0627\u0646\u0633</option><option>\u067e\u0631\u0633\u0646\u0644\u06cc</option></select></div></div>"
+         L"<div class='fld f-sel'><label>\u0646\u0648\u0639 \u067e\u0630\u06cc\u0631\u0634</label>"
+         L"<div class='ic-in'>"+wh_svg(L"user")+L"<select id='ptype' data-nav><option>\u0633\u0631\u067e\u0627\u06cc\u06cc</option><option>\u0639\u0627\u062f\u06cc</option><option>\u0628\u0633\u062a\u0631\u06cc</option></select></div></div>"
          L"</div>";
-    // ----- service info (amount + discount) -----
-    h += L"<div class='sect mt'><span class='acc'></span><span class='ic'>"+wh_svg(L"layers")+L"</span>\u0627\u0637\u0644\u0627\u0639\u0627\u062a \u062e\u062f\u0645\u062a</div>";
+    // ----- خدمت: مبلغ خدمت + تخفیف -----
     h += L"<div class='row'>"
-         L"<div class='fld f-money'><label>\u0645\u0628\u0644\u063a \u062e\u062f\u0645\u062a (\u0631\u06cc\u0627\u0644)</label><input id='price' class='ltr' data-nav inputmode='numeric'></div>"
-         L"<div class='fld f-money'><label>\u062a\u062e\u0641\u06cc\u0641 (\u0631\u06cc\u0627\u0644)</label><input id='discount' class='ltr' data-nav inputmode='numeric'></div>"
+         L"<div class='fld f-money'><label>\u0645\u0628\u0644\u063a \u062e\u062f\u0645\u062a (\u0631\u06cc\u0627\u0644)</label>"
+         L"<div class='ic-in'>"+wh_svg(L"layers")+L"<input id='price' class='ltr' data-nav inputmode='numeric' placeholder='\u0645\u0628\u0644\u063a \u062e\u062f\u0645\u062a \u0631\u0627 \u0648\u0627\u0631\u062f \u06a9\u0646\u06cc\u062f'></div></div>"
+         L"<div class='fld f-money'><label>\u062a\u062e\u0641\u06cc\u0641 (\u0631\u06cc\u0627\u0644)</label>"
+         L"<div class='ic-in'>"+wh_svg(L"receipt")+L"<input id='discount' class='ltr' data-nav inputmode='numeric' placeholder='\u0645\u0628\u0644\u063a \u062a\u062e\u0641\u06cc\u0641 \u0631\u0627 \u0648\u0627\u0631\u062f \u06a9\u0646\u06cc\u062f'></div></div>"
          L"</div>";
-    // ----- bottom action bar: register&print / new / clear / cancel -----
+    // ----- bottom action bar (به ترتیب موکاپ، چپ‌به‌راست) -----
     h += L"<div class='footbar'>"
-         L"<button class='btn primary lg' style='flex:2 1 230px' id='btnSave' data-nav data-enter='submit'>"+wh_svg(L"print")+L"\u062b\u0628\u062a \u067e\u0630\u06cc\u0631\u0634 \u0648 \u0686\u0627\u067e \u0631\u0633\u06cc\u062f</button>"
-         L"<button class='btn outline lg' style='flex:1 1 140px' id='btnNew' data-nav>"+wh_svg(L"plus")+L"\u067e\u0630\u06cc\u0631\u0634 \u062c\u062f\u06cc\u062f</button>"
-         L"<button class='btn lg' style='flex:1 1 120px' id='btnClear' data-nav>"+wh_svg(L"eraser")+L"\u067e\u0627\u06a9 \u06a9\u0631\u062f\u0646</button>"
-         L"<button class='btn danger lg' style='flex:0 1 110px' id='btnCancel' data-nav>"+wh_svg(L"x")+L"\u0627\u0646\u0635\u0631\u0627\u0641</button>"
+         L"<button class='btn primary lg' style='flex:2 1 300px' id='btnSave' data-nav data-enter='submit'>"+wh_svg(L"check")+L"\u062b\u0628\u062a \u067e\u0630\u06cc\u0631\u0634 \u0648 \u0635\u062f\u0648\u0631 \u0642\u0628\u0636</button>"
+         L"<button class='btn errpill lg' style='flex:0 1 130px;display:none' id='btnErr'>"+wh_svg(L"x")+L"\u062e\u0637\u0627 \u062f\u0631 \u062b\u0628\u062a</button>"
+         L"<button class='btn softblue lg' style='flex:1 1 150px' id='btnNew' data-nav>"+wh_svg(L"plus")+L"\u067e\u0630\u06cc\u0631\u0634 \u062c\u062f\u06cc\u062f</button>"
+         L"<button class='btn lg' style='flex:0 1 130px' id='btnClear' data-nav>"+wh_svg(L"refresh")+L"\u067e\u0627\u06a9 \u06a9\u0631\u062f\u0646</button>"
          L"</div>";
     h += L"</div>";   // card fill
     h += L"</div>";   // zone-center
@@ -779,26 +832,25 @@ static std::wstring wh_receptionHtml(){
     // ============================ LEFT ZONE ==============================
     // payment summary + payable + print.
     h += L"<div class='zone zone-left scroll'>";
-    h += L"<div class='card tight bill'>"
-         L"<div class='sect'><span class='acc'></span><span class='ic'>"+wh_svg(L"receipt")+L"</span>\u062e\u0644\u0627\u0635\u0647 \u067e\u0631\u062f\u0627\u062e\u062a</div>"
-         L"<div class='grp'>\u0628\u06cc\u0645\u0647 \u0627\u0635\u0644\u06cc</div>"
-         L"<div class='line'><span>\u062c\u0645\u0639 \u06a9\u0644</span><b id='b_total'>0<span class='u'>\u0631\u06cc\u0627\u0644</span></b></div>"
-         L"<div class='line'><span>\u0633\u0647\u0645 \u0628\u06cc\u0645\u0647</span><b id='b_main'>0<span class='u'>\u0631\u06cc\u0627\u0644</span></b></div>"
-         L"<div class='grp'>\u0628\u06cc\u0645\u0647 \u0645\u06a9\u0645\u0644</div>"
-         L"<div class='line'><span>\u0645\u0627\u0628\u0647\u200c\u0627\u0644\u062a\u0641\u0627\u0648\u062a \u067e\u0627\u06cc\u0647</span><b id='b_diff'>0<span class='u'>\u0631\u06cc\u0627\u0644</span></b></div>"
-         L"<div class='line'><span>\u0633\u0647\u0645 \u0633\u0627\u0632\u0645\u0627\u0646</span><b id='b_org'>0<span class='u'>\u0631\u06cc\u0627\u0644</span></b></div>"
-         L"<div class='grp'>\u0633\u0647\u0645 \u0628\u06cc\u0645\u0627\u0631</div>"
-         L"<div class='line'><span>\u0633\u0647\u0645 \u0628\u06cc\u0645\u0627\u0631</span><b id='b_pat'>0<span class='u'>\u0631\u06cc\u0627\u0644</span></b></div>"
-         L"<div class='line'><span>\u062a\u062e\u0641\u06cc\u0641</span><b id='b_disc'>0<span class='u'>\u0631\u06cc\u0627\u0644</span></b></div>"
-         L"<div class='pay'><span>\u0645\u0628\u0644\u063a \u0646\u0647\u0627\u06cc\u06cc</span><b><span id='b_paid'>0</span> <span style='font-size:11px;opacity:.85'>\u0631\u06cc\u0627\u0644</span></b></div>"
+    h += L"<div class='card bill'>"
+         L"<div class='sect'><span class='ic'>"+wh_svg(L"receipt")+L"</span>\u0635\u0648\u0631\u062a\u062d\u0633\u0627\u0628</div>"
+         L"<div class='line'><span>\u0628\u06cc\u0645\u0647 \u0627\u0635\u0644\u06cc</span><b id='b_total'>0<span class='u'>\u062a\u0648\u0645\u0627\u0646</span></b></div>"
+         L"<div class='line'><span>\u0633\u0647\u0645 \u0628\u06cc\u0645\u0647</span><b id='b_main'>0<span class='u'>\u062a\u0648\u0645\u0627\u0646</span></b></div>"
+         L"<div class='line'><span>\u062c\u0645\u0639 \u06a9\u0644</span><b id='b_sum'>0<span class='u'>\u062a\u0648\u0645\u0627\u0646</span></b></div>"
+         L"<div class='line'><span>\u0628\u06cc\u0645\u0647 \u0645\u06a9\u0645\u0644</span><b id='b_supp'>0<span class='u'>\u062a\u0648\u0645\u0627\u0646</span></b></div>"
+         L"<div class='line'><span>\u0645\u0627\u0628\u0647 \u0627\u0644\u062a\u0641\u0627\u0648\u062a \u0628\u06cc\u0645\u0647 \u067e\u0627\u06cc\u0647</span><b id='b_diff'>0<span class='u'>\u062a\u0648\u0645\u0627\u0646</span></b></div>"
+         L"<div class='line'><span>\u0633\u0647\u0645 \u0633\u0627\u0632\u0645\u0627\u0646</span><b id='b_org'>0<span class='u'>\u062a\u0648\u0645\u0627\u0646</span></b></div>"
+         L"<div class='line'><span>\u0645\u0628\u0644\u063a \u0646\u0647\u0627\u06cc\u06cc</span><b id='b_pat'>0<span class='u'>\u062a\u0648\u0645\u0627\u0646</span></b></div>"
+         L"<div class='line'><span>\u062a\u062e\u0641\u06cc\u0641</span><b id='b_disc'>0<span class='u'>\u062a\u0648\u0645\u0627\u0646</span></b></div>"
+         L"<div class='pay'><span>\u067e\u0631\u062f\u0627\u062e\u062a\u06cc</span><b><span id='b_paid'>0</span> <span style='font-size:11px;opacity:.9'>\u062a\u0648\u0645\u0627\u0646</span></b></div>"
          L"</div>";
-    h += L"<div class='card tight'>"
-         L"<div class='sect'><span class='acc'></span><span class='ic'>"+wh_svg(L"print")+L"</span>\u0686\u0627\u067e</div>"
+    h += L"<div class='card'>"
+         L"<div class='sect'><span class='ic'>"+wh_svg(L"print")+L"</span>\u0686\u0627\u067e</div>"
          L"<div class='btnrow stack'>"
-         L"<button class='btn block sm' id='p_ins'>"+wh_svg(L"shield")+L"\u0631\u0633\u06cc\u062f \u0628\u06cc\u0645\u0647</button>"
-         L"<button class='btn block sm' id='p_rx'>"+wh_svg(L"clipboard")+L"\u0686\u0627\u067e \u0646\u0633\u062e\u0647</button>"
-         L"<button class='btn block sm' id='p_last'>"+wh_svg(L"receipt")+L"\u0686\u0627\u067e \u0622\u062e\u0631\u06cc\u0646 \u0642\u0628\u0636 (F8)</button>"
-         L"<button class='btn block sm' id='p_reprint'>"+wh_svg(L"print")+L"\u0686\u0627\u067e \u0645\u062c\u062f\u062f</button>"
+         L"<button class='btn block' id='p_ins'>"+wh_svg(L"shield")+L"\u0631\u0633\u06cc\u062f \u0628\u06cc\u0645\u0647</button>"
+         L"<button class='btn block' id='p_rx'>"+wh_svg(L"clipboard")+L"\u0686\u0627\u067e \u0646\u0633\u062e\u0647</button>"
+         L"<button class='btn block' id='p_last'>"+wh_svg(L"receipt")+L"\u0686\u0627\u067e \u0622\u062e\u0631\u06cc\u0646 \u0642\u0628\u0636 (F8)</button>"
+         L"<button class='btn block' id='p_reprint' style='display:none'>"+wh_svg(L"print")+L"\u0686\u0627\u067e \u0645\u062c\u062f\u062f</button>"
          L"</div></div>";
     h += L"</div>";   // zone-left
 
