@@ -221,7 +221,14 @@ std::wstring WebHostBridge_Call(int kind, const std::wstring& verb,
         return o.done();
     }
     // ---- save a reception (validate + persist + remember patient) ----
-    if(verb==L"saveReception"){
+    //  Also handles "saveAndPrint" which performs the SAME atomic save and then,
+    //  ONLY when the save truly succeeded, prints the patient receipt. This is the
+    //  root-cause fix for the «چاپ → خطای ثبت» bug: previously the primary button
+    //  saved and printed in two SEPARATE COM round-trips, so a print could fire
+    //  against a stale/empty last_receipt and surface a spurious registration
+    //  error. Now the native layer guarantees ordering and never prints unless the
+    //  record was actually persisted.
+    if(verb==L"saveReception" || verb==L"saveAndPrint"){
         ReceptionRecord r;
         r.firstName  = whjson::get(argsJson,L"first");
         r.lastName   = whjson::get(argsJson,L"last");
@@ -265,26 +272,50 @@ std::wstring WebHostBridge_Call(int kind, const std::wstring& verb,
         r.orgShare=r.baseDiff*SUPP_INSURANCES[suppIdx].pct/100;
         r.patientShare=r.baseDiff-r.orgShare;
         r.paid=r.patientShare-r.discount; if(r.paid<0) r.paid=0;
+        // finalTotal must be populated BEFORE the record is serialized to the
+        // last-receipt store; otherwise the printed receipt shows a garbage/zero
+        // «مبلغ نهایی». It mirrors the patient payable.
+        r.finalTotal = r.paid;
         int q=saveReception(r);
-        if(q>0 && validNationalId(r.nationalId)){
+        bool ok = (q>0);
+        if(ok && validNationalId(r.nationalId)){
             std::vector<int> ins; if(insIdx>0) ins.push_back(insIdx);
             rememberPatient(r.nationalId,r.firstName,r.lastName,r.fatherName,
                             r.gender,r.birthDate,r.mobile,ins);
         }
+        // saveReception() already persists last_receipt; keep an explicit call so
+        // finalTotal is captured even if the internal save path changes.
         saveLastReceipt(r);
-        whjson::Obj o; o.boolean(L"ok",q>0); o.num(L"queue",q); o.num(L"paid",r.paid);
+        // Atomic save+print: print the patient receipt (kind 2) ONLY after a
+        // confirmed save, using the in-memory record (never a re-read that could
+        // race). Print failures never invalidate the registration result.
+        bool printed=false;
+        if(ok && verb==L"saveAndPrint"){
+            printed = printReceipt(r, 2 /*قبض پذیرش*/, g_hFrame);
+        }
+        whjson::Obj o; o.boolean(L"ok",ok); o.num(L"queue",q); o.num(L"paid",r.paid);
+        if(verb==L"saveAndPrint") o.boolean(L"printed",printed);
         return o.done();
     }
     // ---- print the last receipt / a kind ----
     if(verb==L"print"){
         int kindp=(int)whjson::getNum(argsJson,L"kind");   // 0 ins / 1 rx / 2 receipt
         ReceptionRecord r;
-        if(loadLastReceipt(r)) printReceipt(r,kindp,g_hFrame);
-        whjson::Obj o; o.boolean(L"ok",true); return o.done();
+        bool have = loadLastReceipt(r);
+        bool printed=false;
+        if(have) printed = printReceipt(r,kindp,g_hFrame);
+        whjson::Obj o; o.boolean(L"ok",printed);
+        if(!have) o.str(L"error",L"\u0647\u0646\u0648\u0632 \u0642\u0628\u0636\u06cc \u062b\u0628\u062a \u0646\u0634\u062f\u0647 \u0627\u0633\u062a.");
+        return o.done();
     }
     if(verb==L"printLast"){
-        printLastReceipt(g_hFrame);
-        whjson::Obj o; o.boolean(L"ok",true); return o.done();
+        ReceptionRecord r;
+        bool have = loadLastReceipt(r);
+        bool printed=false;
+        if(have) printed = printReceipt(r,2,g_hFrame);
+        whjson::Obj o; o.boolean(L"ok",printed);
+        if(!have) o.str(L"error",L"\u0647\u0646\u0648\u0632 \u0642\u0628\u0636\u06cc \u062b\u0628\u062a \u0646\u0634\u062f\u0647 \u0627\u0633\u062a.");
+        return o.done();
     }
     // ---- appointment: list ----
     if(verb==L"apptList"){

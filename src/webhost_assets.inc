@@ -27,6 +27,42 @@
 //  C++ stays the source of truth; JS never fabricates a lookup/bill/save.
 // ============================================================================
 
+// Modern blue-outline SVG icon set (no image files, no icon font). Stroke uses
+// currentColor so each icon inherits the surrounding text/accent colour. Kept
+// ES-free (pure inline SVG markup) so MSHTML renders them in standards mode.
+static std::wstring wh_svg(const wchar_t* name){
+    std::wstring n(name);
+    const wchar_t* open =
+        L"<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' "
+        L"stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'>";
+    std::wstring body;
+    if(n==L"search")
+        body=L"<circle cx='11' cy='11' r='7'/><path d='M21 21l-4.3-4.3'/>";
+    else if(n==L"user")
+        body=L"<circle cx='12' cy='8' r='4'/><path d='M4 20c0-4 4-6 8-6s8 2 8 6'/>";
+    else if(n==L"shield")
+        body=L"<path d='M12 3l7 3v5c0 5-3.5 8-7 10-3.5-2-7-5-7-10V6z'/><path d='M9 12l2 2 4-4'/>";
+    else if(n==L"stethoscope")
+        body=L"<path d='M6 3v6a4 4 0 0 0 8 0V3'/><path d='M6 3H4M14 3h2'/><path d='M10 17v1a4 4 0 0 0 8 0v-2'/><circle cx='19' cy='13' r='2'/>";
+    else if(n==L"clipboard")
+        body=L"<rect x='6' y='4' width='12' height='17' rx='2'/><path d='M9 4V3h6v1'/><path d='M9 10h6M9 14h4'/>";
+    else if(n==L"layers")
+        body=L"<path d='M12 3l9 5-9 5-9-5z'/><path d='M3 13l9 5 9-5'/>";
+    else if(n==L"receipt")
+        body=L"<path d='M5 3v18l2-1 2 1 2-1 2 1 2-1 2 1V3l-2 1-2-1-2 1-2-1-2 1z'/><path d='M8 8h8M8 12h8M8 16h5'/>";
+    else if(n==L"print")
+        body=L"<path d='M7 9V3h10v6'/><rect x='4' y='9' width='16' height='8' rx='2'/><path d='M7 17h10v4H7z'/>";
+    else if(n==L"plus")
+        body=L"<path d='M12 5v14M5 12h14'/>";
+    else if(n==L"eraser")
+        body=L"<path d='M4 15l7-7 6 6-5 5H8z'/><path d='M9 21h11'/>";
+    else if(n==L"x")
+        body=L"<path d='M6 6l12 12M18 6L6 18'/>";
+    else
+        body=L"<circle cx='12' cy='12' r='8'/>";
+    return std::wstring(open)+body+L"</svg>";
+}
+
 // Shared CSS used by both surfaces. Themed at runtime from the boot payload
 // (CSS custom properties on :root). This is a full design system, not a few
 // utility rules — surfaces, rhythm, controls, tabs, top bar, loader, states.
@@ -41,21 +77,24 @@ static std::wstring wh_commonHead(){
     // The palette is deliberately BLUE-and-WHITE harmonised: the primary call
     // to action uses the accent blue (no clashing green), success is reserved
     // only for confirmation chips and the live payable total.
-    L":root{--bg:#eef3fb;--surface:#ffffff;--surfaceTop:#ffffff;--surface2:#f3f7fd;"
-    L"--border:#dbe4f1;--text:#16263c;--textDim:#64748b;--accent:#1f6fe5;"
-    L"--accent2:#1657c4;--accentText:#ffffff;--danger:#e0413f;--success:#0fa663;"
-    L"--warn:#d97706;--inputBg:#ffffff;--inputText:#16263c;"
-    L"--r:18px;--r2:12px;--r3:9px;--sp:14px;--sp2:10px;--sp3:7px;"
-    L"--shadow:0 1px 2px rgba(20,40,80,.05),0 12px 30px rgba(20,40,80,.08);"
-    L"--shadowSm:0 1px 3px rgba(20,40,80,.07);"
-    L"--ring:0 0 0 3px rgba(31,111,229,.20);}"
+    // 2026 medical palette — White + Blue per spec:
+    //   bg #F5F8FD · primary #2E7DFF · secondary #4DA3FF · accent #1E5EFF ·
+    //   success #18B75A · danger #E53935 · border #DCE7F5 · navy text.
+    L":root{--bg:#f5f8fd;--surface:#ffffff;--surfaceTop:#ffffff;--surface2:#f1f6fd;"
+    L"--border:#dce7f5;--text:#13294b;--textDim:#6b7d99;--accent:#2e7dff;"
+    L"--accent2:#1e5eff;--accent3:#4da3ff;--accentText:#ffffff;--danger:#e53935;--success:#18b75a;"
+    L"--warn:#f59e0b;--inputBg:#ffffff;--inputText:#13294b;"
+    L"--r:20px;--r2:13px;--r3:10px;--sp:14px;--sp2:10px;--sp3:7px;"
+    L"--shadow:0 1px 2px rgba(30,94,255,.05),0 14px 34px rgba(30,94,255,.09);"
+    L"--shadowSm:0 1px 3px rgba(30,94,255,.08);"
+    L"--ring:0 0 0 3px rgba(46,125,255,.22);}"
     // ============================ RESET / BASE ===========================
     L"*{box-sizing:border-box;-ms-user-select:none;}"
     L"html,body{height:100%;margin:0;}"
     L"body{font-family:Vazirmatn,Vazir,Tahoma,'Segoe UI',sans-serif;direction:rtl;"
     L"background:"
-      L"radial-gradient(1200px 560px at 90% -10%,rgba(31,111,229,.12),transparent 60%),"
-      L"radial-gradient(960px 520px at 4% 110%,rgba(31,111,229,.07),transparent 60%),"
+      L"radial-gradient(1300px 600px at 92% -12%,rgba(46,125,255,.13),transparent 60%),"
+      L"radial-gradient(1000px 560px at 3% 112%,rgba(77,163,255,.10),transparent 60%),"
       L"var(--bg);"
     L"color:var(--text);font-size:14.5px;overflow:hidden;line-height:1.55;"
     L"-ms-overflow-style:none;}"
@@ -94,10 +133,11 @@ static std::wstring wh_commonHead(){
     L".card.flex,.card.fill{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;}"
     L".sect{font-weight:800;color:var(--text);margin:0 0 13px;font-size:14px;"
     L"display:flex;align-items:center;gap:9px;}"
-    L".sect .ic{width:27px;height:27px;flex:0 0 auto;border-radius:9px;"
-    L"background:linear-gradient(135deg,rgba(31,111,229,.16),rgba(31,111,229,.06));"
+    L".sect .ic{width:28px;height:28px;flex:0 0 auto;border-radius:9px;"
+    L"background:linear-gradient(135deg,rgba(46,125,255,.16),rgba(46,125,255,.06));"
     L"color:var(--accent);display:flex;align-items:center;justify-content:center;"
     L"font-size:15px;}"
+    L".sect .ic svg{width:16px;height:16px;}"
     L".sect .acc{width:4px;height:17px;border-radius:3px;flex:0 0 auto;"
     L"background:linear-gradient(180deg,var(--accent),var(--accent2));}"
     L".sect.mt{margin-top:15px;padding-top:14px;border-top:1px solid var(--border);}"
@@ -123,7 +163,10 @@ static std::wstring wh_commonHead(){
     L".f-addr{flex:1 1 100%;}"           // آدرس (تمام عرض)
     L".f-sel{flex:1 1 160px;}"           // selects (نوع بیمار/نوبت/بیمه)
     L".f-money{flex:1 1 170px;}"         // مبلغ/تخفیف
+    L".f-half{flex:1 1 47%;}"            // half-width insurance fields
+    L".f-third{flex:1 1 30%;}"           // third-width compact fields
     L".fld.wide{flex:1 1 100%;}"
+    L".fld.xs{flex:0 0 96px;}"
     // ============================== CONTROLS =============================
     L"input,select,textarea{width:100%;height:40px;border:1px solid var(--border);"
     L"border-radius:var(--r2);background:var(--inputBg);color:var(--inputText);"
@@ -171,6 +214,16 @@ static std::wstring wh_commonHead(){
     L".btn[disabled]{opacity:.5;cursor:not-allowed;}"
     L".btnrow{display:flex;gap:8px;flex-wrap:wrap;}"
     L".btnrow.stack{flex-direction:column;}"
+    // compact square icon button (search keys)
+    L".btn.ic-btn{padding:0;width:40px;flex:0 0 40px;}"
+    L".btn.ic-btn svg{width:17px;height:17px;}"
+    // outline variant (secondary actions)
+    L".btn.outline{background:transparent;border-color:var(--accent);color:var(--accent);box-shadow:none;}"
+    L".btn.outline:hover{background:rgba(46,125,255,.08);}"
+    L".btn svg{width:16px;height:16px;flex:0 0 auto;}"
+    // bottom action bar (sticky footer of the center form)
+    L".footbar{display:flex;gap:11px;flex-wrap:wrap;flex-direction:row-reverse;"
+    L"margin-top:13px;padding-top:13px;border-top:1px solid var(--border);}"
     // actions row — the primary «save» button sits on the VISUAL LEFT (LTR end)
     // because in this RTL layout flex children flow right→left, so listing the
     // save button FIRST in markup places it on the right; to honour the request
@@ -192,11 +245,20 @@ static std::wstring wh_commonHead(){
     L"font-size:11.5px;font-weight:700;margin:9px 3px 0;border:1px solid var(--border);}"
     L".chip.ok{background:rgba(15,166,99,.12);color:var(--success);"
     L"border-color:rgba(15,166,99,.25);}"
-    L".pcounts{display:flex;gap:8px;margin-top:11px;}"
-    L".pcounts .c{flex:1 1 0;background:var(--surface2);border:1px solid var(--border);"
-    L"border-radius:var(--r2);padding:8px 4px;}"
-    L".pcounts .c .k{font-size:11px;color:var(--textDim);font-weight:700;}"
-    L".pcounts .c .v{font-size:17px;font-weight:800;margin-top:2px;}"
+    L".pcounts{display:flex;gap:8px;margin-top:11px;flex-wrap:wrap;}"
+    L".pcounts .c{flex:1 1 30%;background:var(--surface2);border:1px solid var(--border);"
+    L"border-radius:var(--r2);padding:8px 4px;text-align:center;}"
+    L".pcounts .c .k{font-size:10.5px;color:var(--textDim);font-weight:700;}"
+    L".pcounts .c .v{font-size:16px;font-weight:800;margin-top:2px;"
+    L"font-variant-numeric:tabular-nums;}"
+    // patient status mini-widgets (electronic version / status / insurance state)
+    L".pstat{display:flex;flex-direction:column;gap:7px;margin-top:11px;}"
+    L".pstat .w{display:flex;align-items:center;justify-content:space-between;"
+    L"background:var(--surface2);border:1px solid var(--border);border-radius:var(--r3);"
+    L"padding:7px 11px;font-size:12px;}"
+    L".pstat .w .k{color:var(--textDim);font-weight:700;}"
+    L".pstat .w .v{font-weight:800;}"
+    L".pstat .w .v.on{color:var(--success);} .pstat .w .v.off{color:var(--textDim);}"
     // ============================= BILLING (left) ========================
     L".bill .line{display:flex;justify-content:space-between;align-items:center;"
     L"padding:8px 2px;border-bottom:1px dashed var(--border);font-size:13.5px;}"
@@ -427,49 +489,72 @@ static std::wstring wh_receptionScript(){
     L"    ins:parseInt(v('ins')||'0',10),supp:parseInt(v('supp')||'0',10)});"
     L"  if(!r||typeof r.price==='undefined')return;"
     L"  var U=\"<span class='u'>\\u0631\\u06cc\\u0627\\u0644</span>\";"
-    L"  $('b_total').innerHTML=fa(fmt(r.price))+U; $('b_main').innerHTML=fa(fmt(r.mainShare))+U;"
-    L"  $('b_diff').innerHTML=fa(fmt(r.baseDiff))+U; $('b_org').innerHTML=fa(fmt(r.orgShare))+U;"
-    L"  $('b_disc').innerHTML=fa(fmt(num(v('discount'))))+U; $('b_paid').innerHTML=fa(fmt(r.paid));"
+    L"  function st(id,val){var e=$(id);if(e)e.innerHTML=fa(fmt(val))+U;}"
+    L"  st('b_total',r.price); st('b_main',r.mainShare);"
+    L"  st('b_diff',r.baseDiff); st('b_org',r.orgShare);"
+    L"  st('b_pat',r.patientShare); st('b_disc',num(v('discount')));"
+    L"  if($('b_paid'))$('b_paid').innerHTML=fa(fmt(r.paid));"
+    // reflect insurance coverage % into the right-panel widget
+    L"  var pct=(r.price>0)?Math.round(r.mainShare*100/r.price):0;"
+    L"  if($('insCov'))$('insCov').value=fa(pct)+'\u066a';"
     // auto-fill the service price (formatted) when the user left it blank/zero.
     L"  if(num(v('price'))===0){ $('price').value=fa(fmt(r.price)); }"
     L"}"
+    L"function statW(id,txt,on){var e=$(id);if(!e)return;e.innerHTML=esc(txt);"
+    L"  e.className='v '+(on?'on':'off');}"
     L"function setPatient(r,found){var a=$('p_avatar'),nm=$('p_name'),sb=$('p_sub');"
     L"  if(found){var fn=((r.first||'')+' '+(r.last||'')).replace(/^ +| +$/g,'');"
     L"    if(a)a.innerHTML=esc((r.first||r.last||'?').substr(0,1));"
     L"    if(nm)nm.innerHTML=esc(fn||'\u2014');"
-    L"    if(sb)sb.innerHTML=esc((r.gender||'')+(r.birth?(' \u00b7 '+r.birth):''));}"
-    L"  else{if(a)a.innerHTML='?';if(nm)nm.innerHTML='\u0628\u06cc\u0645\u0627\u0631 \u062c\u062f\u06cc\u062f';if(sb)sb.innerHTML='\u0628\u062f\u0648\u0646 \u0633\u0627\u0628\u0642\u0647';}}"
-    L"function lookup(){var nid=v('nid');if(nid.length<10)return;"
+    L"    if(sb)sb.innerHTML=esc((r.gender||'')+(r.birth?(' \u00b7 '+r.birth):''));"
+    L"    statW('w_status','\u062f\u0627\u0631\u0627\u06cc \u0633\u0627\u0628\u0642\u0647',true);"
+    L"    statW('w_ins','\u062f\u0627\u0631\u0627\u06cc \u0628\u06cc\u0645\u0647',true);}"
+    L"  else{if(a)a.innerHTML='?';if(nm)nm.innerHTML='\u0628\u06cc\u0645\u0627\u0631 \u062c\u062f\u06cc\u062f';if(sb)sb.innerHTML='\u0628\u062f\u0648\u0646 \u0633\u0627\u0628\u0642\u0647';"
+    L"    statW('w_status','\u062c\u062f\u06cc\u062f',false);"
+    L"    statW('w_ins','\u0646\u0627\u0645\u0634\u062e\u0635',false);"
+    L"    if($('w_file'))$('w_file').innerHTML='\u2014';}}"
+    L"function lookupNid(nid){if(!nid||nid.length<10)return;"
     L"  var r=call('lookup',{nid:nid});"
-    L"  if(r.found){ $('first').value=r.first||''; $('last').value=r.last||'';"
+    L"  if(r.found){ $('nid').value=nid; $('first').value=r.first||''; $('last').value=r.last||'';"
     L"    $('father').value=r.father||''; $('birth').value=r.birth||''; $('mobile').value=r.mobile||'';"
     L"    if(r.gender){$('gender').value=r.gender;} setPatient(r,true);"
     L"    toast('\u0628\u06cc\u0645\u0627\u0631 \u06cc\u0627\u0641\u062a \u0634\u062f','ok'); $('ptype').focus(); }"
     L"  else if(!r.idValid){ toast('\u06a9\u062f \u0645\u0644\u06cc \u0646\u0627\u0645\u0639\u062a\u0628\u0631','bad'); }"
     L"  else { setPatient({},false); toast('\u0628\u06cc\u0645\u0627\u0631 \u062c\u062f\u06cc\u062f','');} }"
-    L"function clearForm(){var ids=['nid','first','last','father','birth','mobile','phone','address','price','discount','archive','file','book','insExp','docCode','docName'];"
+    L"function lookup(){lookupNid(v('nid'));}"
+    L"function clearForm(){var ids=['nid','nidSearch','first','last','father','birth','mobile','phone','address','price','discount','archive','file','book','insExp','insBranch','docCode','docName','docRef'];"
     L"  for(var i=0;i<ids.length;i++){var el=$(ids[i]);if(el)el.value='';}"
     L"  if($('ptype'))$('ptype').selectedIndex=0; if($('ntype'))$('ntype').selectedIndex=0;"
     L"  if($('ins'))$('ins').selectedIndex=0; if($('supp'))$('supp').selectedIndex=0;"
     L"  setPatient({},false); recalc();"
     L"  var n=$('nid'); if(n)n.focus();}"
-    L"function azSubmit(){"
-    L"  var insSel=$('ins'),suppSel=$('supp');"
-    L"  var pt=$('ptype'),nt=$('ntype');"
-    L"  var r=call('saveReception',{first:v('first'),last:v('last'),nid:v('nid'),"
+    // collect the full reception payload from the form (shared by save & print).
+    L"function collect(){var insSel=$('ins'),suppSel=$('supp');var pt=$('ptype'),nt=$('ntype');"
+    L"  return {first:v('first'),last:v('last'),nid:v('nid'),"
     L"    father:v('father'),birth:v('birth'),gender:v('gender'),mobile:v('mobile'),"
     L"    phone:v('phone'),address:v('address'),"
     L"    ptypeName:(pt&&pt.options[pt.selectedIndex])?pt.options[pt.selectedIndex].text:'',"
     L"    ntypeName:(nt&&nt.options[nt.selectedIndex])?nt.options[nt.selectedIndex].text:'',"
     L"    ptype:pt?pt.selectedIndex:0,ntype:nt?nt.selectedIndex:0,"
-    L"    insName:insSel.options[insSel.selectedIndex]?insSel.options[insSel.selectedIndex].text:'',"
-    L"    suppName:suppSel.options[suppSel.selectedIndex]?suppSel.options[suppSel.selectedIndex].text:'',"
-    L"    ins:parseInt(insSel.value||'0',10),supp:parseInt(suppSel.value||'0',10),"
-    L"    price:num(v('price')),discount:num(v('discount'))});"
-    L"  if(r.ok){ toast('\u067e\u0630\u06cc\u0631\u0634 \u062b\u0628\u062a \u0634\u062f \u2014 \u0646\u0648\u0628\u062a '+fa(r.queue),'ok'); clearForm(); }"
-    L"  else { toast(r.error||'\u062e\u0637\u0627 \u062f\u0631 \u062b\u0628\u062a','bad'); } }"
+    L"    insName:(insSel&&insSel.options[insSel.selectedIndex])?insSel.options[insSel.selectedIndex].text:'',"
+    L"    suppName:(suppSel&&suppSel.options[suppSel.selectedIndex])?suppSel.options[suppSel.selectedIndex].text:'',"
+    L"    ins:parseInt((insSel?insSel.value:'0')||'0',10),supp:parseInt((suppSel?suppSel.value:'0')||'0',10),"
+    L"    price:num(v('price')),discount:num(v('discount'))};}"
+    // PRIMARY action: atomic save + print of the receipt. C++ saves first and
+    // ONLY prints when the save truly succeeded — this is the fix for the old
+    // «چاپ → خطای ثبت» bug (no two-step race, no print against a stale record).
+    L"function azSubmit(){"
+    L"  var r=call('saveAndPrint',collect());"
+    L"  if(r.ok){ var m='\u067e\u0630\u06cc\u0631\u0634 \u062b\u0628\u062a \u0634\u062f \u2014 \u0646\u0648\u0628\u062a '+fa(r.queue);"
+    L"    if(r.printed)m+=' \u00b7 \u0631\u0633\u06cc\u062f \u0686\u0627\u067e \u0634\u062f';"
+    L"    toast(m,'ok'); clearForm(); }"
+    L"  else { toast(r.error||'\u062e\u0637\u0627 \u062f\u0631 \u062b\u0628\u062a \u067e\u0630\u06cc\u0631\u0634','bad'); } }"
     L"window.azSubmit=azSubmit;"
-    L"function doPrint(k){var r=call('print',{kind:k}); if(!r||r.ok!==true)toast('\u0686\u0627\u067e \u0627\u0646\u062c\u0627\u0645 \u0646\u0634\u062f','bad');}"
+    // save WITHOUT printing (kept for completeness / future use).
+    L"function azSave(){var r=call('saveReception',collect());"
+    L"  if(r.ok){toast('\u067e\u0630\u06cc\u0631\u0634 \u062b\u0628\u062a \u0634\u062f \u2014 \u0646\u0648\u0628\u062a '+fa(r.queue),'ok');clearForm();}"
+    L"  else{toast(r.error||'\u062e\u0637\u0627 \u062f\u0631 \u062b\u0628\u062a \u067e\u0630\u06cc\u0631\u0634','bad');}}"
+    L"function doPrint(k){var r=call('print',{kind:k}); if(!r||r.ok!==true)toast(r&&r.error?r.error:'\u0686\u0627\u067e \u0627\u0646\u062c\u0627\u0645 \u0646\u0634\u062f','bad');}"
     L"function on(id,ev,fn){var e=$(id);if(e)e[ev]=fn;}"
     // ---- smart Jalali birth-date mask ------------------------------------
     // The user types only digits (e.g. 14001021). We normalise Persian/Arabic
@@ -494,11 +579,16 @@ static std::wstring wh_receptionScript(){
     L"  on('ntype','onchange',function(){$('price').value='';recalc();});"
     L"  on('ins','onchange',recalc); on('supp','onchange',recalc);"
     L"  on('btnSave','onclick',azSubmit); on('btnNew','onclick',clearForm);"
+    L"  on('btnClear','onclick',clearForm);"
+    L"  on('btnCancel','onclick',function(){clearForm();toast('\u0627\u0646\u0635\u0631\u0627\u0641 \u2014 \u0641\u0631\u0645 \u067e\u0627\u06a9 \u0634\u062f','');});"
     L"  on('p_ins','onclick',function(){doPrint(0);});"
     L"  on('p_rx','onclick',function(){doPrint(1);});"
-    L"  on('p_last','onclick',function(){var r=call('printLast'); if(!r||r.ok!==true)toast('\u0686\u0627\u067e \u0627\u0646\u062c\u0627\u0645 \u0646\u0634\u062f','bad');});"
+    L"  on('p_last','onclick',function(){var r=call('printLast'); if(!r||r.ok!==true)toast(r&&r.error?r.error:'\u0686\u0627\u067e \u0627\u0646\u062c\u0627\u0645 \u0646\u0634\u062f','bad');});"
+    L"  on('p_reprint','onclick',function(){var r=call('print',{kind:2}); if(!r||r.ok!==true)toast(r&&r.error?r.error:'\u0686\u0627\u067e \u0627\u0646\u062c\u0627\u0645 \u0646\u0634\u062f','bad'); else toast('\u0686\u0627\u067e \u0645\u062c\u062f\u062f \u0627\u0646\u062c\u0627\u0645 \u0634\u062f','ok');});"
     L"  on('btnSearch','onclick',function(){var n=$('nid'); if(n){n.focus();lookup();}});"
-    L"  on('q_archive','onclick',function(){toast('\u062c\u0633\u062a\u062c\u0648 \u0628\u0631 \u0627\u0633\u0627\u0633 \u0634\u0645\u0627\u0631\u0647 \u0628\u0627\u06cc\u06af\u0627\u0646\u06cc','');});"
+    L"  on('q_nid','onclick',function(){lookupNid(v('nidSearch'));});"
+    L"  on('nidSearch','onkeyup',function(e){var k=(e||window.event).keyCode; if(k===13){lookupNid(v('nidSearch'));} else if(v('nidSearch').length===10){lookupNid(v('nidSearch'));}});"
+    L"  on('q_archive','onclick',function(){toast('\u062c\u0633\u062a\u062c\u0648 \u0628\u0631 \u0627\u0633\u0627\u0633 \u0634\u0645\u0627\u0631\u0647 \u0628\u06cc\u0645\u0647','');});"
     L"  on('q_file','onclick',function(){toast('\u062c\u0633\u062a\u062c\u0648 \u0628\u0631 \u0627\u0633\u0627\u0633 \u0634\u0645\u0627\u0631\u0647 \u067e\u0631\u0648\u0646\u062f\u0647','');});"
     // Ctrl+R clears the form (= «پذیرش جدید»). Ctrl+A inside an input must NOT be
     // hijacked, so we only intercept Ctrl+R / Ctrl+Enter and otherwise fall back
@@ -588,106 +678,127 @@ static std::wstring wh_receptionHtml(){
     h += L"<div class='grid'>";
 
     // ============================ RIGHT ZONE =============================
-    // patient identity card, search keys (with استعلام), insurance, doctor.
+    // patient identity card (photo, status widgets, visit counts, file no),
+    // search keys (icon buttons), insurance, doctor.
     h += L"<div class='zone zone-right scroll'>";
     h += L"<div class='card tight pcard'>"
          L"<div class='avatar' id='p_avatar'>?</div>"
          L"<div class='pname' id='p_name'>\u0628\u06cc\u0645\u0627\u0631 \u062c\u062f\u06cc\u062f</div>"
          L"<div class='psub' id='p_sub'>\u0628\u062f\u0648\u0646 \u0633\u0627\u0628\u0642\u0647</div>"
-         L"<div><span class='chip ok'>\u0646\u0633\u062e\u0647 \u0627\u0644\u06a9\u062a\u0631\u0648\u0646\u06cc\u06a9</span></div>"
+         // status mini-widgets
+         L"<div class='pstat'>"
+         L"<div class='w'><span class='k'>\u0646\u0633\u062e\u0647 \u0627\u0644\u06a9\u062a\u0631\u0648\u0646\u06cc\u06a9</span><span class='v on' id='w_ev'>\u0641\u0639\u0627\u0644</span></div>"
+         L"<div class='w'><span class='k'>\u0648\u0636\u0639\u06cc\u062a \u0628\u06cc\u0645\u0627\u0631</span><span class='v off' id='w_status'>\u062c\u062f\u06cc\u062f</span></div>"
+         L"<div class='w'><span class='k'>\u0648\u0636\u0639\u06cc\u062a \u0628\u06cc\u0645\u0647</span><span class='v off' id='w_ins'>\u0646\u0627\u0645\u0634\u062e\u0635</span></div>"
+         L"<div class='w'><span class='k'>\u0634\u0645\u0627\u0631\u0647 \u067e\u0631\u0648\u0646\u062f\u0647</span><span class='v' id='w_file'>\u2014</span></div>"
+         L"</div>"
          L"<div class='pcounts'>"
-         L"<div class='c'><div class='k'>P (\u0642\u0628\u0636)</div><div class='v' id='p_p'>0</div></div>"
-         L"<div class='c'><div class='k'>S (\u0633\u0631\u067e\u0627\u06cc\u06cc)</div><div class='v' id='p_s'>0</div></div>"
+         L"<div class='c'><div class='k'>\u062a\u0639\u062f\u0627\u062f \u0648\u06cc\u0632\u06cc\u062a</div><div class='v' id='p_visits'>0</div></div>"
+         L"<div class='c'><div class='k'>\u0642\u0628\u0636</div><div class='v' id='p_p'>0</div></div>"
+         L"<div class='c'><div class='k'>\u0633\u0631\u067e\u0627\u06cc\u06cc</div><div class='v' id='p_s'>0</div></div>"
          L"</div>"
          L"</div>";
     h += L"<div class='card tight'>"
-         L"<div class='sect'><span class='acc'></span><span class='ic'>\u26b2</span>\u06a9\u0644\u06cc\u062f\u0647\u0627\u06cc \u062c\u0633\u062a\u062c\u0648</div>"
-         L"<div class='row'><div class='fld wide'><label>\u0634\u0645\u0627\u0631\u0647 \u0628\u0627\u06cc\u06af\u0627\u0646\u06cc</label>"
-         L"<div class='ig'><input id='archive' class='ltr' inputmode='numeric'>"
-         L"<button class='btn sm' id='q_archive'>\u0627\u0633\u062a\u0639\u0644\u0627\u0645</button></div></div></div>"
+         L"<div class='sect'><span class='acc'></span><span class='ic'>"+wh_svg(L"search")+L"</span>\u062c\u0633\u062a\u062c\u0648 \u0628\u06cc\u0645\u0627\u0631</div>"
          L"<div class='row'><div class='fld wide'><label>\u0634\u0645\u0627\u0631\u0647 \u067e\u0631\u0648\u0646\u062f\u0647</label>"
          L"<div class='ig'><input id='file' class='ltr' inputmode='numeric'>"
-         L"<button class='btn sm' id='q_file'>\u0627\u0633\u062a\u0639\u0644\u0627\u0645</button></div></div></div>"
+         L"<button class='btn ic-btn' id='q_file' title='\u0627\u0633\u062a\u0639\u0644\u0627\u0645'>"+wh_svg(L"search")+L"</button></div></div></div>"
+         L"<div class='row'><div class='fld wide'><label>\u0634\u0645\u0627\u0631\u0647 \u0628\u06cc\u0645\u0647</label>"
+         L"<div class='ig'><input id='archive' class='ltr' inputmode='numeric'>"
+         L"<button class='btn ic-btn' id='q_archive' title='\u0627\u0633\u062a\u0639\u0644\u0627\u0645'>"+wh_svg(L"search")+L"</button></div></div></div>"
+         L"<div class='row'><div class='fld wide'><label>\u062c\u0633\u062a\u062c\u0648 \u0628\u0627 \u06a9\u062f \u0645\u0644\u06cc</label>"
+         L"<div class='ig'><input id='nidSearch' class='ltr' maxlength='10' inputmode='numeric'>"
+         L"<button class='btn ic-btn' id='q_nid' title='\u0627\u0633\u062a\u0639\u0644\u0627\u0645'>"+wh_svg(L"search")+L"</button></div></div></div>"
          L"</div>";
     h += L"<div class='card tight'>"
-         L"<div class='sect'><span class='acc'></span><span class='ic'>\u26ce</span>\u0628\u06cc\u0645\u0647</div>"
-         L"<div class='row'><div class='fld wide'><label>\u0628\u06cc\u0645\u0647 \u067e\u0627\u06cc\u0647</label><select id='ins' data-nav></select></div></div>"
-         L"<div class='row'><div class='fld'><label>\u0634 \u062f\u0641\u062a\u0631\u0686\u0647</label><input id='book' class='ltr' inputmode='numeric'></div>"
-         L"<div class='fld'><label>\u062a\u0627\u0631\u06cc\u062e \u0627\u0639\u062a\u0628\u0627\u0631</label><input id='insExp' class='ltr' placeholder='____/__/__'></div></div>"
+         L"<div class='sect'><span class='acc'></span><span class='ic'>"+wh_svg(L"shield")+L"</span>\u0628\u06cc\u0645\u0647</div>"
+         L"<div class='row'><div class='fld wide'><label>\u0628\u06cc\u0645\u0647 \u0627\u0635\u0644\u06cc</label><select id='ins' data-nav></select></div></div>"
          L"<div class='row'><div class='fld wide'><label>\u0628\u06cc\u0645\u0647 \u0645\u06a9\u0645\u0644</label><select id='supp' data-nav></select></div></div>"
+         L"<div class='row'><div class='fld f-half'><label>\u0634 \u062f\u0641\u062a\u0631\u0686\u0647</label><input id='book' class='ltr' inputmode='numeric'></div>"
+         L"<div class='fld f-half'><label>\u0634\u0639\u0628\u0647 \u0628\u06cc\u0645\u0647</label><input id='insBranch'></div></div>"
+         L"<div class='row'><div class='fld f-half'><label>\u062a\u0627\u0631\u06cc\u062e \u0627\u0639\u062a\u0628\u0627\u0631</label><input id='insExp' class='ltr center' placeholder='____/__/__'></div>"
+         L"<div class='fld f-half'><label>\u062f\u0631\u0635\u062f \u067e\u0648\u0634\u0634</label><input id='insCov' class='ltr center' inputmode='numeric' readonly></div></div>"
          L"</div>";
     h += L"<div class='card tight'>"
-         L"<div class='sect'><span class='acc'></span><span class='ic'>\u271a</span>\u067e\u0632\u0634\u06a9 \u0645\u0639\u0627\u0644\u062c</div>"
+         L"<div class='sect'><span class='acc'></span><span class='ic'>"+wh_svg(L"stethoscope")+L"</span>\u067e\u0632\u0634\u06a9 \u0645\u0639\u0627\u0644\u062c</div>"
          L"<div class='row'>"
          L"<div class='fld xs'><label>\u06a9\u062f \u0646\u0638\u0627\u0645</label><input id='docCode' class='ltr' inputmode='numeric'></div>"
          L"<div class='fld'><label>\u0646\u0627\u0645 \u067e\u0632\u0634\u06a9</label><input id='docName'></div>"
          L"</div>"
+         L"<div class='row'><div class='fld wide'><label>\u067e\u0632\u0634\u06a9 \u0627\u0631\u062c\u0627\u0639\u200c\u062f\u0647\u0646\u062f\u0647</label><input id='docRef'></div></div>"
          L"</div>";
     h += L"</div>";   // zone-right
 
     // ============================ CENTER ZONE ============================
-    // patient identity + insurance/visit form + primary actions.
-    h += L"<div class='zone zone-center'>";
+    // patient identity + insurance/visit form + service info + primary actions.
+    h += L"<div class='zone zone-center scroll'>";
     h += L"<div class='card fill'>";
-    h += L"<div class='sect'><span class='acc'></span><span class='ic'>\u263b</span>\u0645\u0634\u062e\u0635\u0627\u062a \u0628\u06cc\u0645\u0627\u0631</div>";
+    h += L"<div class='sect'><span class='acc'></span><span class='ic'>"+wh_svg(L"user")+L"</span>\u0645\u0634\u062e\u0635\u0627\u062a \u0628\u06cc\u0645\u0627\u0631</div>";
     // Row 1: نام، نام خانوادگی، کد ملی (با استعلام)
     h += L"<div class='row'>"
          L"<div class='fld f-name'><label>\u0646\u0627\u0645</label><input id='first' data-nav></div>"
          L"<div class='fld f-family'><label>\u0646\u0627\u0645 \u062e\u0627\u0646\u0648\u0627\u062f\u06af\u06cc</label><input id='last' data-nav></div>"
          L"<div class='fld f-nid'><label>\u06a9\u062f \u0645\u0644\u06cc</label>"
          L"<div class='ig'><input id='nid' class='ltr' data-nav maxlength='10' inputmode='numeric'>"
-         L"<button class='btn sm' id='btnSearch'>\u0627\u0633\u062a\u0639\u0644\u0627\u0645</button></div></div>"
+         L"<button class='btn ic-btn' id='btnSearch' title='\u0627\u0633\u062a\u0639\u0644\u0627\u0645'>"+wh_svg(L"search")+L"</button></div></div>"
          L"</div>";
-    // Row 2: جنسیت، نام پدر، تاریخ تولد
+    // Row 2: نام پدر، تاریخ تولد، جنسیت
     h += L"<div class='row'>"
-         L"<div class='fld f-gender'><label>\u062c\u0646\u0633\u06cc\u062a</label><select id='gender' data-nav><option>\u0645\u0631\u062f</option><option>\u0632\u0646</option></select></div>"
          L"<div class='fld f-father'><label>\u0646\u0627\u0645 \u067e\u062f\u0631</label><input id='father' data-nav></div>"
          L"<div class='fld f-birth'><label>\u062a\u0627\u0631\u06cc\u062e \u062a\u0648\u0644\u062f</label><input id='birth' class='ltr center' data-nav maxlength='10' inputmode='numeric' placeholder='____/__/__'></div>"
+         L"<div class='fld f-gender'><label>\u062c\u0646\u0633\u06cc\u062a</label><select id='gender' data-nav><option>\u0645\u0631\u062f</option><option>\u0632\u0646</option></select></div>"
          L"</div>";
-    // Row 3: موبایل، تلفن ثابت، آدرس
+    // Row 3: موبایل، تلفن ثابت، آدرس (آدرس عریض)
     h += L"<div class='row'>"
          L"<div class='fld f-mobile'><label>\u0645\u0648\u0628\u0627\u06cc\u0644</label><input id='mobile' class='ltr' data-nav maxlength='11' inputmode='numeric'></div>"
          L"<div class='fld f-phone'><label>\u062a\u0644\u0641\u0646 \u062b\u0627\u0628\u062a</label><input id='phone' class='ltr' data-nav inputmode='numeric'></div>"
          L"<div class='fld f-addr'><label>\u0622\u062f\u0631\u0633</label><input id='address' data-nav></div>"
          L"</div>";
-    h += L"<div class='sect mt'><span class='acc'></span><span class='ic'>\u26ce</span>\u0628\u06cc\u0645\u0647 \u0648 \u0646\u0648\u0628\u062a</div>";
+    // ----- medical / visit info -----
+    h += L"<div class='sect mt'><span class='acc'></span><span class='ic'>"+wh_svg(L"clipboard")+L"</span>\u0627\u0637\u0644\u0627\u0639\u0627\u062a \u062f\u0631\u0645\u0627\u0646\u06cc \u0648 \u0646\u0648\u0628\u062a</div>";
     h += L"<div class='row'>"
          L"<div class='fld f-sel'><label>\u0646\u0648\u0639 \u0628\u06cc\u0645\u0627\u0631</label><select id='ptype' data-nav><option>\u0639\u0627\u062f\u06cc</option><option>\u0633\u0631\u067e\u0627\u06cc\u06cc</option><option>\u0628\u0633\u062a\u0631\u06cc</option></select></div>"
          L"<div class='fld f-sel'><label>\u0646\u0648\u0639 \u0646\u0648\u0628\u062a</label><select id='ntype' data-nav><option>\u0639\u0627\u062f\u06cc</option><option>\u0627\u0648\u0631\u0698\u0627\u0646\u0633</option><option>\u067e\u0631\u0633\u0646\u0644\u06cc</option></select></div>"
          L"</div>";
+    // ----- service info (amount + discount) -----
+    h += L"<div class='sect mt'><span class='acc'></span><span class='ic'>"+wh_svg(L"layers")+L"</span>\u0627\u0637\u0644\u0627\u0639\u0627\u062a \u062e\u062f\u0645\u062a</div>";
     h += L"<div class='row'>"
          L"<div class='fld f-money'><label>\u0645\u0628\u0644\u063a \u062e\u062f\u0645\u062a (\u0631\u06cc\u0627\u0644)</label><input id='price' class='ltr' data-nav inputmode='numeric'></div>"
          L"<div class='fld f-money'><label>\u062a\u062e\u0641\u06cc\u0641 (\u0631\u06cc\u0627\u0644)</label><input id='discount' class='ltr' data-nav inputmode='numeric'></div>"
          L"</div>";
-    // Primary action «ثبت پذیرش و صدور قبض» on the VISUAL LEFT (row-reverse).
-    h += L"<div class='actions'>"
-         L"<button class='btn primary lg' style='flex:2 1 240px' id='btnSave' data-nav data-enter='submit'>\u062b\u0628\u062a \u067e\u0630\u06cc\u0631\u0634 \u0648 \u0635\u062f\u0648\u0631 \u0642\u0628\u0636</button>"
-         L"<button class='btn lg' style='flex:1 1 170px' id='btnNew' data-nav>\u067e\u0630\u06cc\u0631\u0634 \u062c\u062f\u06cc\u062f <span class='hint'>(Ctrl+R)</span></button>"
+    // ----- bottom action bar: register&print / new / clear / cancel -----
+    h += L"<div class='footbar'>"
+         L"<button class='btn primary lg' style='flex:2 1 230px' id='btnSave' data-nav data-enter='submit'>"+wh_svg(L"print")+L"\u062b\u0628\u062a \u067e\u0630\u06cc\u0631\u0634 \u0648 \u0686\u0627\u067e \u0631\u0633\u06cc\u062f</button>"
+         L"<button class='btn outline lg' style='flex:1 1 140px' id='btnNew' data-nav>"+wh_svg(L"plus")+L"\u067e\u0630\u06cc\u0631\u0634 \u062c\u062f\u06cc\u062f</button>"
+         L"<button class='btn lg' style='flex:1 1 120px' id='btnClear' data-nav>"+wh_svg(L"eraser")+L"\u067e\u0627\u06a9 \u06a9\u0631\u062f\u0646</button>"
+         L"<button class='btn danger lg' style='flex:0 1 110px' id='btnCancel' data-nav>"+wh_svg(L"x")+L"\u0627\u0646\u0635\u0631\u0627\u0641</button>"
          L"</div>";
     h += L"</div>";   // card fill
     h += L"</div>";   // zone-center
 
     // ============================ LEFT ZONE ==============================
-    // billing breakdown + payable + print.
+    // payment summary + payable + print.
     h += L"<div class='zone zone-left scroll'>";
     h += L"<div class='card tight bill'>"
-         L"<div class='sect'><span class='acc'></span><span class='ic'>\u00a4</span>\u0635\u062f\u0648\u0631 \u0642\u0628\u0636</div>"
+         L"<div class='sect'><span class='acc'></span><span class='ic'>"+wh_svg(L"receipt")+L"</span>\u062e\u0644\u0627\u0635\u0647 \u067e\u0631\u062f\u0627\u062e\u062a</div>"
          L"<div class='grp'>\u0628\u06cc\u0645\u0647 \u0627\u0635\u0644\u06cc</div>"
          L"<div class='line'><span>\u062c\u0645\u0639 \u06a9\u0644</span><b id='b_total'>0<span class='u'>\u0631\u06cc\u0627\u0644</span></b></div>"
          L"<div class='line'><span>\u0633\u0647\u0645 \u0628\u06cc\u0645\u0647</span><b id='b_main'>0<span class='u'>\u0631\u06cc\u0627\u0644</span></b></div>"
          L"<div class='grp'>\u0628\u06cc\u0645\u0647 \u0645\u06a9\u0645\u0644</div>"
          L"<div class='line'><span>\u0645\u0627\u0628\u0647\u200c\u0627\u0644\u062a\u0641\u0627\u0648\u062a \u067e\u0627\u06cc\u0647</span><b id='b_diff'>0<span class='u'>\u0631\u06cc\u0627\u0644</span></b></div>"
          L"<div class='line'><span>\u0633\u0647\u0645 \u0633\u0627\u0632\u0645\u0627\u0646</span><b id='b_org'>0<span class='u'>\u0631\u06cc\u0627\u0644</span></b></div>"
-         L"<div class='grp'>\u0645\u0628\u0644\u063a \u0646\u0647\u0627\u06cc\u06cc</div>"
+         L"<div class='grp'>\u0633\u0647\u0645 \u0628\u06cc\u0645\u0627\u0631</div>"
+         L"<div class='line'><span>\u0633\u0647\u0645 \u0628\u06cc\u0645\u0627\u0631</span><b id='b_pat'>0<span class='u'>\u0631\u06cc\u0627\u0644</span></b></div>"
          L"<div class='line'><span>\u062a\u062e\u0641\u06cc\u0641</span><b id='b_disc'>0<span class='u'>\u0631\u06cc\u0627\u0644</span></b></div>"
-         L"<div class='pay'><span>\u067e\u0631\u062f\u0627\u062e\u062a\u06cc</span><b><span id='b_paid'>0</span> <span style='font-size:11px;opacity:.85'>\u0631\u06cc\u0627\u0644</span></b></div>"
+         L"<div class='pay'><span>\u0645\u0628\u0644\u063a \u0646\u0647\u0627\u06cc\u06cc</span><b><span id='b_paid'>0</span> <span style='font-size:11px;opacity:.85'>\u0631\u06cc\u0627\u0644</span></b></div>"
          L"</div>";
     h += L"<div class='card tight'>"
-         L"<div class='sect'><span class='acc'></span><span class='ic'>\u2399</span>\u0686\u0627\u067e</div>"
+         L"<div class='sect'><span class='acc'></span><span class='ic'>"+wh_svg(L"print")+L"</span>\u0686\u0627\u067e</div>"
          L"<div class='btnrow stack'>"
-         L"<button class='btn block sm' id='p_ins'>\u0631\u0633\u06cc\u062f \u0628\u06cc\u0645\u0647</button>"
-         L"<button class='btn block sm' id='p_rx'>\u0686\u0627\u067e \u0646\u0633\u062e\u0647</button>"
-         L"<button class='btn block sm' id='p_last'>\u0686\u0627\u067e \u0622\u062e\u0631\u06cc\u0646 \u0642\u0628\u0636 (F8)</button>"
+         L"<button class='btn block sm' id='p_ins'>"+wh_svg(L"shield")+L"\u0631\u0633\u06cc\u062f \u0628\u06cc\u0645\u0647</button>"
+         L"<button class='btn block sm' id='p_rx'>"+wh_svg(L"clipboard")+L"\u0686\u0627\u067e \u0646\u0633\u062e\u0647</button>"
+         L"<button class='btn block sm' id='p_last'>"+wh_svg(L"receipt")+L"\u0686\u0627\u067e \u0622\u062e\u0631\u06cc\u0646 \u0642\u0628\u0636 (F8)</button>"
+         L"<button class='btn block sm' id='p_reprint'>"+wh_svg(L"print")+L"\u0686\u0627\u067e \u0645\u062c\u062f\u062f</button>"
          L"</div></div>";
     h += L"</div>";   // zone-left
 
