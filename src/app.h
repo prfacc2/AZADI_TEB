@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.16.0"
+#define APP_VERSION_W   L"1.16.1"
 
 // ----------------------------------------------------------- logging policy -
 //  RELEASE 1.2.0 (Section A): all general user-behavior logging is gated behind
@@ -223,6 +223,17 @@ void         setSetting(const std::wstring& key, const std::wstring& val);
 void installCrashHandler();   // crash-handler: dump + log + friendly message
 void detectSpec();            // speed-handler: sets g_lowSpec
 void installVazirFont();      // embed-load + install on user system if missing
+
+// ------------------------------------------------------------- setup splash --
+// First-run / every-run prerequisite preparation with a visible progress bar.
+// Verifies + installs the things the hybrid (MSHTML) reception surface needs to
+// work on *this* client machine: data/log folders, the Vazirmatn font, the
+// FEATURE_BROWSER_EMULATION registry key (so Trident runs in IE11 standards
+// mode instead of IE7-quirks), and a live MSHTML availability probe. Returns
+// true when the environment is ready for the hybrid UI; false means the native
+// fallback form will be used. Shows the bar only when there is real work to do
+// (first run, or after a version bump), otherwise returns instantly.
+bool RunSetupSplash(HINSTANCE hInst);
 
 // ------------------------------------------------------------------ users --
 // Role constants (kept as plain ints for ABI stability with stored data).

@@ -165,6 +165,14 @@ static std::wstring wh_commonHead(){
     //   آدرس = full line.
     L".row{display:flex;flex-wrap:wrap;gap:13px;margin-bottom:14px;}"
     L".row:last-child{margin-bottom:0;}"
+    // a 3-column patient row that stays perfectly balanced (like the mock):
+    // each .fld is exactly one third minus the gap, no grow-overflow.
+    L".row.cols3{display:flex;flex-wrap:wrap;gap:13px;}"
+    L".row.cols3>.fld{flex:0 0 calc(33.333% - 9px);max-width:calc(33.333% - 9px);}"
+    L".row.cols4{display:flex;flex-wrap:wrap;gap:13px;}"
+    L".row.cols4>.fld{flex:0 0 calc(25% - 10px);max-width:calc(25% - 10px);}"
+    L".row.cols2{display:flex;flex-wrap:wrap;gap:13px;}"
+    L".row.cols2>.fld{flex:0 0 calc(50% - 7px);max-width:calc(50% - 7px);}"
     L".fld{display:flex;flex-direction:column;min-width:0;}"
     L".fld label{font-size:12.5px;color:var(--textDim);margin-bottom:6px;"
     L"font-weight:700;padding-right:3px;}"
@@ -177,19 +185,23 @@ static std::wstring wh_commonHead(){
     L"width:17px;height:17px;color:var(--textDim);pointer-events:none;}"
     L".ic-in input,.ic-in select{padding-right:36px;}"
     L".ic-in select{padding-right:36px;}"
-    // sizing helpers (flex-basis tuned to content)
-    L".f-name{flex:1 1 160px;}"          // نام
-    L".f-family{flex:1 1 190px;}"        // نام خانوادگی
-    L".f-nid{flex:0 0 168px;}"           // کد ملی (۱۰ رقم + دکمه)
-    L".f-gender{flex:0 0 116px;}"        // جنسیت
-    L".f-father{flex:1 1 170px;}"        // نام پدر
-    L".f-birth{flex:0 0 150px;}"         // تاریخ تولد
-    L".f-mobile{flex:0 0 158px;}"        // موبایل (۱۱ رقم)
-    L".f-phone{flex:0 0 150px;}"         // تلفن ثابت
-    L".f-addr{flex:1 1 100%;}"           // آدرس (تمام عرض)
-    L".f-sel{flex:1 1 160px;}"           // selects (نوع بیمار/نوبت/بیمه)
-    L".f-money{flex:1 1 170px;}"         // مبلغ/تخفیف
-    L".f-half{flex:1 1 47%;}"            // half-width insurance fields
+    // sizing helpers — tuned to the reference mock proportions.
+    // Row1 (نام/نام خانوادگی/کد ملی) reads as three balanced columns; row2
+    // (نام پدر/تاریخ تولد/جنسیت) likewise; row3 (موبایل/تلفن/آدرس) gives آدرس
+    // the most room. We use equal flex-grow with sensible min-basis so the three
+    // columns track width like the mock instead of collapsing to content size.
+    L".f-name{flex:1 1 calc(33.33% - 9px);min-width:150px;}"    // نام
+    L".f-family{flex:1 1 calc(33.33% - 9px);min-width:160px;}"  // نام خانوادگی
+    L".f-nid{flex:1 1 calc(33.33% - 9px);min-width:150px;}"     // کد ملی
+    L".f-gender{flex:1 1 calc(33.33% - 9px);min-width:140px;}"  // جنسیت
+    L".f-father{flex:1 1 calc(33.33% - 9px);min-width:150px;}"  // نام پدر
+    L".f-birth{flex:1 1 calc(33.33% - 9px);min-width:150px;}"   // تاریخ تولد
+    L".f-mobile{flex:1 1 calc(33.33% - 9px);min-width:150px;}"  // موبایل
+    L".f-phone{flex:1 1 calc(33.33% - 9px);min-width:150px;}"   // تلفن ثابت
+    L".f-addr{flex:1 1 calc(33.33% - 9px);min-width:160px;}"    // آدرس
+    L".f-sel{flex:1 1 calc(25% - 10px);min-width:140px;}"       // 4-up selects (نوبت/بیمه)
+    L".f-money{flex:1 1 calc(50% - 7px);min-width:180px;}"      // مبلغ/تخفیف (2-up)
+    L".f-half{flex:1 1 calc(50% - 7px);min-width:0;}"           // half-width sidebar fields
     L".f-third{flex:1 1 30%;}"           // third-width compact fields
     L".fld.wide{flex:1 1 100%;}"
     L".fld.xs{flex:0 0 96px;}"
@@ -845,23 +857,25 @@ static std::wstring wh_receptionHtml(){
          L"<div class='ig'><input id='file' class='ltr' inputmode='numeric'>"
          L"<button class='btn softblue sm' id='q_file'>\u0627\u0633\u062a\u0639\u0644\u0627\u0645</button></div></div></div>"
          L"</div>";
+    // بیمه card — mirrors the reference exactly: two rows of two.
+    //   Row1: بیمه پایه · شعبه طرف قرارداد
+    //   Row2: بیمه مکمل · تاریخ اعتبار
+    // (نوع بیمه پایه + درصد پوشش are kept as hidden mirrors so existing JS that
+    //  references #ins2 / #insCov keeps working without layout clutter.)
     h += L"<div class='card'>"
          L"<div class='sect'><span class='ic'>"+wh_svg(L"shield")+L"</span>\u0628\u06cc\u0645\u0647</div>"
          L"<div class='row'>"
          L"<div class='fld f-half'><label>\u0628\u06cc\u0645\u0647 \u067e\u0627\u06cc\u0647</label>"
          L"<div class='ic-in'>"+wh_svg(L"shield")+L"<select id='ins' data-nav></select></div></div>"
-         L"<div class='fld f-half'><label>\u0646\u0648\u0639 \u0628\u06cc\u0645\u0647 \u067e\u0627\u06cc\u0647</label>"
-         L"<div class='ic-in'>"+wh_svg(L"shield")+L"<select id='ins2' data-nav><option>\u0627\u0646\u062a\u062e\u0627\u0628 \u06a9\u0646\u06cc\u062f</option></select></div></div></div>"
-         L"<div class='row'>"
-         L"<div class='fld f-half'><label>\u0628\u06cc\u0645\u0647 \u0645\u06a9\u0645\u0644</label>"
-         L"<div class='ic-in'>"+wh_svg(L"shield")+L"<select id='supp' data-nav></select></div></div>"
          L"<div class='fld f-half'><label>\u0634\u0639\u0628\u0647 \u0637\u0631\u0641 \u0642\u0631\u0627\u0631\u062f\u0627\u062f</label>"
          L"<div class='ic-in'>"+wh_svg(L"layers")+L"<select id='insBranch'><option>\u0627\u0646\u062a\u062e\u0627\u0628 \u06a9\u0646\u06cc\u062f</option></select></div></div></div>"
          L"<div class='row'>"
+         L"<div class='fld f-half'><label>\u0628\u06cc\u0645\u0647 \u0645\u06a9\u0645\u0644</label>"
+         L"<div class='ic-in'>"+wh_svg(L"shield")+L"<select id='supp' data-nav></select></div></div>"
          L"<div class='fld f-half'><label>\u062a\u0627\u0631\u06cc\u062e \u0627\u0639\u062a\u0628\u0627\u0631</label>"
-         L"<div class='ic-in'>"+wh_svg(L"calendar")+L"<input id='insExp' class='ltr center' placeholder='\u0627\u0646\u062a\u062e\u0627\u0628 \u062a\u0627\u0631\u06cc\u062e'></div></div>"
-         L"<div class='fld f-half'><label>\u062f\u0631\u0635\u062f \u067e\u0648\u0634\u0634</label>"
-         L"<div class='ic-in'>"+wh_svg(L"shield")+L"<input id='insCov' class='ltr center' inputmode='numeric' readonly></div></div></div>"
+         L"<div class='ic-in'>"+wh_svg(L"calendar")+L"<input id='insExp' class='ltr center' placeholder='\u0627\u0646\u062a\u062e\u0627\u0628 \u062a\u0627\u0631\u06cc\u062e'></div></div></div>"
+         L"<select id='ins2' style='display:none'><option>\u0627\u0646\u062a\u062e\u0627\u0628 \u06a9\u0646\u06cc\u062f</option></select>"
+         L"<input id='insCov' style='display:none' readonly>"
          L"<input id='book' type='hidden'>"
          L"</div>";
     h += L"<div class='card'>"
@@ -882,7 +896,7 @@ static std::wstring wh_receptionHtml(){
     h += L"<div class='card fill'>";
     h += L"<div class='sect'><span class='ic'>"+wh_svg(L"user")+L"</span>\u0645\u0634\u062e\u0635\u0627\u062a \u0628\u06cc\u0645\u0627\u0631</div>";
     // Row 1: نام*، نام خانوادگی*، کد ملی*
-    h += L"<div class='row'>"
+    h += L"<div class='row cols3'>"
          L"<div class='fld f-name'><label>\u0646\u0627\u0645 <span class='req'>*</span></label>"
          L"<div class='ic-in'>"+wh_svg(L"user")+L"<input id='first' data-nav placeholder='\u0646\u0627\u0645 \u0631\u0627 \u0648\u0627\u0631\u062f \u06a9\u0646\u06cc\u062f'></div></div>"
          L"<div class='fld f-family'><label>\u0646\u0627\u0645 \u062e\u0627\u0646\u0648\u0627\u062f\u06af\u06cc <span class='req'>*</span></label>"
@@ -891,7 +905,7 @@ static std::wstring wh_receptionHtml(){
          L"<div class='ic-in'>"+wh_svg(L"id")+L"<input id='nid' class='ltr' data-nav maxlength='10' inputmode='numeric' placeholder='\u06a9\u062f \u0645\u0644\u06cc \u0631\u0627 \u0648\u0627\u0631\u062f \u06a9\u0646\u06cc\u062f'></div></div>"
          L"</div>";
     // Row 2: نام پدر، تاریخ تولد*، جنسیت
-    h += L"<div class='row'>"
+    h += L"<div class='row cols3'>"
          L"<div class='fld f-father'><label>\u0646\u0627\u0645 \u067e\u062f\u0631</label>"
          L"<div class='ic-in'>"+wh_svg(L"user")+L"<input id='father' data-nav placeholder='\u0646\u0627\u0645 \u067e\u062f\u0631 \u0631\u0627 \u0648\u0627\u0631\u062f \u06a9\u0646\u06cc\u062f'></div></div>"
          L"<div class='fld f-birth'><label>\u062a\u0627\u0631\u06cc\u062e \u062a\u0648\u0644\u062f <span class='req'>*</span></label>"
@@ -899,8 +913,8 @@ static std::wstring wh_receptionHtml(){
          L"<div class='fld f-gender'><label>\u062c\u0646\u0633\u06cc\u062a</label>"
          L"<div class='ic-in'>"+wh_svg(L"gender")+L"<select id='gender' data-nav><option value='' disabled selected>\u0627\u0646\u062a\u062e\u0627\u0628 \u06a9\u0646\u06cc\u062f</option><option>\u0645\u0631\u062f</option><option>\u0632\u0646</option></select></div></div>"
          L"</div>";
-    // Row 3: موبایل، تلفن ثابت، آدرس (آدرس عریض)
-    h += L"<div class='row'>"
+    // Row 3: موبایل، تلفن ثابت، آدرس
+    h += L"<div class='row cols3'>"
          L"<div class='fld f-mobile'><label>\u0634\u0645\u0627\u0631\u0647 \u0645\u0648\u0628\u0627\u06cc\u0644</label>"
          L"<div class='ic-in'>"+wh_svg(L"mobile")+L"<input id='mobile' class='ltr' data-nav maxlength='11' inputmode='numeric' placeholder='\u0634\u0645\u0627\u0631\u0647 \u0645\u0648\u0628\u0627\u06cc\u0644 \u0631\u0627 \u0648\u0627\u0631\u062f \u06a9\u0646\u06cc\u062f'></div></div>"
          L"<div class='fld f-phone'><label>\u062a\u0644\u0641\u0646 \u062b\u0627\u0628\u062a</label>"
@@ -910,7 +924,7 @@ static std::wstring wh_receptionHtml(){
          L"</div>";
     // ----- بیمه و نوبت -----
     h += L"<div class='sect mt'><span class='ic'>"+wh_svg(L"shield")+L"</span>\u0628\u06cc\u0645\u0647 \u0648 \u0646\u0648\u0628\u062a</div>";
-    h += L"<div class='row'>"
+    h += L"<div class='row cols4'>"
          L"<div class='fld f-sel'><label>\u0646\u0648\u0639 \u0628\u06cc\u0645\u0647 \u067e\u0627\u06cc\u0647</label>"
          L"<div class='ic-in'>"+wh_svg(L"shield")+L"<select id='baseType'><option>\u0627\u0646\u062a\u062e\u0627\u0628 \u06a9\u0646\u06cc\u062f</option></select></div></div>"
          L"<div class='fld f-sel'><label>\u0646\u0648\u0639 \u0628\u06cc\u0645\u0647</label>"
@@ -921,7 +935,7 @@ static std::wstring wh_receptionHtml(){
          L"<div class='ic-in'>"+wh_svg(L"user")+L"<select id='ptype' data-nav><option>\u0633\u0631\u067e\u0627\u06cc\u06cc</option><option>\u0639\u0627\u062f\u06cc</option><option>\u0628\u0633\u062a\u0631\u06cc</option></select></div></div>"
          L"</div>";
     // ----- خدمت: مبلغ خدمت + تخفیف -----
-    h += L"<div class='row'>"
+    h += L"<div class='row cols2'>"
          L"<div class='fld f-money'><label>\u0645\u0628\u0644\u063a \u062e\u062f\u0645\u062a (\u0631\u06cc\u0627\u0644)</label>"
          L"<div class='ic-in'>"+wh_svg(L"layers")+L"<input id='price' class='ltr' data-nav inputmode='numeric' placeholder='\u0645\u0628\u0644\u063a \u062e\u062f\u0645\u062a \u0631\u0627 \u0648\u0627\u0631\u062f \u06a9\u0646\u06cc\u062f'></div></div>"
          L"<div class='fld f-money'><label>\u062a\u062e\u0641\u06cc\u0641 (\u0631\u06cc\u0627\u0644)</label>"

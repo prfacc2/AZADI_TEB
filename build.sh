@@ -26,7 +26,7 @@ SRCS="src/main.cpp src/util.cpp src/handlers.cpp src/theme.cpp src/users.cpp \
       src/backup_log.cpp src/sections.cpp src/print_designer.cpp \
       src/user_settings.cpp src/net_sync.cpp src/profile_requests.cpp \
       src/backup_log_viewer.cpp src/backup_mtf.cpp src/saved_messages.cpp \
-      src/webhost.cpp"
+      src/webhost.cpp src/setup_splash.cpp"
 
 $CXX -std=c++17 -O2 -s -municode -mwindows \
     -DUNICODE -D_UNICODE -D_WIN32_IE=0x0700 \
