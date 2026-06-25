@@ -422,7 +422,10 @@ static int recPageVH(int W, int H){
         InfoLayout L; computeInfoLayout(m.infoL,m.infoR,H,L);
         infoH = L.docNameY + L.rh2 + S(40);   // last control + bottom room
     }
-    int billH = S(16)+S(360)+S(210)+S(16);     // billing rows + print block
+    //  v1.19.0: summary card (≈276) + gap + «مبلغ نهایی» gradient card (≈88) +
+    //  «چاپ» group title + 3 print buttons (≈212 from the column bottom). We
+    //  guarantee the gradient card never collides with the print group.
+    int billH = S(364) + S(40) + S(212);       // final-amount bottom + gap + print block
     int need = formH; if(infoH>need) need=infoH; if(billH>need) need=billH;
     need += S(16);                                   // bottom padding mirror
     return need>H ? need : H;
@@ -1500,15 +1503,18 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         }
         recClampScroll(h,t);
         if(t->scrollY!=old){
-            // v1.17.0 smooth-scroll: reposition child controls AND repaint the
-            // painted background in the SAME frame, then force the paint to flush
-            // immediately (UpdateWindow). With WS_CLIPCHILDREN + a double-buffered
-            // WM_PAINT this guarantees the cards, field wells and the edit boxes
-            // move together — no "frame-by-frame" tearing or controls lagging
-            // behind the background while scrolling.
+            // v1.19.0 ultra-smooth scroll: freeze child-control repaints while we
+            // batch-reposition them, then repaint the painted background AND all
+            // controls together in ONE double-buffered frame. SetWindowRedraw
+            // (WM_SETREDRAW) suppresses the per-control invalidations MoveWindow
+            // would otherwise queue, so nothing is drawn twice and the cards,
+            // field wells and edit boxes move in perfect lock-step — zero
+            // flicker, zero tearing, no frame-by-frame lag even with 40+ controls.
+            SendMessageW(h,WM_SETREDRAW,FALSE,0);
             tabPageLayout(h,t);
-            InvalidateRect(h,NULL,FALSE);
-            UpdateWindow(h);
+            SendMessageW(h,WM_SETREDRAW,TRUE,0);
+            RedrawWindow(h,NULL,NULL,
+                RDW_INVALIDATE|RDW_UPDATENOW|RDW_ALLCHILDREN|RDW_NOERASE);
         } else {
             recUpdateScrollbar(h,t);
         }
@@ -1524,11 +1530,14 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         if(t->scrollY!=old){
             // §B (v1.10.0): no header-collapse animation on scroll. The action
             // bar stays at its fixed compact height; we just scroll the page.
-            // v1.17.0: flush the repaint in the same frame so controls and the
-            // painted background never separate while wheel-scrolling.
+            // v1.19.0: freeze child repaints, batch-reposition, then flush ONE
+            // double-buffered frame so controls + painted background never
+            // separate while wheel-scrolling (matches the WM_VSCROLL path).
+            SendMessageW(h,WM_SETREDRAW,FALSE,0);
             tabPageLayout(h,t);
-            InvalidateRect(h,NULL,FALSE);
-            UpdateWindow(h);
+            SendMessageW(h,WM_SETREDRAW,TRUE,0);
+            RedrawWindow(h,NULL,NULL,
+                RDW_INVALIDATE|RDW_UPDATENOW|RDW_ALLCHILDREN|RDW_NOERASE);
         }
         return 0; }
     case WM_APP_THEME:
@@ -2119,9 +2128,20 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
         }
 
-        // ============ LEFT BILLING CARD (صورتحساب) ============
+        // ============ LEFT BILLING COLUMN (صورتحساب) ============
+        //  v1.19.0 premium redesign (matches the reference):
+        //    1) «صورتحساب» summary card  — 8 money rows, NO inline highlight.
+        //    2) «مبلغ نهایی» card        — vivid blue gradient + wallet icon +
+        //                                   large white amount (replaces the old
+        //                                   dark navy «چک پرداختی» strip).
+        //    3) «چاپ» group + 3 print buttons (pinned to the column bottom by
+        //       tabPageLayout). All three blocks scroll together with the page.
         if(!m.stacked && t){
-            RECT card={m.billL,Y(S(RC_OUT)),m.billR,VH-S(RC_OUT)-sy};
+            // ----- 1) summary card -----
+            int sumTop = S(RC_OUT);
+            // 8 rows · 26px each + header (42) + bottom pad (14)
+            int sumBot = sumTop + S(42) + 8*S(26) + S(10);
+            RECT card={m.billL,Y(sumTop),m.billR,Y(sumBot)};
             gpRoundRectBg(dc,card,S(14),g_theme.surface,g_theme.border,g_theme.bg);
             int bl=card.left+S(12), br=card.right-S(12);
             // header
@@ -2151,16 +2171,37 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             row(ry,L"سهم سازمان",t->orgShare);
             row(ry,L"مبلغ نهایی",t->patientShare);
             row(ry,L"تخفیف",t->patientShare - t->paid);
-            // dark navy «چک پرداختی» highlighted row
-            RECT pay={bl,ry+S(4),br,ry+S(44)};
-            fillRoundRect(dc,pay,S(8),g_theme.text,CLR_INVALID);
-            SetTextColor(dc,RGB(255,255,255)); SelectObject(dc,g_fUIB);
-            RECT pk={pay.left+S(10),pay.top,pay.right-S(10),pay.bottom};
-            DrawTextW(dc,L"چک پرداختی",-1,&pk,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
-            std::wstring pv=toFaDigits(formatMoney(t->paid))+L" ریال";
-            DrawTextW(dc,pv.c_str(),-1,&pk,DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX);
-            // «چاپ» group title above the print buttons (which are positioned by
-            // tabPageLayout near the card bottom).
+
+            // ----- 2) «مبلغ نهایی» blue-gradient card -----
+            int faTop = sumBot + S(12);
+            int faBot = faTop + S(76);
+            RECT fa={m.billL,Y(faTop),m.billR,Y(faBot)};
+            // soft glow under the card, then the vivid HORIZONTAL blue gradient
+            // body (royal-blue on the LEFT → sky-blue on the RIGHT, matching the
+            // reference; the wallet icon sits on the lighter right edge).
+            gpShadow(dc,fa,S(14),S(8),46);
+            gpGradRoundRectBgH(dc,fa,S(14),g_theme.accent,g_theme.accent2,
+                               CLR_INVALID,g_theme.bg);
+            int fl=fa.left+S(14), fr=fa.right-S(14);
+            // wallet icon flush-right (RTL)
+            int wico=S(26);
+            RECT wi={fr-wico,fa.top+(fa.bottom-fa.top-wico)/2,fr,
+                     fa.top+(fa.bottom-fa.top-wico)/2+wico};
+            drawIcon(dc,ICO_WALLET,wi,RGB(255,255,255),S(2));
+            // title (small, top) + amount (large, below) on the LEFT, white —
+            // exactly mirrors the reference (icon right, text block left-aligned).
+            SelectObject(dc,g_fSmall);
+            SetTextColor(dc,RGB(0xDD,0xEC,0xFF));
+            RECT ft={fl,fa.top+S(14),fr-wico-S(8),fa.top+S(32)};
+            DrawTextW(dc,L"مبلغ نهایی",-1,&ft,
+                DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+            SelectObject(dc,g_fTitle); SetTextColor(dc,RGB(255,255,255));
+            std::wstring fv=toFaDigits(formatMoney(t->patientShare))+L" ریال";
+            RECT fvr={fl,fa.top+S(34),fr-wico-S(8),fa.bottom-S(10)};
+            DrawTextW(dc,fv.c_str(),-1,&fvr,
+                DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+
+            // ----- 3) «چاپ» group title (buttons positioned by tabPageLayout) -
             int prTop = VH - S(186) - sy - S(26);
             SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.text);
             int icoW=S(16);

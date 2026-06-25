@@ -56,32 +56,32 @@ void applyTheme(bool dark){
         //      border 196 ── crisp hairline between layers
         //      surface 255 ── cards (clean white, pops off the tinted page)
         //      surfaceTop 250 ── soft top-light on cards
-        // ---- v1.11.0 §E: layered light palette using the EXACT spec values.
-        //  bg #F5F7FB · surface #FFFFFF · surface2 #EEF2F8 · border #D7DDE6
-        //  text #0F172A · muted #5B6577 · accent #2563EB · accent2 #0EA5E9
-        //  success #10B981 · warning #F59E0B · danger #EF4444.
-        //  focus_ring is accent @40% alpha (drawn via gdiplus where needed).
-        g_theme.bg          = RGB(0xF5, 0xF7, 0xFB); // #F5F7FB app background
-        g_theme.bg2         = RGB(0xE7, 0xEC, 0xF4); // page gradient bottom (subtle)
+        // ---- v1.19.0: premium "Azadi-Teb 2026" light palette — matches the
+        //  reference reception design exactly.
+        //  bg #F5F8FD · surface #FFFFFF · surface2 #EAF4FF · border #DCE6F2
+        //  text #233042 · muted #6B7A90 · accent #1976F3 · hover #2D8CFF
+        //  success #16C47F · warning #F4B740 · danger #E24C4B.
+        g_theme.bg          = RGB(0xF5, 0xF8, 0xFD); // #F5F8FD app background
+        g_theme.bg2         = RGB(0xE8, 0xF0, 0xFA); // page gradient bottom (subtle)
         g_theme.surface     = RGB(0xFF, 0xFF, 0xFF); // #FFFFFF cards / sheets
         g_theme.surfaceTop  = RGB(0xFF, 0xFF, 0xFF); // card gradient top (flat white)
-        g_theme.surface2    = RGB(0xEE, 0xF2, 0xF8); // #EEF2F8 subtle elevation
-        g_theme.border      = RGB(0xD7, 0xDD, 0xE6); // #D7DDE6 hairline
-        g_theme.text        = RGB(0x0F, 0x17, 0x2A); // #0F172A primary ink
-        g_theme.textDim     = RGB(0x5B, 0x65, 0x77); // #5B6577 muted
-        g_theme.accent      = RGB(0x25, 0x63, 0xEB); // #2563EB primary actions
-        g_theme.accent2     = RGB(0x0E, 0xA5, 0xE9); // #0EA5E9 secondary
-        g_theme.accentHover = RGB(0x3B, 0x76, 0xEF); // lighter accent on hover
+        g_theme.surface2    = RGB(0xEA, 0xF4, 0xFF); // #EAF4FF secondary wash
+        g_theme.border      = RGB(0xDC, 0xE6, 0xF2); // #DCE6F2 hairline
+        g_theme.text        = RGB(0x23, 0x30, 0x42); // #233042 primary ink
+        g_theme.textDim     = RGB(0x6B, 0x7A, 0x90); // #6B7A90 muted
+        g_theme.accent      = RGB(0x19, 0x76, 0xF3); // #1976F3 primary actions
+        g_theme.accent2     = RGB(0x2D, 0x8C, 0xFF); // #2D8CFF gradient end / hover
+        g_theme.accentHover = RGB(0x2D, 0x8C, 0xFF); // #2D8CFF lighter accent on hover
         g_theme.accentText  = RGB(0xFF, 0xFF, 0xFF);
-        g_theme.danger      = RGB(0xEF, 0x44, 0x44); // #EF4444
-        g_theme.dangerHover = RGB(0xF2, 0x5F, 0x5F);
-        g_theme.success     = RGB(0x10, 0xB9, 0x81); // #10B981
-        g_theme.warn        = RGB(0xF5, 0x9E, 0x0B); // #F59E0B warning
-        g_theme.inputBg     = RGB(0xF7, 0xF9, 0xFC); // tinted well (just above bg)
-        g_theme.inputText   = RGB(0x0F, 0x17, 0x2A);
-        g_theme.hover       = RGB(0xE7, 0xEE, 0xFB); // soft accent wash on hover
+        g_theme.danger      = RGB(0xE2, 0x4C, 0x4B); // #E24C4B
+        g_theme.dangerHover = RGB(0xEC, 0x66, 0x65);
+        g_theme.success     = RGB(0x16, 0xC4, 0x7F); // #16C47F
+        g_theme.warn        = RGB(0xF4, 0xB7, 0x40); // #F4B740 warning
+        g_theme.inputBg     = RGB(0xF7, 0xFA, 0xFE); // tinted well (just above bg)
+        g_theme.inputText   = RGB(0x23, 0x30, 0x42);
+        g_theme.hover       = RGB(0xEA, 0xF4, 0xFF); // #EAF4FF soft accent wash on hover
         g_theme.headerTop   = RGB(0xFF, 0xFF, 0xFF);
-        g_theme.headerBot   = RGB(0xEE, 0xF2, 0xF8); // header reads as its own layer
+        g_theme.headerBot   = RGB(0xEA, 0xF4, 0xFF); // header reads as its own layer
         g_infoAccent  = RGB(0x7C, 0x56, 0xE4);    // violet (distinct, non-red)
         g_infoAccent2 = RGB(0x5E, 0x42, 0xD0);
     }
@@ -346,6 +346,18 @@ void drawIcon(HDC dc, int icon, RECT rc, COLORREF col, int thick){
         Arc(dc,cx-r,cy,cx,cy+r, cx,cy, cx-r,cy);               // body 1
         Ellipse(dc,cx+r/3-rr,cy-r/4-rr,cx+r/3+rr,cy-r/4+rr);   // head 2
         Arc(dc,cx,cy+r/8,cx+r,cy+r, cx+r,cy+r/8, cx,cy+r/8);   // body 2
+        break; }
+    case ICO_WALLET: {      // v1.19.0: wallet / billfold glyph (rounded body +
+        // a flap with a button stud — reads clearly at 18-28px sizes).
+        int w=(r*86)/100, hh=(r*62)/100;
+        // rounded wallet body
+        RoundRect(dc,cx-w,cy-hh,cx+w,cy+hh, r/2, r/2);
+        // flap on the right edge (RTL-neutral: a small pocket on one side)
+        int fx=cx+w-(r*52)/100;
+        MoveToEx(dc,fx,cy-hh,0); LineTo(dc,fx,cy+hh);
+        // button stud on the flap
+        int sr=(r*16)/100; if(sr<1) sr=1;
+        Ellipse(dc,fx+(r*22)/100-sr,cy-sr,fx+(r*22)/100+sr,cy+sr);
         break; }
     }
     SetBkMode(dc, oldBk);

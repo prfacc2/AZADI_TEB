@@ -124,6 +124,21 @@ void gpGradRoundRectBg(HDC dc, RECT rc, int rad, COLORREF top, COLORREF bottom, 
     gpGradRoundRect(dc, rc, rad, top, bottom, border);
 }
 
+//  v1.19.0: horizontal (left→right) gradient rounded rect. Mirrors
+//  gpGradRoundRect but uses LinearGradientModeHorizontal.
+void gpGradRoundRectBgH(HDC dc, RECT rc, int rad, COLORREF left, COLORREF right, COLORREF border, COLORREF bg){
+    if(bg!=CLR_INVALID) gpFillCorners(dc, rc, rad, bg);
+    if(!s_gdipOK){ fillRoundRect(dc,rc,rad*2,left,border); return; }
+    Graphics g(dc); g.SetSmoothingMode(SmoothingModeAntiAlias);
+    Rect r(rc.left, rc.top, rc.right-rc.left-1, rc.bottom-rc.top-1);
+    if(r.Width<=0||r.Height<=0) return;
+    GraphicsPath p; roundPath(p,r,rad);
+    LinearGradientBrush br(Rect(r.X,r.Y,r.Width+1,r.Height),
+        C(left), C(right), LinearGradientModeHorizontal);
+    g.FillPath(&br,&p);
+    if(border!=CLR_INVALID){ Pen pn(C(border),1.0f); g.DrawPath(&pn,&p); }
+}
+
 //  Soft drop shadow: draw several expanding translucent rounded rects so the
 //  edge fades out — a cheap, dependency-free blur that gives cards real depth.
 void gpShadow(HDC dc, RECT rc, int rad, int spread, int alpha){

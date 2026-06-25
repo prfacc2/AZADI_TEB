@@ -106,7 +106,9 @@ enum IconId {
     // v1.11.0 §F: bookmark glyph for the Saved-Messages feature.
     ICO_SAVED_MSG,
     // v1.11.0 §A: people / contact / palette glyphs for messenger-style rows.
-    ICO_PALETTE, ICO_INFO, ICO_PEOPLE
+    ICO_PALETTE, ICO_INFO, ICO_PEOPLE,
+    // v1.19.0: wallet glyph for the «مبلغ نهایی» (final-amount) summary card.
+    ICO_WALLET
 };
 // §F: spec name alias — the work order references this symbol explicitly.
 #define IC_SAVED_MSG ICO_SAVED_MSG
@@ -155,6 +157,9 @@ void gpGradRoundRect(HDC dc, RECT rc, int rad, COLORREF top, COLORREF bottom, CO
 //  colour artefacts on rounded controls, cards, wells, lists or combos.
 void gpRoundRectBg(HDC dc, RECT rc, int rad, COLORREF fill, COLORREF border, COLORREF bg, int alpha=255);
 void gpGradRoundRectBg(HDC dc, RECT rc, int rad, COLORREF top, COLORREF bottom, COLORREF border, COLORREF bg);
+//  v1.19.0: HORIZONTAL 2-stop gradient rounded rect (left→right), corners first
+//  filled with `bg`. Used for the «مبلغ نهایی» card (sky-blue → royal-blue).
+void gpGradRoundRectBgH(HDC dc, RECT rc, int rad, COLORREF left, COLORREF right, COLORREF border, COLORREF bg);
 //  Paint only the 4 rounded-corner gaps of `rc` (radius `rad`) with `bg`. Use
 //  this to "patch" the corners behind any rounded region whose interior is
 //  already drawn (e.g. owner-drawn lists / combos / regions).

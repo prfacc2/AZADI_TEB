@@ -966,7 +966,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
             u.dept=L"پذیرش"; u.role=0;
             g_session.user=u; g_session.shift=detectShift();
             g_session.loginAt=iranNow();
-            if(!wcscmp(dbg,L"reception")) switchScreen(SC_RECEPTION);
+            if(!wcscmp(dbg,L"reception")){ switchScreen(SC_RECEPTION);
+                                           // open a fresh reception form tab so
+                                           // the screenshot shows the real form,
+                                           // not the default cartable/portal tab.
+                                           receptionAction(RA_NEWPAT); }
             else if(!wcscmp(dbg,L"manage")){   u.role=1; g_session.user=u;
                                                switchScreen(SC_MANAGE); }
             else if(!wcscmp(dbg,L"admin")){    u.role=2; g_session.user=u;
