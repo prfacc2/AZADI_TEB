@@ -1055,6 +1055,19 @@ static void PrintDesigner_OpenCore(HWND hMain){
         Breadcrumb(L"print designer: abort — no valid owner");
         return;
     }
+    // §1.18.1 CRASH ROOT-CAUSE FIX: the print designer's inspector builds custom
+    // controls (AzNumberSpinner / AzColorPicker / AzSwitch) whose window classes
+    // are registered by uikit::Az_RegisterControls(). That registration used to
+    // only run when the *user-settings* screen was visited. When the designer is
+    // opened from the MANAGEMENT panel («دیزاین چاپ») WITHOUT that screen ever
+    // having been created, the classes were unregistered, every spinner/color/
+    // switch CreateWindowExW returned NULL, and the first access of the (NULL)
+    // child handle inside the editor faulted with ACCESS_VIOLATION (the reported
+    // crash at "print designer: open editor"). Registering here — idempotent via
+    // an internal `done` guard — guarantees the classes always exist before the
+    // editor (or section picker) creates any control. Cheap, allocates nothing on
+    // weak hardware, and never touches the printer.
+    uikit::Az_RegisterControls();
     Breadcrumb(L"print designer: init stores");
     Sections_Init(); Designs_Init();
     Breadcrumb(L"print designer: reconcile section bindings");

@@ -516,7 +516,9 @@ static void tabPageLayout(HWND h, TabPage* t){
     MoveWindow(t->eSvcSearch,m.formL+addW+cgap,  Y(v.toolY), S(180), rh, TRUE);
 
     // ===== bottom action buttons row (4 buttons) =====
-    // ثبت پذیرش و صدور قبض (widest) | پاک کردن | پذیرش جدید | انصراف
+    //  §1.18.1: order EXACTLY matches the reference image (RTL, right→left):
+    //    ثبت پذیرش و صدور قبض (blue, widest) | پذیرش جدید | پاک کردن (red) | انصراف
+    //  (previously پاک‌کردن and پذیرش‌جدید were swapped vs. the reference).
     {
         int gap = S(10);
         int small = S(118);
@@ -524,10 +526,10 @@ static void tabPageLayout(HWND h, TabPage* t){
         if(wideW < S(200)) wideW = S(200);
         int x = m.formR;                 // start at the right edge (RTL)
         // submit is the RIGHT-most & widest
-        x -= wideW; MoveWindow(t->bSubmit, x, Y(v.btnY), wideW, v.btnH, TRUE);
-        x -= gap+small; MoveWindow(t->bReset, x, Y(v.btnY), small, v.btnH, TRUE);
-        x -= gap+small; MoveWindow(t->bNew,   x, Y(v.btnY), small, v.btnH, TRUE);
-        x -= gap+small; MoveWindow(t->bClose, x, Y(v.btnY), small, v.btnH, TRUE);
+        x -= wideW;     MoveWindow(t->bSubmit, x, Y(v.btnY), wideW, v.btnH, TRUE);
+        x -= gap+small; MoveWindow(t->bNew,    x, Y(v.btnY), small, v.btnH, TRUE);
+        x -= gap+small; MoveWindow(t->bReset,  x, Y(v.btnY), small, v.btnH, TRUE);
+        x -= gap+small; MoveWindow(t->bClose,  x, Y(v.btnY), small, v.btnH, TRUE);
         ShowWindow(t->bSubmit,SW_SHOW); ShowWindow(t->bReset,SW_SHOW);
         ShowWindow(t->bNew,SW_SHOW);    ShowWindow(t->bClose,SW_SHOW);
         ShowWindow(t->bSvcAdd,SW_SHOW); ShowWindow(t->eSvcSearch,SW_SHOW);
@@ -1376,8 +1378,10 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         // bottom action row (matches reference): ثبت (primary) | پاک کردن |
         // پذیرش جدید | انصراف
         t->bSubmit =createFlatButton(h,ID_F_SUBMIT,L"ثبت پذیرش و صدور قبض",ICO_SAVE,BS_PRIMARY,0,0,10,10);
-        t->bReset  =createFlatButton(h,ID_F_RESET,L"پاک کردن",ICO_REFRESH,BS_OUTLINE,0,0,10,10);
-        t->bNew    =createFlatButton(h,ID_F_NEW,L"پذیرش جدید",ICO_NONE,BS_OUTLINE,0,0,10,10);
+        // §1.18.1: «پاک کردن» is the destructive/clear action → danger (red) style,
+        // matching the reference image (red trash icon + red text).
+        t->bReset  =createFlatButton(h,ID_F_RESET,L"پاک کردن",ICO_TRASH,BS_DANGER,0,0,10,10);
+        t->bNew    =createFlatButton(h,ID_F_NEW,L"پذیرش جدید",ICO_CHEVRON,BS_OUTLINE,0,0,10,10);
         t->bClose  =createFlatButton(h,ID_F_CLOSE,L"انصراف",ICO_X,BS_OUTLINE,0,0,10,10);
         // services table toolbar
         t->bSvcAdd =createFlatButton(h,ID_F_SVC_ADD,L"افزودن خدمت",ICO_NONE,BS_OUTLINE,0,0,10,10);

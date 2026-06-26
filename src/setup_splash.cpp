@@ -23,6 +23,9 @@
 //  with no window. Pure Win32/GDI — no extra DLLs, fits the single-EXE rule.
 // ============================================================================
 #include "app.h"   // brings in <windows.h>, <string>, and the project decls
+#include "ui_kit.h"
+#include <objbase.h>
+#include <gdiplus.h>
 
 // from handlers.cpp
 extern void installVazirFont();
@@ -34,7 +37,9 @@ struct SetupState {
     volatile LONG pct   = 0;        // 0..100
     wchar_t       step[160] = L"در حال آماده‌سازی…";
     volatile LONG done  = 0;        // worker finished
-    bool          webOk = false;    // MSHTML probe result
+    bool          webOk = false;    // MSHTML probe result (legacy, unused)
+    bool          firstRun = false; // first launch for THIS build → do heavy work
+    bool          lowSpec  = false; // detected weak hardware
 };
 static SetupState* g_ss = nullptr;
 
@@ -48,14 +53,12 @@ static void ssSet(SetupState* s, int pct, const wchar_t* step){
     if(step) lstrcpynW(s->step, step, 160);
 }
 
-// Decide whether the splash needs to run at all. We run it on first ever launch
-// and whenever the stored "setup_done_version" differs from the current build,
-// so a freshly-deployed EXE always re-applies the browser-emulation key.
-static bool ssNeedsRun(){
-    //  v1.17.0: the only state we track is whether prerequisites were prepared
-    //  for THIS build. There is no longer any browser-emulation registry key to
-    //  validate (the HTML/MSHTML layer was retired in favour of a 100% native
-    //  C++ UI), so a simple version compare is sufficient and instant.
+// §1.18.1: whether THIS build has *ever* completed first-run preparation. The
+// heavy/one-time work (font install, marking the build prepared) is gated on
+// this so we don't reinstall the font on every launch. The lightweight
+// per-system configuration (folders, control classes, GDI+ probe, capability
+// detection) runs on EVERY launch inside ssWorker regardless — see RunSetupSplash.
+static bool ssFirstRunForBuild(){
     std::wstring done = getSetting(L"setup_done_version", L"");
     return done != std::wstring(APP_VERSION_W);
 }
@@ -66,34 +69,85 @@ static bool ssNeedsRun(){
 //  themselves are near-instant, but a flash-and-vanish window confuses users
 //  who reported "nothing happens / it didn't apply".
 // ----------------------------------------------------------------------------
+// §1.18.1: detect weak hardware (≤2GB RAM or ≤2 logical CPUs) so the splash can
+// pace itself shorter and the app can later trim animations. Cheap, no polling.
+static bool ssDetectLowSpec(){
+    MEMORYSTATUSEX ms; ms.dwLength=sizeof(ms);
+    unsigned long long ramMB = 0;
+    if(GlobalMemoryStatusEx(&ms)) ramMB = (unsigned long long)(ms.ullTotalPhys/(1024*1024));
+    SYSTEM_INFO si; GetSystemInfo(&si);
+    DWORD cores = si.dwNumberOfProcessors;
+    return (ramMB>0 && ramMB<=2200) || (cores>0 && cores<=2);
+}
+
 static DWORD WINAPI ssWorker(LPVOID p){
     SetupState* s = (SetupState*)p;
+    // weak machines: shave the deliberate pacing so the bar isn't slow on the
+    // very hardware that needs to get to work fastest.
+    const int slow = s->lowSpec ? 90 : 220;
 
     ssSet(s, 6,  L"بررسی پوشه‌های برنامه…");
     // ensure data/ and logs/ exist & are writable (root cause of save errors)
     dataDir();   // auto-creates <exe>\data (or override)
     logsDir();   // auto-creates <exe>\logs
-    Sleep(220);
+    Sleep(slow);
 
-    ssSet(s, 34, L"نصب فونت فارسی (Vazirmatn)…");
-    installVazirFont();
-    Sleep(300);
+    ssSet(s, 24, L"شناسایی سخت‌افزار سیستم…");
+    {
+        wchar_t cap[160];
+        MEMORYSTATUSEX ms; ms.dwLength=sizeof(ms);
+        unsigned long long ramMB=0;
+        if(GlobalMemoryStatusEx(&ms)) ramMB=(unsigned long long)(ms.ullTotalPhys/(1024*1024));
+        SYSTEM_INFO si; GetSystemInfo(&si);
+        swprintf(cap,160,L"setup: cpu=%lu cores, ram=%llu MB, lowSpec=%d",
+                 (unsigned long)si.dwNumberOfProcessors, ramMB, s->lowSpec?1:0);
+        logLine(cap);
+        // persist the detected profile so other modules can read it without
+        // re-probing; also acts as the "configured for this system" flag.
+        setSetting(L"sys_low_spec", s->lowSpec?L"1":L"0");
+    }
+    Sleep(s->lowSpec?60:160);
 
-    ssSet(s, 70, L"آماده‌سازی رابط کاربری بومی (C++)…");
-    //  v1.17.0: the interface is rendered fully in native C++ (Win32/GDI) — no
-    //  embedded browser, no Trident/IE registry key, no C++↔JS bridge. Nothing
-    //  external to configure here; the native engine is always available.
+    // Heavy, one-time-per-build work: install the Persian font. Skipped on
+    // subsequent launches of the same build so startup stays fast.
+    if(s->firstRun){
+        ssSet(s, 46, L"نصب فونت فارسی (Vazirmatn)…");
+        installVazirFont();
+        Sleep(slow);
+    } else {
+        ssSet(s, 46, L"بررسی فونت فارسی…");
+        Sleep(s->lowSpec?40:120);
+    }
+
+    ssSet(s, 66, L"آماده‌سازی موتور گرافیکی (GDI+)…");
+    // GDI+ is started in WinMain right after the splash; here we only confirm the
+    // library is resolvable so a broken GDI+ is reported deterministically rather
+    // than crashing later. No token kept — WinMain owns the real startup.
+    {
+        ULONG_PTR tok=0; Gdiplus::GdiplusStartupInput in;
+        Gdiplus::Status gs=Gdiplus::GdiplusStartup(&tok,&in,NULL);
+        if(gs==Gdiplus::Ok && tok){ Gdiplus::GdiplusShutdown(tok); logLine(L"setup: GDI+ OK"); }
+        else logLine(L"setup: GDI+ probe failed (will fall back to plain GDI)");
+    }
+    Sleep(s->lowSpec?60:160);
+
+    ssSet(s, 82, L"ثبت اجزای رابط کاربری…");
+    // §1.18.1: register ALL custom control window classes (spinner / color /
+    // switch / dropdown) up-front. This guarantees every screen — including the
+    // print designer opened from Management — can create its controls, and is
+    // the belt-and-braces companion to the in-flow registration that fixed the
+    // print-designer ACCESS_VIOLATION. Idempotent (internal done-guard).
+    uikit::Az_RegisterControls();
     s->webOk = false;
-    Sleep(300);
+    Sleep(s->lowSpec?50:200);
 
-    ssSet(s, 94, L"تکمیل راه‌اندازی…");
-    // mark this build's setup complete so next launch is instant.
-    setSetting(L"setup_done_version", APP_VERSION_W);
-    logLine(L"setup: prerequisites prepared (native C++ UI)");
-    Sleep(200);
+    ssSet(s, 94, L"تکمیل پیکربندی برای این سیستم…");
+    if(s->firstRun) setSetting(L"setup_done_version", APP_VERSION_W);
+    logLine(L"setup: prerequisites prepared & system configured (native C++ UI)");
+    Sleep(s->lowSpec?80:200);
 
     ssSet(s, 100, L"آماده است");
-    Sleep(260);
+    Sleep(s->lowSpec?120:260);
     InterlockedExchange(&s->done, 1);
     return 0;
 }
@@ -218,14 +272,13 @@ static LRESULT CALLBACK ssProc(HWND h, UINT m, WPARAM w, LPARAM l){
 //  Public entry.
 // ----------------------------------------------------------------------------
 bool RunSetupSplash(HINSTANCE hInst){
-    // Fast path: already prepared for this build → just (idempotently) ensure
-    // the emulation key + folders without any UI, then return availability.
-    if(!ssNeedsRun()){
-        dataDir(); logsDir();            // idempotently ensure writable folders
-        return false;                    // native UI — no web host
-    }
-
+    // §1.18.1: the loading/preparation splash now runs on EVERY launch so the
+    // app is always (re)configured for the user's current system — folders,
+    // hardware profile, GDI+ probe and UI-control registration. Heavy one-time
+    // work (font install) is still gated to the first launch of a given build.
     SetupState st; g_ss=&st;
+    st.firstRun = ssFirstRunForBuild();
+    st.lowSpec  = ssDetectLowSpec();
 
     WNDCLASSW wc={0};
     wc.lpfnWndProc   = ssProc;
