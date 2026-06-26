@@ -320,7 +320,14 @@ static void computeCenterV(const RecH& m, CenterV& v){
     v.r2by = v.r2y + rh + rgap + lbl;
     v.c2Bot = v.r2by + rh + S(16);
     y = v.c2Bot + S(12);
-    // ----- services table card -----
+    // ----- action buttons row (MUST be BELOW insurance, BEFORE services) -----
+    //  §1.18.2: per the reference image + spec, the «ثبت پذیرش…/پذیرش جدید/پاک
+    //  کردن/انصراف» row sits directly under the «بیمه و نوبت» card and ABOVE the
+    //  «افزودن خدمت» services table.
+    v.btnH = S(44);
+    v.btnY = y;
+    y = v.btnY + v.btnH + S(14);
+    // ----- services table card (always below the action buttons) -----
     v.tTop = y;
     v.toolY = y + S(12);             // toolbar buttons
     v.theadY = v.toolY + rh + S(12); // table header strip
@@ -328,10 +335,7 @@ static void computeCenterV(const RecH& m, CenterV& v){
     v.tbodyBot = v.tbodyY + S(120);  // empty-state body height
     v.tBot = v.tbodyBot + S(12);
     y = v.tBot + S(14);
-    // ----- bottom action buttons -----
-    v.btnH = S(44);
-    v.btnY = y;
-    v.totalBot = v.btnY + v.btnH + S(14);
+    v.totalBot = v.tBot + S(RC_OUT);
 }
 //  Natural (uncompressed) full height the center form needs, so the page can
 //  decide whether to show a vertical scrollbar. Width is taken from the current
