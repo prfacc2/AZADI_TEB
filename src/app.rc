@@ -20,11 +20,21 @@
 205 RCDATA "../assets/icons/ic_settings.png"
 206 RCDATA "../assets/icons/ic_calc.png"
 
+// v1.19.0: embedded HTML/CSS/JS print designer (served by the in-app local
+// HTTP host and rendered in an app-owned WebView window — never the external
+// browser). Each asset is a raw RCDATA blob served verbatim.
+300 RCDATA "../assets/designer/index.html"
+301 RCDATA "../assets/designer/designer.css"
+302 RCDATA "../assets/designer/bootstrap.min.css"
+303 RCDATA "../assets/designer/fields.js"
+304 RCDATA "../assets/designer/templates.js"
+305 RCDATA "../assets/designer/designer.js"
+
 1 24 "app.manifest"
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,18,3,0
- PRODUCTVERSION 1,18,3,0
+ FILEVERSION 1,19,0,0
+ PRODUCTVERSION 1,19,0,0
  FILEFLAGSMASK 0x3fL
  FILEFLAGS 0x0L
  FILEOS 0x40004L
@@ -37,11 +47,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "Azadi-Teb"
             VALUE "FileDescription", "Azadi-Teb Clinic Reception & Management System"
-            VALUE "FileVersion", "1.18.3.0"
+            VALUE "FileVersion", "1.19.0.0"
             VALUE "InternalName", "AzadiTeb"
             VALUE "OriginalFilename", "AzadiTeb.exe"
             VALUE "ProductName", "Azadi-Teb"
-            VALUE "ProductVersion", "1.18.3"
+            VALUE "ProductVersion", "1.19.0"
         END
     END
     BLOCK "VarFileInfo"

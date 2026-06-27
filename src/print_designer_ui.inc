@@ -1226,7 +1226,18 @@ static void PrintDesigner_OpenCore(HWND hMain){
         }
     }
     Breadcrumb(L"print designer: open editor");
-    OpenDesignerWindow(hMain,launch,nullptr);
+    // §1.19.0: PREFER the HTML/CSS/JS designer hosted in an app-owned WebBrowser
+    // window (lightweight, modern, synced with C++ over the loopback /api
+    // bridge). If the host or control cannot be created (very old/locked-down
+    // box), fall back to the proven native GDI editor so the feature NEVER
+    // breaks on weak hardware or odd Windows builds.
+    bool webOk=false;
+    if(getSetting(L"designer_engine",L"web")!=L"native"){
+        Breadcrumb(L"print designer: try web host");
+        webOk = WebDesigner_Open(hMain, launch.sectionIds);
+        if(!webOk) Breadcrumb(L"print designer: web host unavailable, native fallback");
+    }
+    if(!webOk) OpenDesignerWindow(hMain,launch,nullptr);
     Breadcrumb(L"print designer: closed");
 }
 

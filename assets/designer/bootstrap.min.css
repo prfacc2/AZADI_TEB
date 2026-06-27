@@ -1,0 +1,7 @@
+/* Minimal offline Bootstrap-compatible utility subset (kept tiny on purpose;
+   the designer's own designer.css provides full component styling). */
+.d-flex{display:flex}.d-none{display:none}.flex-1{flex:1}
+.text-center{text-align:center}.text-end{text-align:left}.text-start{text-align:right}
+.w-100{width:100%}.mb-2{margin-bottom:.5rem}.mt-2{margin-top:.5rem}
+.gap-2{gap:.5rem}.p-2{padding:.5rem}
+.form-control,.form-select{display:block}

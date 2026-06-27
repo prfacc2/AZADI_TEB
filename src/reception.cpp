@@ -6,6 +6,7 @@
 //   • print: رسید بیمه / چاپ نسخه / چاپ آخرین قبض (F8) — real printer output
 // ============================================================================
 #include "app.h"
+#include "sections.h"   // §1.19.0: resolve operator dept → Section id for print routing
 //  v1.17.0: the HTML/CSS/JS (MSHTML) presentation host was retired — the
 //  reception/appointment UI is now 100% native C++. `webhost.h` is no longer
 //  included and the webhost_*.{cpp,inc} sources are no longer compiled. The
@@ -1313,6 +1314,31 @@ static void paintInfoPanel(HDC dc, TabPage* t, int infoL, int infoR, int H, int 
     #undef SY
 }
 
+// §1.19.0 — Resolve the operator's department (a display name string in
+// g_session.user.dept) to a stable Section id, so the new print_designer
+// design bound to that section is used. Returns 0 when no match is found
+// (caller then falls back to the legacy section-index print path).
+static int recResolveSectionId(){
+    std::wstring dept=g_session.user.dept;
+    std::vector<Section> all;
+    Sections_All(all);
+    if(all.empty()) return 0;
+    if(!dept.empty()){
+        // exact name match first
+        for(const auto& s:all) if(s.is_active && s.name_fa==dept) return s.id;
+        // then a code match (operator dept might already be a code)
+        for(const auto& s:all) if(s.is_active && s.code==dept) return s.id;
+        // then substring (tolerant of decorations)
+        for(const auto& s:all)
+            if(s.is_active && (s.name_fa.find(dept)!=std::wstring::npos ||
+                               dept.find(s.name_fa)!=std::wstring::npos)) return s.id;
+    }
+    // default: first active reception section, else first active section
+    for(const auto& s:all) if(s.is_active && s.kind==L"reception") return s.id;
+    for(const auto& s:all) if(s.is_active) return s.id;
+    return 0;
+}
+
 // ----------------------------------------------------------- tab page proc -
 static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
     TabPage* t=(TabPage*)GetWindowLongPtrW(h,GWLP_USERDATA);
@@ -1719,7 +1745,15 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 // v1.4.0: prefer the user-designed layout for this section; fall
                 // back to the classic GDI receipt if no design exists.
                 auto doPrint=[&](const ReceptionRecord& rec){
-                    if(!printDesignedReceipt(rec,0,h)) printReceipt(rec,2,h);
+                    // §1.19.0 print routing, in priority order:
+                    //  1) new print_designer design bound to the operator's SECTION
+                    //  2) legacy per-section designed receipt (section index 0)
+                    //  3) classic GDI receipt
+                    int sid=recResolveSectionId();
+                    bool done=false;
+                    if(sid>0) done=printPrintDesign(rec,sid,h);
+                    if(!done) done=printDesignedReceipt(rec,0,h);
+                    if(!done) printReceipt(rec,2,h);
                     kickCashDrawer();   // pulse drawer if enabled in printer settings
                 };
                 if(getSetting(L"auto_print",L"0")==L"1"){

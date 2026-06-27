@@ -5,6 +5,7 @@
 // ============================================================================
 #include "app.h"
 #include "print_designer.h"
+#include "web_designer.h"      // §1.19.0: HTML/CSS/JS designer host
 #include "sections.h"
 #include "ui_kit.h"
 #include "undo.h"

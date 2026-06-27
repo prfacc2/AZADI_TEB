@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>طراح چاپ — آزادی طب</title>
+<link rel="stylesheet" href="bootstrap.min.css">
+<link rel="stylesheet" href="designer.css">
+</head>
+<body>
+<!-- ===================== Top toolbar ===================== -->
+<header id="topbar">
+  <div class="tb-group tb-right">
+    <span class="brand">طراح چاپ <small id="secName"></small></span>
+  </div>
+  <div class="tb-group tb-center" id="templateStrip" title="طرح‌های آماده">
+    <!-- built-in template thumbnails injected here -->
+  </div>
+  <div class="tb-group tb-left">
+    <select id="paperSel" class="form-select form-select-sm" title="اندازه کاغذ">
+      <option value="A4">A4</option>
+      <option value="A5">A5</option>
+      <option value="A6">A6</option>
+      <option value="B5">B5</option>
+      <option value="Letter">Letter</option>
+      <option value="R80">رول ۸ سانت</option>
+      <option value="R58">رول ۵.۸ سانت</option>
+    </select>
+    <select id="orientSel" class="form-select form-select-sm" title="جهت کاغذ">
+      <option value="0">عمودی</option>
+      <option value="1">افقی</option>
+    </select>
+    <button class="btn btn-sm btn-outline" id="btnUndo" title="بازگشت (Ctrl+Z)">↶</button>
+    <button class="btn btn-sm btn-outline" id="btnRedo" title="جلو (Ctrl+Y)">↷</button>
+    <button class="btn btn-sm btn-outline" id="btnZoomOut" title="کوچک‌نمایی">−</button>
+    <span id="zoomLbl" class="zoom-lbl">۱۰۰٪</span>
+    <button class="btn btn-sm btn-outline" id="btnZoomIn" title="بزرگ‌نمایی">+</button>
+    <button class="btn btn-sm btn-outline" id="btnZoomFit" title="متناسب">⤢</button>
+    <button class="btn btn-sm btn-secondary" id="btnDownload" title="دانلود طرح">⬇ دانلود</button>
+    <button class="btn btn-sm btn-secondary" id="btnUpload" title="بارگذاری طرح">⬆ بارگذاری</button>
+    <button class="btn btn-sm btn-primary" id="btnSave" title="ذخیره و اعمال (Ctrl+S)">💾 ذخیره و اعمال</button>
+    <button class="btn btn-sm btn-danger" id="btnExit" title="خروج">✕</button>
+  </div>
+</header>
+
+<div id="workspace">
+  <!-- ===================== Canvas (left/center) ===================== -->
+  <main id="canvasWrap">
+    <div id="canvasScroll">
+      <div id="paper">
+        <!-- items rendered here -->
+        <div id="selBox" class="sel-box hidden">
+          <span class="handle h-nw"></span><span class="handle h-ne"></span>
+          <span class="handle h-sw"></span><span class="handle h-se"></span>
+          <span class="handle h-n"></span><span class="handle h-s"></span>
+          <span class="handle h-w"></span><span class="handle h-e"></span>
+          <span class="handle h-rot"></span>
+        </div>
+      </div>
+    </div>
+    <div id="canvasHint">برای جابه‌جایی صفحه، فضای خالی را با ماوس بکشید · چرخ ماوس = اسکرول · Ctrl+چرخ = زوم</div>
+  </main>
+
+  <!-- ===================== Right panel ===================== -->
+  <aside id="rightPanel">
+    <div class="rp-tabs">
+      <button class="rp-tab active" data-tab="palette">ابزارها</button>
+      <button class="rp-tab" data-tab="inspector">تنظیمات آیتم</button>
+      <button class="rp-tab" data-tab="layers">لایه‌ها</button>
+    </div>
+
+    <!-- Palette -->
+    <section class="rp-pane active" id="pane-palette">
+      <input type="search" id="paletteSearch" class="form-control form-control-sm" placeholder="جستجوی ابزار…">
+      <div id="paletteList"><!-- categories injected --></div>
+    </section>
+
+    <!-- Inspector -->
+    <section class="rp-pane" id="pane-inspector">
+      <div id="inspectorEmpty" class="muted">یک آیتم را انتخاب کنید تا تنظیمات پیشرفته آن نمایش داده شود.</div>
+      <div id="inspectorBody" class="hidden"></div>
+    </section>
+
+    <!-- Layers -->
+    <section class="rp-pane" id="pane-layers">
+      <div id="layerList"></div>
+    </section>
+  </aside>
+</div>
+
+<input type="file" id="fileInput" accept=".aztpl,.json" class="hidden">
+<div id="toast" class="toast-msg hidden"></div>
+
+<script src="fields.js"></script>
+<script src="templates.js"></script>
+<script src="designer.js"></script>
+</body>
+</html>

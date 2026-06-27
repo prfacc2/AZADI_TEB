@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.18.3"
+#define APP_VERSION_W   L"1.19.0"
 
 // ----------------------------------------------------------- logging policy -
 //  RELEASE 1.2.0 (Section A): all general user-behavior logging is gated behind
@@ -378,6 +378,13 @@ void openPrintDesigner(HWND owner, int sectionIdx);
 //  Render the saved design for a section onto a printer DC for a real receipt.
 //  Returns false if no design exists (caller falls back to the classic layout).
 bool printDesignedReceipt(const ReceptionRecord& r, int sectionIdx, HWND owner);
+//  §1.19.0 — Render the new-model (print_designer.h PrintDesign) design bound
+//  to a *section id* onto the connected printer. The HTML/CSS/JS designer and
+//  the native designer both persist a PrintDesign per section. Returns false if
+//  no such design exists so the caller can fall back to printDesignedReceipt /
+//  printReceipt. First call (per session, no saved printer) shows the standard
+//  print dialog so the operator picks printer + paper (A4/A5).
+bool printPrintDesign(const ReceptionRecord& r, int sectionId, HWND owner);
 //  Pulse the cash drawer connected to the configured printer (ESC/POS kick),
 //  but only when the «باز کردن کشوی پول» option is enabled in printer settings.
 void kickCashDrawer();

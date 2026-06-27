@@ -1125,3 +1125,145 @@ bool printDesignedReceipt(const ReceptionRecord& r, int sectionIdx, HWND owner){
             +L" ×"+std::to_wstring(copies));
     return true;
 }
+
+// ============================================================================
+//  §1.19.0 — RENDER A NEW (print_designer JSON) DESIGN ONTO A PRINTER DC
+//  The HTML/CSS/JS designer + native designer both persist a `PrintDesign`
+//  (print_designer.h) bound to a section id. This renderer resolves that design
+//  for the given section and prints it on the connected printer. The first time
+//  (per session) it asks A4/A5 via the standard print dialog so the operator can
+//  pick paper + printer; afterwards it reuses the saved default printer.
+// ============================================================================
+static std::wstring pdFieldValue(const ReceptionRecord& r, const std::wstring& tok){
+    // The new designer's field keys mirror the legacy {token} vocabulary, plus
+    // a few extras. Reuse the classic resolver, then handle the new ones.
+    if(tok==L"{first}")    return r.firstName;
+    if(tok==L"{last}")     return r.lastName;
+    if(tok==L"{full}")     return r.firstName+L" "+r.lastName;
+    if(tok==L"{father}")   return r.fatherName;
+    if(tok==L"{nid}")      return toFaDigits(r.nationalId);
+    if(tok==L"{birth}")    return toFaDigits(r.birthDate);
+    if(tok==L"{gender}")   return r.gender;
+    if(tok==L"{mobile}")   return toFaDigits(r.mobile);
+    if(tok==L"{landline}") return toFaDigits(r.landline);
+    if(tok==L"{address}")  return r.address;
+    if(tok==L"{ptype}")    return r.patientType;
+    if(tok==L"{ins}")      return r.insurance;
+    if(tok==L"{supp}")     return r.suppInsurance;
+    if(tok==L"{insno}")    return L"";              // not captured yet
+    if(tok==L"{insexp}")   return L"";
+    if(tok==L"{queue}"){ wchar_t b[16]; swprintf(b,16,L"%d",r.queueNo); return toFaDigits(b); }
+    if(tok==L"{date}")     return toFaDigits(r.apptDate);
+    if(tok==L"{time}")     return toFaDigits(r.apptTime);
+    if(tok==L"{datetime}") return toFaDigits(r.apptDate+L" - "+r.apptTime);
+    if(tok==L"{shift}")    return r.shift;
+    if(tok==L"{dept}")     return r.dept;
+    if(tok==L"{doctor}")   return L"";              // doctor not captured yet
+    if(tok==L"{apptdate}") return toFaDigits(r.apptDate);
+    if(tok==L"{appttime}") return toFaDigits(r.apptTime);
+    if(tok==L"{appttype}") return r.patientType;
+    if(tok==L"{user}")     return r.userName;
+    if(tok==L"{clinic}")   return L"درمانگاه آزادی طب";
+    if(tok==L"{receiptNo}"){ wchar_t b[16]; swprintf(b,16,L"%d",r.queueNo); return toFaDigits(b); }
+    if(tok==L"{total}")    return toFaDigits(formatMoney(r.total))+L" ریال";
+    if(tok==L"{insshare}") return toFaDigits(formatMoney(r.mainShare))+L" ریال";
+    if(tok==L"{discount}") return toFaDigits(formatMoney(r.discount))+L" ریال";
+    if(tok==L"{paid}")     return toFaDigits(formatMoney(r.paid))+L" ریال";
+    if(tok==L"{service}")  return L"ویزیت";
+    if(tok==L"{issued}")   return L"چاپ توسط پذیرش: "+
+        (r.userName.empty()?g_session.user.fullname:r.userName);
+    return L"";
+}
+
+bool printPrintDesign(const ReceptionRecord& r, int sectionId, HWND owner){
+    PrintDesign d;
+    if(!SectionDesign_Resolve(sectionId, d)) return false;   // no design → caller falls back
+    if(d.items.empty()) return false;
+    if(d.paperW<=0 || d.paperH<=0){
+        double pw,ph; if(Paper_Dims(d.paper,pw,ph)){ d.paperW=pw; d.paperH=ph;
+            if(d.orientation==1) std::swap(d.paperW,d.paperH); }
+        else { d.paperW=148; d.paperH=210; }
+    }
+
+    // Resolve a printer DC. First time (no saved printer) → standard dialog so
+    // the operator picks printer + paper (A4/A5). Afterwards reuse it.
+    std::wstring prn=currentPrinter();
+    HDC dc = prn.empty()? NULL : CreateDCW(L"WINSPOOL",prn.c_str(),NULL,NULL);
+    if(!dc){
+        PRINTDLGW pd={0}; pd.lStructSize=sizeof(pd); pd.hwndOwner=owner;
+        pd.Flags=PD_RETURNDC|PD_NOPAGENUMS|PD_NOSELECTION|PD_USEDEVMODECOPIES;
+        if(!PrintDlgW(&pd)) return true;   // user cancelled → treat as handled
+        dc=pd.hDC;
+    }
+    if(!dc) return false;
+
+    int dpiX=GetDeviceCaps(dc,LOGPIXELSX), dpiY=GetDeviceCaps(dc,LOGPIXELSY);
+    int offX=GetDeviceCaps(dc,PHYSICALOFFSETX), offY=GetDeviceCaps(dc,PHYSICALOFFSETY);
+    double sx=dpiX/25.4, sy=dpiY/25.4;
+    auto mmX=[&](double mm){ return (int)(mm*sx)-offX; };
+    auto mmY=[&](double mm){ return (int)(mm*sy)-offY; };
+
+    DOCINFOW di={sizeof(di)};
+    std::wstring docName=std::wstring(APP_NAME_W)+L" — print";
+    di.lpszDocName=docName.c_str();
+    if(StartDocW(dc,&di)<=0){ DeleteDC(dc); return false; }
+    StartPage(dc);
+    SetBkMode(dc,TRANSPARENT);
+
+    // paint items in z-order
+    std::vector<const PrintItem*> ord;
+    for(const auto& it:d.items) ord.push_back(&it);
+    // simple insertion sort by z (avoids pulling in <algorithm>; item counts are tiny)
+    for(size_t i=1;i<ord.size();++i){ const PrintItem* k=ord[i]; size_t j=i;
+        while(j>0 && ord[j-1]->z > k->z){ ord[j]=ord[j-1]; --j; } ord[j]=k; }
+
+    for(const PrintItem* pit : ord){
+        const PrintItem& it=*pit;
+        int x0=mmX(it.x), y0=mmY(it.y), x1=mmX(it.x+it.w), y1=mmY(it.y+it.h);
+        if(it.type==PIT_HLINE){
+            int wpx=(int)(it.borderWidth*sx); if(wpx<1)wpx=1;
+            HPEN p=CreatePen(PS_SOLID,wpx,it.borderColor); HGDIOBJ o=SelectObject(dc,p);
+            MoveToEx(dc,x0,y0,0); LineTo(dc,x1,y0); SelectObject(dc,o); DeleteObject(p);
+        } else if(it.type==PIT_VLINE){
+            int wpx=(int)(it.borderWidth*sx); if(wpx<1)wpx=1;
+            HPEN p=CreatePen(PS_SOLID,wpx,it.borderColor); HGDIOBJ o=SelectObject(dc,p);
+            MoveToEx(dc,x0,y0,0); LineTo(dc,x0,y1); SelectObject(dc,o); DeleteObject(p);
+        } else if(it.type==PIT_RECT||it.type==PIT_FRAME||it.type==PIT_LOGO||
+                  it.type==PIT_PHOTO||it.type==PIT_QR){
+            int wpx=(int)(it.borderWidth*sx); if(wpx<1)wpx=1;
+            HPEN p=CreatePen(PS_SOLID,wpx,it.borderColor); HGDIOBJ o=SelectObject(dc,p);
+            HGDIOBJ ob=SelectObject(dc,GetStockObject(NULL_BRUSH));
+            Rectangle(dc,x0,y0,x1,y1);
+            SelectObject(dc,ob); SelectObject(dc,o); DeleteObject(p);
+            if(it.type==PIT_LOGO||it.type==PIT_QR||it.type==PIT_PHOTO){
+                std::wstring ph=(it.type==PIT_LOGO)?L"لوگو":(it.type==PIT_QR?L"QR":L"عکس");
+                RECT rr={x0,y0,x1,y1};
+                HFONT f=CreateFontW(-(int)(9*dpiY/72.0),0,0,0,FW_NORMAL,0,0,0,
+                    DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Vazirmatn");
+                HGDIOBJ of=SelectObject(dc,f); SetTextColor(dc,RGB(150,150,150));
+                DrawTextW(dc,ph.c_str(),-1,&rr,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
+                SelectObject(dc,of); DeleteObject(f);
+            }
+        } else { // text-bearing: LABEL / FIELD / APPTNO
+            std::wstring s=it.text;
+            if(it.type==PIT_FIELD && !it.field.empty()) s=it.prefix+pdFieldValue(r,it.field)+it.suffix;
+            else if(it.type==PIT_APPTNO){ wchar_t b[16]; swprintf(b,16,L"%d",r.queueNo>0?r.queueNo:it.startValue); s=it.prefix+toFaDigits(b); }
+            else s=it.prefix+it.text+it.suffix;
+            if(it.visibility==1 && (it.type==PIT_FIELD) && pdFieldValue(r,it.field).empty()) continue;
+            if(s.empty()) continue;
+            int lf=-(int)(it.fontPt*dpiY/72.0);
+            RECT rr={x0,y0,x1,y1};
+            HFONT f=CreateFontW(lf,0,0,0,it.bold?FW_BOLD:FW_NORMAL,it.italic?1:0,0,0,
+                DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,
+                it.fontName.empty()?L"Vazirmatn":it.fontName.c_str());
+            HGDIOBJ of=SelectObject(dc,f);
+            SetTextColor(dc,it.textColor);
+            UINT al=(it.align==1)?DT_CENTER:(it.align==2)?DT_LEFT:DT_RIGHT;
+            DrawTextW(dc,s.c_str(),-1,&rr,al|DT_TOP|DT_WORDBREAK|DT_RTLREADING|DT_NOPREFIX);
+            SelectObject(dc,of); DeleteObject(f);
+        }
+    }
+    EndPage(dc); EndDoc(dc); DeleteDC(dc);
+    logLine(L"print_designer design printed for section "+std::to_wstring(sectionId));
+    return true;
+}
