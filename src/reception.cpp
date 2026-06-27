@@ -418,6 +418,7 @@ static void computeInfoLayout(int infoL, int infoR, int H, InfoLayout& L){
 //  natural content height of the form + the right info-panel. When the content
 //  is taller than the client area the page scrolls; the cards grow to this VH so
 //  their rounded bottom edge is always below the last control.
+static int recPrintGroupTop();   // fwd (defined below; shared by VH + layout)
 static int recPageVH(int W, int H){
     RecH m; rcH(W,m);
     int formH = rcFormContentH(W);
@@ -426,13 +427,27 @@ static int recPageVH(int W, int H){
         InfoLayout L; computeInfoLayout(m.infoL,m.infoR,H,L);
         infoH = L.docNameY + L.rh2 + S(40);   // last control + bottom room
     }
-    //  v1.19.0: summary card (≈276) + gap + «مبلغ نهایی» gradient card (≈88) +
-    //  «چاپ» group title + 3 print buttons (≈212 from the column bottom). We
-    //  guarantee the gradient card never collides with the print group.
-    int billH = S(364) + S(40) + S(212);       // final-amount bottom + gap + print block
+    //  v1.18.3: the print group now sits DIRECTLY below the «مبلغ نهایی» card
+    //  (see recPrintGroupTop). Column height = print-group title + 3 buttons
+    //  (3*48) + bottom padding.
+    int billH = recPrintGroupTop() + S(24) + 3*S(48) + S(24);
     int need = formH; if(infoH>need) need=infoH; if(billH>need) need=billH;
     need += S(16);                                   // bottom padding mirror
     return need>H ? need : H;
+}
+//  v1.18.3: single source of truth for the «چاپ» (print) group geometry on the
+//  LEFT billing column. The reference image places the three print buttons
+//  DIRECTLY BELOW the blue «مبلغ نهایی» card (not pinned to the page bottom).
+//  Both the painter (WM_PAINT, draws the «چاپ» title) and the control
+//  positioner (tabPageLayout, moves the 3 buttons) call this so they always
+//  agree. Returns the absolute (pre-scroll) y of the «چاپ» group title; the
+//  buttons start S(24) below it.
+static int recPrintGroupTop(){
+    int sumTop = S(RC_OUT);
+    int sumBot = sumTop + S(42) + 8*S(26) + S(10);   // summary card bottom
+    int faTop  = sumBot + S(12);                      // «مبلغ نهایی» card top
+    int faBot  = faTop  + S(76);                      // ... and its bottom
+    return faBot + S(18);                             // title sits just below
 }
 //  Clamp & return the current scroll offset for the page.
 static int recClampScroll(HWND h, TabPage* t){
@@ -541,9 +556,12 @@ static void tabPageLayout(HWND h, TabPage* t){
 
     // billing panel print buttons (bottom of LEFT billing card). Pinned to the
     // virtual page height so they track the card bottom and scroll with the page.
-    int VH = recPageVH(W,H);
     if(!m.stacked){
-        int bx = m.billL + S(12), byy = VH - S(186) - sy;
+        // v1.18.3: print buttons sit DIRECTLY BELOW the «مبلغ نهایی» card
+        // (matches the reference image), positioned via the shared helper so the
+        // painter's «چاپ» title and these buttons never drift apart.
+        int bx = m.billL + S(12);
+        int byy = recPrintGroupTop() + S(24) - sy;    // S(24) below the title
         int bbw = (m.billR-m.billL) - S(24);
         MoveWindow(t->bPrtIns, bx, byy,        bbw, S(40), TRUE);
         MoveWindow(t->bPrtRx,  bx, byy+S(48),  bbw, S(40), TRUE);
@@ -2210,7 +2228,8 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
 
             // ----- 3) «چاپ» group title (buttons positioned by tabPageLayout) -
-            int prTop = VH - S(186) - sy - S(26);
+            // v1.18.3: sits directly below the «مبلغ نهایی» card (shared helper).
+            int prTop = recPrintGroupTop() - sy;
             SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.text);
             int icoW=S(16);
             RECT pi={br-icoW,prTop,br,prTop+S(18)};
