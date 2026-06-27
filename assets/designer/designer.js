@@ -12,19 +12,27 @@
 // (works in WebView2, Trident, or any browser) and needs no script injection.
 // When the page is opened from a plain file:// (developer mode) the bridge is
 // considered absent and the designer runs standalone (localStorage).
+// §1.19.1 — the page is served by the app's loopback HTTP host and opened in
+// the system browser. The bridge talks to /api/* over same-origin requests.
+// We keep a SHORT synchronous request (with a hard timeout) because every call
+// site is simple request/response; the host replies instantly from memory so
+// there is no perceptible block, and this keeps the call sites trivial. If the
+// page is opened from file:// (developer mode) the bridge is absent and the
+// designer runs fully standalone (localStorage + file download/upload).
 var Bridge = {
   _on: (location.protocol === "http:" || location.protocol === "https:"),
   request: function(verb, args){
     if(!this._on) return null;
     try{
       var xhr = new XMLHttpRequest();
-      xhr.open("POST", "api/"+verb, false);  // synchronous, same-origin
+      xhr.open("POST", "api/"+verb, false);   // same-origin, loopback, instant
+      xhr.timeout = 4000;                       // never hang the UI
       xhr.setRequestHeader("Content-Type","application/json;charset=utf-8");
       xhr.send(JSON.stringify(args||{}));
       if(xhr.status>=200 && xhr.status<300){
         return xhr.responseText ? JSON.parse(xhr.responseText) : {};
       }
-    }catch(e){ console.warn("bridge",verb,e); }
+    }catch(e){ /* host not reachable → behave like standalone */ }
     return null;
   },
   has: function(){ return this._on; }

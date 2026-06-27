@@ -365,6 +365,31 @@ static void buildLauncherPage(SettingsWin* sw, const wchar_t* hint,
     sw->ctrls.push_back(b);
 }
 
+// §1.19.1 — the print-design page now offers TWO actions:
+//   • «باز کردن طراح چاپ»  → the visual designer (HTML page or native fallback)
+//   • «تنظیمات چاپ»        → pick a section, preview/download/upload/apply a design
+static void buildDesignerPage(SettingsWin* sw){
+    RECT c=contentRect(sw);
+    int x=c.left+S(20), y=subTop(sw), w=c.right-c.left-S(40);
+    HWND h=CreateWindowExW(0,L"STATIC",
+        L"\u0637\u0631\u0627\u062d\u06cc \u0642\u0627\u0644\u0628 \u0686\u0627\u067e \u0628\u0631\u0627\u06cc \u0647\u0631 \u0628\u062e\u0634\u060c "
+        L"\u067e\u06cc\u0634\u200c\u0646\u0645\u0627\u06cc\u0634\u060c \u062f\u0627\u0646\u0644\u0648\u062f\u060c "
+        L"\u0628\u0627\u0631\u06af\u0630\u0627\u0631\u06cc \u0648 \u0627\u0639\u0645\u0627\u0644 \u0637\u0631\u062d.",
+        WS_CHILD|WS_VISIBLE|SS_RIGHT|WS_CLIPSIBLINGS,
+        x,y,w,S(48),sw->hwnd,NULL,g_hInst,NULL);
+    SendMessageW(h,WM_SETFONT,(WPARAM)g_fUI,TRUE); sw->ctrls.push_back(h);
+
+    HWND b1=createFlatButton(sw->hwnd,IDC_PANEL_BASE+60,
+        L"\u0628\u0627\u0632 \u06a9\u0631\u062f\u0646 \u0637\u0631\u0627\u062d \u0686\u0627\u067e",
+        ICO_PRINT,BS_PRIMARY,x,y+S(58),w,S(40));
+    sw->ctrls.push_back(b1);
+
+    HWND b2=createFlatButton(sw->hwnd,IDC_PANEL_BASE+65,
+        L"\u062a\u0646\u0638\u06cc\u0645\u0627\u062a \u0686\u0627\u067e",   // تنظیمات چاپ
+        ICO_GEAR,BS_OUTLINE,x,y+S(58)+S(48),w,S(40));
+    sw->ctrls.push_back(b2);
+}
+
 // §1.12.0: compute the unscrolled content height of the current page so we can
 // clamp scrolling and decide whether a scrollbar is needed. For sub-pages we
 // take the bottom-most child control; for the home page we sum the rows.
@@ -442,9 +467,7 @@ static void buildPage(SettingsWin* sw){
     case PAGE_CONTACT: buildContactPage(sw); break;
     case PAGE_ABOUT:   buildAboutPage(sw);   break;
     case PAGE_DESIGNER:
-        buildLauncherPage(sw,
-            L"\u0637\u0631\u0627\u062d\u06cc \u0642\u0627\u0644\u0628 \u0686\u0627\u067e \u0628\u0631\u0627\u06cc \u0647\u0631 \u0628\u062e\u0634. \u0627\u0628\u062a\u062f\u0627 \u0628\u062e\u0634 \u0631\u0627 \u0627\u0646\u062a\u062e\u0627\u0628 \u06a9\u0646\u06cc\u062f.",
-            L"\u0628\u0627\u0632 \u06a9\u0631\u062f\u0646 \u0637\u0631\u0627\u062d \u0686\u0627\u067e",ICO_PRINT,IDC_PANEL_BASE+60);
+        buildDesignerPage(sw);
         break;
     case PAGE_BACKUP:
         buildLauncherPage(sw,
@@ -814,6 +837,7 @@ static LRESULT CALLBACK SettingsProc(HWND h,UINT m,WPARAM w,LPARAM l){
             }
             return 0; }
         case IDC_PANEL_BASE+60: { HWND mw=sw->hMain; PrintDesigner_Open(mw); return 0; }
+        case IDC_PANEL_BASE+65: { HWND mw=sw->hMain; PrintCfg_Open(mw); return 0; }   // تنظیمات چاپ
         case IDC_PANEL_BASE+61: { HWND mw=sw->hMain; openBackupManager(mw); return 0; }
         case IDC_PANEL_BASE+62: { HWND mw=sw->hMain; (void)mw;
                                   // employees screen lives in the management panel

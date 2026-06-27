@@ -1,17 +1,19 @@
 // ============================================================================
-//  web_designer.cpp — loopback HTTP host + system WebBrowser (Trident) host for
-//  the HTML/CSS/JS print designer (release 1.19.0).
+//  web_designer.cpp — loopback HTTP host for the HTML/CSS/JS print designer
+//  (release 1.19.1).
 //
 //  Design goals:
-//   * NO external dependency — uses Winsock (already linked) + the WebBrowser
-//     ActiveX control that ships with EVERY Windows 7→11 (ole32/oleaut32).
-//   * NOT the external browser — the page lives inside an app-owned window.
+//   * NO external dependency — uses Winsock (already linked) only.
+//   * Crash/hang-proof — the designer page is opened in the operator's DEFAULT
+//     BROWSER (ShellExecute on the loopback URL). The fragile embedded Trident
+//     control (blank screen / "not responding") was removed in 1.19.1.
 //   * Light & stable — the HTTP host is a single blocking-accept thread (no
 //     polling/busy loop); the page itself is a tiny static app.
-//   * Engine-agnostic bridge — the page talks to C++ over same-origin HTTP
-//     /api/* requests, so it works under Trident today and WebView2 tomorrow.
-//   * Safe fallback — if the control can't be created, WebDesigner_Open returns
-//     false and the caller opens the proven native GDI designer instead.
+//   * Fully synced with C++ — the page persists through /api/save which writes
+//     the section design and posts WM_APP_DESIGN_PUSHED so reception picks the
+//     new layout up immediately.
+//   * Safe fallback — if the loopback host can't start, WebDesigner_Open
+//     returns false and the caller opens the proven native GDI designer.
 // ============================================================================
 #include "app.h"
 #include "web_designer.h"
@@ -19,9 +21,7 @@
 #include "sections.h"
 #include <winsock2.h>
 #include <ws2tcpip.h>
-#include <ole2.h>
-#include <exdisp.h>
-#include <mshtml.h>
+#include <shellapi.h>
 #include <string>
 #include <vector>
 #include <map>

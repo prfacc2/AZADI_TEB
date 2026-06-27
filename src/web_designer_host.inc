@@ -1,212 +1,142 @@
 // ============================================================================
-//  web_designer_host.inc — app-owned window hosting the system WebBrowser
-//  (Trident) ActiveX control, pointed at the loopback designer URL.
+//  web_designer_host.inc — opens the HTML/CSS/JS print designer (served by the
+//  loopback HTTP host, see web_designer_http.inc) and keeps the app in sync.
 //  Included into web_designer.cpp.
 //
-//  This uses the WebBrowser control present on EVERY Windows 7→11 (no SDK, no
-//  WebView2 runtime, no external browser). We raise FEATURE_BROWSER_EMULATION
-//  for our process so the page renders in a modern (IE11/edge) document mode.
-//  A minimal IOleClientSite/IOleInPlaceSite/IOleInPlaceFrame implements the
-//  hosting contract. The page<->C++ sync is over the loopback HTTP /api bridge
-//  (see web_designer_http.inc), so no IDispatch plumbing is required here.
+//  §1.19.1 — the previous embedded WebBrowser (Trident) host was REMOVED: on
+//  many machines it produced a blank/white screen and a "not responding" hang
+//  (Trident's synchronous XHR pumped against the same UI thread as the modal
+//  message loop). The designer is now opened in the operator's DEFAULT BROWSER
+//  via ShellExecute on the loopback URL. This is:
+//    • crash-proof / hang-proof — the browser runs in its own process;
+//    • universal — every Windows has a default browser, no WebView2 runtime;
+//    • lightweight — nothing heavy is loaded inside our process;
+//    • fully synced with C++ — the page saves through the /api/save bridge,
+//      which persists the design AND posts WM_APP_DESIGN_PUSHED so reception
+//      picks up the new layout immediately (no extra plumbing here).
+//
+//  While the browser is open we show a small, native "designer session" panel
+//  so the operator can return focus / finish the session deliberately. The
+//  panel auto-closes when the page signals exit (sets g_wdExitFlag via
+//  /api/exit) or when a design is saved and the operator dismisses it.
 // ============================================================================
 namespace {
 
-// --- raise document mode for this exe (HKCU, idempotent, best-effort) -------
-static void wdSetBrowserEmulation(){
-    wchar_t exe[MAX_PATH]; GetModuleFileNameW(NULL,exe,MAX_PATH);
-    std::wstring name=exe; size_t s=name.find_last_of(L"\\/");
-    if(s!=std::wstring::npos) name=name.substr(s+1);
-    HKEY k;
-    if(RegCreateKeyExW(HKEY_CURRENT_USER,
-        L"Software\\Microsoft\\Internet Explorer\\Main\\FeatureControl\\FEATURE_BROWSER_EMULATION",
-        0,NULL,0,KEY_SET_VALUE,NULL,&k,NULL)==ERROR_SUCCESS){
-        DWORD mode=11001;   // IE11 edge mode
-        RegSetValueExW(k,name.c_str(),0,REG_DWORD,(const BYTE*)&mode,sizeof(mode));
-        RegCloseKey(k);
-    }
-}
+static const wchar_t* WD_CLS = L"AzWebDesignerWait";
 
-// --- WebView2 availability probe (informational only) -----------------------
-static bool wdWebView2Present(){
-    HMODULE m=LoadLibraryW(L"WebView2Loader.dll");
-    if(m){ FreeLibrary(m); return true; }
-    return false;
-}
-
-// --- minimal OLE host site --------------------------------------------------
-struct HostSite : public IOleClientSite, public IOleInPlaceSite, public IOleInPlaceFrame, public IStorage {
-    LONG ref; HWND hwnd;
-    HostSite(HWND h):ref(1),hwnd(h){}
-    virtual ~HostSite(){}
-    // IUnknown
-    STDMETHODIMP QueryInterface(REFIID r, void** pp){
-        if(r==IID_IUnknown||r==IID_IOleClientSite){ *pp=(IOleClientSite*)this; AddRef(); return S_OK; }
-        if(r==IID_IOleInPlaceSite){ *pp=(IOleInPlaceSite*)this; AddRef(); return S_OK; }
-        if(r==IID_IOleInPlaceFrame){ *pp=(IOleInPlaceFrame*)this; AddRef(); return S_OK; }
-        if(r==IID_IStorage){ *pp=(IStorage*)this; AddRef(); return S_OK; }
-        *pp=NULL; return E_NOINTERFACE;
-    }
-    STDMETHODIMP_(ULONG) AddRef(){ return InterlockedIncrement(&ref); }
-    STDMETHODIMP_(ULONG) Release(){ LONG c=InterlockedDecrement(&ref); if(c==0) delete this; return c; }
-    // IOleClientSite
-    STDMETHODIMP SaveObject(){ return S_OK; }
-    STDMETHODIMP GetMoniker(DWORD,DWORD,IMoniker** pp){ *pp=NULL; return E_NOTIMPL; }
-    STDMETHODIMP GetContainer(IOleContainer** pp){ *pp=NULL; return E_NOINTERFACE; }
-    STDMETHODIMP ShowObject(){ return S_OK; }
-    STDMETHODIMP OnShowWindow(BOOL){ return S_OK; }
-    STDMETHODIMP RequestNewObjectLayout(){ return E_NOTIMPL; }
-    // IOleWindow (shared)
-    STDMETHODIMP GetWindow(HWND* p){ *p=hwnd; return S_OK; }
-    STDMETHODIMP ContextSensitiveHelp(BOOL){ return S_OK; }
-    // IOleInPlaceSite
-    STDMETHODIMP CanInPlaceActivate(){ return S_OK; }
-    STDMETHODIMP OnInPlaceActivate(){ return S_OK; }
-    STDMETHODIMP OnUIActivate(){ return S_OK; }
-    STDMETHODIMP GetWindowContext(IOleInPlaceFrame** ppF,IOleInPlaceUIWindow** ppU,LPRECT pr,LPRECT pc,LPOLEINPLACEFRAMEINFO fi){
-        *ppF=(IOleInPlaceFrame*)this; AddRef(); *ppU=NULL;
-        GetClientRect(hwnd,pr); GetClientRect(hwnd,pc);
-        if(fi){ fi->fMDIApp=FALSE; fi->hwndFrame=hwnd; fi->haccel=NULL; fi->cAccelEntries=0; }
-        return S_OK;
-    }
-    STDMETHODIMP Scroll(SIZE){ return S_OK; }
-    STDMETHODIMP OnUIDeactivate(BOOL){ return S_OK; }
-    STDMETHODIMP OnInPlaceDeactivate(){ return S_OK; }
-    STDMETHODIMP DiscardUndoState(){ return S_OK; }
-    STDMETHODIMP DeactivateAndUndo(){ return S_OK; }
-    STDMETHODIMP OnPosRectChange(LPCRECT){ return S_OK; }
-    // IOleInPlaceFrame / UIWindow
-    STDMETHODIMP GetBorder(LPRECT pr){ GetClientRect(hwnd,pr); return S_OK; }
-    STDMETHODIMP RequestBorderSpace(LPCBORDERWIDTHS){ return S_OK; }
-    STDMETHODIMP SetBorderSpace(LPCBORDERWIDTHS){ return S_OK; }
-    STDMETHODIMP SetActiveObject(IOleInPlaceActiveObject*,LPCOLESTR){ return S_OK; }
-    STDMETHODIMP InsertMenus(HMENU,LPOLEMENUGROUPWIDTHS){ return S_OK; }
-    STDMETHODIMP SetMenu(HMENU,HOLEMENU,HWND){ return S_OK; }
-    STDMETHODIMP RemoveMenus(HMENU){ return S_OK; }
-    STDMETHODIMP SetStatusText(LPCOLESTR){ return S_OK; }
-    STDMETHODIMP EnableModeless(BOOL){ return S_OK; }
-    STDMETHODIMP TranslateAccelerator(LPMSG,WORD){ return S_FALSE; }
-    // IStorage (stubs — WebBrowser tolerates a minimal storage)
-    STDMETHODIMP CreateStream(const OLECHAR*,DWORD,DWORD,DWORD,IStream**){ return E_NOTIMPL; }
-    STDMETHODIMP OpenStream(const OLECHAR*,void*,DWORD,DWORD,IStream**){ return E_NOTIMPL; }
-    STDMETHODIMP CreateStorage(const OLECHAR*,DWORD,DWORD,DWORD,IStorage**){ return E_NOTIMPL; }
-    STDMETHODIMP OpenStorage(const OLECHAR*,IStorage*,DWORD,SNB,DWORD,IStorage**){ return E_NOTIMPL; }
-    STDMETHODIMP CopyTo(DWORD,const IID*,SNB,IStorage*){ return E_NOTIMPL; }
-    STDMETHODIMP MoveElementTo(const OLECHAR*,IStorage*,const OLECHAR*,DWORD){ return E_NOTIMPL; }
-    STDMETHODIMP Commit(DWORD){ return S_OK; }
-    STDMETHODIMP Revert(){ return S_OK; }
-    STDMETHODIMP EnumElements(DWORD,void*,DWORD,IEnumSTATSTG**){ return E_NOTIMPL; }
-    STDMETHODIMP DestroyElement(const OLECHAR*){ return E_NOTIMPL; }
-    STDMETHODIMP RenameElement(const OLECHAR*,const OLECHAR*){ return E_NOTIMPL; }
-    STDMETHODIMP SetElementTimes(const OLECHAR*,const FILETIME*,const FILETIME*,const FILETIME*){ return E_NOTIMPL; }
-    STDMETHODIMP SetClass(REFCLSID){ return S_OK; }
-    STDMETHODIMP SetStateBits(DWORD,DWORD){ return S_OK; }
-    STDMETHODIMP Stat(STATSTG*,DWORD){ return E_NOTIMPL; }
+struct WaitState {
+    HWND owner = nullptr;
+    std::wstring url;
+    bool savedAtLeastOnce = false;
 };
 
-struct WebHost {
-    HostSite* site=nullptr;
-    IOleObject* ole=nullptr;
-    IWebBrowser2* wb=nullptr;
-    HWND hwnd=nullptr;
-};
-
-static const wchar_t* WD_CLS=L"AzWebDesigner";
-
-static bool createBrowser(WebHost* wh){
-    OleInitialize(NULL);
-    wh->site=new HostSite(wh->hwnd);
-    HRESULT hr=CoCreateInstance(CLSID_WebBrowser,NULL,CLSCTX_INPROC_SERVER,
-        IID_IOleObject,(void**)&wh->ole);
-    if(FAILED(hr)||!wh->ole) return false;
-    wh->ole->SetClientSite(wh->site);
-    OleSetContainedObject(wh->ole,TRUE);
-    RECT rc; GetClientRect(wh->hwnd,&rc);
-    hr=wh->ole->DoVerb(OLEIVERB_INPLACEACTIVATE,NULL,wh->site,0,wh->hwnd,&rc);
-    if(FAILED(hr)) return false;
-    hr=wh->ole->QueryInterface(IID_IWebBrowser2,(void**)&wh->wb);
-    if(FAILED(hr)||!wh->wb) return false;
-    return true;
-}
-
-static void sizeBrowser(WebHost* wh){
-    if(!wh||!wh->ole) return;
-    RECT rc; GetClientRect(wh->hwnd,&rc);
-    IOleInPlaceObject* ip=nullptr;
-    if(SUCCEEDED(wh->ole->QueryInterface(IID_IOleInPlaceObject,(void**)&ip))&&ip){
-        ip->SetObjectRects(&rc,&rc); ip->Release();
-    }
-    if(wh->wb){ wh->wb->put_Width(rc.right-rc.left); wh->wb->put_Height(rc.bottom-rc.top); }
-}
-
-static void navigate(WebHost* wh, const std::wstring& url){
-    if(!wh->wb) return;
-    VARIANT v; VariantInit(&v);
-    BSTR b=SysAllocString(url.c_str());
-    wh->wb->Navigate(b,&v,&v,&v,&v);
-    SysFreeString(b);
-}
-
-static void destroyBrowser(WebHost* wh){
-    if(wh->wb){ wh->wb->Stop(); wh->wb->Release(); wh->wb=nullptr; }
-    if(wh->ole){ wh->ole->Close(OLECLOSE_NOSAVE); wh->ole->SetClientSite(NULL); wh->ole->Release(); wh->ole=nullptr; }
-    if(wh->site){ wh->site->Release(); wh->site=nullptr; }
-}
-
-// poll the exit flag the page sets via /api/exit
-static VOID CALLBACK exitPoll(HWND h,UINT,UINT_PTR id,DWORD){
+// poll: close automatically if the page asked to exit.
+static VOID CALLBACK wdExitPoll(HWND h, UINT, UINT_PTR id, DWORD){
     if(InterlockedCompareExchange(&g_wdExitFlag,0,0)){
-        KillTimer(h,id); DestroyWindow(h);
+        KillTimer(h,id);
+        DestroyWindow(h);
     }
 }
 
-static LRESULT CALLBACK WdProc(HWND h,UINT m,WPARAM w,LPARAM l){
-    WebHost* wh=(WebHost*)GetWindowLongPtrW(h,GWLP_USERDATA);
+static void wdOpenInBrowser(const std::wstring& url){
+    // ShellExecute on an http URL launches the user's default browser. We do
+    // NOT shell to a specific browser so it works on locked-down machines.
+    ShellExecuteW(NULL, L"open", url.c_str(), NULL, NULL, SW_SHOWNORMAL);
+}
+
+static LRESULT CALLBACK WdWaitProc(HWND h, UINT m, WPARAM w, LPARAM l){
+    WaitState* st = (WaitState*)GetWindowLongPtrW(h, GWLP_USERDATA);
     switch(m){
-        case WM_SIZE: if(wh) sizeBrowser(wh); return 0;
-        case WM_CLOSE: DestroyWindow(h); return 0;
-        case WM_DESTROY: if(wh){ destroyBrowser(wh); } return 0;
+    case WM_COMMAND:{
+        int id=LOWORD(w);
+        if(id==101){ // «باز کردن دوباره در مرورگر»
+            if(st) wdOpenInBrowser(st->url);
+            return 0;
+        }
+        if(id==102){ // «پایان طراحی»
+            InterlockedExchange(&g_wdExitFlag,1);
+            DestroyWindow(h);
+            return 0;
+        }
+        return 0; }
+    case WM_CLOSE: DestroyWindow(h); return 0;
+    case WM_DESTROY: return 0;
     }
     return DefWindowProcW(h,m,w,l);
 }
 
 } // namespace
 
-bool WebDesigner_WebViewAvailable(){ return wdWebView2Present(); }
+bool WebDesigner_WebViewAvailable(){
+    // No embedded engine is required any more; the system browser is always
+    // available. Returning true keeps the public contract intact.
+    return true;
+}
 
 bool WebDesigner_Open(HWND owner, const std::vector<int>& sectionIds){
     int sid = sectionIds.empty()?0:sectionIds[0];
-    std::wstring url=WebDesigner_Url(sid);
-    if(url.empty()) return false;          // host failed → fall back to native
-    wdSetBrowserEmulation();
+    std::wstring url = WebDesigner_Url(sid);
+    if(url.empty()) return false;            // host failed → caller falls back
 
+    // launch the page in the default browser
+    wdOpenInBrowser(url);
+
+    // register the small native "session" window class once
     static bool reg=false;
-    if(!reg){ WNDCLASSW wc={}; wc.lpfnWndProc=WdProc; wc.hInstance=g_hInst;
-        wc.hCursor=LoadCursor(NULL,IDC_ARROW); wc.lpszClassName=WD_CLS;
-        wc.hbrBackground=(HBRUSH)(COLOR_WINDOW+1); wc.style=CS_HREDRAW|CS_VREDRAW;
-        if(!RegisterClassW(&wc)) return false; reg=true; }
-
-    RECT wa; SystemParametersInfoW(SPI_GETWORKAREA,0,&wa,0);
-    HWND h=CreateWindowExW(0,WD_CLS,L"\u0637\u0631\u0627\u062d \u0686\u0627\u067e",
-        WS_POPUP|WS_VISIBLE|WS_CLIPCHILDREN,
-        wa.left,wa.top,wa.right-wa.left,wa.bottom-wa.top,owner,NULL,g_hInst,NULL);
-    if(!h) return false;
-
-    WebHost* wh=new WebHost(); wh->hwnd=h;
-    SetWindowLongPtrW(h,GWLP_USERDATA,(LONG_PTR)wh);
-
-    if(!createBrowser(wh)){
-        destroyBrowser(wh); delete wh;
-        DestroyWindow(h);
-        return false;                      // → caller falls back to native
+    if(!reg){
+        WNDCLASSW wc={};
+        wc.lpfnWndProc=WdWaitProc; wc.hInstance=g_hInst;
+        wc.hCursor=LoadCursor(NULL,IDC_ARROW);
+        wc.hbrBackground=(HBRUSH)(COLOR_BTNFACE+1);
+        wc.lpszClassName=WD_CLS;
+        if(!RegisterClassW(&wc)){ return true; } // browser already open; treat as handled
+        reg=true;
     }
-    sizeBrowser(wh);
-    navigate(wh,url);
-    ShowWindow(h,SW_SHOW);
-    if(owner&&IsWindow(owner)) EnableWindow(owner,FALSE);
-    SetTimer(h,1,200,exitPoll);
 
-    // modal pump until the designer window closes
+    int W=460, H=210;
+    RECT wa; SystemParametersInfoW(SPI_GETWORKAREA,0,&wa,0);
+    int x=wa.left+((wa.right-wa.left)-W)/2;
+    int y=wa.top +((wa.bottom-wa.top)-H)/2;
+
+    HWND h=CreateWindowExW(WS_EX_TOPMOST|WS_EX_DLGMODALFRAME,WD_CLS,
+        L"\u0637\u0631\u0627\u062d \u0686\u0627\u067e \u2014 \u062c\u0644\u0633\u0647 \u0628\u0627\u0632 \u0627\u0633\u062a",
+        WS_POPUPWINDOW|WS_CAPTION|WS_VISIBLE,
+        x,y,W,H,owner,NULL,g_hInst,NULL);
+    if(!h) return true; // browser is open even if the helper window failed
+
+    WaitState* st=new WaitState();
+    st->owner=owner; st->url=url;
+    SetWindowLongPtrW(h,GWLP_USERDATA,(LONG_PTR)st);
+
+    HFONT f = g_fUI ? g_fUI : (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+    HWND info=CreateWindowExW(0,L"STATIC",
+        L"\u0637\u0631\u0627\u062d \u0686\u0627\u067e \u062f\u0631 \u0645\u0631\u0648\u0631\u06af\u0631 "
+        L"\u067e\u06cc\u0634\u200c\u0641\u0631\u0636 \u0628\u0627\u0632 \u0634\u062f.\n\n"
+        L"\u067e\u0633 \u0627\u0632 \u0637\u0631\u0627\u062d\u06cc\u060c \u062f\u06a9\u0645\u0647\u0654 "
+        L"\u00ab\u0630\u062e\u06cc\u0631\u0647 \u0648 \u0627\u0639\u0645\u0627\u0644\u00bb \u0631\u0627 "
+        L"\u062f\u0631 \u0645\u0631\u0648\u0631\u06af\u0631 \u0628\u0632\u0646\u06cc\u062f\u061b "
+        L"\u062a\u063a\u06cc\u06cc\u0631\u0627\u062a \u0628\u0644\u0627\u0641\u0627\u0635\u0644\u0647 "
+        L"\u0627\u0639\u0645\u0627\u0644 \u0645\u06cc\u200c\u0634\u0648\u062f.",
+        WS_CHILD|WS_VISIBLE|SS_LEFT,
+        16,12,W-34,96,h,NULL,g_hInst,NULL);
+    SendMessageW(info,WM_SETFONT,(WPARAM)f,TRUE);
+
+    HWND bReopen=CreateWindowExW(0,L"BUTTON",
+        L"\u0628\u0627\u0632 \u06a9\u0631\u062f\u0646 \u062f\u0648\u0628\u0627\u0631\u0647 \u062f\u0631 \u0645\u0631\u0648\u0631\u06af\u0631",
+        WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,
+        16,H-66,210,30,h,(HMENU)101,g_hInst,NULL);
+    SendMessageW(bReopen,WM_SETFONT,(WPARAM)f,TRUE);
+
+    HWND bDone=CreateWindowExW(0,L"BUTTON",
+        L"\u067e\u0627\u06cc\u0627\u0646 \u0637\u0631\u0627\u062d\u06cc",
+        WS_CHILD|WS_VISIBLE|BS_DEFPUSHBUTTON,
+        W-150,H-66,130,30,h,(HMENU)102,g_hInst,NULL);
+    SendMessageW(bDone,WM_SETFONT,(WPARAM)f,TRUE);
+
+    if(owner&&IsWindow(owner)) EnableWindow(owner,FALSE);
+    SetTimer(h,1,300,wdExitPoll);
+
+    // modal pump until the session window closes
     MSG msg;
     while(IsWindow(h) && GetMessageW(&msg,NULL,0,0)){
         if(msg.message==WM_QUIT){ PostQuitMessage((int)msg.wParam); break; }
@@ -215,7 +145,7 @@ bool WebDesigner_Open(HWND owner, const std::vector<int>& sectionIds){
         TranslateMessage(&msg); DispatchMessageW(&msg);
         if(!IsWindow(h)) break;
     }
-    delete wh;
+    delete st;
     if(owner&&IsWindow(owner)){ EnableWindow(owner,TRUE); SetForegroundWindow(owner); }
     return true;
 }

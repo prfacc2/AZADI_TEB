@@ -12,6 +12,10 @@ body{
 }
 .hidden{display:none !important}
 .muted{color:var(--muted);font-size:13px;line-height:1.9;padding:8px}
+/* §1.19.1 — chrome is LTR (preview LEFT, palette RIGHT) but all Persian copy
+   reads RTL. Force RTL on the text-bearing UI containers only. */
+.brand,.pal-cat h6,.pal-item,.insp-row label,.insp-sec h6,.layer-item .ly-name,
+.muted,#canvasHint,.rp-tab,.toast-msg,.insp-row,.tpl-thumb b{direction:rtl}
 
 /* ---------- toolbar ---------- */
 #topbar{

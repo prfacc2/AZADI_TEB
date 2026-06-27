@@ -119,3 +119,7 @@ int  ApptCounter_Peek(int sectionId);
 void PrintDesigner_Open(HWND hMain);
 //  Management → "بازگردانی دیزاین چاپ": import an .aztpl and apply to sections.
 void RestoreDesign_Open(HWND hMain);
+//  §1.19.1 — «تنظیمات چاپ» (Print Settings): pick a section, preview its current
+//  print design (enlargeable), download/upload an .aztpl, and apply it to the
+//  section. Reachable from the management Settings menu.
+void PrintCfg_Open(HWND hMain);

@@ -3127,3 +3127,23 @@ HWND createManageScreen(HWND frame){
     if(s_mg) mgLayout(h);
     return h;
 }
+
+// §1.19.1 — public «تنظیمات چاپ» entry, reachable from the management Settings
+// menu (user_settings.cpp). Opens the print-settings panel as a MODAL surface
+// (its own message pump) so it works whether or not the management screen is
+// the active surface. Independent of the dashboard's s_mg state.
+void PrintCfg_Open(HWND hMain){
+    HWND owner = hMain ? hMain : g_hFrame;
+    openPrintCfg(owner);
+    if(!s_pc || !IsWindow(s_pc)) return;
+    if(owner && IsWindow(owner)) EnableWindow(owner,FALSE);
+    MSG msg;
+    while(s_pc && IsWindow(s_pc) && GetMessageW(&msg,NULL,0,0)){
+        if(msg.message==WM_QUIT){ PostQuitMessage((int)msg.wParam); break; }
+        if(!(s_pc && IsWindow(s_pc))) break;
+        if(IsDialogMessageW(s_pc,&msg)){ if(!(s_pc && IsWindow(s_pc))) break; continue; }
+        TranslateMessage(&msg); DispatchMessageW(&msg);
+        if(!(s_pc && IsWindow(s_pc))) break;
+    }
+    if(owner && IsWindow(owner)){ EnableWindow(owner,TRUE); SetForegroundWindow(owner); }
+}
