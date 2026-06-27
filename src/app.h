@@ -177,6 +177,8 @@ bool gpDrawBackground(HDC dc, RECT rc, bool dark, COLORREF scrim, int scrimA);
 //  GDI+ / resource unavailable so callers fall back to the vector drawIcon().
 bool gpDrawTintedImageRes(HDC dc, int resId, RECT rc, COLORREF tint);
 bool gpDrawImageFileCircle(HDC dc, const std::wstring& path, RECT rc);
+// v1.20.0: aspect-fit an image (file path OR data:base64 URI) into a rect.
+bool gpDrawImageRectAny(HDC dc, const std::wstring& src, RECT rc);
 //  RCDATA ids of the print-action raster icons (see app.rc):
 #define IMG_IC_PRINTER 201
 #define IMG_IC_RECEIPT 202

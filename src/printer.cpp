@@ -1229,20 +1229,31 @@ bool printPrintDesign(const ReceptionRecord& r, int sectionId, HWND owner){
             HPEN p=CreatePen(PS_SOLID,wpx,it.borderColor); HGDIOBJ o=SelectObject(dc,p);
             MoveToEx(dc,x0,y0,0); LineTo(dc,x0,y1); SelectObject(dc,o); DeleteObject(p);
         } else if(it.type==PIT_RECT||it.type==PIT_FRAME||it.type==PIT_LOGO||
-                  it.type==PIT_PHOTO||it.type==PIT_QR){
+                  it.type==PIT_PHOTO||it.type==PIT_QR||it.type==PIT_IMAGE){
             int wpx=(int)(it.borderWidth*sx); if(wpx<1)wpx=1;
             HPEN p=CreatePen(PS_SOLID,wpx,it.borderColor); HGDIOBJ o=SelectObject(dc,p);
             HGDIOBJ ob=SelectObject(dc,GetStockObject(NULL_BRUSH));
-            Rectangle(dc,x0,y0,x1,y1);
+            // v1.20.0: PIT_IMAGE with a real picture draws no border box.
+            bool isImgItem=(it.type==PIT_LOGO||it.type==PIT_PHOTO||it.type==PIT_IMAGE);
+            if(!(isImgItem && !it.imgPath.empty()))
+                Rectangle(dc,x0,y0,x1,y1);
             SelectObject(dc,ob); SelectObject(dc,o); DeleteObject(p);
-            if(it.type==PIT_LOGO||it.type==PIT_QR||it.type==PIT_PHOTO){
-                std::wstring ph=(it.type==PIT_LOGO)?L"لوگو":(it.type==PIT_QR?L"QR":L"عکس");
+            if(it.type==PIT_LOGO||it.type==PIT_QR||it.type==PIT_PHOTO||it.type==PIT_IMAGE){
                 RECT rr={x0,y0,x1,y1};
-                HFONT f=CreateFontW(-(int)(9*dpiY/72.0),0,0,0,FW_NORMAL,0,0,0,
-                    DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Vazirmatn");
-                HGDIOBJ of=SelectObject(dc,f); SetTextColor(dc,RGB(150,150,150));
-                DrawTextW(dc,ph.c_str(),-1,&rr,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
-                SelectObject(dc,of); DeleteObject(f);
+                // v1.20.0: if the item carries an actual image (uploaded logo /
+                // patient photo / image, stored as a file path or data:base64 URI),
+                // render the picture; otherwise fall back to a labelled box.
+                bool drawn=false;
+                if(isImgItem && !it.imgPath.empty())
+                    drawn=gpDrawImageRectAny(dc,it.imgPath,rr);
+                if(!drawn){
+                    std::wstring ph=(it.type==PIT_LOGO)?L"لوگو":(it.type==PIT_QR?L"QR":(it.type==PIT_IMAGE?L"تصویر":L"عکس"));
+                    HFONT f=CreateFontW(-(int)(9*dpiY/72.0),0,0,0,FW_NORMAL,0,0,0,
+                        DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Vazirmatn");
+                    HGDIOBJ of=SelectObject(dc,f); SetTextColor(dc,RGB(150,150,150));
+                    DrawTextW(dc,ph.c_str(),-1,&rr,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
+                    SelectObject(dc,of); DeleteObject(f);
+                }
             }
         } else { // text-bearing: LABEL / FIELD / APPTNO
             std::wstring s=it.text;

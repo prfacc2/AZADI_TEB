@@ -1,664 +1,806 @@
-/* designer.js — print designer engine (lightweight, dependency-free).
-   Talks to C++ via window.azBridge when embedded; falls back to standalone
-   browser mode (localStorage) for testing. */
-(function(){
-"use strict";
+/* ===========================================================================
+   designer.js — Azadi-Teb professional print designer engine (v1.20.0)
+   Dependency-free, RTL-aware WYSIWYG editor. Talks to C++ over the loopback
+   HTTP host (/api/*) using ASYNCHRONOUS XHR (no sync XHR, no sync-timeout —
+   fixes the deprecated-sync console warnings AND the "save error" bug where a
+   synchronous request with a timeout attribute threw in some browsers).
+   =========================================================================== */
+(function () {
+  "use strict";
 
-// ----------------------------------------------------------------- bridge ---
-// In the embedded host, C++ injects window.azBridge.call(verb,jsonArgs)->jsonStr
-// (WebView2 / native message channel). We also support a postMessage fallback.
-// The designer is served by the app's loopback HTTP host. The bridge talks to
-// it via synchronous same-origin requests to /api/* — this is engine-agnostic
-// (works in WebView2, Trident, or any browser) and needs no script injection.
-// When the page is opened from a plain file:// (developer mode) the bridge is
-// considered absent and the designer runs standalone (localStorage).
-// §1.19.1 — the page is served by the app's loopback HTTP host and opened in
-// the system browser. The bridge talks to /api/* over same-origin requests.
-// We keep a SHORT synchronous request (with a hard timeout) because every call
-// site is simple request/response; the host replies instantly from memory so
-// there is no perceptible block, and this keeps the call sites trivial. If the
-// page is opened from file:// (developer mode) the bridge is absent and the
-// designer runs fully standalone (localStorage + file download/upload).
-var Bridge = {
-  _on: (location.protocol === "http:" || location.protocol === "https:"),
-  request: function(verb, args){
-    if(!this._on) return null;
-    try{
-      var xhr = new XMLHttpRequest();
-      xhr.open("POST", "api/"+verb, false);   // same-origin, loopback, instant
-      xhr.timeout = 4000;                       // never hang the UI
-      xhr.setRequestHeader("Content-Type","application/json;charset=utf-8");
-      xhr.send(JSON.stringify(args||{}));
-      if(xhr.status>=200 && xhr.status<300){
-        return xhr.responseText ? JSON.parse(xhr.responseText) : {};
-      }
-    }catch(e){ /* host not reachable → behave like standalone */ }
-    return null;
-  },
-  has: function(){ return this._on; }
-};
-
-// ------------------------------------------------------------- paper data ---
-var PAPER = {A4:[210,297],A5:[148,210],A6:[105,148],B5:[176,250],
-             Letter:[215.9,279.4],R80:[80,200],R58:[58,200]};
-function paperDims(p,orient){ var d=PAPER[p]||[148,210]; var w=d[0],h=d[1];
-  if(orient===1){var t=w;w=h;h=t;} return [w,h]; }
-
-// ------------------------------------------------------------- app state ----
-var S = {
-  design: null,        // current PrintDesign
-  selId: 0,
-  zoom: 1,             // px per mm baseline computed in fitZoom
-  pxPerMM: 3.78,       // base (96dpi: 1mm≈3.7795px)
-  scale: 1,            // zoom multiplier
-  undo: [], redo: [],
-  dirty: false,
-  templates: window.AZ_TEMPLATES || []
-};
-
-var $paper = document.getElementById("paper");
-var $scroll = document.getElementById("canvasScroll");
-var $selBox = document.getElementById("selBox");
-
-// ---------------------------------------------------------------- helpers ---
-function faDigits(s){ s=String(s); var f="۰۱۲۳۴۵۶۷۸۹";
-  return s.replace(/[0-9]/g,function(d){return f[+d];}); }
-function clone(o){ return JSON.parse(JSON.stringify(o)); }
-function genId(){ var m=0; (S.design.items||[]).forEach(function(it){ if(it.id>m)m=it.id; }); return m+1; }
-function findItem(id){ return (S.design.items||[]).find(function(it){return it.id===id;}); }
-function toast(msg){ var t=document.getElementById("toast"); t.textContent=msg;
-  t.classList.remove("hidden"); t.classList.add("show");
-  clearTimeout(toast._t); toast._t=setTimeout(function(){ t.classList.remove("show");
-    setTimeout(function(){t.classList.add("hidden");},220); },1800); }
-
-// ------------------------------------------------------------- undo stack ---
-function pushUndo(){ S.undo.push(clone(S.design)); if(S.undo.length>60) S.undo.shift();
-  S.redo.length=0; S.dirty=true; updateUndoButtons(); }
-function doUndo(){ if(!S.undo.length) return; S.redo.push(clone(S.design));
-  S.design=S.undo.pop(); S.selId=0; renderAll(); updateUndoButtons(); toast("بازگشت"); }
-function doRedo(){ if(!S.redo.length) return; S.undo.push(clone(S.design));
-  S.design=S.redo.pop(); S.selId=0; renderAll(); updateUndoButtons(); toast("جلو"); }
-function updateUndoButtons(){
-  document.getElementById("btnUndo").disabled=!S.undo.length;
-  document.getElementById("btnRedo").disabled=!S.redo.length; }
-
-// ------------------------------------------------------------- rendering ----
-var ITEM_LABELS = {label:"برچسب",field:"داده",hline:"خط افقی",vline:"خط عمودی",
-  rect:"کادر",frame:"حاشیه صفحه",logo:"لوگو",photo:"عکس بیمار",qr:"بارکد/QR",apptno:"شماره نوبت"};
-
-function mm(v){ return v*S.pxPerMM*S.scale; }
-
-function styleItem(el,it){
-  el.style.left=mm(it.x)+"px"; el.style.top=mm(it.y)+"px";
-  el.style.width=mm(it.w)+"px"; el.style.height=mm(it.h)+"px";
-  el.style.transform = it.rot ? "rotate("+it.rot+"deg)" : "";
-  el.style.opacity = (it.opacity==null?1:it.opacity);
-  el.style.zIndex = it.z||0;
-}
-
-function sampleFor(it){
-  if(it.type==="field"){
-    var f=window.AZ_FIELDS[it.field];
-    return (it.prefix||"") + (f?f.sample:(it.field||"داده"));
-  }
-  if(it.type==="apptno") return faDigits(it.startValue||1);
-  return it.text||"";
-}
-
-function buildItemEl(it){
-  var el=document.createElement("div");
-  el.className="pi pi-"+it.type; el.dataset.id=it.id;
-  styleItem(el,it);
-
-  if(it.type==="label"||it.type==="field"||it.type==="apptno"){
-    var t=document.createElement("div"); t.className="pi-text";
-    t.textContent = it.type==="label" ? (it.text||"برچسب") : sampleFor(it);
-    t.style.color=it.textColor||"#000";
-    t.style.fontSize=mm(it.pt*0.3528)+"px"; // pt->mm->px
-    t.style.fontWeight=it.bold?"700":"400";
-    t.style.fontStyle=it.italic?"italic":"normal";
-    t.style.fontFamily=it.font||"Vazirmatn";
-    t.style.lineHeight=it.lineSpacing||1.2;
-    t.style.textAlign = it.align===1?"center":(it.align===2?"left":"right");
-    el.style.justifyContent = it.align===1?"center":(it.align===2?"flex-start":"flex-end");
-    if(!it.fillTransparent){ el.style.background=it.fillColor||"#fff"; }
-    if(it.borderWidth>0){ el.style.border=mm(it.borderWidth)+"px "+borderCss(it.borderStyle)+" "+(it.borderColor||"#000"); }
-    if(it.corner>0) el.style.borderRadius=mm(it.corner)+"px";
-    el.appendChild(t);
-  } else if(it.type==="hline"){
-    el.style.borderTop=Math.max(1,mm(it.borderWidth))+"px "+borderCss(it.borderStyle)+" "+(it.borderColor||"#000");
-    el.style.height="0";
-  } else if(it.type==="vline"){
-    el.style.borderInlineStart=Math.max(1,mm(it.borderWidth))+"px "+borderCss(it.borderStyle)+" "+(it.borderColor||"#000");
-    el.style.width="0";
-  } else if(it.type==="rect"||it.type==="frame"){
-    el.style.border=Math.max(1,mm(it.borderWidth))+"px "+borderCss(it.borderStyle)+" "+(it.borderColor||"#000");
-    if(it.corner>0) el.style.borderRadius=mm(it.corner)+"px";
-    if(!it.fillTransparent) el.style.background=it.fillColor;
-  } else if(it.type==="logo"||it.type==="photo"||it.type==="qr"){
-    el.textContent = it.type==="logo"?"لوگو":(it.type==="qr"?"QR":"عکس");
-    if(it.borderWidth>0) el.style.border=Math.max(1,mm(it.borderWidth))+"px solid "+(it.borderColor||"#aaa");
-  }
-  return el;
-}
-function borderCss(s){ return s===1?"dashed":(s===2?"dotted":(s===3?"double":"solid")); }
-
-function renderAll(){
-  if(!S.design) return;
-  var d=paperDims(S.design.paper,S.design.orientation);
-  S.design.paperW=d[0]; S.design.paperH=d[1];
-  $paper.style.width=mm(S.design.paperW)+"px";
-  $paper.style.height=mm(S.design.paperH)+"px";
-  // remove old items (keep selBox)
-  Array.prototype.slice.call($paper.querySelectorAll(".pi")).forEach(function(n){n.remove();});
-  var items=(S.design.items||[]).slice().sort(function(a,b){return (a.z||0)-(b.z||0);});
-  items.forEach(function(it){ $paper.appendChild(buildItemEl(it)); });
-  syncToolbar(); renderSelection(); renderLayers();
-}
-
-function renderSelection(){
-  var it=findItem(S.selId);
-  if(!it){ $selBox.classList.add("hidden");
-    Array.prototype.slice.call($paper.querySelectorAll(".pi.sel")).forEach(function(n){n.classList.remove("sel");});
-    return; }
-  Array.prototype.slice.call($paper.querySelectorAll(".pi")).forEach(function(n){
-    n.classList.toggle("sel", +n.dataset.id===S.selId); });
-  $selBox.classList.remove("hidden");
-  $selBox.style.left=mm(it.x)+"px"; $selBox.style.top=mm(it.y)+"px";
-  $selBox.style.width=mm(it.w)+"px"; $selBox.style.height=mm(it.h)+"px";
-  $selBox.style.transform = it.rot?"rotate("+it.rot+"deg)":"";
-}
-
-// ------------------------------------------------------------- toolbar ------
-function syncToolbar(){
-  document.getElementById("paperSel").value=S.design.paper;
-  document.getElementById("orientSel").value=String(S.design.orientation||0);
-  document.getElementById("zoomLbl").textContent=faDigits(Math.round(S.scale*100))+"٪";
-}
-
-// ------------------------------------------------------------- zoom/pan -----
-function setScale(s, anchorClientX, anchorClientY){
-  s=Math.max(0.25,Math.min(4,s));
-  S.scale=s; renderAll();
-}
-function fitZoom(){
-  var availW=$scroll.clientWidth-60, availH=$scroll.clientHeight-80;
-  var d=paperDims(S.design.paper,S.design.orientation);
-  var sw=availW/(d[0]*S.pxPerMM), sh=availH/(d[1]*S.pxPerMM);
-  S.scale=Math.max(0.25,Math.min(2,Math.min(sw,sh)));
-  renderAll();
-}
-
-// ----------------------------------------------------------- palette --------
-function buildPalette(){
-  var list=document.getElementById("paletteList"); list.innerHTML="";
-  // generic tools category first
-  var tools=[
-    {t:"label",ic:"🇹",l:"برچسب / متن"},
-    {t:"hline",ic:"—",l:"خط افقی"},
-    {t:"vline",ic:"│",l:"خط عمودی"},
-    {t:"rect",ic:"▭",l:"کادر / مستطیل"},
-    {t:"frame",ic:"⬚",l:"حاشیه صفحه"},
-    {t:"logo",ic:"🖼",l:"لوگو درمانگاه"},
-    {t:"photo",ic:"👤",l:"عکس بیمار"},
-    {t:"qr",ic:"▦",l:"بارکد / QR"},
-    {t:"apptno",ic:"#",l:"شماره نوبت"},
-  ];
-  list.appendChild(catEl("ابزارهای طراحی", tools.map(function(o){
-    return palItem(o.l,o.ic,function(){ addItem(o.t); }); })));
-
-  // data-field categories
-  (window.AZ_FIELD_CATS||[]).forEach(function(cat){
-    var els=cat.items.map(function(f){
-      return palItem(f.label,"⬡",function(){ addField(f.key,f.label); }); });
-    list.appendChild(catEl(cat.title, els));
-  });
-}
-function catEl(title, children){
-  var c=document.createElement("div"); c.className="pal-cat";
-  var h=document.createElement("h6"); h.textContent=title; c.appendChild(h);
-  var g=document.createElement("div"); g.className="pal-grid";
-  children.forEach(function(ch){ g.appendChild(ch); });
-  c.appendChild(g); return c;
-}
-function palItem(label, ic, on){
-  var d=document.createElement("div"); d.className="pal-item"; d.title=label;
-  d.dataset.search=label.toLowerCase();
-  var i=document.createElement("span"); i.className="ic"; i.textContent=ic;
-  var s=document.createElement("span"); s.textContent=label;
-  d.appendChild(i); d.appendChild(s);
-  d.addEventListener("click",on); return d;
-}
-function filterPalette(q){
-  q=(q||"").trim().toLowerCase();
-  Array.prototype.slice.call(document.querySelectorAll("#paletteList .pal-item")).forEach(function(el){
-    el.style.display = (!q || el.dataset.search.indexOf(q)>=0) ? "" : "none"; });
-  Array.prototype.slice.call(document.querySelectorAll("#paletteList .pal-cat")).forEach(function(c){
-    var any=Array.prototype.slice.call(c.querySelectorAll(".pal-item")).some(function(e){return e.style.display!=="none";});
-    c.style.display=any?"":"none"; });
-}
-
-// ------------------------------------------------------------- add items ----
-function defaultsFor(type){
-  var base={id:genId(),type:type,x:20,y:20,w:50,h:8,rot:0,z:(S.design.items.length+1),
-    locked:false,text:"",field:"",prefix:"",suffix:"",font:"Vazirmatn",pt:11,
-    bold:false,italic:false,align:0,lineSpacing:1.2,textColor:"#000000",
-    fillColor:"#ffffff",fillTransparent:true,borderColor:"#000000",borderWidth:0,
-    borderStyle:0,corner:0,padding:1,opacity:1,visibility:0,startValue:1,step:1};
-  if(type==="label"){ base.text="متن نمونه"; }
-  if(type==="hline"){ base.w=60; base.h=0.4; base.borderWidth=0.4; }
-  if(type==="vline"){ base.w=0.4; base.h=40; base.borderWidth=0.4; }
-  if(type==="rect"){ base.w=50; base.h=30; base.borderWidth=0.4; }
-  if(type==="frame"){ base.x=8;base.y=8;base.isFrame=true;
-    base.w=S.design.paperW-16; base.h=S.design.paperH-16; base.borderWidth=0.6; }
-  if(type==="logo"){ base.w=22; base.h=22; }
-  if(type==="photo"){ base.w=24; base.h=30; base.borderWidth=0.3; }
-  if(type==="qr"){ base.w=24; base.h=24; base.field="{receiptNo}"; }
-  if(type==="apptno"){ base.w=40; base.h=12; base.pt=22; base.bold=true; base.align=1; }
-  return base;
-}
-function addItem(type){
-  pushUndo(); var it=defaultsFor(type);
-  S.design.items.push(it); S.selId=it.id; renderAll(); switchTab("inspector"); }
-function addField(key,label){
-  pushUndo(); var it=defaultsFor("field");
-  it.field=key; it.prefix=(label?label+": ":""); it.w=60;
-  S.design.items.push(it); S.selId=it.id; renderAll(); switchTab("inspector"); }
-
-// ------------------------------------------------------------- inspector ----
-function switchTab(name){
-  Array.prototype.slice.call(document.querySelectorAll(".rp-tab")).forEach(function(t){
-    t.classList.toggle("active",t.dataset.tab===name); });
-  Array.prototype.slice.call(document.querySelectorAll(".rp-pane")).forEach(function(p){
-    p.classList.toggle("active",p.id==="pane-"+name); });
-  if(name==="inspector") renderInspector();
-  else if(name==="layers") renderLayers();
-}
-function row(label, control){
-  var r=document.createElement("div"); r.className="insp-row";
-  if(label){ var l=document.createElement("label"); l.textContent=label; r.appendChild(l); }
-  r.appendChild(control); return r;
-}
-function inp(type,val,on){ var i=document.createElement("input"); i.type=type;
-  i.className="form-control form-control-sm"; if(val!=null)i.value=val;
-  i.addEventListener("input",function(){on(i.value,i);}); return i; }
-function numInp(val,on,step){ var i=inp("number",val,function(v){on(parseFloat(v)||0);});
-  i.step=step||"0.5"; return i; }
-function colorInp(val,on){ return inp("color",val||"#000000",function(v){on(v);}); }
-function sel(opts,val,on){ var s=document.createElement("select");
-  s.className="form-select form-select-sm";
-  opts.forEach(function(o){ var op=document.createElement("option");
-    op.value=o[0]; op.textContent=o[1]; if(String(o[0])===String(val))op.selected=true;
-    s.appendChild(op); });
-  s.addEventListener("change",function(){on(s.value);}); return s; }
-function chk(label,val,on){ var w=document.createElement("label"); w.className="row-inline";
-  var c=document.createElement("input"); c.type="checkbox"; c.checked=!!val;
-  c.addEventListener("change",function(){on(c.checked);});
-  var t=document.createElement("span"); t.textContent=label;
-  w.appendChild(c); w.appendChild(t); return w; }
-function grid2(a,b){ var g=document.createElement("div"); g.className="insp-grid2";
-  g.appendChild(a); g.appendChild(b); return g; }
-function secEl(title){ var s=document.createElement("div"); s.className="insp-sec";
-  var h=document.createElement("h6"); h.textContent=title; s.appendChild(h); return s; }
-
-function renderInspector(){
-  var body=document.getElementById("inspectorBody");
-  var empty=document.getElementById("inspectorEmpty");
-  var it=findItem(S.selId);
-  if(!it){ body.classList.add("hidden"); empty.classList.remove("hidden"); return; }
-  empty.classList.add("hidden"); body.classList.remove("hidden"); body.innerHTML="";
-
-  function commit(){ S.dirty=true; renderAll(); }
-
-  // header / type
-  var head=document.createElement("div"); head.className="insp-row";
-  head.innerHTML='<label>نوع آیتم</label><b>'+(ITEM_LABELS[it.type]||it.type)+'</b>';
-  body.appendChild(head);
-
-  // text / field binding
-  if(it.type==="label"){
-    body.appendChild(row("متن", (function(){ var ta=document.createElement("textarea");
-      ta.className="form-control form-control-sm"; ta.rows=2; ta.value=it.text||"";
-      ta.addEventListener("input",function(){ it.text=ta.value; commit(); }); return ta; })()));
-  }
-  if(it.type==="field"){
-    var opts=[]; (window.AZ_FIELD_CATS||[]).forEach(function(c){ c.items.forEach(function(f){
-      opts.push([f.key, c.title+" › "+f.label]); }); });
-    body.appendChild(row("داده", sel(opts,it.field,function(v){ it.field=v; commit(); })));
-    body.appendChild(row("پیشوند", inp("text",it.prefix,function(v){ it.prefix=v; commit(); })));
-    body.appendChild(row("پسوند", inp("text",it.suffix,function(v){ it.suffix=v; commit(); })));
-  }
-  if(it.type==="apptno"){
-    body.appendChild(grid2(
-      row("شروع از", numInp(it.startValue,function(v){it.startValue=Math.round(v);commit();},"1")),
-      row("گام", numInp(it.step,function(v){it.step=Math.round(v)||1;commit();},"1"))));
-  }
-
-  // position & size
-  var pos=secEl("موقعیت و اندازه (میلی‌متر)");
-  pos.appendChild(grid2(row("X", numInp(round1(it.x),function(v){it.x=v;commit();})),
-                         row("Y", numInp(round1(it.y),function(v){it.y=v;commit();}))));
-  pos.appendChild(grid2(row("عرض", numInp(round1(it.w),function(v){it.w=Math.max(0.5,v);commit();})),
-                         row("ارتفاع", numInp(round1(it.h),function(v){it.h=Math.max(0.2,v);commit();}))));
-  pos.appendChild(grid2(row("چرخش°", numInp(round1(it.rot),function(v){it.rot=v;commit();},"1")),
-                         row("لایه (Z)", numInp(it.z||0,function(v){it.z=Math.round(v);commit();},"1"))));
-  body.appendChild(pos);
-
-  // text styling
-  if(it.type==="label"||it.type==="field"||it.type==="apptno"){
-    var ts=secEl("متن");
-    ts.appendChild(grid2(
-      row("فونت", sel([["Vazirmatn","وزیر"],["Tahoma","تهوما"],["Arial","Arial"],["Times New Roman","Times"]],it.font,function(v){it.font=v;commit();})),
-      row("اندازه (pt)", numInp(it.pt,function(v){it.pt=Math.max(4,v);commit();},"0.5"))));
-    var styRow=document.createElement("div"); styRow.className="insp-grid3";
-    styRow.appendChild(chk("توپر",it.bold,function(v){it.bold=v;commit();}));
-    styRow.appendChild(chk("مورب",it.italic,function(v){it.italic=v;commit();}));
-    styRow.appendChild(sel([[0,"راست"],[1,"وسط"],[2,"چپ"]],it.align,function(v){it.align=+v;commit();}));
-    ts.appendChild(row("سبک / چینش",styRow));
-    ts.appendChild(grid2(
-      row("رنگ متن", colorInp(it.textColor,function(v){it.textColor=v;commit();})),
-      row("فاصله خطوط", numInp(it.lineSpacing,function(v){it.lineSpacing=v||1.2;commit();},"0.1"))));
-    body.appendChild(ts);
-  }
-
-  // fill & border (for boxes/labels)
-  if(it.type!=="hline"&&it.type!=="vline"){
-    var fb=secEl("پس‌زمینه و کادر");
-    fb.appendChild(row("شفاف بودن پس‌زمینه", chk("بدون پس‌زمینه",it.fillTransparent,function(v){it.fillTransparent=v;commit();})));
-    fb.appendChild(grid2(
-      row("رنگ پس‌زمینه", colorInp(it.fillColor,function(v){it.fillColor=v;commit();})),
-      row("گردی گوشه (mm)", numInp(it.corner,function(v){it.corner=Math.max(0,v);commit();},"0.5"))));
-    fb.appendChild(grid2(
-      row("ضخامت کادر (mm)", numInp(it.borderWidth,function(v){it.borderWidth=Math.max(0,v);commit();},"0.1")),
-      row("رنگ کادر", colorInp(it.borderColor,function(v){it.borderColor=v;commit();}))));
-    fb.appendChild(row("نوع کادر", sel([[0,"پیوسته"],[1,"چین‌چین"],[2,"نقطه‌چین"],[3,"دوخطه"]],it.borderStyle,function(v){it.borderStyle=+v;commit();})));
-    body.appendChild(fb);
-  } else {
-    var lb=secEl("خط");
-    lb.appendChild(grid2(
-      row("ضخامت (mm)", numInp(it.borderWidth,function(v){it.borderWidth=Math.max(0.1,v);commit();},"0.1")),
-      row("رنگ", colorInp(it.borderColor,function(v){it.borderColor=v;commit();}))));
-    lb.appendChild(row("نوع خط", sel([[0,"پیوسته"],[1,"چین‌چین"],[2,"نقطه‌چین"]],it.borderStyle,function(v){it.borderStyle=+v;commit();})));
-    body.appendChild(lb);
-  }
-
-  // advanced
-  var adv=secEl("پیشرفته");
-  adv.appendChild(row("شفافیت (٪)", numInp(Math.round((it.opacity==null?1:it.opacity)*100),function(v){it.opacity=Math.max(0,Math.min(1,v/100));commit();},"5")));
-  adv.appendChild(row("نمایش", sel([[0,"همیشه"],[1,"فقط وقتی داده خالی نیست"]],it.visibility,function(v){it.visibility=+v;commit();})));
-  adv.appendChild(chk("قفل (غیرقابل جابه‌جایی)",it.locked,function(v){it.locked=v;commit();}));
-  body.appendChild(adv);
-
-  // actions
-  var act=document.createElement("div"); act.className="insp-sec";
-  var dup=document.createElement("button"); dup.className="btn btn-sm btn-outline btn-block";
-  dup.textContent="تکثیر آیتم"; dup.style.marginBottom="6px";
-  dup.addEventListener("click",function(){ pushUndo(); var c=clone(it); c.id=genId(); c.x+=4; c.y+=4; c.z=(it.z||0)+1;
-    S.design.items.push(c); S.selId=c.id; renderAll(); renderInspector(); });
-  var del=document.createElement("button"); del.className="btn btn-sm btn-del btn-block";
-  del.textContent="حذف آیتم";
-  del.addEventListener("click",function(){ deleteSelected(); });
-  act.appendChild(dup); act.appendChild(del); body.appendChild(act);
-}
-function round1(v){ return Math.round(v*10)/10; }
-
-function deleteSelected(){ // delete selected
-  var it=findItem(S.selId); if(!it) return;
-  pushUndo(); S.design.items=S.design.items.filter(function(x){return x.id!==S.selId;});
-  S.selId=0; renderAll(); renderInspector(); }
-
-// re-render inspector when selection changes
-var _origRenderSel=renderSelection;
-renderSelection=function(){ _origRenderSel(); if(document.getElementById("pane-inspector").classList.contains("active")) renderInspector(); };
-
-// ------------------------------------------------------------- layers -------
-function renderLayers(){
-  var box=document.getElementById("layerList"); if(!box) return; box.innerHTML="";
-  var items=(S.design.items||[]).slice().sort(function(a,b){return (b.z||0)-(a.z||0);});
-  items.forEach(function(it){
-    var d=document.createElement("div"); d.className="layer-item"+(it.id===S.selId?" sel":"");
-    var name=document.createElement("span"); name.className="ly-name";
-    name.textContent=(ITEM_LABELS[it.type]||it.type)+(it.type==="label"?(" — "+(it.text||"").slice(0,12)):(it.type==="field"?(" — "+(window.AZ_FIELDS[it.field]?window.AZ_FIELDS[it.field].label:it.field)):""));
-    d.appendChild(name);
-    var up=document.createElement("button"); up.textContent="▲"; up.title="بالا";
-    up.addEventListener("click",function(e){e.stopPropagation(); pushUndo(); it.z=(it.z||0)+1; renderAll();});
-    var dn=document.createElement("button"); dn.textContent="▼"; dn.title="پایین";
-    dn.addEventListener("click",function(e){e.stopPropagation(); pushUndo(); it.z=(it.z||0)-1; renderAll();});
-    d.appendChild(up); d.appendChild(dn);
-    d.addEventListener("click",function(){ S.selId=it.id; renderAll(); switchTab("inspector"); });
-    box.appendChild(d);
-  });
-}
-
-// ------------------------------------------------------------ templates -----
-function buildTemplateStrip(){
-  var strip=document.getElementById("templateStrip"); strip.innerHTML="";
-  S.templates.forEach(function(t,i){
-    var th=document.createElement("div"); th.className="tpl-thumb"; th.title=t.name;
-    var cv=document.createElement("canvas"); cv.width=92; cv.height=68; th.appendChild(cv);
-    var b=document.createElement("b"); b.textContent=t.name; th.appendChild(b);
-    drawThumb(cv,t);
-    th.addEventListener("click",function(){ applyTemplate(i); });
-    strip.appendChild(th);
-  });
-}
-function drawThumb(cv,t){
-  var ctx=cv.getContext("2d"); var d=paperDims(t.paper,t.orientation);
-  var pad=4, aw=cv.width-pad*2, ah=cv.height-pad*2;
-  var s=Math.min(aw/d[0],ah/d[1]); var ox=(cv.width-d[0]*s)/2, oy=pad;
-  ctx.fillStyle="#fff"; ctx.fillRect(ox,oy,d[0]*s,d[1]*s);
-  ctx.strokeStyle="#ccc"; ctx.strokeRect(ox,oy,d[0]*s,d[1]*s);
-  (t.items||[]).forEach(function(it){
-    var x=ox+it.x*s,y=oy+it.y*s,w=it.w*s,h=it.h*s;
-    if(it.type==="label"||it.type==="field"||it.type==="apptno"){
-      ctx.fillStyle=it.bold?"#1f7ae0":"#555";
-      ctx.fillRect(x,y+h*0.3,Math.max(2,w),Math.max(1,h*0.4));
-    } else if(it.type==="hline"){ ctx.strokeStyle="#888"; ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x+w,y); ctx.stroke(); }
-    else if(it.type==="vline"){ ctx.strokeStyle="#888"; ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x,y+h); ctx.stroke(); }
-    else { ctx.strokeStyle="#aaa"; ctx.strokeRect(x,y,w,h); }
-  });
-}
-function applyTemplate(i){
-  var t=S.templates[i]; if(!t) return;
-  pushUndo();
-  var nd=clone(t); nd.id=S.design.id; nd.name=S.design.name||t.name; nd.kind="user";
-  // keep section target; assign fresh ids
-  var k=1; (nd.items||[]).forEach(function(it){ it.id=k++; });
-  S.design=nd; S.selId=0; renderAll(); fitZoom();
-  toast("طرح آماده اعمال شد — می‌توانید آن را ویرایش و ذخیره کنید");
-}
-
-// ------------------------------------------------------------ interactions --
-// click-select + drag-move on items; resize/rotate via handles
-var drag=null;
-$paper.addEventListener("pointerdown",function(e){
-  var piEl=e.target.closest(".pi");
-  var handle=e.target.classList.contains("handle")?e.target:null;
-  if(handle){
-    var it=findItem(S.selId); if(!it||it.locked) return;
-    pushUndo();
-    drag={mode:"resize",handle:handleDir(handle),it:it,sx:e.clientX,sy:e.clientY,
-      ox:it.x,oy:it.y,ow:it.w,oh:it.h,orot:it.rot};
-    if(handle.classList.contains("h-rot")) drag.mode="rotate";
-    $paper.setPointerCapture(e.pointerId); e.preventDefault(); return;
-  }
-  if(piEl){
-    var id=+piEl.dataset.id; S.selId=id; renderAll(); switchTab("inspector");
-    var sel=findItem(id);
-    if(sel && !sel.locked){
-      pushUndo();
-      drag={mode:"move",it:sel,sx:e.clientX,sy:e.clientY,ox:sel.x,oy:sel.y};
-      $paper.setPointerCapture(e.pointerId);
+  /* ------------------------------------------------------------- bridge --- */
+  // Async request to the loopback host. cb(resultObjOrNull). Falls back to
+  // standalone (no host) when not served over http(s).
+  var Bridge = {
+    _on: (location.protocol === "http:" || location.protocol === "https:"),
+    has: function () { return this._on; },
+    request: function (verb, args, cb) {
+      cb = cb || function () {};
+      if (!this._on) { cb(null); return; }
+      try {
+        var xhr = new XMLHttpRequest();
+        xhr.open("POST", "api/" + verb, true);   // ASYNC — no UI block, no warnings
+        xhr.setRequestHeader("Content-Type", "application/json;charset=utf-8");
+        xhr.onreadystatechange = function () {
+          if (xhr.readyState !== 4) return;
+          if (xhr.status >= 200 && xhr.status < 300) {
+            var r = null;
+            try { r = xhr.responseText ? JSON.parse(xhr.responseText) : {}; } catch (e) { r = null; }
+            cb(r);
+          } else { cb(null); }
+        };
+        xhr.onerror = function () { cb(null); };
+        xhr.send(JSON.stringify(args || {}));
+      } catch (e) { cb(null); }
     }
-    e.preventDefault();
-  } else {
-    // empty paper click: deselect
-    S.selId=0; renderAll();
+  };
+
+  /* --------------------------------------------------------- paper data --- */
+  var PAPER = {
+    A4: [210, 297], A5: [148, 210], A6: [105, 148], B5: [176, 250],
+    Letter: [215.9, 279.4], R80: [80, 200], R58: [58, 200]
+  };
+  function paperDims(p, orient) {
+    var d = PAPER[p] || [148, 210], w = d[0], h = d[1];
+    if (orient === 1) { var t = w; w = h; h = t; }
+    return [w, h];
   }
-});
-$paper.addEventListener("pointermove",function(e){
-  if(!drag) return;
-  var dx=(e.clientX-drag.sx)/(S.pxPerMM*S.scale);
-  var dy=(e.clientY-drag.sy)/(S.pxPerMM*S.scale);
-  var it=drag.it;
-  if(drag.mode==="move"){ it.x=snap(drag.ox+dx); it.y=snap(drag.oy+dy); }
-  else if(drag.mode==="rotate"){
-    var cx=mm(it.x+it.w/2), cy=mm(it.y+it.h/2);
-    var rect=$paper.getBoundingClientRect();
-    var ang=Math.atan2((e.clientY-rect.top)-cy,(e.clientX-rect.left)-cx)*180/Math.PI+90;
-    it.rot=Math.round(ang);
-  } else if(drag.mode==="resize"){
-    var h=drag.handle;
-    if(h.indexOf("e")>=0) it.w=Math.max(1,drag.ow+dx);
-    if(h.indexOf("s")>=0) it.h=Math.max(0.5,drag.oh+dy);
-    if(h.indexOf("w")>=0){ it.w=Math.max(1,drag.ow-dx); it.x=drag.ox+dx; }
-    if(h.indexOf("n")>=0){ it.h=Math.max(0.5,drag.oh-dy); it.y=drag.oy+dy; }
+
+  /* ---------------------------------------------------------- app state --- */
+  var S = {
+    design: null, selId: 0,
+    pxPerMM: 3.7795, scale: 1,
+    panX: 0, panY: 0,
+    undo: [], redo: [], dirty: false,
+    templates: window.AZ_TEMPLATES || []
+  };
+
+  var $paper, $scroll, $selBox, $stage;
+
+  /* ------------------------------------------------------------ helpers --- */
+  function faDigits(s) {
+    s = String(s); var f = "۰۱۲۳۴۵۶۷۸۹";
+    return s.replace(/[0-9]/g, function (d) { return f[+d]; });
   }
-  renderAll();
-});
-$paper.addEventListener("pointerup",function(e){ if(drag){ drag=null; renderInspector(); } });
-function handleDir(el){ var c=el.className; var m=c.match(/h-(\w+)/); return m?m[1]:""; }
-function snap(v){ return Math.round(v*2)/2; } // 0.5mm snap
-
-// pan with drag on empty area
-var pan=null;
-$scroll.addEventListener("pointerdown",function(e){
-  if(e.target===$scroll || e.target===$paper){
-    if(e.target===$paper){ /* handled above for items; empty paper still pans */ }
-    pan={sx:e.clientX,sy:e.clientY,sl:$scroll.scrollLeft,st:$scroll.scrollTop};
-    $scroll.classList.add("panning"); $scroll.setPointerCapture(e.pointerId);
+  function clone(o) { return JSON.parse(JSON.stringify(o)); }
+  function genId() { var m = 0; (S.design.items || []).forEach(function (it) { if (it.id > m) m = it.id; }); return m + 1; }
+  function findItem(id) { return (S.design.items || []).find(function (it) { return it.id === id; }); }
+  function selItem() { return S.selId ? findItem(S.selId) : null; }
+  function toast(msg, isErr) {
+    var t = document.getElementById("toast"); if (!t) return;
+    t.textContent = msg;
+    t.className = "toast-msg show" + (isErr ? " err" : "");
+    clearTimeout(toast._t);
+    toast._t = setTimeout(function () { t.className = "toast-msg"; }, 2200);
   }
-});
-$scroll.addEventListener("pointermove",function(e){
-  if(!pan) return;
-  $scroll.scrollLeft=pan.sl-(e.clientX-pan.sx);
-  $scroll.scrollTop=pan.st-(e.clientY-pan.sy);
-});
-$scroll.addEventListener("pointerup",function(){ pan=null; $scroll.classList.remove("panning"); });
 
-// ctrl+wheel = zoom, wheel = scroll (native)
-$scroll.addEventListener("wheel",function(e){
-  if(e.ctrlKey){ e.preventDefault();
-    var f=e.deltaY<0?1.1:0.9; setScale(S.scale*f); }
-},{passive:false});
-
-// ------------------------------------------------------------ keyboard ------
-document.addEventListener("keydown",function(e){
-  var tag=(e.target.tagName||"").toLowerCase();
-  var typing=(tag==="input"||tag==="textarea"||tag==="select");
-  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="z"){ e.preventDefault(); doUndo(); return; }
-  if((e.ctrlKey||e.metaKey)&&(e.key.toLowerCase()==="y"||(e.shiftKey&&e.key.toLowerCase()==="z"))){ e.preventDefault(); doRedo(); return; }
-  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="s"){ e.preventDefault(); saveDesign(); return; }
-  if(typing) return;
-  var it=findItem(S.selId);
-  if((e.key==="Delete"||e.key==="Backspace")&&it){ e.preventDefault(); deleteSelected(); return; }
-  if(it && !it.locked){
-    var step=e.shiftKey?5:0.5;
-    if(e.key==="ArrowLeft"){ e.preventDefault(); pushUndo(); it.x-=step; renderAll(); }
-    if(e.key==="ArrowRight"){ e.preventDefault(); pushUndo(); it.x+=step; renderAll(); }
-    if(e.key==="ArrowUp"){ e.preventDefault(); pushUndo(); it.y-=step; renderAll(); }
-    if(e.key==="ArrowDown"){ e.preventDefault(); pushUndo(); it.y+=step; renderAll(); }
+  /* --------------------------------------------------------- undo stack --- */
+  function pushUndo() {
+    S.undo.push(clone(S.design)); if (S.undo.length > 80) S.undo.shift();
+    S.redo.length = 0; S.dirty = true; updateUndoButtons();
   }
-});
-
-// ------------------------------------------------------------ save/load -----
-function designToJsonStr(){ return JSON.stringify(S.design); }
-
-function saveDesign(){
-  // ask for name if needed
-  var name=S.design.name;
-  if(!name || S.design.kind==="builtin"){
-    name=prompt("نام طرح را وارد کنید:", (name||"طرح جدید"));
-    if(name===null) return; S.design.name=name; S.design.kind="user";
+  function doUndo() {
+    if (!S.undo.length) return;
+    S.redo.push(clone(S.design)); S.design = S.undo.pop(); S.selId = 0;
+    renderAll(); updateUndoButtons(); toast("بازگشت");
   }
-  if(Bridge.has()){
-    var res=Bridge.request("save",{design:S.design});
-    if(res && res.ok){ if(res.id) S.design.id=res.id; S.dirty=false;
-      toast("ذخیره و بر بخش اعمال شد"); }
-    else toast("خطا در ذخیره");
-  } else {
-    try{ localStorage.setItem("az_design_"+(S.design.id||"new"), designToJsonStr()); }catch(_){}
-    S.dirty=false; toast("ذخیره شد (حالت آزمایشی مرورگر)");
+  function doRedo() {
+    if (!S.redo.length) return;
+    S.undo.push(clone(S.design)); S.design = S.redo.pop(); S.selId = 0;
+    renderAll(); updateUndoButtons(); toast("جلو");
   }
-}
-function downloadDesign(){
-  var data=designToJsonStr();
-  if(Bridge.has()){ Bridge.request("download",{design:S.design,name:S.design.name}); toast("فایل طرح ذخیره شد"); return; }
-  var blob=new Blob([data],{type:"application/json"});
-  var a=document.createElement("a"); a.href=URL.createObjectURL(blob);
-  a.download=(S.design.name||"design")+".aztpl"; a.click();
-  setTimeout(function(){URL.revokeObjectURL(a.href);},500);
-}
-function uploadDesign(){
-  if(Bridge.has()){
-    var res=Bridge.request("upload",{});
-    if(res && res.design){ pushUndo(); S.design=res.design; S.selId=0; renderAll(); fitZoom(); toast("طرح بارگذاری شد"); }
-    return;
+  function updateUndoButtons() {
+    var u = document.getElementById("btnUndo"), r = document.getElementById("btnRedo");
+    if (u) u.disabled = !S.undo.length;
+    if (r) r.disabled = !S.redo.length;
   }
-  document.getElementById("fileInput").click();
-}
-document.getElementById("fileInput").addEventListener("change",function(e){
-  var f=e.target.files[0]; if(!f) return;
-  var r=new FileReader();
-  r.onload=function(){ try{ var d=JSON.parse(r.result); pushUndo(); S.design=d; S.selId=0;
-    renderAll(); fitZoom(); toast("طرح بارگذاری شد"); }catch(_){ toast("فایل نامعتبر"); } };
-  r.readAsText(f); e.target.value="";
-});
 
-// ------------------------------------------------------------ wire ui -------
-function wire(){
-  document.getElementById("paperSel").addEventListener("change",function(){ pushUndo(); S.design.paper=this.value; renderAll(); fitZoom(); });
-  document.getElementById("orientSel").addEventListener("change",function(){ pushUndo(); S.design.orientation=+this.value; renderAll(); fitZoom(); });
-  document.getElementById("btnUndo").addEventListener("click",doUndo);
-  document.getElementById("btnRedo").addEventListener("click",doRedo);
-  document.getElementById("btnZoomIn").addEventListener("click",function(){ setScale(S.scale*1.15); });
-  document.getElementById("btnZoomOut").addEventListener("click",function(){ setScale(S.scale/1.15); });
-  document.getElementById("btnZoomFit").addEventListener("click",fitZoom);
-  document.getElementById("btnSave").addEventListener("click",saveDesign);
-  document.getElementById("btnDownload").addEventListener("click",downloadDesign);
-  document.getElementById("btnUpload").addEventListener("click",uploadDesign);
-  document.getElementById("btnExit").addEventListener("click",function(){
-    if(S.dirty && !confirm("تغییرات ذخیره‌نشده دارید. خارج می‌شوید؟")) return;
-    if(Bridge.has()) Bridge.request("exit",{}); else toast("خروج (حالت مرورگر)");
-  });
-  Array.prototype.slice.call(document.querySelectorAll(".rp-tab")).forEach(function(t){
-    t.addEventListener("click",function(){ switchTab(t.dataset.tab); if(t.dataset.tab==="inspector")renderInspector(); if(t.dataset.tab==="layers")renderLayers(); }); });
-  document.getElementById("paletteSearch").addEventListener("input",function(){ filterPalette(this.value); });
-}
+  /* --------------------------------------------------------- rendering ---- */
+  var ITEM_LABELS = {
+    label: "متن ثابت", field: "فیلد داده", hline: "خط افقی", vline: "خط عمودی",
+    rect: "کادر", frame: "حاشیه صفحه", logo: "لوگو", photo: "عکس بیمار",
+    qr: "بارکد / QR", apptno: "شماره نوبت", image: "تصویر"
+  };
+  var ITEM_ICONS = {
+    label: "T", field: "{}", hline: "—", vline: "│", rect: "▭", frame: "⬚",
+    logo: "★", photo: "👤", qr: "▦", apptno: "#", image: "🖼"
+  };
 
-// ------------------------------------------------------------ init ----------
-function loadInitial(){
-  var initial=null, secName="";
-  if(Bridge.has()){
-    var res=Bridge.request("init",{});
-    if(res){ if(res.design) initial=res.design; if(res.sectionName) secName=res.sectionName;
-      if(res.templates && res.templates.length) S.templates=res.templates; }
+  function mm(v) { return v * S.pxPerMM * S.scale; }
+
+  function styleItem(el, it) {
+    el.style.left = mm(it.x) + "px";
+    el.style.top = mm(it.y) + "px";
+    el.style.width = mm(it.w) + "px";
+    el.style.height = mm(it.h) + "px";
+    el.style.transform = it.rot ? "rotate(" + it.rot + "deg)" : "";
+    el.style.opacity = (it.opacity == null ? 1 : it.opacity);
+    el.style.zIndex = it.z || 0;
   }
-  if(!initial){ initial = clone(S.templates[0]); var k=1; initial.items.forEach(function(it){it.id=k++;}); }
-  S.design=initial;
-  if(!S.design.paper) S.design.paper="A5";
-  document.getElementById("secName").textContent = secName?("— "+secName):"";
-}
 
-// C++ may push messages to JS via window.azReceive(verb,jsonStr)
-window.azReceive=function(verb,jsonStr){
-  try{
-    var data=jsonStr?JSON.parse(jsonStr):{};
-    if(verb==="loadDesign" && data.design){ S.design=data.design; S.selId=0; S.undo.length=0; S.redo.length=0; renderAll(); fitZoom(); }
-    if(verb==="setSectionName"){ document.getElementById("secName").textContent=data.name?("— "+data.name):""; }
-  }catch(e){ console.warn("azReceive",e); }
-};
+  // What text to SHOW on the canvas. Fields show their Persian label inside a
+  // soft pill (NOT a fake sample value — the user asked for no examples). The
+  // real patient data is substituted only at print time in C++.
+  function displayText(it) {
+    if (it.type === "label") return it.text || "";
+    if (it.type === "apptno") return faDigits(String(it.startValue || 1));
+    if (it.type === "field") {
+      var f = window.AZ_FIELDS[it.field];
+      var lbl = f ? f.label : (it.field || "فیلد");
+      return (it.prefix || "") + "［" + lbl + "］" + (it.suffix || "");
+    }
+    return it.text || "";
+  }
 
-function boot(){
-  buildPalette(); wire();
-  loadInitial(); buildTemplateStrip(); renderAll(); fitZoom();
-  updateUndoButtons();
-  // tell host we're ready
-  if(Bridge.has()) Bridge.request("ready",{});
-}
-if(document.readyState==="loading") document.addEventListener("DOMContentLoaded",boot);
-else boot();
+  function buildItemEl(it) {
+    var el = document.createElement("div");
+    el.className = "pi pi-" + it.type + (it.id === S.selId ? " sel" : "");
+    el.dataset.id = it.id;
+    styleItem(el, it);
 
-// expose for debugging / host
-window.AZDesigner={ S:S, render:renderAll, save:saveDesign };
+    if (it.type === "label" || it.type === "field" || it.type === "apptno") {
+      var t = document.createElement("div");
+      t.className = "pi-text" + (it.type === "field" ? " pi-fieldtext" : "");
+      t.textContent = displayText(it);
+      t.style.color = it.textColor || "#000";
+      t.style.fontSize = mm((it.pt || 10) * 0.3528) + "px";
+      t.style.fontWeight = it.bold ? "700" : "400";
+      t.style.fontStyle = it.italic ? "italic" : "normal";
+      t.style.fontFamily = it.font || "Vazirmatn";
+      t.style.textAlign = it.align === 1 ? "center" : (it.align === 2 ? "left" : "right");
+      t.style.lineHeight = (it.lineSpacing && it.lineSpacing > 0) ? it.lineSpacing : 1.25;
+      el.appendChild(t);
+    } else if (it.type === "hline") {
+      el.style.height = Math.max(1, mm((it.borderWidth || 1) * 0.3528)) + "px";
+      el.style.background = it.borderColor || "#222";
+    } else if (it.type === "vline") {
+      el.style.width = Math.max(1, mm((it.borderWidth || 1) * 0.3528)) + "px";
+      el.style.background = it.borderColor || "#222";
+    } else if (it.type === "rect" || it.type === "frame") {
+      el.style.border = Math.max(1, (it.borderWidth || 1)) + "px solid " + (it.borderColor || "#222");
+      el.style.borderRadius = mm(it.corner || 0) + "px";
+      if (!it.fillTransparent && it.fillColor) el.style.background = it.fillColor;
+    } else if (it.type === "logo" || it.type === "photo" || it.type === "image" || it.type === "qr") {
+      el.style.border = "1px dashed #9aa7c2";
+      el.style.borderRadius = mm(it.corner || 0) + "px";
+      if (it.imgPath && /^data:/.test(it.imgPath)) {
+        var img = document.createElement("img");
+        img.src = it.imgPath; img.className = "pi-img";
+        el.appendChild(img);
+      } else {
+        var ph = document.createElement("div");
+        ph.className = "pi-ph";
+        ph.textContent = ITEM_ICONS[it.type] + " " + (ITEM_LABELS[it.type] || it.type);
+        el.appendChild(ph);
+      }
+    }
+    return el;
+  }
+
+  function renderAll() {
+    if (!S.design) return;
+    var dims = paperDims(S.design.paper, S.design.orientation);
+    S.design.paperW = dims[0]; S.design.paperH = dims[1];
+
+    $paper.style.width = mm(dims[0]) + "px";
+    $paper.style.height = mm(dims[1]) + "px";
+
+    // wipe items (keep selBox)
+    Array.prototype.slice.call($paper.querySelectorAll(".pi")).forEach(function (e) { e.remove(); });
+
+    var items = (S.design.items || []).slice().sort(function (a, b) { return (a.z || 0) - (b.z || 0); });
+    items.forEach(function (it) { $paper.appendChild(buildItemEl(it)); });
+
+    updateSelBox();
+    var pl = document.getElementById("paperLbl");
+    if (pl) pl.textContent = S.design.paper + " · " + faDigits(Math.round(dims[0])) + "×" + faDigits(Math.round(dims[1])) + " mm";
+  }
+
+  function updateSelBox() {
+    var it = selItem();
+    if (!it) { $selBox.classList.add("hidden"); return; }
+    $selBox.classList.remove("hidden");
+    $selBox.style.left = mm(it.x) + "px";
+    $selBox.style.top = mm(it.y) + "px";
+    $selBox.style.width = mm(it.w) + "px";
+    $selBox.style.height = mm(it.h) + "px";
+    $selBox.style.transform = it.rot ? "rotate(" + it.rot + "deg)" : "";
+  }
+
+  function select(id) {
+    S.selId = id;
+    Array.prototype.slice.call($paper.querySelectorAll(".pi")).forEach(function (e) {
+      e.classList.toggle("sel", +e.dataset.id === id);
+    });
+    updateSelBox();
+    renderInspector(); renderLayers();
+    if (id) switchTab("inspector");
+  }
+
+  /* -------------------------------------------------------- new items ----- */
+  function defaultItem(type) {
+    var it = {
+      id: genId(), type: type, x: 10, y: 10, w: 40, h: 8, rot: 0, z: (S.design.items || []).length + 1,
+      locked: false, isFrame: false, text: "", field: "", prefix: "", suffix: "",
+      font: "Vazirmatn", pt: 11, bold: false, italic: false, align: 0, lineSpacing: 1.25,
+      textColor: "#111111", fillColor: "#ffffff", fillTransparent: true,
+      borderColor: "#333333", borderWidth: 1, corner: 0, padding: 1, opacity: 1,
+      visibility: 0, startValue: 1, step: 1, imgPath: ""
+    };
+    if (type === "label") { it.text = "متن"; it.w = 40; it.h = 8; }
+    else if (type === "field") { it.w = 50; it.h = 8; }
+    else if (type === "hline") { it.w = 80; it.h = 1; it.borderWidth = 1; }
+    else if (type === "vline") { it.w = 1; it.h = 40; it.borderWidth = 1; }
+    else if (type === "rect") { it.w = 50; it.h = 25; }
+    else if (type === "frame") {
+      var dm = paperDims(S.design.paper, S.design.orientation);
+      it.x = 4; it.y = 4; it.w = dm[0] - 8; it.h = dm[1] - 8; it.isFrame = true; it.borderWidth = 1.4;
+    }
+    else if (type === "logo") { it.w = 28; it.h = 28; }
+    else if (type === "photo") { it.w = 25; it.h = 32; }
+    else if (type === "image") { it.w = 40; it.h = 25; }
+    else if (type === "qr") { it.w = 24; it.h = 24; }
+    else if (type === "apptno") { it.w = 30; it.h = 14; it.pt = 22; it.bold = true; it.align = 1; }
+    return it;
+  }
+
+  function addItem(type, field) {
+    pushUndo();
+    var it = defaultItem(type);
+    if (type === "field" && field) {
+      it.field = field;
+      var dm = paperDims(S.design.paper, S.design.orientation);
+      it.x = Math.round((dm[0] - it.w) / 2);
+      it.y = 20 + ((S.design.items.length * 3) % 60);
+    }
+    S.design.items.push(it);
+    renderAll(); select(it.id);
+    toast("افزوده شد: " + (ITEM_LABELS[type] || type));
+  }
+
+  function deleteItem(id) {
+    var i = S.design.items.findIndex(function (x) { return x.id === id; });
+    if (i < 0) return;
+    pushUndo(); S.design.items.splice(i, 1);
+    if (S.selId === id) S.selId = 0;
+    renderAll(); renderInspector(); renderLayers();
+  }
+  function duplicateItem(id) {
+    var it = findItem(id); if (!it) return;
+    pushUndo(); var c = clone(it); c.id = genId(); c.x += 4; c.y += 4; c.z = S.design.items.length + 1;
+    S.design.items.push(c); renderAll(); select(c.id);
+  }
+
+  /* ------------------------------------------------------------ palette --- */
+  function buildPalette() {
+    var host = document.getElementById("paletteList");
+    if (!host) return; host.innerHTML = "";
+
+    // 1) shapes / objects
+    var objs = [
+      ["label", "متن ثابت"], ["hline", "خط افقی"], ["vline", "خط عمودی"],
+      ["rect", "کادر"], ["frame", "حاشیه صفحه"], ["logo", "لوگو"],
+      ["photo", "عکس بیمار"], ["image", "تصویر"], ["qr", "بارکد / QR"], ["apptno", "شماره نوبت"]
+    ];
+    var sec = document.createElement("div"); sec.className = "pl-cat";
+    sec.innerHTML = "<div class='pl-cat-h'>عناصر طراحی</div>";
+    var grid = document.createElement("div"); grid.className = "pl-grid";
+    objs.forEach(function (o) {
+      var b = document.createElement("button");
+      b.className = "pl-tile"; b.dataset.kind = "obj"; b.dataset.type = o[0];
+      b.innerHTML = "<span class='pl-ic'>" + (ITEM_ICONS[o[0]] || "•") + "</span><span class='pl-lb'>" + o[1] + "</span>";
+      b.title = o[1];
+      b.addEventListener("click", function () { addItem(o[0]); });
+      grid.appendChild(b);
+    });
+    sec.appendChild(grid); host.appendChild(sec);
+
+    // 2) bindable fields (grouped) — these are BLUE tiles
+    (window.AZ_FIELD_CATS || []).forEach(function (cat) {
+      var c = document.createElement("div"); c.className = "pl-cat";
+      c.innerHTML = "<div class='pl-cat-h'>" + cat.title + "</div>";
+      var g = document.createElement("div"); g.className = "pl-fields";
+      cat.items.forEach(function (f) {
+        var b = document.createElement("button");
+        b.className = "pl-field"; b.dataset.kind = "field"; b.dataset.label = f.label;
+        b.textContent = f.label;
+        b.title = "افزودن فیلد: " + f.label;
+        b.addEventListener("click", function () { addItem("field", f.key); });
+        g.appendChild(b);
+      });
+      c.appendChild(g); host.appendChild(c);
+    });
+  }
+
+  function filterPalette(q) {
+    q = (q || "").trim();
+    Array.prototype.slice.call(document.querySelectorAll("#paletteList .pl-field,#paletteList .pl-tile")).forEach(function (b) {
+      var txt = (b.dataset.label || b.querySelector(".pl-lb") && b.querySelector(".pl-lb").textContent || "");
+      b.style.display = (!q || txt.indexOf(q) >= 0) ? "" : "none";
+    });
+  }
+
+  /* ---------------------------------------------------------- inspector --- */
+  function row(label, ctrl) {
+    var r = document.createElement("div"); r.className = "insp-row";
+    var l = document.createElement("label"); l.textContent = label;
+    r.appendChild(l); r.appendChild(ctrl); return r;
+  }
+  function numInput(val, min, max, step, onCh) {
+    var i = document.createElement("input"); i.type = "number";
+    i.className = "form-control form-control-sm"; i.value = (val == null ? 0 : val);
+    if (min != null) i.min = min; if (max != null) i.max = max; if (step != null) i.step = step;
+    i.addEventListener("change", function () { onCh(parseFloat(i.value) || 0); });
+    return i;
+  }
+  function textInput(val, onCh, ph) {
+    var i = document.createElement("input"); i.type = "text";
+    i.className = "form-control form-control-sm"; i.value = val || ""; if (ph) i.placeholder = ph;
+    i.addEventListener("input", function () { onCh(i.value); });
+    return i;
+  }
+  function colorInput(val, onCh) {
+    var i = document.createElement("input"); i.type = "color";
+    i.className = "form-color"; i.value = val || "#000000";
+    i.addEventListener("input", function () { onCh(i.value); });
+    return i;
+  }
+  function checkInput(val, onCh) {
+    var i = document.createElement("input"); i.type = "checkbox"; i.className = "form-check";
+    i.checked = !!val; i.addEventListener("change", function () { onCh(i.checked); });
+    return i;
+  }
+  function selectInput(opts, val, onCh) {
+    var s = document.createElement("select"); s.className = "form-select form-select-sm";
+    opts.forEach(function (o) {
+      var op = document.createElement("option"); op.value = o[0]; op.textContent = o[1];
+      if (String(o[0]) === String(val)) op.selected = true; s.appendChild(op);
+    });
+    s.addEventListener("change", function () { onCh(s.value); });
+    return s;
+  }
+
+  function renderInspector() {
+    var empty = document.getElementById("inspectorEmpty");
+    var body = document.getElementById("inspectorBody");
+    var it = selItem();
+    if (!it) { empty.classList.remove("hidden"); body.classList.add("hidden"); body.innerHTML = ""; return; }
+    empty.classList.add("hidden"); body.classList.remove("hidden"); body.innerHTML = "";
+
+    function up(noUndo) { if (!noUndo) pushUndo(); renderAll(); updateSelBox(); }
+    function grp(title) { var g = document.createElement("div"); g.className = "insp-grp"; g.innerHTML = "<div class='insp-grp-h'>" + title + "</div>"; body.appendChild(g); return g; }
+
+    // header
+    var hd = document.createElement("div"); hd.className = "insp-head";
+    hd.innerHTML = "<span class='insp-type'>" + (ITEM_LABELS[it.type] || it.type) + "</span>";
+    var del = document.createElement("button"); del.className = "btn btn-sm btn-danger"; del.textContent = "حذف";
+    del.addEventListener("click", function () { deleteItem(it.id); });
+    var dup = document.createElement("button"); dup.className = "btn btn-sm btn-outline"; dup.textContent = "تکثیر";
+    dup.addEventListener("click", function () { duplicateItem(it.id); });
+    hd.appendChild(dup); hd.appendChild(del);
+    body.appendChild(hd);
+
+    // content
+    if (it.type === "label") {
+      var gc = grp("متن");
+      gc.appendChild(row("متن", textInput(it.text, function (v) { it.text = v; up(true); }, "متن دلخواه")));
+    }
+    if (it.type === "field") {
+      var gf = grp("فیلد داده");
+      var opts = [];
+      (window.AZ_FIELD_CATS || []).forEach(function (c) { c.items.forEach(function (f) { opts.push([f.key, c.title + " › " + f.label]); }); });
+      gf.appendChild(row("نوع داده", selectInput(opts, it.field, function (v) { it.field = v; up(); })));
+      gf.appendChild(row("پیشوند", textInput(it.prefix, function (v) { it.prefix = v; up(true); }, "مثلاً: نام بیمار: ")));
+      gf.appendChild(row("پسوند", textInput(it.suffix, function (v) { it.suffix = v; up(true); }, "")));
+      gf.appendChild(row("فقط وقتی پر است", checkInput(it.visibility === 1, function (v) { it.visibility = v ? 1 : 0; up(); })));
+    }
+    if (it.type === "apptno") {
+      var ga = grp("شمارنده نوبت");
+      ga.appendChild(row("مقدار شروع", numInput(it.startValue, 0, 99999, 1, function (v) { it.startValue = v; up(); })));
+      ga.appendChild(row("گام", numInput(it.step, 1, 100, 1, function (v) { it.step = v; up(); })));
+      ga.appendChild(row("پیشوند", textInput(it.prefix, function (v) { it.prefix = v; up(true); }, "نوبت ")));
+    }
+    if (it.type === "logo" || it.type === "photo" || it.type === "image") {
+      var gi = grp("تصویر");
+      var up2 = document.createElement("button"); up2.className = "btn btn-sm btn-primary"; up2.style.width = "100%";
+      up2.textContent = it.imgPath ? "تغییر تصویر…" : "بارگذاری تصویر…";
+      up2.addEventListener("click", function () { pickImageFor(it); });
+      gi.appendChild(up2);
+      if (it.imgPath) {
+        var clr = document.createElement("button"); clr.className = "btn btn-sm btn-outline"; clr.style.width = "100%"; clr.style.marginTop = "6px";
+        clr.textContent = "حذف تصویر";
+        clr.addEventListener("click", function () { pushUndo(); it.imgPath = ""; up(true); renderInspector(); });
+        gi.appendChild(clr);
+      }
+    }
+
+    // typography (text-bearing)
+    if (it.type === "label" || it.type === "field" || it.type === "apptno") {
+      var gt = grp("قلم و متن");
+      gt.appendChild(row("فونت", selectInput([["Vazirmatn", "وزیر"], ["Tahoma", "تاهوما"], ["IRANSans", "ایران‌سنس"]], it.font, function (v) { it.font = v; up(); })));
+      gt.appendChild(row("اندازه (pt)", numInput(it.pt, 5, 96, 0.5, function (v) { it.pt = v; up(); })));
+      gt.appendChild(row("ضخیم", checkInput(it.bold, function (v) { it.bold = v; up(); })));
+      gt.appendChild(row("کج", checkInput(it.italic, function (v) { it.italic = v; up(); })));
+      gt.appendChild(row("چینش", selectInput([["0", "راست"], ["1", "وسط"], ["2", "چپ"]], it.align, function (v) { it.align = +v; up(); })));
+      gt.appendChild(row("رنگ متن", colorInput(it.textColor, function (v) { it.textColor = v; up(); })));
+      gt.appendChild(row("فاصله خطوط", numInput(it.lineSpacing, 1, 3, 0.05, function (v) { it.lineSpacing = v; up(); })));
+    }
+
+    // box / line styling
+    if (it.type === "rect" || it.type === "frame" || it.type === "hline" || it.type === "vline" || it.type === "qr" || it.type === "logo" || it.type === "photo" || it.type === "image") {
+      var gb = grp("کادر و خط");
+      gb.appendChild(row("رنگ خط", colorInput(it.borderColor, function (v) { it.borderColor = v; up(); })));
+      gb.appendChild(row("ضخامت خط", numInput(it.borderWidth, 0, 10, 0.2, function (v) { it.borderWidth = v; up(); })));
+      if (it.type === "rect" || it.type === "frame") {
+        gb.appendChild(row("گردی گوشه", numInput(it.corner, 0, 30, 0.5, function (v) { it.corner = v; up(); })));
+        gb.appendChild(row("بدون پُرکننده", checkInput(it.fillTransparent, function (v) { it.fillTransparent = v; up(); })));
+        gb.appendChild(row("رنگ پُرکننده", colorInput(it.fillColor, function (v) { it.fillColor = v; up(); })));
+      }
+    }
+
+    // geometry
+    var gg = grp("اندازه و موقعیت (mm)");
+    gg.appendChild(row("X", numInput(it.x, 0, 1000, 0.5, function (v) { it.x = v; up(); })));
+    gg.appendChild(row("Y", numInput(it.y, 0, 1000, 0.5, function (v) { it.y = v; up(); })));
+    gg.appendChild(row("عرض", numInput(it.w, 1, 1000, 0.5, function (v) { it.w = v; up(); })));
+    gg.appendChild(row("ارتفاع", numInput(it.h, 1, 1000, 0.5, function (v) { it.h = v; up(); })));
+    gg.appendChild(row("چرخش°", numInput(it.rot, -180, 180, 1, function (v) { it.rot = v; up(); })));
+    gg.appendChild(row("شفافیت", numInput(it.opacity, 0, 1, 0.05, function (v) { it.opacity = v; up(); })));
+  }
+
+  /* ------------------------------------------------------------- layers --- */
+  function renderLayers() {
+    var host = document.getElementById("layerList"); if (!host) return; host.innerHTML = "";
+    var items = (S.design.items || []).slice().sort(function (a, b) { return (b.z || 0) - (a.z || 0); });
+    items.forEach(function (it) {
+      var r = document.createElement("div");
+      r.className = "lyr" + (it.id === S.selId ? " sel" : "");
+      var nm = it.type === "label" ? (it.text || "متن") :
+        it.type === "field" ? (window.AZ_FIELDS[it.field] ? window.AZ_FIELDS[it.field].label : "فیلد") :
+          (ITEM_LABELS[it.type] || it.type);
+      r.innerHTML = "<span class='lyr-ic'>" + (ITEM_ICONS[it.type] || "•") + "</span><span class='lyr-nm'>" + nm + "</span>";
+      var up = document.createElement("button"); up.className = "lyr-b"; up.textContent = "▲"; up.title = "بالا";
+      up.addEventListener("click", function (e) { e.stopPropagation(); pushUndo(); it.z = (it.z || 0) + 1; renderAll(); renderLayers(); });
+      var dn = document.createElement("button"); dn.className = "lyr-b"; dn.textContent = "▼"; dn.title = "پایین";
+      dn.addEventListener("click", function (e) { e.stopPropagation(); pushUndo(); it.z = Math.max(0, (it.z || 0) - 1); renderAll(); renderLayers(); });
+      var del = document.createElement("button"); del.className = "lyr-b del"; del.textContent = "✕";
+      del.addEventListener("click", function (e) { e.stopPropagation(); deleteItem(it.id); });
+      r.appendChild(up); r.appendChild(dn); r.appendChild(del);
+      r.addEventListener("click", function () { select(it.id); });
+      host.appendChild(r);
+    });
+  }
+
+  /* ----------------------------------------------------------- tabs ------- */
+  function switchTab(name) {
+    Array.prototype.slice.call(document.querySelectorAll(".rp-tab")).forEach(function (t) {
+      t.classList.toggle("active", t.dataset.tab === name);
+    });
+    Array.prototype.slice.call(document.querySelectorAll(".rp-pane")).forEach(function (p) {
+      p.classList.toggle("active", p.id === "pane-" + name);
+    });
+  }
+
+  /* ------------------------------------------------ zoom / pan / fit ------ */
+  function setScale(s) {
+    S.scale = Math.max(0.2, Math.min(4, s));
+    var z = document.getElementById("zoomLbl"); if (z) z.textContent = faDigits(Math.round(S.scale * 100)) + "٪";
+    renderAll();
+  }
+  function fitZoom() {
+    var dm = paperDims(S.design.paper, S.design.orientation);
+    var availW = $scroll.clientWidth - 60, availH = $scroll.clientHeight - 60;
+    var sw = availW / (dm[0] * S.pxPerMM), sh = availH / (dm[1] * S.pxPerMM);
+    setScale(Math.max(0.25, Math.min(sw, sh)));
+    centerPaper();
+  }
+  function centerPaper() {
+    // center the paper within the scroll viewport
+    $scroll.scrollLeft = ($stage.clientWidth - $scroll.clientWidth) / 2;
+    $scroll.scrollTop = 40;
+  }
+
+  /* --------------------------------------------- canvas interactions ------ */
+  function clientToMM(clientX, clientY) {
+    var r = $paper.getBoundingClientRect();
+    return { x: (clientX - r.left) / (S.pxPerMM * S.scale), y: (clientY - r.top) / (S.pxPerMM * S.scale) };
+  }
+
+  function wireCanvas() {
+    // click empty space -> deselect ; drag empty space -> PAN the page
+    var panning = false, panSX = 0, panSY = 0, scL = 0, scT = 0, moved = false;
+
+    $scroll.addEventListener("mousedown", function (e) {
+      var pi = e.target.closest && e.target.closest(".pi");
+      var handle = e.target.closest && e.target.closest(".handle");
+      if (pi || handle) return;     // item / handle drag handled elsewhere
+      panning = true; moved = false;
+      panSX = e.clientX; panSY = e.clientY; scL = $scroll.scrollLeft; scT = $scroll.scrollTop;
+      $scroll.classList.add("panning");
+      e.preventDefault();
+    });
+    window.addEventListener("mousemove", function (e) {
+      if (!panning) return;
+      var dx = e.clientX - panSX, dy = e.clientY - panSY;
+      if (Math.abs(dx) + Math.abs(dy) > 3) moved = true;
+      $scroll.scrollLeft = scL - dx; $scroll.scrollTop = scT - dy;
+    });
+    window.addEventListener("mouseup", function () {
+      if (panning) { panning = false; $scroll.classList.remove("panning"); if (!moved) select(0); }
+    });
+
+    // wheel = scroll ; ctrl+wheel = zoom
+    $scroll.addEventListener("wheel", function (e) {
+      if (e.ctrlKey) { e.preventDefault(); setScale(S.scale * (e.deltaY < 0 ? 1.1 : 0.9)); }
+    }, { passive: false });
+
+    // item drag (move) + resize + rotate
+    var drag = null;
+    $paper.addEventListener("mousedown", function (e) {
+      var handle = e.target.closest(".handle");
+      var piEl = e.target.closest(".pi");
+      if (handle) {
+        var it = selItem(); if (!it) return;
+        drag = { mode: "resize", dir: handle.className.replace("handle ", "").trim(), it: it, start: clientToMM(e.clientX, e.clientY), o: clone(it) };
+        if (handle.classList.contains("h-rot")) drag.mode = "rotate";
+        pushUndo(); e.stopPropagation(); e.preventDefault(); return;
+      }
+      if (piEl) {
+        var id = +piEl.dataset.id; select(id);
+        var it2 = findItem(id); if (!it2 || it2.locked) return;
+        drag = { mode: "move", it: it2, start: clientToMM(e.clientX, e.clientY), o: clone(it2) };
+        pushUndo(); e.preventDefault();
+      }
+    });
+    window.addEventListener("mousemove", function (e) {
+      if (!drag) return;
+      var p = clientToMM(e.clientX, e.clientY);
+      var dx = p.x - drag.start.x, dy = p.y - drag.start.y;
+      var it = drag.it, o = drag.o;
+      if (drag.mode === "move") { it.x = Math.max(0, Math.round((o.x + dx) * 2) / 2); it.y = Math.max(0, Math.round((o.y + dy) * 2) / 2); }
+      else if (drag.mode === "rotate") {
+        var cx = o.x + o.w / 2, cy = o.y + o.h / 2;
+        it.rot = Math.round(Math.atan2(p.y - cy, p.x - cx) * 180 / Math.PI + 90);
+      } else { // resize
+        var d = drag.dir;
+        if (d.indexOf("e") >= 0) it.w = Math.max(2, o.w + dx);
+        if (d.indexOf("s") >= 0) it.h = Math.max(2, o.h + dy);
+        if (d.indexOf("w") >= 0) { it.w = Math.max(2, o.w - dx); it.x = o.x + dx; }
+        if (d.indexOf("n") >= 0) { it.h = Math.max(2, o.h - dy); it.y = o.y + dy; }
+      }
+      renderAll();
+    });
+    window.addEventListener("mouseup", function () { if (drag) { drag = null; renderInspector(); } });
+
+    // keyboard nudges + delete
+    window.addEventListener("keydown", function (e) {
+      if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
+      var it = selItem();
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); doUndo(); return; }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") { e.preventDefault(); doRedo(); return; }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); saveDesign(); return; }
+      if (!it) return;
+      var step = e.shiftKey ? 5 : 1;
+      if (e.key === "Delete") { e.preventDefault(); deleteItem(it.id); }
+      else if (e.key === "ArrowLeft") { e.preventDefault(); pushUndo(); it.x -= step; renderAll(); }
+      else if (e.key === "ArrowRight") { e.preventDefault(); pushUndo(); it.x += step; renderAll(); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); pushUndo(); it.y -= step; renderAll(); }
+      else if (e.key === "ArrowDown") { e.preventDefault(); pushUndo(); it.y += step; renderAll(); }
+    });
+  }
+
+  /* ----------------------------------------------------- image upload ----- */
+  function pickImageFor(it) {
+    var inp = document.createElement("input");
+    inp.type = "file"; inp.accept = "image/*";
+    inp.addEventListener("change", function () {
+      var f = inp.files[0]; if (!f) return;
+      var rd = new FileReader();
+      rd.onload = function () {
+        pushUndo(); it.imgPath = rd.result; renderAll(); renderInspector();
+        toast("تصویر بارگذاری شد");
+      };
+      rd.readAsDataURL(f);
+    });
+    inp.click();
+  }
+
+  /* -------------------------------------------------- templates gallery --- */
+  var TPL_GROUPS = [
+    { key: "reception", title: "پذیرش" },
+    { key: "appointment", title: "نوبت‌دهی" },
+    { key: "lab", title: "آزمایشگاه و رادیولوژی" }
+  ];
+  function tplGroupOf(t) {
+    var g = (t.group || "").toLowerCase();
+    if (g) return g;
+    var n = (t.name || "") + (t.kind || "");
+    if (/نوبت|appoint|queue/i.test(n)) return "appointment";
+    if (/آزمایش|رادیو|lab|radio/i.test(n)) return "lab";
+    return "reception";
+  }
+  function openTemplateGallery() {
+    var ov = document.getElementById("tplOverlay");
+    var grid = document.getElementById("tplGrid");
+    var tabs = document.getElementById("tplTabs");
+    grid.innerHTML = ""; tabs.innerHTML = "";
+
+    var current = "reception";
+    function renderTab() {
+      Array.prototype.slice.call(tabs.children).forEach(function (b) { b.classList.toggle("active", b.dataset.g === current); });
+      grid.innerHTML = "";
+      var list = (S.templates || []).filter(function (t) { return tplGroupOf(t) === current; });
+      if (!list.length) { grid.innerHTML = "<div class='muted' style='padding:24px'>طرحی در این دسته نیست.</div>"; return; }
+      list.forEach(function (t) {
+        var card = document.createElement("div"); card.className = "tpl-card";
+        var thumb = document.createElement("div"); thumb.className = "tpl-thumb";
+        thumb.appendChild(buildThumb(t));
+        var nm = document.createElement("div"); nm.className = "tpl-nm"; nm.textContent = t.name || "طرح";
+        var meta = document.createElement("div"); meta.className = "tpl-meta"; meta.textContent = (t.paper || "A5") + " · " + ((t.items || []).length) + " آیتم";
+        card.appendChild(thumb); card.appendChild(nm); card.appendChild(meta);
+        card.addEventListener("click", function () { applyTemplate(t); ov.classList.add("hidden"); });
+        grid.appendChild(card);
+      });
+    }
+    TPL_GROUPS.forEach(function (g) {
+      var b = document.createElement("button"); b.className = "tpl-tab"; b.dataset.g = g.key; b.textContent = g.title;
+      b.addEventListener("click", function () { current = g.key; renderTab(); });
+      tabs.appendChild(b);
+    });
+    renderTab();
+    ov.classList.remove("hidden");
+  }
+
+  // simple SVG-ish DOM thumbnail (scaled mini paper)
+  function buildThumb(t) {
+    var dm = paperDims(t.paper || "A5", t.orientation || 0);
+    var scale = 150 / dm[1];
+    var p = document.createElement("div"); p.className = "mini-paper";
+    p.style.width = (dm[0] * scale) + "px"; p.style.height = (dm[1] * scale) + "px";
+    (t.items || []).forEach(function (it) {
+      var e = document.createElement("div"); e.className = "mini-it mini-" + it.type;
+      e.style.left = (it.x * scale) + "px"; e.style.top = (it.y * scale) + "px";
+      e.style.width = (it.w * scale) + "px"; e.style.height = Math.max(1, it.h * scale) + "px";
+      if (it.type === "hline" || it.type === "vline") e.style.background = "#445";
+      else if (it.type === "label" || it.type === "field" || it.type === "apptno") { e.style.background = it.type === "field" ? "#cfe0ff" : "#dfe3ea"; }
+      else e.style.border = "0.5px solid #889";
+      p.appendChild(e);
+    });
+    return p;
+  }
+
+  function applyTemplate(t) {
+    pushUndo();
+    var d = clone(t);
+    d.id = (S.design && S.design.id) || 0;   // keep binding id so save UPDATES current
+    d.kind = "user";
+    if (!d.name) d.name = t.name || "طرح";
+    var k = 1; (d.items || []).forEach(function (it) { it.id = k++; });
+    S.design = d; S.selId = 0;
+    renderAll(); fitZoom(); renderLayers(); renderInspector();
+    toast("طرح اعمال شد: " + (t.name || ""));
+  }
+
+  /* ------------------------------------------------------------ save ------ */
+  function saveDesign() {
+    if (!S.design) return;
+    if (!S.design.name || S.design.kind === "builtin") {
+      var nm = prompt("نام طرح را وارد کنید:", S.design.name || "طرح سفارشی");
+      if (nm === null) return;
+      S.design.name = nm || "طرح سفارشی"; S.design.kind = "user";
+    }
+    if (Bridge.has()) {
+      var btn = document.getElementById("btnSave"); if (btn) { btn.disabled = true; btn.textContent = "در حال ذخیره…"; }
+      Bridge.request("save", { design: S.design }, function (res) {
+        if (btn) { btn.disabled = false; btn.innerHTML = "💾 ذخیره و اعمال"; }
+        if (res && res.ok) { if (res.id) S.design.id = res.id; S.dirty = false; toast("ذخیره شد و بر بخش اعمال گردید ✓"); }
+        else toast("خطا در ذخیره — دوباره تلاش کنید", true);
+      });
+    } else {
+      try { localStorage.setItem("az_design", JSON.stringify(S.design)); } catch (_) {}
+      S.dirty = false; toast("ذخیره شد (حالت آزمایشی)");
+    }
+  }
+  function downloadDesign() {
+    var data = JSON.stringify(S.design);
+    if (Bridge.has()) { Bridge.request("download", { design: S.design, name: S.design.name }, function () {}); toast("درخواست دانلود ارسال شد"); return; }
+    var blob = new Blob([data], { type: "application/json" });
+    var a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+    a.download = (S.design.name || "design") + ".aztpl"; a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 500);
+  }
+  function uploadDesign() {
+    document.getElementById("fileInput").click();
+  }
+
+  /* ------------------------------------------------------------ wire ------ */
+  function wire() {
+    document.getElementById("paperSel").addEventListener("change", function () { pushUndo(); S.design.paper = this.value; renderAll(); fitZoom(); });
+    document.getElementById("orientSel").addEventListener("change", function () { pushUndo(); S.design.orientation = +this.value; renderAll(); fitZoom(); });
+    document.getElementById("btnUndo").addEventListener("click", doUndo);
+    document.getElementById("btnRedo").addEventListener("click", doRedo);
+    document.getElementById("btnZoomIn").addEventListener("click", function () { setScale(S.scale * 1.15); });
+    document.getElementById("btnZoomOut").addEventListener("click", function () { setScale(S.scale / 1.15); });
+    document.getElementById("btnZoomFit").addEventListener("click", fitZoom);
+    document.getElementById("btnSave").addEventListener("click", saveDesign);
+    document.getElementById("btnDownload").addEventListener("click", downloadDesign);
+    document.getElementById("btnUpload").addEventListener("click", uploadDesign);
+    document.getElementById("btnTemplates").addEventListener("click", openTemplateGallery);
+    document.getElementById("tplClose").addEventListener("click", function () { document.getElementById("tplOverlay").classList.add("hidden"); });
+    document.getElementById("tplOverlay").addEventListener("click", function (e) { if (e.target.id === "tplOverlay") this.classList.add("hidden"); });
+    document.getElementById("btnExit").addEventListener("click", function () {
+      if (S.dirty && !confirm("تغییرات ذخیره‌نشده دارید. خارج می‌شوید؟")) return;
+      if (Bridge.has()) Bridge.request("exit", {}, function () {});
+      toast("جلسهٔ طراحی پایان یافت");
+    });
+    Array.prototype.slice.call(document.querySelectorAll(".rp-tab")).forEach(function (t) {
+      t.addEventListener("click", function () {
+        switchTab(t.dataset.tab);
+        if (t.dataset.tab === "inspector") renderInspector();
+        if (t.dataset.tab === "layers") renderLayers();
+      });
+    });
+    document.getElementById("paletteSearch").addEventListener("input", function () { filterPalette(this.value); });
+
+    document.getElementById("fileInput").addEventListener("change", function (e) {
+      var f = e.target.files[0]; if (!f) return;
+      var r = new FileReader();
+      r.onload = function () {
+        try { var d = JSON.parse(r.result); pushUndo(); d.id = (S.design && S.design.id) || 0; S.design = d; S.selId = 0; renderAll(); fitZoom(); toast("طرح بارگذاری شد"); }
+        catch (_) { toast("فایل نامعتبر است", true); }
+      };
+      r.readAsText(f); e.target.value = "";
+    });
+  }
+
+  /* ------------------------------------------------------------ init ------ */
+  function loadInitial(cb) {
+    if (Bridge.has()) {
+      Bridge.request("init", {}, function (res) {
+        var initial = null, secName = "";
+        if (res) {
+          if (res.design) initial = res.design;
+          if (res.sectionName) secName = res.sectionName;
+        }
+        Bridge.request("templates", {}, function (tr) {
+          if (tr && tr.templates && tr.templates.length) {
+            // merge C++ builtins with the rich JS gallery (JS gallery preferred for UX)
+            if (!S.templates || !S.templates.length) S.templates = tr.templates;
+          }
+          finish(initial, secName);
+        });
+      });
+    } else { finish(null, ""); }
+
+    function finish(initial, secName) {
+      if (!initial) {
+        initial = clone((S.templates && S.templates[0]) || { paper: "A5", orientation: 0, items: [] });
+        var k = 1; (initial.items || []).forEach(function (it) { it.id = k++; });
+      }
+      S.design = initial;
+      if (!S.design.paper) S.design.paper = "A5";
+      if (!S.design.items) S.design.items = [];
+      var sn = document.getElementById("secName");
+      if (sn) sn.textContent = secName ? ("— " + secName) : "";
+      document.getElementById("paperSel").value = S.design.paper;
+      document.getElementById("orientSel").value = S.design.orientation || 0;
+      cb && cb();
+    }
+  }
+
+  function boot() {
+    $paper = document.getElementById("paper");
+    $scroll = document.getElementById("canvasScroll");
+    $selBox = document.getElementById("selBox");
+    $stage = document.getElementById("canvasStage");
+    buildPalette(); wire(); wireCanvas();
+    loadInitial(function () {
+      renderAll(); fitZoom(); renderLayers(); updateUndoButtons();
+      if (Bridge.has()) Bridge.request("ready", {}, function () {});
+    });
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
+  else boot();
+
+  window.AZDesigner = { S: S, render: renderAll, save: saveDesign };
 })();

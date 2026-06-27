@@ -30,8 +30,21 @@ struct WaitState {
     bool savedAtLeastOnce = false;
 };
 
-// poll: close automatically if the page asked to exit.
+// poll: reflect save state + close automatically if the page asked to exit.
 static VOID CALLBACK wdExitPoll(HWND h, UINT, UINT_PTR id, DWORD){
+    // refresh the "saved" indicator so the operator gets clear feedback that the
+    // design was persisted & applied to the section (no guessing).
+    bool saved=false; wdLock(); saved=g_wdHaveSaved; wdUnlock();
+    HWND lbl=GetDlgItem(h,200);
+    if(lbl){
+        static bool lastSaved=false;
+        if(saved!=lastSaved || saved){
+            lastSaved=saved;
+            SetWindowTextW(lbl, saved
+                ? L"\u2714 \u0637\u0631\u062d \u0630\u062e\u06cc\u0631\u0647 \u0648 \u0628\u0631 \u0628\u062e\u0634 \u0627\u0639\u0645\u0627\u0644 \u0634\u062f."
+                : L"");
+        }
+    }
     if(InterlockedCompareExchange(&g_wdExitFlag,0,0)){
         KillTimer(h,id);
         DestroyWindow(h);
@@ -93,7 +106,7 @@ bool WebDesigner_Open(HWND owner, const std::vector<int>& sectionIds){
         reg=true;
     }
 
-    int W=460, H=210;
+    int W=470, H=236;
     RECT wa; SystemParametersInfoW(SPI_GETWORKAREA,0,&wa,0);
     int x=wa.left+((wa.right-wa.left)-W)/2;
     int y=wa.top +((wa.bottom-wa.top)-H)/2;
@@ -112,14 +125,19 @@ bool WebDesigner_Open(HWND owner, const std::vector<int>& sectionIds){
     HWND info=CreateWindowExW(0,L"STATIC",
         L"\u0637\u0631\u0627\u062d \u0686\u0627\u067e \u062f\u0631 \u0645\u0631\u0648\u0631\u06af\u0631 "
         L"\u067e\u06cc\u0634\u200c\u0641\u0631\u0636 \u0628\u0627\u0632 \u0634\u062f.\n\n"
-        L"\u067e\u0633 \u0627\u0632 \u0637\u0631\u0627\u062d\u06cc\u060c \u062f\u06a9\u0645\u0647\u0654 "
-        L"\u00ab\u0630\u062e\u06cc\u0631\u0647 \u0648 \u0627\u0639\u0645\u0627\u0644\u00bb \u0631\u0627 "
-        L"\u062f\u0631 \u0645\u0631\u0648\u0631\u06af\u0631 \u0628\u0632\u0646\u06cc\u062f\u061b "
-        L"\u062a\u063a\u06cc\u06cc\u0631\u0627\u062a \u0628\u0644\u0627\u0641\u0627\u0635\u0644\u0647 "
-        L"\u0627\u0639\u0645\u0627\u0644 \u0645\u06cc\u200c\u0634\u0648\u062f.",
+        L"\u062f\u0631 \u0635\u0641\u062d\u0647\u0654 \u0637\u0631\u0627\u062d\u06cc\u060c \u062f\u06a9\u0645\u0647\u0654 "
+        L"\u00ab\u0630\u062e\u06cc\u0631\u0647 \u0648 \u0627\u0639\u0645\u0627\u0644\u00bb \u0631\u0627 \u0628\u0632\u0646\u06cc\u062f \u062a\u0627 "
+        L"\u0637\u0631\u062d \u0630\u062e\u06cc\u0631\u0647 \u0648 \u0641\u0648\u0631\u06cc \u0628\u0631 \u0628\u062e\u0634 \u0627\u0639\u0645\u0627\u0644 \u0634\u0648\u062f.\n"
+        L"\u067e\u0633 \u0627\u0632 \u067e\u0627\u06cc\u0627\u0646\u060c \u00ab\u067e\u0627\u06cc\u0627\u0646 \u0637\u0631\u0627\u062d\u06cc\u00bb \u0631\u0627 \u0628\u0632\u0646\u06cc\u062f.",
         WS_CHILD|WS_VISIBLE|SS_LEFT,
         16,12,W-34,96,h,NULL,g_hInst,NULL);
     SendMessageW(info,WM_SETFONT,(WPARAM)f,TRUE);
+
+    // live "saved" status line (updated by wdExitPoll)
+    HWND sline=CreateWindowExW(0,L"STATIC",L"",
+        WS_CHILD|WS_VISIBLE|SS_LEFT,
+        16,110,W-34,18,h,(HMENU)200,g_hInst,NULL);
+    SendMessageW(sline,WM_SETFONT,(WPARAM)f,TRUE);
 
     HWND bReopen=CreateWindowExW(0,L"BUTTON",
         L"\u0628\u0627\u0632 \u06a9\u0631\u062f\u0646 \u062f\u0648\u0628\u0627\u0631\u0647 \u062f\u0631 \u0645\u0631\u0648\u0631\u06af\u0631",

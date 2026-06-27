@@ -317,3 +317,58 @@ bool gpDrawImageFileCircle(HDC dc, const std::wstring& path, RECT rc){
     g.ResetClip();
     return true;
 }
+
+// ---------------------------------------------------------------------------
+//  v1.20.0: draw an image into a rect (aspect-fit, no crop). Accepts either a
+//  file path OR a "data:image/...;base64,..." URI (the print designer stores
+//  uploaded logos / patient photos as base64 data URIs). Used by the print
+//  renderer so PIT_LOGO / PIT_PHOTO / PIT_IMAGE actually print the picture.
+//  Returns false if GDI+ is off or the source can't be decoded (caller then
+//  falls back to drawing a labelled placeholder box).
+// ---------------------------------------------------------------------------
+static int b64val(int c){
+    if(c>='A'&&c<='Z') return c-'A';
+    if(c>='a'&&c<='z') return c-'a'+26;
+    if(c>='0'&&c<='9') return c-'0'+52;
+    if(c=='+') return 62; if(c=='/') return 63; return -1;
+}
+static std::string b64decode(const std::string& in){
+    std::string out; int val=0,bits=-8;
+    for(unsigned char c:in){ if(c=='='){break;} int d=b64val(c); if(d<0)continue;
+        val=(val<<6)|d; bits+=6; if(bits>=0){ out.push_back((char)((val>>bits)&0xFF)); bits-=8; } }
+    return out;
+}
+
+bool gpDrawImageRectAny(HDC dc, const std::wstring& src, RECT rc){
+    if(!s_gdipOK || src.empty()) return false;
+    int W=rc.right-rc.left, H=rc.bottom-rc.top; if(W<=0||H<=0) return false;
+    Image* img=NULL; IStream* st=NULL;
+
+    if(src.compare(0,5,L"data:")==0){
+        size_t comma=src.find(L','); if(comma==std::wstring::npos) return false;
+        std::string b64; b64.reserve(src.size()-comma);
+        for(size_t i=comma+1;i<src.size();++i){ wchar_t w=src[i]; if(w<128) b64.push_back((char)w); }
+        std::string bytes=b64decode(b64); if(bytes.empty()) return false;
+        HGLOBAL hg=GlobalAlloc(GMEM_MOVEABLE,bytes.size()); if(!hg) return false;
+        void* p=GlobalLock(hg); if(!p){ GlobalFree(hg); return false; }
+        memcpy(p,bytes.data(),bytes.size()); GlobalUnlock(hg);
+        if(CreateStreamOnHGlobal(hg,TRUE,&st)!=S_OK){ GlobalFree(hg); return false; }
+        img=Image::FromStream(st);
+    } else {
+        img=new Image(src.c_str());
+    }
+    if(!img || img->GetLastStatus()!=Ok){ if(img)delete img; if(st)st->Release(); return false; }
+    REAL iw=(REAL)img->GetWidth(), ih=(REAL)img->GetHeight();
+    if(iw<=0||ih<=0){ delete img; if(st)st->Release(); return false; }
+
+    Graphics g(dc);
+    g.SetInterpolationMode(InterpolationModeHighQualityBicubic);
+    g.SetPixelOffsetMode(PixelOffsetModeHalf);
+    g.SetSmoothingMode(SmoothingModeAntiAlias);
+    REAL scale=(W/iw < H/ih)? W/iw : H/ih;   // contain (aspect-fit)
+    REAL dw=iw*scale, dh=ih*scale;
+    REAL dx=rc.left+(W-dw)/2, dy=rc.top+(H-dh)/2;
+    g.DrawImage(img, RectF(dx,dy,dw,dh), 0,0,iw,ih, UnitPixel);
+    delete img; if(st)st->Release();
+    return true;
+}

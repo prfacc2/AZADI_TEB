@@ -121,7 +121,8 @@ static std::string designToWebJson(const PrintDesign& d){
         o+="\"borderStyle\":0,";
         o+="\"corner\":"+jnum(it.corner)+",\"padding\":"+jnum(it.padding)+",";
         o+="\"opacity\":"+jnum(it.opacity)+",\"visibility\":"+jint(it.visibility)+",";
-        o+="\"startValue\":"+jint(it.startValue)+",\"step\":"+jint(it.step);
+        o+="\"startValue\":"+jint(it.startValue)+",\"step\":"+jint(it.step)+",";
+        o+="\"imgPath\":"+jstr(it.imgPath);
         o+="}";
     }
     o+="]}";
@@ -199,6 +200,7 @@ static bool webJsonToDesign(const std::string& json, PrintDesign& out){
                     else if(ik=="visibility") it.visibility=(int)j.dbl();
                     else if(ik=="startValue") it.startValue=(int)j.dbl();
                     else if(ik=="step") it.step=(int)j.dbl();
+                    else if(ik=="imgPath") it.imgPath=u82w(j.str());
                     else j.skip();
                     if(!j.eat(',')){ j.eat('}'); break; } if(!j.ok)break; }
                 if(it.fontName.empty()) it.fontName=L"Vazirmatn";
