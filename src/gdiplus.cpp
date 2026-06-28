@@ -365,10 +365,15 @@ bool gpDrawImageRectAny(HDC dc, const std::wstring& src, RECT rc){
     g.SetInterpolationMode(InterpolationModeHighQualityBicubic);
     g.SetPixelOffsetMode(PixelOffsetModeHalf);
     g.SetSmoothingMode(SmoothingModeAntiAlias);
+    // v1.22.0: HARD-clip to the item's rect so an uploaded logo/photo can NEVER
+    // bleed outside its designed box (was: a large image overflowed onto the
+    // whole page background). Aspect-fit (contain) inside the rect.
+    g.SetClip(Rect(rc.left,rc.top,W,H));
     REAL scale=(W/iw < H/ih)? W/iw : H/ih;   // contain (aspect-fit)
     REAL dw=iw*scale, dh=ih*scale;
     REAL dx=rc.left+(W-dw)/2, dy=rc.top+(H-dh)/2;
     g.DrawImage(img, RectF(dx,dy,dw,dh), 0,0,iw,ih, UnitPixel);
+    g.ResetClip();
     delete img; if(st)st->Release();
     return true;
 }

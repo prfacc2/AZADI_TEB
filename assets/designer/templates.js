@@ -19,7 +19,7 @@
     return {
       id: nid(), type: "label", x: 10, y: 10, w: 40, h: 8, rot: 0, z: 1,
       locked: false, isFrame: false, text: "", field: "", prefix: "", suffix: "",
-      font: "Vazirmatn", pt: 11, bold: false, italic: false, align: 0, lineSpacing: 1.25,
+      font: "Vazirmatn", pt: 11, bold: false, italic: false, align: 0, dir: 0, lineSpacing: 1.25,
       textColor: "#111111", fillColor: "#ffffff", fillTransparent: true,
       borderColor: "#333333", borderWidth: 1, corner: 0, padding: 1, opacity: 1,
       visibility: 0, startValue: 1, step: 1, imgPath: ""
@@ -189,6 +189,209 @@
       items.push(F(x + cw / 2, y, cw / 2, 5, "{issued}", { pt: 8, align: 2, textColor: "#777" }));
       push("lab", names[i], paper, 0, items);
     }
+  })();
+
+  /* ====================================================================== *
+   *  PREMIUM — richly detailed forms modelled on real Iranian clinics.
+   *  Coloured header bands, info boxes, service tables, signature blocks.
+   * ====================================================================== */
+  function BAND(x, y, w, h, color, o) {
+    return mk(Object.assign({ type: "rect", x: x, y: y, w: w, h: h, fillTransparent: false,
+      fillColor: color, borderWidth: 0, borderColor: color, corner: (o && o.corner) || 1.5 }, o || {}));
+  }
+  // a labelled cell with a soft box (label small grey on top, value bold below)
+  function CELL(x, y, w, h, labelTxt, field, o) {
+    o = o || {};
+    var arr = [];
+    arr.push(R(x, y, w, h, { borderColor: "#cdd7e6", borderWidth: 0.4, corner: 1.2,
+      fillTransparent: false, fillColor: o.bg || "#f7faff" }));
+    arr.push(L(x + 2, y + 1.2, w - 4, 4, labelTxt, { pt: 7.5, align: 0, dir: 0, textColor: "#7a879c" }));
+    if (field) arr.push(F(x + 2, y + 5, w - 4, 5.5, field, { pt: o.pt || 9.5, bold: o.bold !== false, align: 0, dir: 0, textColor: o.color || "#16233a" }));
+    else arr.push(L(x + 2, y + 5, w - 4, 5.5, o.text || "", { pt: o.pt || 9.5, bold: o.bold !== false, align: 0, dir: 0, textColor: o.color || "#16233a" }));
+    return arr;
+  }
+  function tableJson(cols, rows, header, widths) {
+    return JSON.stringify({ cols: cols, rows: rows, header: !!header,
+      widths: widths || null, cells: [] });
+  }
+  function TABLE(x, y, w, h, cols, rows, o) {
+    o = o || {};
+    return mk(Object.assign({ type: "table", x: x, y: y, w: w, h: h,
+      borderColor: o.borderColor || "#2b5f9e", borderWidth: 0.5,
+      text: o.text || tableJson(cols, rows, o.header !== false, o.widths) }, o));
+  }
+
+  (function () {
+    // ---- 1. Premium reception A5 (blue, با کادر و جدول خدمات) -------------
+    (function () {
+      var W = 148, H = 210, x = 9, cw = W - 18, items = [], y = 8;
+      items.push(FR(W, H));
+      items.push(BAND(x, y, cw, 22, "#1f4e8c", { corner: 2 }));
+      items.push(LOGO(x + 2, y + 2, 18));
+      items.push(L(x + 22, y + 2.5, cw - 24, 8, "درمانگاه شبانه‌روزی آزادی طب", { pt: 14, bold: true, align: 0, dir: 0, textColor: "#ffffff" }));
+      items.push(L(x + 22, y + 11, cw - 24, 5, "{clinicaddr}", { field: "{clinicaddr}", type: "field", prefix: "نشانی: ", pt: 7.5, align: 0, dir: 0, textColor: "#dbe7fb" }));
+      items.push(F(x + 22, y + 16, cw - 24, 5, "{clinicphone}", { prefix: "تلفن: ", pt: 7.5, align: 0, dir: 0, textColor: "#dbe7fb" }));
+      y += 24;
+      items.push(L(x, y, cw, 6, "برگهٔ پذیرش بیمار", { pt: 11, bold: true, align: 1, dir: 2, textColor: "#1f4e8c" }));
+      items.push(F(x, y + 1, 36, 5, "{receiptNo}", { prefix: "شماره: ", pt: 8.5, align: 0, dir: 0, textColor: "#555" }));
+      items.push(F(x + cw - 40, y + 1, 40, 5, "{date}", { prefix: "تاریخ ", pt: 8.5, align: 2, dir: 1, textColor: "#555" }));
+      y += 9;
+      // patient info cells (2 columns)
+      var colW = (cw - 4) / 2;
+      function row(lbl1, f1, lbl2, f2) {
+        CELL(x, y, colW, 11, lbl1, f1).forEach(function (e) { items.push(e); });
+        if (lbl2) CELL(x + colW + 4, y, colW, 11, lbl2, f2).forEach(function (e) { items.push(e); });
+        y += 13;
+      }
+      row("نام و نام خانوادگی", "{full}", "کد ملی", "{nid}");
+      row("نام پدر", "{father}", "تاریخ تولد", "{birth}");
+      row("جنسیت", "{gender}", "تلفن همراه", "{mobile}");
+      row("بیمهٔ پایه", "{ins}", "بیمهٔ مکمل", "{supp}");
+      // services table
+      items.push(L(x, y, cw, 5, "شرح خدمات", { pt: 9.5, bold: true, align: 0, dir: 0, textColor: "#1f4e8c" })); y += 6;
+      items.push(TABLE(x, y, cw, 26, 3, 4, { header: true, widths: [0.5, 0.25, 0.25],
+        text: JSON.stringify({ cols: 3, rows: 4, header: true, widths: [0.5, 0.25, 0.25],
+          cells: [{ r: 0, c: 0, t: "شرح خدمت" }, { r: 0, c: 1, t: "تعداد" }, { r: 0, c: 2, t: "مبلغ (ریال)" }] }) })); y += 28;
+      // totals
+      var tw = (cw - 6) / 3;
+      CELL(x, y, tw, 11, "جمع کل", "{totalonly}", { bg: "#eef4ff" }).forEach(function (e) { items.push(e); });
+      CELL(x + tw + 3, y, tw, 11, "سهم بیمه", "{insshareonly}", { bg: "#eef4ff" }).forEach(function (e) { items.push(e); });
+      CELL(x + 2 * (tw + 3), y, tw, 11, "قابل پرداخت", "{paidonly}", { bg: "#dff0e3", color: "#0f7a3a", bold: true }).forEach(function (e) { items.push(e); });
+      y += 14;
+      // queue badge + footer
+      items.push(BAND(x, y, cw * 0.55, 12, "#eaf1fc", { corner: 2, borderColor: "#1f4e8c", borderWidth: 0.5 }));
+      items.push(F(x, y + 2.5, cw * 0.55, 7, "{queue}", { prefix: "نوبت شما: ", bold: true, pt: 13, align: 1, dir: 2, textColor: "#1f4e8c" }));
+      items.push(QR(x + cw - 18, y - 4, 18));
+      y += 16;
+      items.push(HL(x, y, cw, { borderColor: "#cdd7e6" })); y += 1.5;
+      items.push(F(x, y, cw, 4.5, "{issued}", { pt: 7.5, align: 0, dir: 0, textColor: "#8a93a6" }));
+      items.push(L(x, y, cw, 4.5, "نسخهٔ بیمار — لطفاً تا پایان درمان نزد خود نگه دارید.", { pt: 7, align: 2, dir: 0, textColor: "#9aa3b4" }));
+      push("reception", "★ پذیرش حرفه‌ای آبی (جدول خدمات)", "A5", 0, items);
+    })();
+
+    // ---- 2. Premium A4 hospital admission (دو ستونه با کادر) -------------
+    (function () {
+      var W = 210, H = 297, x = 12, cw = W - 24, items = [], y = 12;
+      items.push(BAND(x, y, cw, 26, "#0e4d6e", { corner: 2 }));
+      items.push(LOGO(x + 3, y + 3, 20));
+      items.push(L(x + 26, y + 3.5, cw - 28, 9, "مرکز درمانی و تخصصی آزادی طب", { pt: 18, bold: true, align: 0, dir: 0, textColor: "#ffffff" }));
+      items.push(L(x + 26, y + 13, cw - 28, 5, "پذیرش، درمانگاه تخصصی، تصویربرداری و آزمایشگاه", { pt: 9, align: 0, dir: 0, textColor: "#cfe6f0" }));
+      items.push(F(x + 26, y + 19, cw - 28, 5, "{clinicphone}", { prefix: "تلفن: ", pt: 8.5, align: 0, dir: 0, textColor: "#cfe6f0" }));
+      items.push(QR(x + cw - 22, y + 2, 22));
+      y += 30;
+      items.push(BAND(x, y, cw, 9, "#eaf3f7", { corner: 1.5, borderColor: "#0e4d6e", borderWidth: 0.4 }));
+      items.push(L(x + 3, y + 1.8, cw - 6, 5, "برگهٔ پذیرش و صورتحساب بیمار", { pt: 12, bold: true, align: 1, dir: 2, textColor: "#0e4d6e" }));
+      y += 12;
+      var colW = (cw - 6) / 2;
+      function rowA(lbl1, f1, lbl2, f2) {
+        CELL(x, y, colW, 12, lbl1, f1).forEach(function (e) { items.push(e); });
+        if (lbl2) CELL(x + colW + 6, y, colW, 12, lbl2, f2).forEach(function (e) { items.push(e); });
+        y += 14;
+      }
+      rowA("نام و نام خانوادگی", "{full}", "کد ملی", "{nid}");
+      rowA("نام پدر", "{father}", "تاریخ تولد / سن", "{age}");
+      rowA("جنسیت", "{gender}", "تلفن همراه", "{mobile}");
+      rowA("پزشک معالج", "{doctor}", "بخش / دپارتمان", "{dept}");
+      rowA("بیمهٔ پایه", "{ins}", "بیمهٔ مکمل", "{supp}");
+      rowA("نشانی", "{address}", "نوع پذیرش", "{ptype}");
+      y += 1;
+      items.push(L(x, y, cw, 5, "شرح خدمات و صورتحساب", { pt: 11, bold: true, align: 0, dir: 0, textColor: "#0e4d6e" })); y += 6;
+      items.push(TABLE(x, y, cw, 46, 4, 7, { borderColor: "#0e4d6e", header: true, widths: [0.45, 0.15, 0.2, 0.2],
+        text: JSON.stringify({ cols: 4, rows: 7, header: true, widths: [0.45, 0.15, 0.2, 0.2],
+          cells: [{ r: 0, c: 0, t: "شرح خدمت" }, { r: 0, c: 1, t: "تعداد" }, { r: 0, c: 2, t: "بهای واحد" }, { r: 0, c: 3, t: "مبلغ کل" }] }) })); y += 49;
+      var tw = (cw - 9) / 4;
+      CELL(x, y, tw, 12, "جمع کل", "{totalonly}").forEach(function (e) { items.push(e); });
+      CELL(x + tw + 3, y, tw, 12, "سهم بیمه", "{insshareonly}").forEach(function (e) { items.push(e); });
+      CELL(x + 2 * (tw + 3), y, tw, 12, "تخفیف", "{discount}").forEach(function (e) { items.push(e); });
+      CELL(x + 3 * (tw + 3), y, tw, 12, "قابل پرداخت", "{paidonly}", { bg: "#dff0e3", color: "#0f7a3a" }).forEach(function (e) { items.push(e); });
+      y += 16;
+      items.push(HL(x, y, cw, { borderColor: "#cdd7e6" })); y += 3;
+      items.push(L(x, y, colW, 6, "مهر و امضای پذیرش", { pt: 9, align: 0, dir: 0, textColor: "#6b7689" }));
+      items.push(L(x + colW + 6, y, colW, 6, "مهر و امضای صندوق", { pt: 9, align: 2, dir: 0, textColor: "#6b7689" }));
+      y += 8;
+      items.push(F(x, y, cw, 5, "{issued}", { pt: 8, align: 0, dir: 0, textColor: "#9aa3b4" }));
+      push("reception", "★ پذیرش بیمارستانی A4 (کامل)", "A4", 0, items);
+    })();
+
+    // ---- 3. Premium thermal receipt R80 (رول حرارتی حرفه‌ای) -------------
+    (function () {
+      var W = 80, H = 200, x = 4, cw = W - 8, items = [], y = 5;
+      items.push(L(x, y, cw, 7, "درمانگاه آزادی طب", { pt: 13, bold: true, align: 1, dir: 2, textColor: "#000" })); y += 8;
+      items.push(L(x, y, cw, 4, "{clinicaddr}", { field: "{clinicaddr}", type: "field", pt: 7, align: 1, dir: 2, textColor: "#333" })); y += 4.5;
+      items.push(F(x, y, cw, 4, "{clinicphone}", { prefix: "تلفن: ", pt: 7, align: 1, dir: 2, textColor: "#333" })); y += 5;
+      items.push(HL(x, y, cw, { borderColor: "#000", borderWidth: 0.4 })); y += 2;
+      items.push(F(x, y, cw / 2, 5, "{receiptNo}", { prefix: "قبض ", pt: 8, align: 0, dir: 0 }));
+      items.push(F(x + cw / 2, y, cw / 2, 5, "{date}", { prefix: "", pt: 8, align: 2, dir: 1 })); y += 6;
+      items.push(F(x, y, cw, 5, "{full}", { prefix: "بیمار: ", bold: true, pt: 9, align: 0, dir: 0 })); y += 5.5;
+      items.push(F(x, y, cw, 5, "{nid}", { prefix: "کد ملی: ", pt: 8, align: 0, dir: 0 })); y += 5.5;
+      items.push(F(x, y, cw, 5, "{ins}", { prefix: "بیمه: ", pt: 8, align: 0, dir: 0 })); y += 6;
+      items.push(HL(x, y, cw, { borderColor: "#000", borderWidth: 0.3, borderStyle: 1 })); y += 2;
+      items.push(TABLE(x, y, cw, 24, 2, 4, { borderColor: "#000", header: true, widths: [0.65, 0.35],
+        text: JSON.stringify({ cols: 2, rows: 4, header: true, widths: [0.65, 0.35],
+          cells: [{ r: 0, c: 0, t: "شرح خدمت" }, { r: 0, c: 1, t: "مبلغ" }] }) })); y += 26;
+      items.push(HL(x, y, cw, { borderColor: "#000", borderWidth: 0.3 })); y += 2;
+      items.push(F(x, y, cw, 5, "{total}", { prefix: "جمع کل: ", pt: 8, align: 0, dir: 0 })); y += 5;
+      items.push(F(x, y, cw, 5, "{insshare}", { prefix: "سهم بیمه: ", pt: 8, align: 0, dir: 0 })); y += 5;
+      items.push(F(x, y, cw, 6, "{paid}", { prefix: "قابل پرداخت: ", bold: true, pt: 10, align: 0, dir: 0 })); y += 7;
+      items.push(R(x, y, cw, 10, { borderColor: "#000", borderWidth: 0.5, corner: 1 }));
+      items.push(F(x, y + 2, cw, 6, "{queue}", { prefix: "نوبت: ", bold: true, pt: 12, align: 1, dir: 2 })); y += 12;
+      items.push(QR(x + cw / 2 - 9, y, 18)); y += 20;
+      items.push(L(x, y, cw, 4, "از انتخاب شما سپاسگزاریم.", { pt: 7.5, align: 1, dir: 2, textColor: "#333" }));
+      push("reception", "★ رسید حرارتی حرفه‌ای ۸ سانت", "R80", 0, items);
+    })();
+
+    // ---- 4. Premium appointment card A6 (کارت نوبت لوکس) ----------------
+    (function () {
+      var W = 105, H = 148, x = 7, cw = W - 14, items = [], y = 7;
+      items.push(FR(W, H));
+      items.push(BAND(x, y, cw, 18, "#6d28d9", { corner: 2 }));
+      items.push(LOGO(x + 2, y + 2, 14));
+      items.push(L(x + 18, y + 2.5, cw - 20, 7, "درمانگاه آزادی طب", { pt: 12, bold: true, align: 0, dir: 0, textColor: "#fff" }));
+      items.push(L(x + 18, y + 10, cw - 20, 5, "کارت نوبت", { pt: 8, align: 0, dir: 0, textColor: "#e9d8fd" }));
+      y += 21;
+      items.push(L(x, y, cw, 5, "شماره نوبت شما", { pt: 9, align: 1, dir: 2, textColor: "#7a879c" })); y += 6;
+      items.push(BAND(x + cw / 2 - 22, y, 44, 26, "#f5f0ff", { corner: 3, borderColor: "#6d28d9", borderWidth: 0.6 }));
+      items.push(APPT(x + cw / 2 - 22, y + 1, 44, 24, { pt: 40, textColor: "#6d28d9", dir: 2, prefix: "" })); y += 29;
+      items.push(HL(x, y, cw, { borderColor: "#ddd" })); y += 3;
+      items.push(F(x, y, cw, 6, "{full}", { prefix: "بیمار: ", bold: true, pt: 10, align: 1, dir: 2 })); y += 7;
+      items.push(F(x, y, cw, 5.5, "{doctor}", { prefix: "پزشک: ", pt: 9, align: 1, dir: 2, textColor: "#444" })); y += 6.5;
+      items.push(F(x, y, cw / 2, 5.5, "{apptdate}", { prefix: "تاریخ ", pt: 9, align: 0, dir: 0 }));
+      items.push(F(x + cw / 2, y, cw / 2, 5.5, "{appttime}", { prefix: "ساعت ", pt: 9, align: 2, dir: 1 })); y += 7;
+      items.push(QR(x + cw / 2 - 9, y, 16)); y += 18;
+      items.push(L(x, y, cw, 4.5, "لطفاً تا اعلام شماره منتظر بمانید.", { pt: 7.5, align: 1, dir: 2, textColor: "#888" }));
+      push("appointment", "★ کارت نوبت لوکس (بنفش)", "A6", 0, items);
+    })();
+
+    // ---- 5. Premium lab request A5 (آزمایشگاه با جدول) -----------------
+    (function () {
+      var W = 148, H = 210, x = 9, cw = W - 18, items = [], y = 8;
+      items.push(FR(W, H));
+      items.push(BAND(x, y, cw, 20, "#0e6655", { corner: 2 }));
+      items.push(LOGO(x + 2, y + 2, 16));
+      items.push(L(x + 20, y + 2.5, cw - 22, 7, "آزمایشگاه تشخیص طبی آزادی طب", { pt: 12, bold: true, align: 0, dir: 0, textColor: "#fff" }));
+      items.push(L(x + 20, y + 10, cw - 22, 5, "فرم درخواست و جوابدهی آزمایش", { pt: 8, align: 0, dir: 0, textColor: "#cdeae3" }));
+      items.push(QR(x + cw - 18, y + 1, 17));
+      y += 23;
+      items.push(F(x, y, cw / 2, 6, "{date}", { prefix: "تاریخ ", pt: 9, align: 0, dir: 0 }));
+      items.push(F(x + cw / 2, y, cw / 2, 6, "{receiptNo}", { prefix: "شماره پذیرش ", pt: 9, align: 2, dir: 1 })); y += 7;
+      var colW = (cw - 4) / 2;
+      function rowL(lbl1, f1, lbl2, f2) {
+        CELL(x, y, colW, 11, lbl1, f1).forEach(function (e) { items.push(e); });
+        if (lbl2) CELL(x + colW + 4, y, colW, 11, lbl2, f2).forEach(function (e) { items.push(e); });
+        y += 13;
+      }
+      rowL("نام و نام خانوادگی", "{full}", "کد ملی", "{nid}");
+      rowL("سن", "{age}", "جنسیت", "{gender}");
+      rowL("پزشک درخواست‌کننده", "{doctor}", "بیمه", "{ins}");
+      items.push(L(x, y, cw, 5, "آزمایش‌های درخواستی / نتایج", { pt: 9.5, bold: true, align: 0, dir: 0, textColor: "#0e6655" })); y += 6;
+      items.push(TABLE(x, y, cw, 46, 4, 8, { borderColor: "#0e6655", header: true, widths: [0.4, 0.2, 0.2, 0.2],
+        text: JSON.stringify({ cols: 4, rows: 8, header: true, widths: [0.4, 0.2, 0.2, 0.2],
+          cells: [{ r: 0, c: 0, t: "نام آزمایش" }, { r: 0, c: 1, t: "نتیجه" }, { r: 0, c: 2, t: "واحد" }, { r: 0, c: 3, t: "محدودهٔ مرجع" }] }) })); y += 49;
+      items.push(HL(x, y, cw, { borderColor: "#bbb" })); y += 2;
+      items.push(L(x, y, cw / 2, 5, "مهر و امضای مسئول فنی", { pt: 8, align: 0, dir: 0, textColor: "#777" }));
+      items.push(F(x + cw / 2, y, cw / 2, 5, "{issued}", { pt: 8, align: 2, dir: 0, textColor: "#777" }));
+      push("lab", "★ آزمایشگاه حرفه‌ای (جدول نتایج)", "A5", 0, items);
+    })();
   })();
 
   window.AZ_TEMPLATES = ALL;

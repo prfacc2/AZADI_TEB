@@ -112,7 +112,7 @@ static std::string designToWebJson(const PrintDesign& d){
         o+="\"prefix\":"+jstr(it.prefix)+",\"suffix\":"+jstr(it.suffix)+",";
         o+="\"font\":"+jstr(it.fontName)+",\"pt\":"+jnum(it.fontPt)+",";
         o+="\"bold\":"+jbool(it.bold)+",\"italic\":"+jbool(it.italic)+",";
-        o+="\"align\":"+jint(it.align)+",\"lineSpacing\":"+jnum(it.lineSpacing)+",";
+        o+="\"align\":"+jint(it.align)+",\"dir\":"+jint(it.dir)+",\"lineSpacing\":"+jnum(it.lineSpacing)+",";
         o+="\"textColor\":\""+hexColor(it.textColor)+"\",";
         o+="\"fillColor\":\""+hexColor(it.fillColor)+"\",";
         o+="\"fillTransparent\":"+jbool(it.fillTransparent)+",";
@@ -188,6 +188,7 @@ static bool webJsonToDesign(const std::string& json, PrintDesign& out){
                     else if(ik=="bold") it.bold=j.boolean();
                     else if(ik=="italic") it.italic=j.boolean();
                     else if(ik=="align") it.align=(int)j.dbl();
+                    else if(ik=="dir") it.dir=(int)j.dbl();
                     else if(ik=="lineSpacing") it.lineSpacing=j.dbl();
                     else if(ik=="textColor") it.textColor=parseHexColor(j.str());
                     else if(ik=="fillColor") it.fillColor=parseHexColor(j.str());
@@ -232,6 +233,19 @@ static bool jsonGetObject(const std::string& json, const std::string& key, std::
         if(instr){ if(ch=='\\'){++p;continue;} if(ch=='"')instr=false; continue; }
         if(ch=='"') instr=true; else if(ch=='{')++depth; else if(ch=='}'){ if(--depth==0){ out=json.substr(st,p-st+1); return true; } } }
     return false;
+}
+
+// v1.22.0: extract a top-level numeric value: "key": 123  (or 123.4)
+static bool jsonGetNumber(const std::string& json, const std::string& key, double& out){
+    std::string pat="\""+key+"\"";
+    size_t k=json.find(pat); if(k==std::string::npos) return false;
+    size_t c=json.find(':',k+pat.size()); if(c==std::string::npos) return false;
+    size_t p=c+1; while(p<json.size()&&(json[p]==' '||json[p]=='\t'||json[p]=='\n'||json[p]=='\r'))++p;
+    size_t st=p;
+    while(p<json.size()&&(isdigit((unsigned char)json[p])||json[p]=='-'||json[p]=='+'||json[p]=='.'||json[p]=='e'||json[p]=='E'))++p;
+    if(p==st) return false;
+    out=atof(json.substr(st,p-st).c_str());
+    return true;
 }
 
 #include "web_designer_http.inc"

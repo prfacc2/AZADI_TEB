@@ -68,6 +68,19 @@ static std::string apiHandle(const std::string& verb, const std::string& bodyJso
         for(size_t i=0;i<b.size();++i){ if(i)o+=","; o+=designToWebJson(b[i]); }
         o+="]}"; return o;
     }
+    if(verb=="mydesigns"){
+        // v1.22.0: "طراحی‌های من" — user-saved designs from the DB.
+        std::vector<PrintDesign> u; Designs_User(u);
+        std::string o="{\"designs\":[";
+        for(size_t i=0;i<u.size();++i){ if(i)o+=","; o+=designToWebJson(u[i]); }
+        o+="]}"; return o;
+    }
+    if(verb=="delete"){
+        double idd=0; if(!jsonGetNumber(bodyJson,"id",idd) || idd<=0)
+            return "{\"ok\":false,\"err\":\"no id\"}";
+        bool ok=Designs_Delete((int)idd);
+        return ok?"{\"ok\":true}":"{\"ok\":false,\"err\":\"delete failed\"}";
+    }
     if(verb=="save"){
         std::string dj; if(!jsonGetObject(bodyJson,"design",dj))
             return "{\"ok\":false,\"err\":\"no design\"}";

@@ -1845,9 +1845,10 @@ static void openNewPatient(HWND owner){
 // ============================================================================
 #define MGPCFG_CLASS L"AzPrintCfg"
 enum { PC_LIST=3601, PC_B_DOWNLOAD, PC_B_UPLOAD, PC_B_APPLY, PC_B_ENLARGE,
-       PC_B_DESIGN, PC_B_CLOSE };
+       PC_B_DESIGN, PC_B_CLOSE, PC_B_ZOOMIN, PC_B_ZOOMOUT };
 struct PrintCfgState {
     HWND list, bDownload, bUpload, bApply, bEnlarge, bDesign, bClose;
+    HWND bZoomIn, bZoomOut;
     std::vector<Section> sects;     // active sections
     int  sel = -1;                  // selected list index
     PrintDesign preview;            // currently-resolved design for sel
@@ -1855,6 +1856,7 @@ struct PrintCfgState {
     PrintDesign pending;            // imported-but-not-yet-applied design
     bool havePending = false;
     bool enlarged = false;          // preview occupies the whole card
+    double zoom = 1.0;              // v1.22.0: real preview zoom (0.4..4.0)
 };
 static HWND s_pc=NULL; static PrintCfgState* s_pcs=NULL;
 static void pcClose(){ if(s_pc&&IsWindow(s_pc)){ HWND v=s_pc; s_pc=NULL; DestroyWindow(v);} }
@@ -1961,13 +1963,18 @@ static void pcDrawTable(HDC dc, const PrintItem& it, const RECT& box, double scP
     SelectObject(dc,op); DeleteObject(pen);
 }
 
-static void pcPaintDesign(HDC dc, const RECT& area, const PrintDesign& d){
+static void pcPaintDesign(HDC dc, const RECT& area, const PrintDesign& d, double zoom){
     double pw=d.paperW, ph=d.paperH;
     if(pw<=0||ph<=0){ if(!Paper_Dims(d.paper,pw,ph)){ pw=148; ph=210; }
         if(d.orientation==1) std::swap(pw,ph); }
     int aw=area.right-area.left, ah=area.bottom-area.top;
     if(aw<10||ah<10) return;
     double sc = (aw/pw < ah/ph) ? aw/pw : ah/ph;     // mm→px fit
+    if(zoom<=0) zoom=1.0;
+    sc *= zoom;                                       // v1.22.0: apply zoom
+    // clip drawing to the preview pane so a zoomed-in page never spills out
+    HRGN clip=CreateRectRgn(area.left,area.top,area.right,area.bottom);
+    SelectClipRgn(dc,clip);
     int pgW=(int)(pw*sc), pgH=(int)(ph*sc);
     int px=area.left+(aw-pgW)/2, py=area.top+(ah-pgH)/2;
     // paper sheet (white) + shadow
@@ -2044,15 +2051,19 @@ static void pcPaintDesign(HDC dc, const RECT& area, const PrintDesign& d){
                 it.fontName.empty()?L"Vazirmatn":it.fontName.c_str());
             HGDIOBJ of=SelectObject(dc,f); SetTextColor(dc,pcCR(it.textColor));
             UINT al=(it.align==1)?DT_CENTER:(it.align==2)?DT_LEFT:DT_RIGHT;
-            DrawTextW(dc,s.c_str(),-1,&rr,al|DT_TOP|DT_WORDBREAK|DT_RTLREADING|DT_NOPREFIX);
+            UINT dirf=(it.dir==1)?0:DT_RTLREADING;
+            if(it.dir==2) al=DT_CENTER;
+            DrawTextW(dc,s.c_str(),-1,&rr,al|DT_TOP|DT_WORDBREAK|dirf|DT_NOPREFIX);
             SelectObject(dc,of); DeleteObject(f);
         }
     }
+    SelectClipRgn(dc,NULL); DeleteObject(clip);
 }
 // (re)load the resolved design for the selected section into preview
 static void pcLoadPreview(){
     if(!s_pcs) return;
     s_pcs->havePreview=false; s_pcs->havePending=false; s_pcs->enlarged=false;
+    s_pcs->zoom=1.0;
     if(s_pcs->sel<0 || s_pcs->sel>=(int)s_pcs->sects.size()) return;
     PrintDesign d;
     if(SectionDesign_Resolve(s_pcs->sects[s_pcs->sel].id, d)){
@@ -2064,15 +2075,19 @@ static void pcLayout(HWND h){
     int listW=S(260), listX=c.right-S(20)-listW;
     int listTop=c.top+S(64), listH=c.bottom-S(64)-S(60)-listTop;
     MoveWindow(s_pcs->list, listX, listTop, listW, listH, TRUE);
-    int by=c.bottom-S(52), bw=S(118), gap=S(8), x=c.right-S(20);
+    int by=c.bottom-S(52), bw=S(108), gap=S(7), x=c.right-S(20);
+    int zw=S(40);
     MoveWindow(s_pcs->bClose,   x-bw, by, bw, S(38), TRUE); x-=bw+gap;
     MoveWindow(s_pcs->bApply,   x-bw, by, bw, S(38), TRUE); x-=bw+gap;
     MoveWindow(s_pcs->bUpload,  x-bw, by, bw, S(38), TRUE); x-=bw+gap;
     MoveWindow(s_pcs->bDownload,x-bw, by, bw, S(38), TRUE); x-=bw+gap;
     MoveWindow(s_pcs->bDesign,  x-bw, by, bw, S(38), TRUE); x-=bw+gap;
-    MoveWindow(s_pcs->bEnlarge, x-bw, by, bw, S(38), TRUE);
+    MoveWindow(s_pcs->bEnlarge, x-bw, by, bw, S(38), TRUE); x-=bw+gap;
+    MoveWindow(s_pcs->bZoomIn,  x-zw, by, zw, S(38), TRUE); x-=zw+gap;
+    MoveWindow(s_pcs->bZoomOut, x-zw, by, zw, S(38), TRUE);
     for(HWND w:{s_pcs->list,s_pcs->bClose,s_pcs->bApply,s_pcs->bUpload,
-                s_pcs->bDownload,s_pcs->bDesign,s_pcs->bEnlarge}) ShowWindow(w,SW_SHOW);
+                s_pcs->bDownload,s_pcs->bDesign,s_pcs->bEnlarge,
+                s_pcs->bZoomIn,s_pcs->bZoomOut}) ShowWindow(w,SW_SHOW);
 }
 static std::wstring pcDesignsDir(){
     std::wstring d=dataDir()+L"\\exported_designs";
@@ -2165,7 +2180,9 @@ static LRESULT CALLBACK pcProc(HWND h, UINT m, WPARAM w, LPARAM l){
           s_pcs->sects.swap(act); }
         for(auto&s:s_pcs->sects)
             SendMessageW(s_pcs->list,LB_ADDSTRING,0,(LPARAM)s.name_fa.c_str());
-        s_pcs->bEnlarge =createFlatButton(h,PC_B_ENLARGE, L"بزرگ‌نمایی",ICO_REFRESH,BS_OUTLINE,0,0,10,10);
+        s_pcs->bZoomOut =createFlatButton(h,PC_B_ZOOMOUT, L"−",         ICO_NONE,   BS_OUTLINE,0,0,10,10);
+        s_pcs->bZoomIn  =createFlatButton(h,PC_B_ZOOMIN,  L"+",         ICO_NONE,   BS_OUTLINE,0,0,10,10);
+        s_pcs->bEnlarge =createFlatButton(h,PC_B_ENLARGE, L"تمام‌صفحه", ICO_REFRESH,BS_OUTLINE,0,0,10,10);
         s_pcs->bDesign  =createFlatButton(h,PC_B_DESIGN,  L"طراحی",     ICO_GEAR,   BS_OUTLINE,0,0,10,10);
         s_pcs->bDownload=createFlatButton(h,PC_B_DOWNLOAD,L"دانلود طرح",ICO_SAVE,   BS_OUTLINE,0,0,10,10);
         s_pcs->bUpload  =createFlatButton(h,PC_B_UPLOAD,  L"بارگذاری",  ICO_ID,     BS_OUTLINE,0,0,10,10);
@@ -2187,6 +2204,10 @@ static LRESULT CALLBACK pcProc(HWND h, UINT m, WPARAM w, LPARAM l){
             s_pcs->sel=(int)SendMessageW(s_pcs->list,LB_GETCURSEL,0,0);
             pcLoadPreview(); InvalidateRect(h,NULL,FALSE);
         } else if(id==PC_B_ENLARGE){ s_pcs->enlarged=!s_pcs->enlarged;
+            pcLayout(h); InvalidateRect(h,NULL,FALSE);
+        } else if(id==PC_B_ZOOMIN){ s_pcs->zoom*=1.25; if(s_pcs->zoom>4.0)s_pcs->zoom=4.0;
+            InvalidateRect(h,NULL,FALSE);
+        } else if(id==PC_B_ZOOMOUT){ s_pcs->zoom/=1.25; if(s_pcs->zoom<0.4)s_pcs->zoom=0.4;
             InvalidateRect(h,NULL,FALSE);
         } else if(id==PC_B_DOWNLOAD){ pcDownload(h);
         } else if(id==PC_B_UPLOAD){ pcUpload(h);
@@ -2223,7 +2244,12 @@ static LRESULT CALLBACK pcProc(HWND h, UINT m, WPARAM w, LPARAM l){
         gpRoundRectBg(dc,pr,S(12),g_theme.bg,g_theme.border,g_theme.surface);
         if(s_pcs && s_pcs->havePreview){
             RECT inner={pr.left+S(10),pr.top+S(10),pr.right-S(10),pr.bottom-S(10)};
-            pcPaintDesign(dc,inner,s_pcs->preview);
+            pcPaintDesign(dc,inner,s_pcs->preview,s_pcs->zoom);
+            // zoom % badge
+            SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.accent);
+            wchar_t zb[32]; swprintf(zb,32,L"بزرگ‌نمایی: %d%%",(int)(s_pcs->zoom*100));
+            RECT zr={pr.left+S(12),pr.top+S(6),pr.left+S(170),pr.top+S(26)};
+            DrawTextW(dc,toFaDigits(zb).c_str(),-1,&zr,DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
         } else {
             SelectObject(dc,g_fUI); SetTextColor(dc,g_theme.textDim);
             DrawTextW(dc,L"یک بخش را انتخاب کنید تا پیش‌نمایش طرح آن نمایش داده شود.",-1,&pr,
@@ -2684,12 +2710,56 @@ static void mgPaintEmps(HDC dc, HWND h){
     }
 }
 
+// v1.22.0: row rect for the employee list shown on the «پیام به کارمندان» page.
+static RECT mgMsgEmpRowRect(HWND h, int idx){
+    RECT a=mgContentRect(h);
+    // compose button sits at top+30..top+74 (see mgLayout PG_MSG); list starts below.
+    int y=a.top+mgHeadH()+S(132)+idx*(mgEmpRowH()+S(8));
+    RECT r={a.left+S(12),y,a.right-S(12),y+mgEmpRowH()}; return r;
+}
 static void mgPaintMsg(HDC dc, HWND h){
     RECT a=mgContentRect(h);
+    // hint above the compose button
     SetTextColor(dc,g_theme.textDim); SelectObject(dc,g_fUI);
-    RECT tr={a.left+S(24),a.top+mgHeadH()+S(96),a.right-S(24),a.top+mgHeadH()+S(140)};
+    RECT tr={a.left+S(24),a.top+mgHeadH()+S(86),a.right-S(24),a.top+mgHeadH()+S(112)};
     DrawTextW(dc,L"برای ارسال پیام، رسانه و هدف‌گذاری، دکمهٔ «نوشتن پیام» را بزنید.",-1,&tr,
         DT_CENTER|DT_WORDBREAK|DT_RTLREADING|DT_NOPREFIX);
+
+    // ---- employee list (so management can see who will receive the message) --
+    int hy=a.top+mgHeadH()+S(118);
+    gpLine(dc,a.left+S(12),hy,a.right-S(12),hy,g_theme.border,1);
+    SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.accent);
+    RECT hr={a.left+S(12),hy+S(6),a.right-S(12),hy+S(28)};
+    std::wstring hdr=L"کارمندان ("+toFaDigits(std::to_wstring((int)s_mg->emps.size()))+L" نفر)";
+    DrawTextW(dc,hdr.c_str(),-1,&hr,DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+
+    if(s_mg->emps.empty()){
+        SetTextColor(dc,g_theme.textDim); SelectObject(dc,g_fUI);
+        RECT er={a.left,hy+S(60),a.right,hy+S(100)};
+        DrawTextW(dc,L"کارمندی برای نمایش وجود ندارد.",-1,&er,
+            DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+        return;
+    }
+    for(int i=0;i<(int)s_mg->emps.size();i++){
+        RECT r=mgMsgEmpRowRect(h,i);
+        if(r.top>a.bottom) break;
+        gpRoundRectBg(dc,r,S(12), g_theme.surface, g_theme.border, g_theme.bg);
+        const EmpRow& e=s_mg->emps[i];
+        // online dot
+        { RECT dot={r.right-S(34),r.top+(r.bottom-r.top)/2-S(6),r.right-S(22),r.top+(r.bottom-r.top)/2+S(6)};
+          gpRoundRectBg(dc,dot,S(6), e.online?g_theme.success:g_theme.textDim,
+                        e.online?g_theme.success:g_theme.textDim, g_theme.surface); }
+        SetTextColor(dc,g_theme.text); SelectObject(dc,g_fUIB);
+        RECT nr={r.left+S(14),r.top+S(8),r.right-S(48),r.top+S(32)};
+        DrawTextW(dc,e.user.fullname.c_str(),-1,&nr,DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_WORD_ELLIPSIS|DT_NOPREFIX);
+        SetTextColor(dc,g_theme.textDim); SelectObject(dc,g_fSmall);
+        std::wstring sub=e.deptName;
+        if(!e.prof.empId.empty()) sub+=L"  •  کد: "+toFaDigits(e.prof.empId);
+        if(!e.prof.position.empty()) sub+=L"  •  "+e.prof.position;
+        sub+=e.online? L"  •  آنلاین" : L"  •  آفلاین";
+        RECT sr={r.left+S(14),r.top+S(32),r.right-S(48),r.bottom-S(8)};
+        DrawTextW(dc,sub.c_str(),-1,&sr,DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_WORD_ELLIPSIS|DT_NOPREFIX);
+    }
 }
 
 static void mgPaintReqs(HDC dc, HWND h){
@@ -2963,6 +3033,7 @@ static void mgGoPage(HWND h, int page){
     s_mg->page=page; s_mg->secAddMode=false; s_mg->msg.clear();
     if(page==PG_SECTS){ mgLoadCats(); mgUpdateAutoIdPreview(); }
     else if(page==PG_EMPS){ mgLoadEmps(); mgFillDeptCombo(); }
+    else if(page==PG_MSG){ mgLoadEmps(); }   // v1.22.0: show employee list
     else if(page==PG_PATIENTS){ mgPatientsLoadAsync(h); }
     mgLayout(h);
     InvalidateRect(h,NULL,TRUE);

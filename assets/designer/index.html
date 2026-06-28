@@ -20,6 +20,9 @@
     <button class="btn btn-templates" id="btnTemplates" title="انتخاب از طرح‌های آماده">
       ✨ طرح‌های آماده
     </button>
+    <button class="btn btn-mydesigns" id="btnMyDesigns" title="طرح‌هایی که خودتان ذخیره کرده‌اید">
+      📁 طراحی‌های من
+    </button>
     <span class="paper-lbl" id="paperLbl"></span>
   </div>
 
@@ -29,6 +32,9 @@
       <option value="0">عمودی</option>
       <option value="1">افقی</option>
     </select>
+    <label class="reflow-toggle" title="با تغییر اندازهٔ کاغذ، همهٔ عناصر متناسب جابه‌جا و تغییر اندازه می‌دهند">
+      <input type="checkbox" id="chkReflow" checked> واکنش‌گرا
+    </label>
     <span class="tb-sep"></span>
     <button class="btn btn-sm btn-outline" id="btnUndo" title="بازگشت (Ctrl+Z)">↶</button>
     <button class="btn btn-sm btn-outline" id="btnRedo" title="جلو (Ctrl+Y)">↷</button>
@@ -100,6 +106,17 @@
   </div>
 </div>
 
+<!-- ===================== My Designs overlay ===================== -->
+<div id="myOverlay" class="overlay hidden">
+  <div class="tpl-modal">
+    <div class="tpl-modal-head">
+      <span class="tpl-title">📁 طراحی‌های من</span>
+      <button id="myClose" class="btn btn-sm btn-outline">بستن ✕</button>
+    </div>
+    <div id="myGrid" class="tpl-grid"></div>
+  </div>
+</div>
+
 <!-- ===================== Table builder overlay ===================== -->
 <div id="tblOverlay" class="overlay hidden">
   <div class="tbl-modal">
@@ -113,7 +130,16 @@
         <div class="insp-row"><label>تعداد ردیف‌ها</label><input type="number" id="tblRows" class="form-control form-control-sm" min="1" max="40" value="4"></div>
         <div class="insp-row"><label>ردیف سرستون</label><input type="checkbox" id="tblHeader" class="form-check" checked></div>
         <button class="btn btn-sm btn-outline" id="tblRebuild" style="width:100%">بازسازی شبکهٔ جدول</button>
-        <p class="muted" style="font-size:12px;margin-top:8px">هر سلول را پر کنید. برای مقدار داده‌ای از فیلدها مثل <code>{full}</code> استفاده کنید.</p>
+        <div class="tbl-quickbtns">
+          <button class="btn btn-sm btn-outline" id="tblAddRow" title="افزودن ردیف">＋ ردیف</button>
+          <button class="btn btn-sm btn-outline" id="tblAddCol" title="افزودن ستون">＋ ستون</button>
+          <button class="btn btn-sm btn-outline" id="tblDelRow" title="حذف ردیف انتخاب‌شده">－ ردیف</button>
+          <button class="btn btn-sm btn-outline" id="tblDelCol" title="حذف ستون انتخاب‌شده">－ ستون</button>
+        </div>
+        <p class="muted" style="font-size:12px;margin-top:8px">روی هر سلول کلیک کنید تا انتخاب شود؛ سپس می‌توانید ردیف/ستون افزوده یا حذف کنید، یا از فهرست زیر یک فیلد داده‌ای را داخل آن سلول درج کنید.</p>
+        <label style="font-size:12px;font-weight:700;margin-top:6px;display:block">درج فیلد در سلول انتخاب‌شده:</label>
+        <select id="tblFieldSel" class="form-control form-control-sm"></select>
+        <button class="btn btn-sm btn-primary" id="tblFieldInsert" style="width:100%;margin-top:6px">درج فیلد در سلول</button>
       </div>
       <div class="tbl-grid-wrap"><div id="tblEditor"></div></div>
     </div>

@@ -1250,6 +1250,32 @@ static std::wstring pdFieldValue(const ReceptionRecord& r, const std::wstring& t
     if(tok==L"{service}")  return L"ویزیت";
     if(tok==L"{issued}")   return L"چاپ توسط پذیرش: "+
         (r.userName.empty()?g_session.user.fullname:r.userName);
+    // v1.22.0 — extra fields modelled on real Iranian clinic forms.
+    if(tok==L"{clinicaddr}")  return getSetting(L"clinic_address",L"");
+    if(tok==L"{clinicphone}") return toFaDigits(getSetting(L"clinic_phone",L""));
+    if(tok==L"{clinicmgr}")   return getSetting(L"clinic_manager",L"");
+    if(tok==L"{cliniclic}")   return toFaDigits(getSetting(L"clinic_license",L""));
+    if(tok==L"{age}"){
+        // derive age from birthDate (Jalali "YYYY/MM/DD") roughly.
+        std::wstring bd=r.birthDate; if(bd.size()>=4){
+            int by=_wtoi(bd.substr(0,4).c_str());
+            if(by>1200 && by<1500){ SYSTEMTIME st; GetLocalTime(&st);
+                int jy=st.wYear-621; int age=jy-by;
+                if(age>0&&age<150){ wchar_t b[16]; swprintf(b,16,L"%d",age); return toFaDigits(b)+L" سال"; } } }
+        return L"";
+    }
+    if(tok==L"{patientshare}") return toFaDigits(formatMoney(r.patientShare))+L" ریال";
+    if(tok==L"{finaltotal}")   return toFaDigits(formatMoney(r.finalTotal))+L" ریال";
+    if(tok==L"{visittype}")    return r.patientType;
+    if(tok==L"{insidx}")     { wchar_t b[16]; swprintf(b,16,L"%d",r.insIdx); return toFaDigits(b); }
+    if(tok==L"{shiftuser}")    return r.shift+L" — "+(r.userName.empty()?g_session.user.fullname:r.userName);
+    if(tok==L"{barcode}")      return toFaDigits(r.nationalId);   // barcode payload = NID
+    if(tok==L"{nationalcard}") return toFaDigits(r.nationalId);
+    if(tok==L"{regdate}")      return toFaDigits(r.apptDate);
+    if(tok==L"{regtime}")      return toFaDigits(r.apptTime);
+    if(tok==L"{insshareonly}") return toFaDigits(formatMoney(r.mainShare));
+    if(tok==L"{paidonly}")     return toFaDigits(formatMoney(r.paid));
+    if(tok==L"{totalonly}")    return toFaDigits(formatMoney(r.total));
     return L"";
 }
 
@@ -1490,7 +1516,10 @@ bool printPrintDesign(const ReceptionRecord& r, int sectionId, HWND owner){
             HGDIOBJ of=SelectObject(dc,f);
             SetTextColor(dc,pdCR(it.textColor));
             UINT al=(it.align==1)?DT_CENTER:(it.align==2)?DT_LEFT:DT_RIGHT;
-            DrawTextW(dc,s.c_str(),-1,&rr,al|DT_TOP|DT_WORDBREAK|DT_RTLREADING|DT_NOPREFIX);
+            // v1.22.0: per-item text direction. dir 0=RTL, 1=LTR, 2=center.
+            UINT dirf=(it.dir==1)?0:DT_RTLREADING;
+            if(it.dir==2) al=DT_CENTER;
+            DrawTextW(dc,s.c_str(),-1,&rr,al|DT_TOP|DT_WORDBREAK|dirf|DT_NOPREFIX);
             SelectObject(dc,of); DeleteObject(f);
         }
     }

@@ -49,14 +49,20 @@
   // Shared with C++ Paper_Dims(). Portrait mm. Includes small / laser sizes.
   var PAPER = {
     A3: [297, 420], A4: [210, 297], A5: [148, 210], A6: [105, 148],
-    B5: [176, 250], Letter: [215.9, 279.4], Legal: [215.9, 355.6],
-    R80: [80, 200], R58: [58, 200], L90: [90, 130], L100: [100, 150]
+    A7: [74, 105], B4: [250, 353], B5: [176, 250], B6: [125, 176],
+    Letter: [215.9, 279.4], Legal: [215.9, 355.6], HalfLetter: [139.7, 215.9],
+    R80: [80, 200], R80L: [80, 297], R72: [72, 200], R58: [58, 200], R58L: [58, 297],
+    R44: [44, 150], L90: [90, 130], L100: [100, 150], L102: [102, 152], L130: [130, 180]
   };
   var PAPER_LABELS = {
-    A3: "A3", A4: "A4", A5: "A5", A6: "A6", B5: "B5",
-    Letter: "Letter", Legal: "Legal",
-    R80: "رول حرارتی ۸ سانت", R58: "رول حرارتی ۵.۸ سانت",
-    L90: "لیزری کوچک ۹×۱۳", L100: "لیزری کوچک ۱۰×۱۵"
+    A3: "A3 (۲۹۷×۴۲۰)", A4: "A4 (۲۱۰×۲۹۷)", A5: "A5 (۱۴۸×۲۱۰)", A6: "A6 (۱۰۵×۱۴۸)",
+    A7: "A7 (۷۴×۱۰۵)", B4: "B4 (۲۵۰×۳۵۳)", B5: "B5 (۱۷۶×۲۵۰)", B6: "B6 (۱۲۵×۱۷۶)",
+    Letter: "Letter (نامه)", Legal: "Legal (حقوقی)", HalfLetter: "نیم‌نامه (۱۴×۲۱.۶)",
+    R80: "رول حرارتی ۸ سانت", R80L: "رول حرارتی ۸ سانت بلند",
+    R72: "رول حرارتی ۷.۲ سانت", R58: "رول حرارتی ۵.۸ سانت",
+    R58L: "رول حرارتی ۵.۸ سانت بلند", R44: "رول حرارتی ۴.۴ سانت",
+    L90: "لیبل/لیزری ۹×۱۳", L100: "لیبل/لیزری ۱۰×۱۵",
+    L102: "لیبل ۱۰.۲×۱۵.۲", L130: "لیبل بزرگ ۱۳×۱۸"
   };
   function paperDims(p, orient) {
     var d = PAPER[p] || [148, 210], w = d[0], h = d[1];
@@ -64,11 +70,51 @@
     return [w, h];
   }
 
+  // v1.22.0 RESPONSIVE: proportionally reflow every item from one page size to
+  // another so a design keeps its relative layout when the paper changes. Font
+  // sizes and border widths scale by the geometric-mean factor; clamped so they
+  // never run off the new page.
+  function reflowItems(fromW, fromH, toW, toH) {
+    if (!S.design || !S.design.items) return;
+    if (fromW <= 0 || fromH <= 0 || toW <= 0 || toH <= 0) return;
+    var sx = toW / fromW, sy = toH / fromH;
+    var sf = Math.sqrt(sx * sy);            // uniform factor for fonts/strokes
+    S.design.items.forEach(function (it) {
+      it.x = Math.round(it.x * sx * 100) / 100;
+      it.y = Math.round(it.y * sy * 100) / 100;
+      it.w = Math.round(it.w * sx * 100) / 100;
+      it.h = Math.round(it.h * sy * 100) / 100;
+      if (typeof it.fontSize === "number" && it.fontSize > 0)
+        it.fontSize = Math.max(4, Math.round(it.fontSize * sf * 10) / 10);
+      if (typeof it.borderWidth === "number" && it.borderWidth > 0)
+        it.borderWidth = Math.max(0.1, Math.round(it.borderWidth * sf * 100) / 100);
+      // keep inside new page
+      if (it.w > toW) it.w = toW;
+      if (it.h > toH) it.h = toH;
+      if (it.x < 0) it.x = 0; if (it.y < 0) it.y = 0;
+      if (it.x + it.w > toW) it.x = Math.max(0, toW - it.w);
+      if (it.y + it.h > toH) it.y = Math.max(0, toH - it.h);
+    });
+  }
+
+  function changePaper(newPaper, newOrient) {
+    if (!S.design) return;
+    var oldDims = paperDims(S.design.paper, S.design.orientation);
+    if (typeof newPaper === "string") S.design.paper = newPaper;
+    if (typeof newOrient === "number") S.design.orientation = newOrient;
+    var newDims = paperDims(S.design.paper, S.design.orientation);
+    pushUndo();
+    if (S.reflowOnResize !== false)
+      reflowItems(oldDims[0], oldDims[1], newDims[0], newDims[1]);
+    renderAll(); fitZoom();
+  }
+
   /* ---------------------------------------------------------- app state --- */
   var S = {
     design: null, selId: 0,
     pxPerMM: 3.7795, scale: 1,
     undo: [], redo: [], dirty: false,
+    reflowOnResize: true,                 // v1.22.0 responsive paper resize
     templates: window.AZ_TEMPLATES || []
   };
 
@@ -168,8 +214,9 @@
   function tableHtml(it, forThumb) {
     var t = parseTable(it);
     var sum = 0; t.widths.forEach(function (w) { sum += (w || 1); });
+    var tdir = (it.dir === 1) ? "ltr" : "rtl";
     var html = "<table style='font-size:" + (forThumb ? "100%" : ptPx(it.pt || 9) + "px") +
-      ";color:" + (it.textColor || "#000") + "'>";
+      ";color:" + (it.textColor || "#000") + ";direction:" + tdir + "'>";
     for (var r = 0; r < t.rows; r++) {
       html += "<tr>";
       for (var c = 0; c < t.cols; c++) {
@@ -211,6 +258,10 @@
       t.style.textAlign = it.align === 1 ? "center" : (it.align === 2 ? "left" : "right");
       t.style.alignItems = "flex-start";   // matches GDI DT_TOP
       t.style.lineHeight = (it.lineSpacing && it.lineSpacing > 0) ? it.lineSpacing : 1.25;
+      // v1.22.0: text direction (RTL/LTR/Center). dir 0=RTL 1=LTR 2=center.
+      if (it.dir === 1) { t.style.direction = "ltr"; if (it.align == null || it.align === 0) { t.style.justifyContent = "flex-start"; t.style.textAlign = "left"; } }
+      else if (it.dir === 2) { t.style.direction = "rtl"; t.style.justifyContent = "center"; t.style.textAlign = "center"; }
+      else { t.style.direction = "rtl"; }
       el.appendChild(t);
     } else if (it.type === "table") {
       el.innerHTML = tableHtml(it, false);
@@ -224,6 +275,11 @@
       el.style.border = Math.max(1, mm(it.borderWidth || 0.4)) + "px solid " + (it.borderColor || "#222");
       el.style.borderRadius = mm(it.corner || 0) + "px";
       if (!it.fillTransparent && it.fillColor) el.style.background = it.fillColor;
+      // v1.22.0 fix: a frame / transparent box must NOT capture clicks on its
+      // empty center — otherwise clicking the blank page selects the frame.
+      // We make the element click-through and rely on edge hit-testing
+      // (hitItemAt) so it is only selected when its border/handle is clicked.
+      if (it.type === "frame" || it.fillTransparent) el.style.pointerEvents = "none";
     } else if (it.type === "logo" || it.type === "photo" || it.type === "image" || it.type === "qr") {
       el.style.borderRadius = mm(it.corner || 0) + "px";
       if (it.imgPath && /^data:/.test(it.imgPath)) {
@@ -286,7 +342,7 @@
     var it = {
       id: genId(), type: type, x: 10, y: 10, w: 40, h: 8, rot: 0, z: (S.design.items || []).length + 1,
       locked: false, isFrame: false, text: "", field: "", prefix: "", suffix: "",
-      font: "Vazirmatn", pt: 11, bold: false, italic: false, align: 0, lineSpacing: 1.25,
+      font: "Vazirmatn", pt: 11, bold: false, italic: false, align: 0, dir: 0, lineSpacing: 1.25,
       textColor: "#111111", fillColor: "#ffffff", fillTransparent: true,
       borderColor: "#333333", borderWidth: 0.4, corner: 0, padding: 1, opacity: 1,
       visibility: 0, startValue: 1, step: 1, imgPath: ""
@@ -500,6 +556,7 @@
         gt.appendChild(row("ضخیم", checkInput(it.bold, function (v) { it.bold = v; up(); })));
         gt.appendChild(row("کج", checkInput(it.italic, function (v) { it.italic = v; up(); })));
         gt.appendChild(row("چینش", selectInput([["0", "راست"], ["1", "وسط"], ["2", "چپ"]], it.align, function (v) { it.align = +v; up(); })));
+        gt.appendChild(row("جهت متن", selectInput([["0", "راست‌به‌چپ (RTL)"], ["1", "چپ‌به‌راست (LTR)"], ["2", "وسط‌چین (Center)"]], it.dir || 0, function (v) { it.dir = +v; up(); })));
       }
       gt.appendChild(row("رنگ متن", colorInput(it.textColor, function (v) { it.textColor = v; up(); })));
       if (it.type !== "table")
@@ -584,13 +641,46 @@
     return { x: (clientX - r.left) / (S.pxPerMM * S.scale), y: (clientY - r.top) / (S.pxPerMM * S.scale) };
   }
 
+  // v1.22.0: topmost item hit at a paper coordinate (mm). For frames and
+  // transparent rectangles only the BORDER band counts as a hit, so their
+  // empty interior is click-through (lets you click items/page behind them).
+  function hitItemAt(mmx, mmy) {
+    var items = (S.design.items || []).slice().sort(function (a, b) { return (b.z || 0) - (a.z || 0); });
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i];
+      if (it.locked) continue;
+      if (mmx < it.x || mmx > it.x + it.w || mmy < it.y || mmy > it.y + it.h) continue;
+      var hollow = (it.type === "frame") || ((it.type === "rect") && it.fillTransparent);
+      if (hollow) {
+        // border band thickness in mm (min 1.5mm so it's easy to grab)
+        var band = Math.max(1.5, (it.borderWidth || 0.4) + 1.2);
+        var inside = (mmx > it.x + band && mmx < it.x + it.w - band &&
+                      mmy > it.y + band && mmy < it.y + it.h - band);
+        if (inside) continue;   // clicked the hollow center → pass through
+      }
+      return it;
+    }
+    return null;
+  }
+
   function wireCanvas() {
     var panning = false, panSX = 0, panSY = 0, scL = 0, scT = 0, moved = false;
+    var drag = null;
 
     $scroll.addEventListener("mousedown", function (e) {
       var pi = e.target.closest && e.target.closest(".pi");
       var handle = e.target.closest && e.target.closest(".handle");
       if (pi || handle) return;
+      // v1.22.0: frames/transparent-rects have pointer-events:none in their
+      // hollow center, so e.target won't be a .pi even when the click lands on
+      // their border band. Hit-test by coordinate so the border is selectable.
+      var p = clientToMM(e.clientX, e.clientY);
+      var hit = hitItemAt(p.x, p.y);
+      if (hit) {
+        select(hit.id);
+        if (!hit.locked) drag = { mode: "move", it: hit, start: p, o: clone(hit) };
+        pushUndo(); e.preventDefault(); return;
+      }
       panning = true; moved = false;
       panSX = e.clientX; panSY = e.clientY; scL = $scroll.scrollLeft; scT = $scroll.scrollTop;
       $scroll.classList.add("panning");
@@ -610,7 +700,6 @@
       if (e.ctrlKey) { e.preventDefault(); setScale(S.scale * (e.deltaY < 0 ? 1.1 : 0.9)); }
     }, { passive: false });
 
-    var drag = null;
     $paper.addEventListener("mousedown", function (e) {
       var handle = e.target.closest(".handle");
       var piEl = e.target.closest(".pi");
@@ -624,6 +713,14 @@
         var id = +piEl.dataset.id; select(id);
         var it2 = findItem(id); if (!it2 || it2.locked) return;
         drag = { mode: "move", it: it2, start: clientToMM(e.clientX, e.clientY), o: clone(it2) };
+        pushUndo(); e.preventDefault(); return;
+      }
+      // v1.22.0: no .pi under cursor — could be a hollow frame/rect border.
+      var p = clientToMM(e.clientX, e.clientY);
+      var hit = hitItemAt(p.x, p.y);
+      if (hit) {
+        select(hit.id);
+        if (!hit.locked) drag = { mode: "move", it: hit, start: p, o: clone(hit) };
         pushUndo(); e.preventDefault();
       }
     });
@@ -683,6 +780,7 @@
   var tblTarget = null;        // existing item being edited, or null = new
   function openTableBuilder(it) {
     tblTarget = it;
+    tblSel = { r: -1, c: -1 };
     var model = it ? parseTable(it) : { cols: 3, rows: 4, header: true, widths: [1, 1, 1],
       cells: [["ردیف", "شرح", "مبلغ"], ["", "", ""], ["", "", ""], ["", "", ""]] };
     document.getElementById("tblCols").value = model.cols;
@@ -691,6 +789,8 @@
     renderTableEditor(model);
     document.getElementById("tblOverlay").classList.remove("hidden");
   }
+  // v1.22.0: track the currently selected cell (row,col) in the table editor.
+  var tblSel = { r: -1, c: -1 };
   function readTableModel() {
     var cols = Math.max(1, Math.min(10, +document.getElementById("tblCols").value || 3));
     var rows = Math.max(1, Math.min(40, +document.getElementById("tblRows").value || 4));
@@ -710,17 +810,48 @@
       for (var c = 0; c < model.cols; c++) {
         var v = (model.cells[r] && model.cells[r][c] != null) ? model.cells[r][c] : "";
         var hd = (model.header && r === 0) ? "hd" : "";
-        html += "<td><input class='cell " + hd + "' value=\"" + escapeHtml(v).replace(/"/g, "&quot;") + "\"></td>";
+        var selCls = (r === tblSel.r && c === tblSel.c) ? " cellsel" : "";
+        html += "<td data-r='" + r + "' data-c='" + c + "'><input class='cell " + hd + selCls +
+          "' data-r='" + r + "' data-c='" + c + "' value=\"" + escapeHtml(v).replace(/"/g, "&quot;") + "\"></td>";
       }
       html += "</tr>";
     }
     html += "</tbody></table>";
     host.innerHTML = html;
+    // wire cell focus → remember selection (so add/del row/col + field-insert target it)
+    Array.prototype.slice.call(host.querySelectorAll("input.cell")).forEach(function (inp) {
+      inp.addEventListener("focus", function () {
+        tblSel = { r: +this.dataset.r, c: +this.dataset.c };
+        Array.prototype.slice.call(host.querySelectorAll("input.cell")).forEach(function (x) { x.classList.remove("cellsel"); });
+        this.classList.add("cellsel");
+      });
+    });
+  }
+
+  // build the field dropdown for in-cell insertion
+  function populateTblFieldSelect() {
+    var sel = document.getElementById("tblFieldSel");
+    if (!sel) return;
+    sel.innerHTML = "<option value=''>— انتخاب فیلد —</option>";
+    (window.AZ_FIELD_CATS || []).forEach(function (cat) {
+      var og = document.createElement("optgroup"); og.label = cat.title;
+      cat.items.forEach(function (f) {
+        var op = document.createElement("option"); op.value = f.key; op.textContent = f.label + "  " + f.key;
+        og.appendChild(op);
+      });
+      sel.appendChild(og);
+    });
   }
 
   function wireTableBuilder() {
     document.getElementById("tblClose").addEventListener("click", function () { document.getElementById("tblOverlay").classList.add("hidden"); });
     document.getElementById("tblCancel").addEventListener("click", function () { document.getElementById("tblOverlay").classList.add("hidden"); });
+    populateTblFieldSelect();
+    function rebuild(model) {
+      document.getElementById("tblCols").value = model.cols;
+      document.getElementById("tblRows").value = model.rows;
+      renderTableEditor(model);
+    }
     document.getElementById("tblRebuild").addEventListener("click", function () {
       var cur = readTableModel();
       var cols = Math.max(1, Math.min(10, +document.getElementById("tblCols").value || 3));
@@ -728,6 +859,45 @@
       var m = { cols: cols, rows: rows, header: document.getElementById("tblHeader").checked, widths: [], cells: [] };
       for (var r = 0; r < rows; r++) { m.cells[r] = []; for (var c = 0; c < cols; c++) { m.cells[r][c] = (cur.cells[r] && cur.cells[r][c]) || ""; } }
       renderTableEditor(m);
+    });
+    // ---- v1.22.0 add/delete row & column ----
+    document.getElementById("tblAddRow").addEventListener("click", function () {
+      var m = readTableModel();
+      var at = (tblSel.r >= 0 ? tblSel.r + 1 : m.rows);
+      var nr = []; for (var c = 0; c < m.cols; c++) nr.push("");
+      m.cells.splice(at, 0, nr); m.rows++;
+      tblSel = { r: at, c: 0 }; rebuild(m);
+    });
+    document.getElementById("tblAddCol").addEventListener("click", function () {
+      var m = readTableModel();
+      var at = (tblSel.c >= 0 ? tblSel.c + 1 : m.cols);
+      for (var r = 0; r < m.rows; r++) m.cells[r].splice(at, 0, "");
+      m.cols++; m.widths.splice(at, 0, 1);
+      tblSel = { r: 0, c: at }; rebuild(m);
+    });
+    document.getElementById("tblDelRow").addEventListener("click", function () {
+      var m = readTableModel(); if (m.rows <= 1) { toast("حداقل یک ردیف لازم است", "err"); return; }
+      var at = (tblSel.r >= 0 ? tblSel.r : m.rows - 1);
+      m.cells.splice(at, 1); m.rows--;
+      tblSel = { r: Math.min(at, m.rows - 1), c: tblSel.c }; rebuild(m);
+    });
+    document.getElementById("tblDelCol").addEventListener("click", function () {
+      var m = readTableModel(); if (m.cols <= 1) { toast("حداقل یک ستون لازم است", "err"); return; }
+      var at = (tblSel.c >= 0 ? tblSel.c : m.cols - 1);
+      for (var r = 0; r < m.rows; r++) m.cells[r].splice(at, 1);
+      m.cols--; m.widths.splice(at, 1);
+      tblSel = { r: tblSel.r, c: Math.min(at, m.cols - 1) }; rebuild(m);
+    });
+    // ---- v1.22.0 insert a {field} token into the selected cell ----
+    document.getElementById("tblFieldInsert").addEventListener("click", function () {
+      var key = document.getElementById("tblFieldSel").value;
+      if (!key) { toast("ابتدا یک فیلد را انتخاب کنید", "err"); return; }
+      if (tblSel.r < 0 || tblSel.c < 0) { toast("ابتدا یک سلول را انتخاب کنید", "err"); return; }
+      var inp = document.querySelector("#tblEditor input.cell[data-r='" + tblSel.r + "'][data-c='" + tblSel.c + "']");
+      if (!inp) { toast("سلول یافت نشد", "err"); return; }
+      inp.value = (inp.value ? inp.value + " " : "") + key;
+      inp.focus();
+      toast("فیلد در سلول درج شد", "ok");
     });
     document.getElementById("tblInsert").addEventListener("click", function () {
       var model = readTableModel();
@@ -795,6 +965,53 @@
     });
     renderTab();
     ov.classList.remove("hidden");
+  }
+
+  // v1.22.0 "طراحی‌های من" — list user-saved designs from the C++ DB.
+  function openMyDesigns() {
+    var ov = document.getElementById("myOverlay");
+    var grid = document.getElementById("myGrid");
+    grid.innerHTML = "<div class='muted' style='padding:24px'>در حال بارگذاری…</div>";
+    ov.classList.remove("hidden");
+
+    function render(list) {
+      grid.innerHTML = "";
+      if (!list || !list.length) {
+        grid.innerHTML = "<div class='muted' style='padding:24px'>هنوز طرحی ذخیره نکرده‌اید. پس از طراحی، دکمهٔ «ذخیره و اعمال» را بزنید و نامی برای طرح وارد کنید تا اینجا نمایش داده شود.</div>";
+        return;
+      }
+      list.forEach(function (t) {
+        var card = document.createElement("div"); card.className = "tpl-card my-card";
+        var thumb = document.createElement("div"); thumb.className = "tpl-thumb";
+        thumb.appendChild(buildThumb(t));
+        var nm = document.createElement("div"); nm.className = "tpl-nm"; nm.textContent = t.name || "طرح من";
+        var meta = document.createElement("div"); meta.className = "tpl-meta";
+        meta.textContent = (PAPER_LABELS[t.paper] || t.paper || "A5") + " · " + faDigits((t.items || []).length) + " آیتم";
+        var del = document.createElement("button"); del.className = "my-del"; del.title = "حذف طرح"; del.textContent = "🗑";
+        del.addEventListener("click", function (e) {
+          e.stopPropagation();
+          if (!confirm("این طرح حذف شود؟ «" + (t.name || "") + "»")) return;
+          Bridge.request("delete", { id: t.id }, function (res) {
+            if (res && res.ok) { card.remove(); toast("طرح حذف شد", "ok"); }
+            else toast("خطا در حذف طرح", "err");
+          });
+        });
+        card.appendChild(del);
+        card.appendChild(thumb); card.appendChild(nm); card.appendChild(meta);
+        card.addEventListener("click", function () { applyTemplate(t); ov.classList.add("hidden"); });
+        grid.appendChild(card);
+      });
+    }
+
+    if (Bridge.has()) {
+      Bridge.request("mydesigns", {}, function (res) {
+        render((res && res.designs) || []);
+      });
+    } else {
+      var local = [];
+      try { var raw = localStorage.getItem("az_design"); if (raw) local = [JSON.parse(raw)]; } catch (e) {}
+      render(local);
+    }
   }
 
   // High-fidelity mini preview: render real text/lines/boxes/tables.
@@ -909,8 +1126,10 @@
 
   function wire() {
     populatePaperSelect();
-    document.getElementById("paperSel").addEventListener("change", function () { pushUndo(); S.design.paper = this.value; renderAll(); fitZoom(); });
-    document.getElementById("orientSel").addEventListener("change", function () { pushUndo(); S.design.orientation = +this.value; renderAll(); fitZoom(); });
+    document.getElementById("paperSel").addEventListener("change", function () { changePaper(this.value, undefined); });
+    document.getElementById("orientSel").addEventListener("change", function () { changePaper(undefined, +this.value); });
+    var rf = document.getElementById("chkReflow");
+    if (rf) { rf.checked = S.reflowOnResize; rf.addEventListener("change", function () { S.reflowOnResize = this.checked; }); }
     document.getElementById("btnUndo").addEventListener("click", doUndo);
     document.getElementById("btnRedo").addEventListener("click", doRedo);
     document.getElementById("btnZoomIn").addEventListener("click", function () { setScale(S.scale * 1.15); });
@@ -922,6 +1141,12 @@
     document.getElementById("btnTemplates").addEventListener("click", openTemplateGallery);
     document.getElementById("tplClose").addEventListener("click", function () { document.getElementById("tplOverlay").classList.add("hidden"); });
     document.getElementById("tplOverlay").addEventListener("click", function (e) { if (e.target.id === "tplOverlay") this.classList.add("hidden"); });
+    var bMy = document.getElementById("btnMyDesigns");
+    if (bMy) bMy.addEventListener("click", openMyDesigns);
+    var myClose = document.getElementById("myClose");
+    if (myClose) myClose.addEventListener("click", function () { document.getElementById("myOverlay").classList.add("hidden"); });
+    var myOv = document.getElementById("myOverlay");
+    if (myOv) myOv.addEventListener("click", function (e) { if (e.target.id === "myOverlay") this.classList.add("hidden"); });
     document.getElementById("btnExit").addEventListener("click", function () {
       if (S.dirty && !confirm("تغییرات ذخیره‌نشده دارید. خارج می‌شوید؟")) return;
       if (Bridge.has()) Bridge.request("exit", {}, function () {});

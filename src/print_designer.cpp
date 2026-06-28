@@ -24,7 +24,7 @@ PrintItem::PrintItem()
     : id(0), type(PIT_LABEL), x(10), y(10), w(40), h(8), rot(0),
       locked(false), is_frame(false), z(0),
       fontName(L"Vazirmatn"), fontPt(10), bold(false), italic(false),
-      align(0), lineSpacing(1.0),
+      align(0), dir(0), lineSpacing(1.0),
       textColor(0x000000), fillColor(0xFFFFFF), fillTransparent(true),
       borderColor(0x000000), borderWidth(0), corner(0), padding(1),
       opacity(1.0), visibility(0),
@@ -41,11 +41,16 @@ bool Paper_Dims(const std::wstring& name, double& wmm, double& hmm){
     struct P { const wchar_t* n; double w,h; };
     static const P ps[] = {
         { L"A3", 297, 420 }, { L"A4", 210, 297 }, { L"A5", 148, 210 },
-        { L"A6", 105, 148 }, { L"B5", 176, 250 }, { L"Letter", 215.9, 279.4 },
-        { L"Legal", 215.9, 355.6 },
-        { L"R80", 80, 200 }, { L"R58", 58, 200 },
-        // §1.21.0: small / laser label sizes shared with the JS designer.
+        { L"A6", 105, 148 }, { L"A7", 74, 105 },
+        { L"B4", 250, 353 }, { L"B5", 176, 250 }, { L"B6", 125, 176 },
+        { L"Letter", 215.9, 279.4 }, { L"Legal", 215.9, 355.6 },
+        { L"HalfLetter", 139.7, 215.9 },
+        // thermal rolls (width × default cut length) shared with JS designer.
+        { L"R80", 80, 200 }, { L"R80L", 80, 297 }, { L"R72", 72, 200 },
+        { L"R58", 58, 200 }, { L"R58L", 58, 297 }, { L"R44", 44, 150 },
+        // small / laser label sizes shared with the JS designer.
         { L"L90", 90, 130 }, { L"L100", 100, 150 },
+        { L"L102", 102, 152 }, { L"L130", 130, 180 },
     };
     for(const auto& p : ps) if(name==p.n){ wmm=p.w; hmm=p.h; return true; }
     return false;   // custom
@@ -115,6 +120,7 @@ std::string Design_ToJson(const PrintDesign& d){
         o << "\"bold\":" << (it.bold?1:0) << ",";
         o << "\"italic\":" << (it.italic?1:0) << ",";
         o << "\"align\":" << inum(it.align) << ",";
+        o << "\"dir\":" << inum(it.dir) << ",";
         o << "\"ls\":" << num(it.lineSpacing) << ",";
         o << "\"tc\":" << inum(it.textColor) << ",";
         o << "\"fc\":" << inum(it.fillColor) << ",";
@@ -225,6 +231,7 @@ bool Design_FromJson(const std::string& json, PrintDesign& out, std::wstring& er
                     else if(k=="bold") it.bold=jp.dbl()!=0;
                     else if(k=="italic") it.italic=jp.dbl()!=0;
                     else if(k=="align") it.align=(int)jp.dbl();
+                    else if(k=="dir") it.dir=(int)jp.dbl();
                     else if(k=="ls") it.lineSpacing=jp.dbl();
                     else if(k=="tc") it.textColor=(unsigned)jp.dbl();
                     else if(k=="fc") it.fillColor=(unsigned)jp.dbl();
@@ -374,10 +381,34 @@ int SectionDesign_Get(int sectionId){
 bool SectionDesign_Resolve(int sectionId, PrintDesign& out){
     int did=SectionDesign_Get(sectionId);
     if(did>0 && Designs_Get(did,out)) return true;
-    // fall back to T01 (first builtin)
+    // v1.22.0: no binding yet → pick a builtin that MATCHES the section type so
+    // each section shows a different, appropriate default (was: always b[0],
+    // which made every section preview look identical). We classify by the
+    // section's Persian name and choose a group keyword the builtin name fits.
     std::vector<PrintDesign> b; Designs_Builtins(b);
-    if(!b.empty()){ out=b[0]; return true; }
-    return false;
+    if(b.empty()) return false;
+    std::wstring nm;
+    { std::vector<Section> all; Sections_All(all);
+      for(const auto& s:all) if(s.id==sectionId){ nm=s.name_fa; break; } }
+    auto has=[&](const wchar_t* kw){ return nm.find(kw)!=std::wstring::npos; };
+    // keyword to look for inside builtin design names, by section family
+    const wchar_t* want=L"";
+    if(has(L"نوبت"))                         want=L"نوبت";
+    else if(has(L"آزمایش")||has(L"لاب"))     want=L"آزمایش";
+    else if(has(L"رادیو")||has(L"تصویر")||has(L"سونو")) want=L"رادیولوژی";
+    else if(has(L"دندان"))                   want=L"دندانپزشک";
+    else if(has(L"تزریق"))                   want=L"سرپایی";
+    else if(has(L"دارو"))                    want=L"شرح خدمت";
+    else if(has(L"بیمه"))                    want=L"بیمه";
+    else if(has(L"صورتحساب")||has(L"قبض")||has(L"مبلغ")) want=L"صورتحساب";
+    if(*want){
+        for(const auto& d:b) if(d.name.find(want)!=std::wstring::npos){ out=d; return true; }
+    }
+    // deterministic spread: different sections fall on different builtins even
+    // when no keyword matches, so previews are not all identical.
+    out=b[(size_t)((sectionId-1+ (int)b.size())% (int)b.size())];
+    if(sectionId<=0) out=b[0];
+    return true;
 }
 
 // §1.12.0 (§7): single-source-of-truth reconciliation. Detach (archive) any

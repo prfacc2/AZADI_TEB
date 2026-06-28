@@ -46,6 +46,7 @@ struct PrintItem {
     double       fontPt;
     bool         bold, italic;
     int          align;         // 0=right 1=center 2=left 3=justify (RTL)
+    int          dir;           // text direction: 0=RTL 1=LTR 2=center(auto). v1.22.0
     double       lineSpacing;
 
     // appearance
