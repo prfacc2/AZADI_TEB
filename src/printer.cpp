@@ -1316,6 +1316,58 @@ static void pdDrawTable(HDC dc, const PrintItem& it, const RECT& box,
     SelectObject(dc,op); DeleteObject(pen);
 }
 
+// Map a design paper name to a Windows DMPAPER_* code. Returns 0 for custom.
+static short pdPaperCode(const std::wstring& name){
+    if(name==L"A3")     return DMPAPER_A3;       // 8
+    if(name==L"A4")     return DMPAPER_A4;       // 9
+    if(name==L"A5")     return DMPAPER_A5;       // 11
+    if(name==L"A6")     return DMPAPER_A6;       // 70
+    if(name==L"B5")     return DMPAPER_B5;       // 13
+    if(name==L"Letter") return DMPAPER_LETTER;   // 1
+    if(name==L"Legal")  return DMPAPER_LEGAL;    // 5
+    return 0; // R80/R58/L90/L100/custom → set explicit dimensions instead
+}
+// Create a printer DC whose DEVMODE paper size & orientation match the design,
+// so an A5 design actually prints on A5 (not the printer's default A4). Falls
+// back to a plain DC if the printer doesn't expose its properties.
+static HDC pdCreatePrinterDC(const std::wstring& prn, const PrintDesign& d){
+    if(prn.empty()) return NULL;
+    HANDLE hp=NULL;
+    if(!OpenPrinterW((LPWSTR)prn.c_str(),&hp,NULL) || !hp)
+        return CreateDCW(L"WINSPOOL",prn.c_str(),NULL,NULL);
+    LONG need=DocumentPropertiesW(NULL,hp,(LPWSTR)prn.c_str(),NULL,NULL,0);
+    HDC dc=NULL;
+    if(need>0){
+        std::vector<BYTE> buf(need);
+        DEVMODEW* dm=(DEVMODEW*)buf.data();
+        if(DocumentPropertiesW(NULL,hp,(LPWSTR)prn.c_str(),dm,NULL,DM_OUT_BUFFER)==IDOK){
+            short code=pdPaperCode(d.paper);
+            // orientation
+            dm->dmFields |= DM_ORIENTATION;
+            dm->dmOrientation = (d.orientation==1)?DMORIENT_LANDSCAPE:DMORIENT_PORTRAIT;
+            if(code>0){
+                dm->dmFields |= DM_PAPERSIZE;
+                dm->dmPaperSize = code;
+                dm->dmFields &= ~(DM_PAPERWIDTH|DM_PAPERLENGTH);
+            } else {
+                // custom / receipt / small-laser: set explicit size in 0.1 mm.
+                double wmm=d.paperW, hmm=d.paperH;
+                if(d.orientation==1 && wmm<hmm) std::swap(wmm,hmm);
+                dm->dmFields |= (DM_PAPERSIZE|DM_PAPERWIDTH|DM_PAPERLENGTH);
+                dm->dmPaperSize   = DMPAPER_USER;       // 256
+                dm->dmPaperWidth  = (short)(wmm*10.0);   // tenths of a millimetre
+                dm->dmPaperLength = (short)(hmm*10.0);
+            }
+            // let the driver validate/merge our changes
+            DocumentPropertiesW(NULL,hp,(LPWSTR)prn.c_str(),dm,dm,DM_IN_BUFFER|DM_OUT_BUFFER);
+            dc=CreateDCW(L"WINSPOOL",prn.c_str(),NULL,dm);
+        }
+    }
+    ClosePrinter(hp);
+    if(!dc) dc=CreateDCW(L"WINSPOOL",prn.c_str(),NULL,NULL);
+    return dc;
+}
+
 bool printPrintDesign(const ReceptionRecord& r, int sectionId, HWND owner){
     PrintDesign d;
     if(!SectionDesign_Resolve(sectionId, d)) return false;   // no design → caller falls back
@@ -1326,10 +1378,11 @@ bool printPrintDesign(const ReceptionRecord& r, int sectionId, HWND owner){
         else { d.paperW=148; d.paperH=210; }
     }
 
-    // Resolve a printer DC. First time (no saved printer) → standard dialog so
-    // the operator picks printer + paper (A4/A5). Afterwards reuse it.
+    // Resolve a printer DC whose paper size matches the DESIGN (so an A5 design
+    // prints on A5, an 80mm receipt design on the receipt roll, etc.). First
+    // time (no saved printer) → standard dialog so the operator picks a printer.
     std::wstring prn=currentPrinter();
-    HDC dc = prn.empty()? NULL : CreateDCW(L"WINSPOOL",prn.c_str(),NULL,NULL);
+    HDC dc = pdCreatePrinterDC(prn, d);
     if(!dc){
         PRINTDLGW pd={0}; pd.lStructSize=sizeof(pd); pd.hwndOwner=owner;
         pd.Flags=PD_RETURNDC|PD_NOPAGENUMS|PD_NOSELECTION|PD_USEDEVMODECOPIES;
@@ -1347,7 +1400,25 @@ bool printPrintDesign(const ReceptionRecord& r, int sectionId, HWND owner){
     DOCINFOW di={sizeof(di)};
     std::wstring docName=std::wstring(APP_NAME_W)+L" — print";
     di.lpszDocName=docName.c_str();
-    if(StartDocW(dc,&di)<=0){ DeleteDC(dc); return false; }
+    if(StartDocW(dc,&di)<=0){
+        // The stored/default printer rejected the job (common with virtual
+        // "app" printers e.g. some PDF/photo apps → "doesn't support print
+        // preview"). Fall back to the standard dialog so the operator picks a
+        // working printer, then re-resolve DPI/offsets for the new DC.
+        DeleteDC(dc); dc=NULL;
+        PRINTDLGW pd={0}; pd.lStructSize=sizeof(pd); pd.hwndOwner=owner;
+        pd.Flags=PD_RETURNDC|PD_NOPAGENUMS|PD_NOSELECTION|PD_USEDEVMODECOPIES;
+        if(!PrintDlgW(&pd)) return true;        // cancelled → handled
+        dc=pd.hDC; if(!dc) return false;
+        dpiX=GetDeviceCaps(dc,LOGPIXELSX); dpiY=GetDeviceCaps(dc,LOGPIXELSY);
+        offX=GetDeviceCaps(dc,PHYSICALOFFSETX); offY=GetDeviceCaps(dc,PHYSICALOFFSETY);
+        sx=dpiX/25.4; sy=dpiY/25.4;
+        if(StartDocW(dc,&di)<=0){
+            MessageBoxW(owner,L"چاپگر انتخاب‌شده از چاپ این سند پشتیبانی نمی‌کند.\n"
+                L"لطفاً یک چاپگر واقعی (نه «Microsoft Print to PDF» یا برنامهٔ عکس) انتخاب کنید.",
+                L"چاپ طرح",MB_OK|MB_ICONWARNING);
+            DeleteDC(dc); return false; }
+    }
     StartPage(dc);
     SetBkMode(dc,TRANSPARENT);
 
