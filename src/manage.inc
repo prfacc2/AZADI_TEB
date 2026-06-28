@@ -1939,8 +1939,8 @@ static void pcDrawTable(HDC dc, const PrintItem& it, const RECT& box, double scP
     if(t.header && t.rows>0){ RECT hr={cx[t.cols],ry[0],cx[0],ry[1]};
         HBRUSH hb=CreateSolidBrush(RGB(238,242,251)); FillRect(dc,&hr,hb); DeleteObject(hb); }
     double fontPt=it.fontPt>0?it.fontPt:9.0;
-    int lf=-(int)(fontPt*scPxMm*3.78/2.83);
-    if(lf>-(S(7))) lf=-(S(7)); if(lf<-(S(40))) lf=-(S(40));
+    int lf=-(int)(fontPt*scPxMm*25.4/72.0 + 0.5);   // pt → px (WYSIWYG)
+    if(lf>-2) lf=-2;
     HFONT fN=CreateFontW(lf,0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,
         it.fontName.empty()?L"Vazirmatn":it.fontName.c_str());
     HFONT fH=CreateFontW(lf,0,0,0,FW_BOLD,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,
@@ -2033,8 +2033,11 @@ static void pcPaintDesign(HDC dc, const RECT& area, const PrintDesign& d){
             else if(it.type==PIT_APPTNO){ s=it.prefix+toFaDigits(std::to_wstring(it.startValue>0?it.startValue:1)); }
             else s=it.prefix+it.text+it.suffix;
             if(s.empty()) continue;
-            int lf=-(int)(it.fontPt*sc*3.78/2.83);   // pt(mm-space)→px approx
-            if(lf>-(S(8))) lf=-(S(8)); if(lf<-(S(60))) lf=-(S(60));
+            // WYSIWYG font size: pt → px.  sc is px-per-mm, and 1pt = 1/72 in =
+            // 25.4/72 mm, so px = pt * sc * (25.4/72).  (The old 3.78/2.83 factor
+            // was ~3.8× too large and made text overlap.)
+            int lf=-(int)(it.fontPt*sc*25.4/72.0 + 0.5);
+            if(lf>-2) lf=-2;
             RECT rr={x0,y0,x1,y1};
             HFONT f=CreateFontW(lf,0,0,0,it.bold?FW_BOLD:FW_NORMAL,it.italic?1:0,0,0,
                 DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,
@@ -2106,9 +2109,26 @@ static void pcUpload(HWND h){
     if(hf==INVALID_HANDLE_VALUE){ MessageBoxW(h,L"خواندن فایل ناموفق بود.",L"بارگذاری طرح",MB_OK|MB_ICONERROR); return; }
     DWORD sz=GetFileSize(hf,NULL); std::string buf; buf.resize(sz);
     DWORD rd=0; ReadFile(hf,&buf[0],sz,&rd,NULL); CloseHandle(hf); buf.resize(rd);
-    PrintDesign d; std::wstring err;
-    if(!Design_FromJson(buf,d,err)){
+    // strip a UTF-8 BOM if present
+    if(buf.size()>=3 && (unsigned char)buf[0]==0xEF && (unsigned char)buf[1]==0xBB && (unsigned char)buf[2]==0xBF)
+        buf.erase(0,3);
+    PrintDesign d; std::wstring err; bool ok=false;
+    // v1.21.1: accept BOTH file shapes —
+    //   (a) native AZTEMPLATE/1 (written by «دانلود طرح» here), and
+    //   (b) the browser designer's JS-shaped JSON (written by «دانلود» in the
+    //       web designer). Try native first, then fall back to the web parser.
+    if(buf.find("AZTEMPLATE/1")!=std::string::npos){
+        ok=Design_FromJson(buf,d,err);
+    } else {
+        ok=Design_FromWebJson(buf,d);
+        if(!ok) err=L"ساختار فایل طرح شناسایی نشد (نه AZTEMPLATE/1 و نه طرح طراح وب).";
+    }
+    if(ok && d.items.empty()){ ok=false; err=L"فایل طرح هیچ آیتمی ندارد."; }
+    if(!ok){
         MessageBoxW(h,(L"فایل طرح نامعتبر است.\n"+err).c_str(),L"بارگذاری طرح",MB_OK|MB_ICONERROR); return; }
+    // make sure paper dimensions are resolved for the preview
+    if(d.paperW<=0||d.paperH<=0){ double pw,ph; if(Paper_Dims(d.paper,pw,ph)){ d.paperW=pw; d.paperH=ph;
+        if(d.orientation==1) std::swap(d.paperW,d.paperH); } else { d.paperW=148; d.paperH=210; } }
     s_pcs->pending=d; s_pcs->havePending=true; s_pcs->preview=d; s_pcs->havePreview=true;
     s_pcs->enlarged=false;
     MessageBoxW(h,L"طرح بارگذاری شد. برای اعمال روی بخش، «اعمال» را بزنید.",L"بارگذاری طرح",MB_OK|MB_ICONINFORMATION);

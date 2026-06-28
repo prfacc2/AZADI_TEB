@@ -91,6 +91,12 @@ std::string  Design_ToJson(const PrintDesign& d);
 bool         Design_FromJson(const std::string& json, PrintDesign& out,
                              std::wstring& err);
 
+// v1.21.1: the web designer (browser) downloads files in its own JS-shaped JSON
+// (string item types, #rrggbb colours, no AZTEMPLATE magic). These let the
+// native UI (Print Settings import) round-trip those same files.
+std::string  Design_ToWebJson(const PrintDesign& d);
+bool         Design_FromWebJson(const std::string& json, PrintDesign& out);
+
 // ----------------------------------------------------------- design store ----
 void Designs_Init();                       // seed 20 built-ins on first run
 int  Designs_All(std::vector<PrintDesign>& out);

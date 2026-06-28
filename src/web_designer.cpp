@@ -214,6 +214,11 @@ static bool webJsonToDesign(const std::string& json, PrintDesign& out){
     return j.ok;
 }
 
+// v1.21.1: public wrappers so the native UI (Print Settings import/export) can
+// round-trip the very files the browser designer downloads.
+std::string Design_ToWebJson(const PrintDesign& d){ return designToWebJson(d); }
+bool Design_FromWebJson(const std::string& json, PrintDesign& out){ return webJsonToDesign(json,out); }
+
 // extract a string value of `key` from a flat JSON object (top-level only)
 static bool jsonGetObject(const std::string& json, const std::string& key, std::string& out){
     // find "key" then capture the following {...} balanced block
