@@ -20,7 +20,11 @@ enum PrintItemType {
     PIT_LOGO,          // clinic logo (image)
     PIT_QR,            // QR / barcode (encodes the receipt number)
     PIT_PHOTO,         // patient personal photo placeholder
-    PIT_APPTNO         // appointment-number counter (§3.13)
+    PIT_APPTNO,        // appointment-number counter (§3.13)
+    PIT_TABLE          // §1.21.0: grid/table. Model stored as JSON in `text`:
+                       //   {"cols":n,"rows":n,"header":bool,"widths":[..],
+                       //    "cells":[[..],..]}  — round-trips through C++ as a
+                       //    plain string so it never breaks the data model.
 };
 
 // Each PrintItem lives in millimetre space (paper coordinates).

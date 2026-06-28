@@ -1873,6 +1873,94 @@ static RECT pcPreviewRect(HWND h){
     return r;
 }
 // Render a PrintDesign scaled-to-fit inside `area` (WYSIWYG paper preview).
+// ---- v1.21.0: self-contained helpers for the Print-Settings preview --------
+// (printer.cpp's equivalents are file-static, so we duplicate compact versions.)
+static inline COLORREF pcCR(unsigned int rgb){
+    return RGB((rgb>>16)&0xFF,(rgb>>8)&0xFF,rgb&0xFF);   // 0x00RRGGBB → COLORREF
+}
+struct PcTable {
+    int cols=0,rows=0; bool header=false;
+    std::vector<double> widths;
+    std::vector<std::vector<std::wstring>> cells;
+};
+static std::wstring pcU8toW(const std::string& s){
+    int n=MultiByteToWideChar(CP_UTF8,0,s.c_str(),(int)s.size(),NULL,0);
+    std::wstring w(n,0); if(n) MultiByteToWideChar(CP_UTF8,0,s.c_str(),(int)s.size(),&w[0],n);
+    return w;
+}
+static bool pcParseTable(const std::wstring& jsonW, PcTable& t){
+    int n=WideCharToMultiByte(CP_UTF8,0,jsonW.c_str(),(int)jsonW.size(),NULL,0,NULL,NULL);
+    std::string s(n,0); if(n) WideCharToMultiByte(CP_UTF8,0,jsonW.c_str(),(int)jsonW.size(),&s[0],n,NULL,NULL);
+    size_t p=0; auto ws=[&]{ while(p<s.size()&&(s[p]==' '||s[p]=='\t'||s[p]=='\n'||s[p]=='\r'))++p; };
+    auto rdStr=[&](std::string& out)->bool{ ws(); if(p>=s.size()||s[p]!='"')return false; ++p;
+        while(p<s.size()&&s[p]!='"'){ char c=s[p++]; if(c=='\\'&&p<s.size()){ char e=s[p++];
+            switch(e){case 'n':out+='\n';break;case 'r':out+='\r';break;case 't':out+='\t';break;
+                case '"':out+='"';break;case '\\':out+='\\';break;case '/':out+='/';break;
+                case 'u':{ if(p+4<=s.size()){ unsigned v=(unsigned)strtoul(s.substr(p,4).c_str(),NULL,16); p+=4;
+                    if(v<0x80)out+=(char)v; else if(v<0x800){out+=(char)(0xC0|(v>>6));out+=(char)(0x80|(v&0x3F));}
+                    else{out+=(char)(0xE0|(v>>12));out+=(char)(0x80|((v>>6)&0x3F));out+=(char)(0x80|(v&0x3F));} } break; }
+                default:out+=e; } } else out+=c; }
+        if(p<s.size()&&s[p]=='"')++p; return true; };
+    auto rdNum=[&]()->double{ ws(); size_t st=p; while(p<s.size()&&(isdigit((unsigned char)s[p])||s[p]=='-'||s[p]=='+'||s[p]=='.'||s[p]=='e'||s[p]=='E'))++p; return atof(s.substr(st,p-st).c_str()); };
+    ws(); if(p>=s.size()||s[p]!='{') return false; ++p;
+    while(true){ ws(); if(p<s.size()&&s[p]=='}'){++p;break;} if(p>=s.size())break;
+        std::string key; if(!rdStr(key))break; ws(); if(p<s.size()&&s[p]==':')++p;
+        if(key=="cols") t.cols=(int)rdNum();
+        else if(key=="rows") t.rows=(int)rdNum();
+        else if(key=="header"){ ws(); if(s.compare(p,4,"true")==0){t.header=true;p+=4;} else if(s.compare(p,5,"false")==0){t.header=false;p+=5;} else rdNum(); }
+        else if(key=="widths"){ ws(); if(p<s.size()&&s[p]=='['){++p; while(true){ ws(); if(p<s.size()&&s[p]==']'){++p;break;} t.widths.push_back(rdNum()); ws(); if(p<s.size()&&s[p]==','){++p;continue;} if(p<s.size()&&s[p]==']'){++p;break;} break; } } }
+        else if(key=="cells"){ ws(); if(p<s.size()&&s[p]=='['){++p;
+            while(true){ ws(); if(p<s.size()&&s[p]==']'){++p;break;}
+                if(p<s.size()&&s[p]=='['){++p; std::vector<std::wstring> rowv;
+                    while(true){ ws(); if(p<s.size()&&s[p]==']'){++p;break;} std::string cv; if(rdStr(cv)) rowv.push_back(pcU8toW(cv)); else { rdNum(); rowv.push_back(L""); }
+                        ws(); if(p<s.size()&&s[p]==','){++p;continue;} if(p<s.size()&&s[p]==']'){++p;break;} break; }
+                    t.cells.push_back(rowv); }
+                ws(); if(p<s.size()&&s[p]==','){++p;continue;} if(p<s.size()&&s[p]==']'){++p;break;} break; } } }
+        else { ws(); if(p<s.size()&&s[p]=='"'){ std::string tmp; rdStr(tmp); }
+            else if(p<s.size()&&s[p]=='{'){ int d2=0; do{ if(s[p]=='{')d2++; else if(s[p]=='}')d2--; ++p; }while(p<s.size()&&d2>0); }
+            else if(p<s.size()&&s[p]=='['){ int d2=0; do{ if(s[p]=='[')d2++; else if(s[p]==']')d2--; ++p; }while(p<s.size()&&d2>0); }
+            else rdNum(); }
+        ws(); if(p<s.size()&&s[p]==','){++p;continue;} ws(); if(p<s.size()&&s[p]=='}'){++p;break;}
+        if(p>=s.size())break;
+    }
+    if(t.cols<=0||t.rows<=0||t.cells.empty()) return false;
+    if((int)t.widths.size()!=t.cols) t.widths.assign(t.cols,1.0);
+    return true;
+}
+// preview-mode table: shows raw cell text (no live record substitution)
+static void pcDrawTable(HDC dc, const PrintItem& it, const RECT& box, double scPxMm){
+    PcTable t; if(!pcParseTable(it.text,t)) return;
+    int X0=box.left,Y0=box.top,X1=box.right,Y1=box.bottom;
+    int W=X1-X0,H=Y1-Y0; if(W<=0||H<=0) return;
+    double sumw=0; for(double w:t.widths) sumw+=w; if(sumw<=0) sumw=t.cols;
+    std::vector<int> cx; cx.push_back(X1); double acc=0;
+    for(int c=0;c<t.cols;++c){ acc+=t.widths[c]; cx.push_back(X1-(int)(W*(acc/sumw))); }
+    std::vector<int> ry; for(int rr=0;rr<=t.rows;++rr) ry.push_back(Y0+(int)((double)H*rr/t.rows));
+    if(t.header && t.rows>0){ RECT hr={cx[t.cols],ry[0],cx[0],ry[1]};
+        HBRUSH hb=CreateSolidBrush(RGB(238,242,251)); FillRect(dc,&hr,hb); DeleteObject(hb); }
+    double fontPt=it.fontPt>0?it.fontPt:9.0;
+    int lf=-(int)(fontPt*scPxMm*3.78/2.83);
+    if(lf>-(S(7))) lf=-(S(7)); if(lf<-(S(40))) lf=-(S(40));
+    HFONT fN=CreateFontW(lf,0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,
+        it.fontName.empty()?L"Vazirmatn":it.fontName.c_str());
+    HFONT fH=CreateFontW(lf,0,0,0,FW_BOLD,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,
+        it.fontName.empty()?L"Vazirmatn":it.fontName.c_str());
+    int pad=S(3); SetTextColor(dc,pcCR(it.textColor));
+    for(int rr=0;rr<t.rows;++rr){ bool hd=(t.header&&rr==0);
+        HGDIOBJ of=SelectObject(dc,hd?fH:fN);
+        for(int c=0;c<t.cols;++c){ std::wstring cell;
+            if(rr<(int)t.cells.size()&&c<(int)t.cells[rr].size()) cell=t.cells[rr][c];
+            RECT cr={cx[c+1]+pad,ry[rr],cx[c]-pad,ry[rr+1]};
+            if(cr.right<=cr.left||cr.bottom<=cr.top) continue;
+            DrawTextW(dc,cell.c_str(),-1,&cr,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_END_ELLIPSIS|DT_NOPREFIX);
+        } SelectObject(dc,of); }
+    DeleteObject(fN); DeleteObject(fH);
+    int bw=1; HPEN pen=CreatePen(PS_SOLID,bw,pcCR(it.borderColor)); HGDIOBJ op=SelectObject(dc,pen);
+    for(int c=0;c<=t.cols;++c){ MoveToEx(dc,cx[c],ry[0],0); LineTo(dc,cx[c],ry[t.rows]); }
+    for(int rr=0;rr<=t.rows;++rr){ MoveToEx(dc,cx[t.cols],ry[rr],0); LineTo(dc,cx[0],ry[rr]); }
+    SelectObject(dc,op); DeleteObject(pen);
+}
+
 static void pcPaintDesign(HDC dc, const RECT& area, const PrintDesign& d){
     double pw=d.paperW, ph=d.paperH;
     if(pw<=0||ph<=0){ if(!Paper_Dims(d.paper,pw,ph)){ pw=148; ph=210; }
@@ -1902,26 +1990,41 @@ static void pcPaintDesign(HDC dc, const RECT& area, const PrintDesign& d){
     for(const PrintItem* pit:ord){
         const PrintItem& it=*pit;
         int x0=mmX(it.x), y0=mmY(it.y), x1=mmX(it.x+it.w), y1=mmY(it.y+it.h);
-        if(it.type==PIT_HLINE){
-            HPEN p=CreatePen(PS_SOLID,1,it.borderColor); HGDIOBJ o=SelectObject(dc,p);
+        if(it.type==PIT_TABLE){
+            RECT rr={x0,y0,x1,y1}; pcDrawTable(dc,it,rr,sc);
+        } else if(it.type==PIT_HLINE){
+            HPEN p=CreatePen(PS_SOLID,1,pcCR(it.borderColor)); HGDIOBJ o=SelectObject(dc,p);
             MoveToEx(dc,x0,y0,0); LineTo(dc,x1,y0); SelectObject(dc,o); DeleteObject(p);
         } else if(it.type==PIT_VLINE){
-            HPEN p=CreatePen(PS_SOLID,1,it.borderColor); HGDIOBJ o=SelectObject(dc,p);
+            HPEN p=CreatePen(PS_SOLID,1,pcCR(it.borderColor)); HGDIOBJ o=SelectObject(dc,p);
             MoveToEx(dc,x0,y0,0); LineTo(dc,x0,y1); SelectObject(dc,o); DeleteObject(p);
         } else if(it.type==PIT_RECT||it.type==PIT_FRAME||it.type==PIT_LOGO||
-                  it.type==PIT_PHOTO||it.type==PIT_QR){
-            HPEN p=CreatePen(PS_SOLID,1,it.borderColor); HGDIOBJ o=SelectObject(dc,p);
-            HGDIOBJ ob=SelectObject(dc,GetStockObject(NULL_BRUSH));
-            Rectangle(dc,x0,y0,x1,y1);
-            SelectObject(dc,ob); SelectObject(dc,o); DeleteObject(p);
-            if(it.type==PIT_LOGO||it.type==PIT_QR||it.type==PIT_PHOTO){
-                const wchar_t* ph2=(it.type==PIT_LOGO)?L"لوگو":(it.type==PIT_QR?L"QR":L"عکس");
-                RECT rr={x0,y0,x1,y1}; SetTextColor(dc,RGB(150,150,150));
-                HFONT f=CreateFontW(-S(11),0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,0,0,
-                    CLEARTYPE_QUALITY,0,L"Vazirmatn");
-                HGDIOBJ of=SelectObject(dc,f);
-                DrawTextW(dc,ph2,-1,&rr,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
-                SelectObject(dc,of); DeleteObject(f);
+                  it.type==PIT_PHOTO||it.type==PIT_QR||it.type==PIT_IMAGE){
+            bool isImgItem=(it.type==PIT_LOGO||it.type==PIT_PHOTO||it.type==PIT_IMAGE);
+            // fill rect/frame background when not transparent (WYSIWYG)
+            if((it.type==PIT_RECT||it.type==PIT_FRAME) && !it.fillTransparent){
+                RECT fr={x0,y0,x1,y1}; HBRUSH fb=CreateSolidBrush(pcCR(it.fillColor));
+                FillRect(dc,&fr,fb); DeleteObject(fb);
+            }
+            // real image (uploaded logo / photo / image) → draw the picture
+            bool drawn=false;
+            if(isImgItem && !it.imgPath.empty()){
+                RECT rr={x0,y0,x1,y1}; drawn=gpDrawImageRectAny(dc,it.imgPath,rr);
+            }
+            if(!drawn){
+                HPEN p=CreatePen(PS_SOLID,1,pcCR(it.borderColor)); HGDIOBJ o=SelectObject(dc,p);
+                HGDIOBJ ob=SelectObject(dc,GetStockObject(NULL_BRUSH));
+                Rectangle(dc,x0,y0,x1,y1);
+                SelectObject(dc,ob); SelectObject(dc,o); DeleteObject(p);
+                if(it.type==PIT_LOGO||it.type==PIT_QR||it.type==PIT_PHOTO||it.type==PIT_IMAGE){
+                    const wchar_t* ph2=(it.type==PIT_LOGO)?L"لوگو":(it.type==PIT_QR?L"QR":(it.type==PIT_IMAGE?L"تصویر":L"عکس"));
+                    RECT rr={x0,y0,x1,y1}; SetTextColor(dc,RGB(150,150,150));
+                    HFONT f=CreateFontW(-S(11),0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,0,0,
+                        CLEARTYPE_QUALITY,0,L"Vazirmatn");
+                    HGDIOBJ of=SelectObject(dc,f);
+                    DrawTextW(dc,ph2,-1,&rr,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
+                    SelectObject(dc,of); DeleteObject(f);
+                }
             }
         } else { // text: LABEL / FIELD / APPTNO — show sample/text
             std::wstring s=it.text;
@@ -1936,7 +2039,7 @@ static void pcPaintDesign(HDC dc, const RECT& area, const PrintDesign& d){
             HFONT f=CreateFontW(lf,0,0,0,it.bold?FW_BOLD:FW_NORMAL,it.italic?1:0,0,0,
                 DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,
                 it.fontName.empty()?L"Vazirmatn":it.fontName.c_str());
-            HGDIOBJ of=SelectObject(dc,f); SetTextColor(dc,it.textColor);
+            HGDIOBJ of=SelectObject(dc,f); SetTextColor(dc,pcCR(it.textColor));
             UINT al=(it.align==1)?DT_CENTER:(it.align==2)?DT_LEFT:DT_RIGHT;
             DrawTextW(dc,s.c_str(),-1,&rr,al|DT_TOP|DT_WORDBREAK|DT_RTLREADING|DT_NOPREFIX);
             SelectObject(dc,of); DeleteObject(f);

@@ -42,7 +42,10 @@ bool Paper_Dims(const std::wstring& name, double& wmm, double& hmm){
     static const P ps[] = {
         { L"A3", 297, 420 }, { L"A4", 210, 297 }, { L"A5", 148, 210 },
         { L"A6", 105, 148 }, { L"B5", 176, 250 }, { L"Letter", 215.9, 279.4 },
+        { L"Legal", 215.9, 355.6 },
         { L"R80", 80, 200 }, { L"R58", 58, 200 },
+        // §1.21.0: small / laser label sizes shared with the JS designer.
+        { L"L90", 90, 130 }, { L"L100", 100, 150 },
     };
     for(const auto& p : ps) if(name==p.n){ wmm=p.w; hmm=p.h; return true; }
     return false;   // custom

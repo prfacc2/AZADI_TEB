@@ -23,16 +23,8 @@
     <span class="paper-lbl" id="paperLbl"></span>
   </div>
 
-  <div class="tb-group tb-left">
-    <select id="paperSel" class="form-select form-select-sm" title="اندازه کاغذ">
-      <option value="A4">A4</option>
-      <option value="A5">A5</option>
-      <option value="A6">A6</option>
-      <option value="B5">B5</option>
-      <option value="Letter">Letter</option>
-      <option value="R80">رول ۸ سانت</option>
-      <option value="R58">رول ۵.۸ سانت</option>
-    </select>
+  <div class="tb-group tb-actions">
+    <select id="paperSel" class="form-select form-select-sm" title="اندازه کاغذ"></select>
     <select id="orientSel" class="form-select form-select-sm" title="جهت کاغذ">
       <option value="0">عمودی</option>
       <option value="1">افقی</option>
@@ -46,15 +38,38 @@
     <button class="btn btn-sm btn-outline" id="btnZoomIn" title="بزرگ‌نمایی">+</button>
     <button class="btn btn-sm btn-outline" id="btnZoomFit" title="متناسب با صفحه">⤢</button>
     <span class="tb-sep"></span>
-    <button class="btn btn-sm btn-outline" id="btnDownload" title="دانلود طرح">⬇</button>
-    <button class="btn btn-sm btn-outline" id="btnUpload" title="بارگذاری طرح">⬆</button>
+    <button class="btn btn-sm btn-outline" id="btnDownload" title="دانلود طرح به‌صورت فایل">⬇ دانلود</button>
+    <button class="btn btn-sm btn-outline" id="btnUpload" title="بارگذاری طرح از فایل">⬆ بارگذاری</button>
     <button class="btn btn-sm btn-primary" id="btnSave" title="ذخیره و اعمال (Ctrl+S)">💾 ذخیره و اعمال</button>
     <button class="btn btn-sm btn-danger" id="btnExit" title="خروج">✕</button>
   </div>
 </header>
 
 <div id="workspace">
-  <!-- ===================== Canvas ===================== -->
+  <!-- ===================== Right panel (tools / settings) ===================== -->
+  <aside id="rightPanel">
+    <div class="rp-tabs">
+      <button class="rp-tab active" data-tab="palette">عناصر</button>
+      <button class="rp-tab" data-tab="inspector">تنظیمات</button>
+      <button class="rp-tab" data-tab="layers">لایه‌ها</button>
+    </div>
+
+    <section class="rp-pane active" id="pane-palette">
+      <input type="search" id="paletteSearch" class="form-control form-control-sm" placeholder="جستجوی عنصر یا فیلد…">
+      <div id="paletteList"></div>
+    </section>
+
+    <section class="rp-pane" id="pane-inspector">
+      <div id="inspectorEmpty" class="muted">یک آیتم را روی صفحه انتخاب کنید تا تنظیمات کامل و حرفه‌ای آن نمایش داده شود.</div>
+      <div id="inspectorBody" class="hidden"></div>
+    </section>
+
+    <section class="rp-pane" id="pane-layers">
+      <div id="layerList"></div>
+    </section>
+  </aside>
+
+  <!-- ===================== Preview / Canvas (LEFT in RTL) ===================== -->
   <main id="canvasWrap">
     <div id="canvasScroll">
       <div id="canvasStage">
@@ -69,42 +84,43 @@
         </div>
       </div>
     </div>
-    <div id="canvasHint">فضای خالی را با ماوس بکشید تا صفحه جابه‌جا شود · چرخ ماوس = اسکرول · Ctrl+چرخ = زوم · کلیدهای جهت = جابه‌جایی دقیق</div>
+    <div id="canvasHint">پیش‌نمایش زنده · فضای خالی را بکشید تا صفحه جابه‌جا شود · چرخ ماوس = اسکرول · Ctrl+چرخ = زوم · کلیدهای جهت = جابه‌جایی دقیق</div>
   </main>
-
-  <!-- ===================== Right panel ===================== -->
-  <aside id="rightPanel">
-    <div class="rp-tabs">
-      <button class="rp-tab active" data-tab="palette">عناصر</button>
-      <button class="rp-tab" data-tab="inspector">تنظیمات</button>
-      <button class="rp-tab" data-tab="layers">لایه‌ها</button>
-    </div>
-
-    <section class="rp-pane active" id="pane-palette">
-      <input type="search" id="paletteSearch" class="form-control form-control-sm" placeholder="جستجوی عنصر یا فیلد…">
-      <div id="paletteList"></div>
-    </section>
-
-    <section class="rp-pane" id="pane-inspector">
-      <div id="inspectorEmpty" class="muted">یک آیتم را روی صفحه انتخاب کنید تا تنظیمات کامل آن نمایش داده شود.</div>
-      <div id="inspectorBody" class="hidden"></div>
-    </section>
-
-    <section class="rp-pane" id="pane-layers">
-      <div id="layerList"></div>
-    </section>
-  </aside>
 </div>
 
 <!-- ===================== Templates gallery overlay ===================== -->
 <div id="tplOverlay" class="overlay hidden">
   <div class="tpl-modal">
     <div class="tpl-modal-head">
-      <span class="tpl-title">✨ طرح‌های آمادهٔ حرفه‌ای</span>
+      <span class="tpl-title">✨ طرح‌های آمادهٔ حرفه‌ای درمانگاه</span>
       <button id="tplClose" class="btn btn-sm btn-outline">بستن ✕</button>
     </div>
     <div id="tplTabs" class="tpl-tabs"></div>
     <div id="tplGrid" class="tpl-grid"></div>
+  </div>
+</div>
+
+<!-- ===================== Table builder overlay ===================== -->
+<div id="tblOverlay" class="overlay hidden">
+  <div class="tbl-modal">
+    <div class="tpl-modal-head">
+      <span class="tpl-title">📊 طراحی جدول</span>
+      <button id="tblClose" class="btn btn-sm btn-outline">بستن ✕</button>
+    </div>
+    <div class="tbl-body">
+      <div class="tbl-controls">
+        <div class="insp-row"><label>تعداد ستون‌ها</label><input type="number" id="tblCols" class="form-control form-control-sm" min="1" max="10" value="3"></div>
+        <div class="insp-row"><label>تعداد ردیف‌ها</label><input type="number" id="tblRows" class="form-control form-control-sm" min="1" max="40" value="4"></div>
+        <div class="insp-row"><label>ردیف سرستون</label><input type="checkbox" id="tblHeader" class="form-check" checked></div>
+        <button class="btn btn-sm btn-outline" id="tblRebuild" style="width:100%">بازسازی شبکهٔ جدول</button>
+        <p class="muted" style="font-size:12px;margin-top:8px">هر سلول را پر کنید. برای مقدار داده‌ای از فیلدها مثل <code>{full}</code> استفاده کنید.</p>
+      </div>
+      <div class="tbl-grid-wrap"><div id="tblEditor"></div></div>
+    </div>
+    <div class="tbl-foot">
+      <button class="btn btn-sm btn-outline" id="tblCancel">انصراف</button>
+      <button class="btn btn-sm btn-primary" id="tblInsert">درج جدول در طرح</button>
+    </div>
   </div>
 </div>
 

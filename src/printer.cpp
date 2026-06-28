@@ -1134,6 +1134,84 @@ bool printDesignedReceipt(const ReceptionRecord& r, int sectionIdx, HWND owner){
 //  (per session) it asks A4/A5 via the standard print dialog so the operator can
 //  pick paper + printer; afterwards it reuses the saved default printer.
 // ============================================================================
+// ----------------------------------------------------------------------------
+//  §1.21.0 — table model. A PIT_TABLE item stores its grid as JSON inside
+//  `it.text`: {"cols":n,"rows":n,"header":bool,"widths":[..],"cells":[[..]]}.
+//  We parse it here with a tiny tolerant reader so print + preview render the
+//  EXACT same grid the designer shows (true WYSIWYG). Cells may contain {field}
+//  tokens which are substituted with live data at print time.
+// ----------------------------------------------------------------------------
+struct PdTable {
+    int cols=0, rows=0; bool header=false;
+    std::vector<double> widths;
+    std::vector<std::vector<std::wstring>> cells;
+};
+static std::wstring pdU8toW(const std::string& s){
+    int n=MultiByteToWideChar(CP_UTF8,0,s.c_str(),(int)s.size(),NULL,0);
+    std::wstring w(n,0); if(n) MultiByteToWideChar(CP_UTF8,0,s.c_str(),(int)s.size(),&w[0],n);
+    return w;
+}
+// PrintItem colours are stored as 0x00RRGGBB (web/CSS order). GDI COLORREF is
+// 0x00BBGGRR, so we must swap R<->B to print the *exact* colour designed.
+static inline COLORREF pdCR(unsigned int rgb){
+    return RGB((rgb>>16)&0xFF, (rgb>>8)&0xFF, rgb&0xFF);
+}
+static bool pdParseTable(const std::wstring& jsonW, PdTable& t){
+    // convert to utf8 for byte parsing, but keep strings as wstring
+    int n=WideCharToMultiByte(CP_UTF8,0,jsonW.c_str(),(int)jsonW.size(),NULL,0,NULL,NULL);
+    std::string s(n,0); if(n) WideCharToMultiByte(CP_UTF8,0,jsonW.c_str(),(int)jsonW.size(),&s[0],n,NULL,NULL);
+    size_t p=0; auto ws=[&]{ while(p<s.size()&&(s[p]==' '||s[p]=='\t'||s[p]=='\n'||s[p]=='\r'))++p; };
+    auto rdStr=[&](std::string& out)->bool{ ws(); if(p>=s.size()||s[p]!='"')return false; ++p;
+        while(p<s.size()&&s[p]!='"'){ char c=s[p++]; if(c=='\\'&&p<s.size()){ char e=s[p++];
+            switch(e){case 'n':out+='\n';break;case 'r':out+='\r';break;case 't':out+='\t';break;
+                case '"':out+='"';break;case '\\':out+='\\';break;case '/':out+='/';break;
+                case 'u':{ if(p+4<=s.size()){ unsigned v=(unsigned)strtoul(s.substr(p,4).c_str(),NULL,16); p+=4;
+                    if(v<0x80)out+=(char)v; else if(v<0x800){out+=(char)(0xC0|(v>>6));out+=(char)(0x80|(v&0x3F));}
+                    else{out+=(char)(0xE0|(v>>12));out+=(char)(0x80|((v>>6)&0x3F));out+=(char)(0x80|(v&0x3F));} } break; }
+                default:out+=e; } } else out+=c; }
+        if(p<s.size()&&s[p]=='"')++p; return true; };
+    auto rdNum=[&]()->double{ ws(); size_t st=p; while(p<s.size()&&(isdigit((unsigned char)s[p])||s[p]=='-'||s[p]=='+'||s[p]=='.'||s[p]=='e'||s[p]=='E'))++p; return atof(s.substr(st,p-st).c_str()); };
+    ws(); if(p>=s.size()||s[p]!='{') return false; ++p;
+    while(true){ ws(); if(p<s.size()&&s[p]=='}'){++p;break;} if(p>=s.size())break;
+        std::string key; if(!rdStr(key))break; ws(); if(p<s.size()&&s[p]==':')++p;
+        if(key=="cols") t.cols=(int)rdNum();
+        else if(key=="rows") t.rows=(int)rdNum();
+        else if(key=="header"){ ws(); if(s.compare(p,4,"true")==0){t.header=true;p+=4;} else if(s.compare(p,5,"false")==0){t.header=false;p+=5;} else rdNum(); }
+        else if(key=="widths"){ ws(); if(p<s.size()&&s[p]=='['){++p; while(true){ ws(); if(p<s.size()&&s[p]==']'){++p;break;} t.widths.push_back(rdNum()); ws(); if(p<s.size()&&s[p]==','){++p;continue;} if(p<s.size()&&s[p]==']'){++p;break;} break; } } }
+        else if(key=="cells"){ ws(); if(p<s.size()&&s[p]=='['){++p;
+            while(true){ ws(); if(p<s.size()&&s[p]==']'){++p;break;}
+                if(p<s.size()&&s[p]=='['){++p; std::vector<std::wstring> rowv;
+                    while(true){ ws(); if(p<s.size()&&s[p]==']'){++p;break;} std::string cv; if(rdStr(cv)) rowv.push_back(pdU8toW(cv)); else { rdNum(); rowv.push_back(L""); }
+                        ws(); if(p<s.size()&&s[p]==','){++p;continue;} if(p<s.size()&&s[p]==']'){++p;break;} break; }
+                    t.cells.push_back(rowv); }
+                ws(); if(p<s.size()&&s[p]==','){++p;continue;} if(p<s.size()&&s[p]==']'){++p;break;} break; } } }
+        else { // skip unknown value
+            ws(); if(p<s.size()&&s[p]=='"'){ std::string tmp; rdStr(tmp); }
+            else if(p<s.size()&&s[p]=='{'){ int d=0; do{ if(s[p]=='{')d++; else if(s[p]=='}')d--; ++p; }while(p<s.size()&&d>0); }
+            else if(p<s.size()&&s[p]=='['){ int d=0; do{ if(s[p]=='[')d++; else if(s[p]==']')d--; ++p; }while(p<s.size()&&d>0); }
+            else rdNum();
+        }
+        ws(); if(p<s.size()&&s[p]==','){++p;continue;} ws(); if(p<s.size()&&s[p]=='}'){++p;break;}
+        if(p>=s.size())break;
+    }
+    if(t.cols<=0||t.rows<=0||t.cells.empty()) return false;
+    if((int)t.widths.size()!=t.cols){ t.widths.assign(t.cols,1.0); }
+    return true;
+}
+// substitute {field} tokens inside an arbitrary string with live record data.
+static std::wstring pdSubstFields(const ReceptionRecord& r, const std::wstring& in,
+                                  std::wstring (*resolver)(const ReceptionRecord&, const std::wstring&)){
+    std::wstring out; size_t i=0;
+    while(i<in.size()){
+        if(in[i]==L'{'){ size_t e=in.find(L'}',i);
+            if(e!=std::wstring::npos){ std::wstring tok=in.substr(i,e-i+1);
+                std::wstring v=resolver(r,tok);
+                if(!v.empty() || tok.size()>2) { out+=v; i=e+1; continue; } } }
+        out+=in[i++];
+    }
+    return out;
+}
+
 static std::wstring pdFieldValue(const ReceptionRecord& r, const std::wstring& tok){
     // The new designer's field keys mirror the legacy {token} vocabulary, plus
     // a few extras. Reuse the classic resolver, then handle the new ones.
@@ -1173,6 +1251,69 @@ static std::wstring pdFieldValue(const ReceptionRecord& r, const std::wstring& t
     if(tok==L"{issued}")   return L"چاپ توسط پذیرش: "+
         (r.userName.empty()?g_session.user.fullname:r.userName);
     return L"";
+}
+
+// Draw a PIT_TABLE grid inside `box` (device px). RTL: column 0 is the rightmost.
+//   pxPerMmX/Y : device pixels per millimetre (for border width scaling)
+//   live       : when non-NULL, substitutes {field} tokens with record data;
+//                otherwise (preview with no record) shows the raw cell text.
+static void pdDrawTable(HDC dc, const PrintItem& it, const RECT& box,
+                        double pxPerMmX, double pxPerMmY,
+                        double fontPxPerPt, const ReceptionRecord* live){
+    PdTable t; if(!pdParseTable(it.text,t)) return;
+    int X0=box.left, Y0=box.top, X1=box.right, Y1=box.bottom;
+    int W=X1-X0, H=Y1-Y0; if(W<=0||H<=0) return;
+
+    // column x-boundaries (RTL: col index 0 starts at the right edge)
+    double sumw=0; for(double w:t.widths) sumw+=w; if(sumw<=0) sumw=t.cols;
+    std::vector<int> cx; cx.reserve(t.cols+1);
+    cx.push_back(X1);
+    double acc=0;
+    for(int c=0;c<t.cols;++c){ acc+=t.widths[c]; cx.push_back(X1-(int)(W*(acc/sumw))); }
+    // row y-boundaries (top → bottom), equal height
+    std::vector<int> ry; ry.reserve(t.rows+1);
+    for(int rr=0;rr<=t.rows;++rr) ry.push_back(Y0+(int)((double)H*rr/t.rows));
+
+    // fill header row background
+    if(t.header && t.rows>0){
+        RECT hr={cx[t.cols], ry[0], cx[0], ry[1]};
+        HBRUSH hb=CreateSolidBrush(RGB(238,242,251));
+        FillRect(dc,&hr,hb); DeleteObject(hb);
+    }
+
+    // cell text
+    double fontPt = it.fontPt>0 ? it.fontPt : 9.0;
+    int lf=-(int)(fontPt*fontPxPerPt);
+    HFONT fNorm=CreateFontW(lf,0,0,0,FW_NORMAL,it.italic?1:0,0,0,DEFAULT_CHARSET,0,0,
+        CLEARTYPE_QUALITY,0,it.fontName.empty()?L"Vazirmatn":it.fontName.c_str());
+    HFONT fHead=CreateFontW(lf,0,0,0,FW_BOLD,0,0,0,DEFAULT_CHARSET,0,0,
+        CLEARTYPE_QUALITY,0,it.fontName.empty()?L"Vazirmatn":it.fontName.c_str());
+    int pad=(int)(1.2*pxPerMmX); if(pad<2)pad=2;
+    SetTextColor(dc,pdCR(it.textColor));
+    for(int rr=0;rr<t.rows;++rr){
+        bool isHead=(t.header && rr==0);
+        HGDIOBJ of=SelectObject(dc, isHead?fHead:fNorm);
+        for(int c=0;c<t.cols;++c){
+            std::wstring cell;
+            if(rr<(int)t.cells.size() && c<(int)t.cells[rr].size()) cell=t.cells[rr][c];
+            if(live) cell=pdSubstFields(*live,cell,pdFieldValue);
+            // RTL: visual column c occupies [cx[c+1] .. cx[c]]
+            RECT cr={cx[c+1]+pad, ry[rr]+pad/2, cx[c]-pad, ry[rr+1]-pad/2};
+            if(cr.right<=cr.left||cr.bottom<=cr.top) continue;
+            DrawTextW(dc,cell.c_str(),-1,&cr,
+                DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_END_ELLIPSIS|DT_NOPREFIX);
+        }
+        SelectObject(dc,of);
+    }
+    DeleteObject(fNorm); DeleteObject(fHead);
+
+    // grid lines
+    int bw=(int)(it.borderWidth*pxPerMmX); if(bw<1)bw=1;
+    HPEN pen=CreatePen(PS_SOLID,bw,pdCR(it.borderColor));
+    HGDIOBJ op=SelectObject(dc,pen);
+    for(int c=0;c<=t.cols;++c){ MoveToEx(dc,cx[c],ry[0],0); LineTo(dc,cx[c],ry[t.rows]); }
+    for(int rr=0;rr<=t.rows;++rr){ MoveToEx(dc,cx[t.cols],ry[rr],0); LineTo(dc,cx[0],ry[rr]); }
+    SelectObject(dc,op); DeleteObject(pen);
 }
 
 bool printPrintDesign(const ReceptionRecord& r, int sectionId, HWND owner){
@@ -1220,21 +1361,29 @@ bool printPrintDesign(const ReceptionRecord& r, int sectionId, HWND owner){
     for(const PrintItem* pit : ord){
         const PrintItem& it=*pit;
         int x0=mmX(it.x), y0=mmY(it.y), x1=mmX(it.x+it.w), y1=mmY(it.y+it.h);
-        if(it.type==PIT_HLINE){
+        if(it.type==PIT_TABLE){
+            RECT rr={x0,y0,x1,y1};
+            pdDrawTable(dc, it, rr, sx, sy, dpiY/72.0, &r);
+        } else if(it.type==PIT_HLINE){
             int wpx=(int)(it.borderWidth*sx); if(wpx<1)wpx=1;
-            HPEN p=CreatePen(PS_SOLID,wpx,it.borderColor); HGDIOBJ o=SelectObject(dc,p);
+            HPEN p=CreatePen(PS_SOLID,wpx,pdCR(it.borderColor)); HGDIOBJ o=SelectObject(dc,p);
             MoveToEx(dc,x0,y0,0); LineTo(dc,x1,y0); SelectObject(dc,o); DeleteObject(p);
         } else if(it.type==PIT_VLINE){
             int wpx=(int)(it.borderWidth*sx); if(wpx<1)wpx=1;
-            HPEN p=CreatePen(PS_SOLID,wpx,it.borderColor); HGDIOBJ o=SelectObject(dc,p);
+            HPEN p=CreatePen(PS_SOLID,wpx,pdCR(it.borderColor)); HGDIOBJ o=SelectObject(dc,p);
             MoveToEx(dc,x0,y0,0); LineTo(dc,x0,y1); SelectObject(dc,o); DeleteObject(p);
         } else if(it.type==PIT_RECT||it.type==PIT_FRAME||it.type==PIT_LOGO||
                   it.type==PIT_PHOTO||it.type==PIT_QR||it.type==PIT_IMAGE){
             int wpx=(int)(it.borderWidth*sx); if(wpx<1)wpx=1;
-            HPEN p=CreatePen(PS_SOLID,wpx,it.borderColor); HGDIOBJ o=SelectObject(dc,p);
+            bool isImgItem=(it.type==PIT_LOGO||it.type==PIT_PHOTO||it.type==PIT_IMAGE);
+            // v1.21.0: fill rect/frame background when not transparent (WYSIWYG).
+            if((it.type==PIT_RECT||it.type==PIT_FRAME) && !it.fillTransparent){
+                RECT fr={x0,y0,x1,y1}; HBRUSH fb=CreateSolidBrush(pdCR(it.fillColor));
+                FillRect(dc,&fr,fb); DeleteObject(fb);
+            }
+            HPEN p=CreatePen(PS_SOLID,wpx,pdCR(it.borderColor)); HGDIOBJ o=SelectObject(dc,p);
             HGDIOBJ ob=SelectObject(dc,GetStockObject(NULL_BRUSH));
             // v1.20.0: PIT_IMAGE with a real picture draws no border box.
-            bool isImgItem=(it.type==PIT_LOGO||it.type==PIT_PHOTO||it.type==PIT_IMAGE);
             if(!(isImgItem && !it.imgPath.empty()))
                 Rectangle(dc,x0,y0,x1,y1);
             SelectObject(dc,ob); SelectObject(dc,o); DeleteObject(p);
@@ -1268,7 +1417,7 @@ bool printPrintDesign(const ReceptionRecord& r, int sectionId, HWND owner){
                 DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,
                 it.fontName.empty()?L"Vazirmatn":it.fontName.c_str());
             HGDIOBJ of=SelectObject(dc,f);
-            SetTextColor(dc,it.textColor);
+            SetTextColor(dc,pdCR(it.textColor));
             UINT al=(it.align==1)?DT_CENTER:(it.align==2)?DT_LEFT:DT_RIGHT;
             DrawTextW(dc,s.c_str(),-1,&rr,al|DT_TOP|DT_WORDBREAK|DT_RTLREADING|DT_NOPREFIX);
             SelectObject(dc,of); DeleteObject(f);

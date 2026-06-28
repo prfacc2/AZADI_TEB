@@ -1,16 +1,25 @@
 /* ===========================================================================
-   designer.js — Azadi-Teb professional print designer engine (v1.20.0)
+   designer.js — Azadi-Teb professional print designer engine (v1.21.0)
    Dependency-free, RTL-aware WYSIWYG editor. Talks to C++ over the loopback
-   HTTP host (/api/*) using ASYNCHRONOUS XHR (no sync XHR, no sync-timeout —
-   fixes the deprecated-sync console warnings AND the "save error" bug where a
-   synchronous request with a timeout attribute threw in some browsers).
+   HTTP host (/api/*) using ASYNCHRONOUS XHR.
+
+   v1.21.0 changes:
+     • Right-side tools panel, LEFT live preview (matches app spec).
+     • Real DOWNLOAD: writes a .aztpl file via a browser Blob (works because the
+       designer now opens in the default browser). No more silent "sent" toast.
+     • Robust SAVE with explicit console diagnostics on every failure.
+     • TABLE designer (rows/cols/header + per-cell text & {field} bindings).
+       Stored in the item's `text` field as compact JSON so it round-trips
+       through C++ unchanged and prints/previews identically (true WYSIWYG).
+     • WYSIWYG text rendering: top-aligned, pt-based font sizes — identical to
+       the GDI print path (DT_TOP, lf = pt*dpi/72).
+     • Paper-size dropdown populated from a shared PAPER table (incl. small /
+       laser sizes) so designer + printer agree.
    =========================================================================== */
 (function () {
   "use strict";
 
   /* ------------------------------------------------------------- bridge --- */
-  // Async request to the loopback host. cb(resultObjOrNull). Falls back to
-  // standalone (no host) when not served over http(s).
   var Bridge = {
     _on: (location.protocol === "http:" || location.protocol === "https:"),
     has: function () { return this._on; },
@@ -19,26 +28,35 @@
       if (!this._on) { cb(null); return; }
       try {
         var xhr = new XMLHttpRequest();
-        xhr.open("POST", "api/" + verb, true);   // ASYNC — no UI block, no warnings
+        xhr.open("POST", "api/" + verb, true);   // ASYNC
         xhr.setRequestHeader("Content-Type", "application/json;charset=utf-8");
         xhr.onreadystatechange = function () {
           if (xhr.readyState !== 4) return;
           if (xhr.status >= 200 && xhr.status < 300) {
             var r = null;
-            try { r = xhr.responseText ? JSON.parse(xhr.responseText) : {}; } catch (e) { r = null; }
+            try { r = xhr.responseText ? JSON.parse(xhr.responseText) : {}; }
+            catch (e) { console.error("[designer] bad JSON from /api/" + verb, e, xhr.responseText); r = null; }
             cb(r);
-          } else { cb(null); }
+          } else { console.error("[designer] /api/" + verb + " HTTP " + xhr.status); cb(null); }
         };
-        xhr.onerror = function () { cb(null); };
+        xhr.onerror = function () { console.error("[designer] network error on /api/" + verb); cb(null); };
         xhr.send(JSON.stringify(args || {}));
-      } catch (e) { cb(null); }
+      } catch (e) { console.error("[designer] request threw on /api/" + verb, e); cb(null); }
     }
   };
 
   /* --------------------------------------------------------- paper data --- */
+  // Shared with C++ Paper_Dims(). Portrait mm. Includes small / laser sizes.
   var PAPER = {
-    A4: [210, 297], A5: [148, 210], A6: [105, 148], B5: [176, 250],
-    Letter: [215.9, 279.4], R80: [80, 200], R58: [58, 200]
+    A3: [297, 420], A4: [210, 297], A5: [148, 210], A6: [105, 148],
+    B5: [176, 250], Letter: [215.9, 279.4], Legal: [215.9, 355.6],
+    R80: [80, 200], R58: [58, 200], L90: [90, 130], L100: [100, 150]
+  };
+  var PAPER_LABELS = {
+    A3: "A3", A4: "A4", A5: "A5", A6: "A6", B5: "B5",
+    Letter: "Letter", Legal: "Legal",
+    R80: "رول حرارتی ۸ سانت", R58: "رول حرارتی ۵.۸ سانت",
+    L90: "لیزری کوچک ۹×۱۳", L100: "لیزری کوچک ۱۰×۱۵"
   };
   function paperDims(p, orient) {
     var d = PAPER[p] || [148, 210], w = d[0], h = d[1];
@@ -50,7 +68,6 @@
   var S = {
     design: null, selId: 0,
     pxPerMM: 3.7795, scale: 1,
-    panX: 0, panY: 0,
     undo: [], redo: [], dirty: false,
     templates: window.AZ_TEMPLATES || []
   };
@@ -66,17 +83,17 @@
   function genId() { var m = 0; (S.design.items || []).forEach(function (it) { if (it.id > m) m = it.id; }); return m + 1; }
   function findItem(id) { return (S.design.items || []).find(function (it) { return it.id === id; }); }
   function selItem() { return S.selId ? findItem(S.selId) : null; }
-  function toast(msg, isErr) {
+  function toast(msg, kind) {
     var t = document.getElementById("toast"); if (!t) return;
     t.textContent = msg;
-    t.className = "toast-msg show" + (isErr ? " err" : "");
+    t.className = "toast-msg show" + (kind ? (" " + kind) : "");
     clearTimeout(toast._t);
-    toast._t = setTimeout(function () { t.className = "toast-msg"; }, 2200);
+    toast._t = setTimeout(function () { t.className = "toast-msg"; }, 2400);
   }
 
   /* --------------------------------------------------------- undo stack --- */
   function pushUndo() {
-    S.undo.push(clone(S.design)); if (S.undo.length > 80) S.undo.shift();
+    S.undo.push(clone(S.design)); if (S.undo.length > 100) S.undo.shift();
     S.redo.length = 0; S.dirty = true; updateUndoButtons();
   }
   function doUndo() {
@@ -99,14 +116,17 @@
   var ITEM_LABELS = {
     label: "متن ثابت", field: "فیلد داده", hline: "خط افقی", vline: "خط عمودی",
     rect: "کادر", frame: "حاشیه صفحه", logo: "لوگو", photo: "عکس بیمار",
-    qr: "بارکد / QR", apptno: "شماره نوبت", image: "تصویر"
+    qr: "بارکد / QR", apptno: "شماره نوبت", image: "تصویر", table: "جدول"
   };
   var ITEM_ICONS = {
     label: "T", field: "{}", hline: "—", vline: "│", rect: "▭", frame: "⬚",
-    logo: "★", photo: "👤", qr: "▦", apptno: "#", image: "🖼"
+    logo: "★", photo: "👤", qr: "▦", apptno: "#", image: "🖼", table: "▦"
   };
 
   function mm(v) { return v * S.pxPerMM * S.scale; }
+  // Font size in px so that on screen it equals the printed point size.
+  // 1pt = 1/72 inch; CSS px = 96/inch ⇒ 1pt = 96/72 px = 1.3333px, then * zoom.
+  function ptPx(pt) { return (pt || 10) * (96 / 72) * S.scale; }
 
   function styleItem(el, it) {
     el.style.left = mm(it.x) + "px";
@@ -118,18 +138,58 @@
     el.style.zIndex = it.z || 0;
   }
 
-  // What text to SHOW on the canvas. Fields show their Persian label inside a
-  // soft pill (NOT a fake sample value — the user asked for no examples). The
-  // real patient data is substituted only at print time in C++.
   function displayText(it) {
     if (it.type === "label") return it.text || "";
-    if (it.type === "apptno") return faDigits(String(it.startValue || 1));
+    if (it.type === "apptno") return (it.prefix || "") + faDigits(String(it.startValue || 1));
     if (it.type === "field") {
       var f = window.AZ_FIELDS[it.field];
       var lbl = f ? f.label : (it.field || "فیلد");
       return (it.prefix || "") + "［" + lbl + "］" + (it.suffix || "");
     }
     return it.text || "";
+  }
+
+  /* -------------------------------------------------- table data helpers -- */
+  // A table item stores its model as JSON inside it.text:
+  //   {cols:n, rows:n, header:true, widths:[..], cells:[[..]]}
+  function parseTable(it) {
+    try {
+      var t = JSON.parse(it.text || "");
+      if (t && t.cells) {
+        if (!t.widths || t.widths.length !== t.cols) {
+          t.widths = []; for (var i = 0; i < t.cols; i++) t.widths.push(1);
+        }
+        return t;
+      }
+    } catch (e) {}
+    return { cols: 3, rows: 3, header: true, widths: [1, 1, 1],
+      cells: [["ستون ۱", "ستون ۲", "ستون ۳"], ["", "", ""], ["", "", ""]] };
+  }
+  function tableHtml(it, forThumb) {
+    var t = parseTable(it);
+    var sum = 0; t.widths.forEach(function (w) { sum += (w || 1); });
+    var html = "<table style='font-size:" + (forThumb ? "100%" : ptPx(it.pt || 9) + "px") +
+      ";color:" + (it.textColor || "#000") + "'>";
+    for (var r = 0; r < t.rows; r++) {
+      html += "<tr>";
+      for (var c = 0; c < t.cols; c++) {
+        var isHd = (t.header && r === 0);
+        var wpc = ((t.widths[c] || 1) / sum * 100).toFixed(3);
+        var v = (t.cells[r] && t.cells[r][c] != null) ? t.cells[r][c] : "";
+        // show field labels for {tokens}
+        v = String(v).replace(/\{[a-zA-Z]+\}/g, function (tok) {
+          var f = window.AZ_FIELDS[tok]; return f ? ("［" + f.label + "］") : tok;
+        });
+        html += "<td class='" + (isHd ? "th" : "") + "' style='width:" + wpc + "%;border-color:" +
+          (it.borderColor || "#333") + "'>" + escapeHtml(v) + "</td>";
+      }
+      html += "</tr>";
+    }
+    html += "</table>";
+    return html;
+  }
+  function escapeHtml(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
 
   function buildItemEl(it) {
@@ -143,31 +203,35 @@
       t.className = "pi-text" + (it.type === "field" ? " pi-fieldtext" : "");
       t.textContent = displayText(it);
       t.style.color = it.textColor || "#000";
-      t.style.fontSize = mm((it.pt || 10) * 0.3528) + "px";
+      t.style.fontSize = ptPx(it.pt) + "px";
       t.style.fontWeight = it.bold ? "700" : "400";
       t.style.fontStyle = it.italic ? "italic" : "normal";
-      t.style.fontFamily = it.font || "Vazirmatn";
+      t.style.fontFamily = (it.font || "Vazirmatn") + ",Tahoma,sans-serif";
+      t.style.justifyContent = it.align === 1 ? "center" : (it.align === 2 ? "flex-start" : "flex-end");
       t.style.textAlign = it.align === 1 ? "center" : (it.align === 2 ? "left" : "right");
+      t.style.alignItems = "flex-start";   // matches GDI DT_TOP
       t.style.lineHeight = (it.lineSpacing && it.lineSpacing > 0) ? it.lineSpacing : 1.25;
       el.appendChild(t);
+    } else if (it.type === "table") {
+      el.innerHTML = tableHtml(it, false);
     } else if (it.type === "hline") {
-      el.style.height = Math.max(1, mm((it.borderWidth || 1) * 0.3528)) + "px";
+      el.style.height = Math.max(1, mm(it.borderWidth || 0.4)) + "px";
       el.style.background = it.borderColor || "#222";
     } else if (it.type === "vline") {
-      el.style.width = Math.max(1, mm((it.borderWidth || 1) * 0.3528)) + "px";
+      el.style.width = Math.max(1, mm(it.borderWidth || 0.4)) + "px";
       el.style.background = it.borderColor || "#222";
     } else if (it.type === "rect" || it.type === "frame") {
-      el.style.border = Math.max(1, (it.borderWidth || 1)) + "px solid " + (it.borderColor || "#222");
+      el.style.border = Math.max(1, mm(it.borderWidth || 0.4)) + "px solid " + (it.borderColor || "#222");
       el.style.borderRadius = mm(it.corner || 0) + "px";
       if (!it.fillTransparent && it.fillColor) el.style.background = it.fillColor;
     } else if (it.type === "logo" || it.type === "photo" || it.type === "image" || it.type === "qr") {
-      el.style.border = "1px dashed #9aa7c2";
       el.style.borderRadius = mm(it.corner || 0) + "px";
       if (it.imgPath && /^data:/.test(it.imgPath)) {
         var img = document.createElement("img");
         img.src = it.imgPath; img.className = "pi-img";
         el.appendChild(img);
       } else {
+        el.style.border = "1px dashed #9aa7c2";
         var ph = document.createElement("div");
         ph.className = "pi-ph";
         ph.textContent = ITEM_ICONS[it.type] + " " + (ITEM_LABELS[it.type] || it.type);
@@ -185,7 +249,6 @@
     $paper.style.width = mm(dims[0]) + "px";
     $paper.style.height = mm(dims[1]) + "px";
 
-    // wipe items (keep selBox)
     Array.prototype.slice.call($paper.querySelectorAll(".pi")).forEach(function (e) { e.remove(); });
 
     var items = (S.design.items || []).slice().sort(function (a, b) { return (a.z || 0) - (b.z || 0); });
@@ -193,7 +256,8 @@
 
     updateSelBox();
     var pl = document.getElementById("paperLbl");
-    if (pl) pl.textContent = S.design.paper + " · " + faDigits(Math.round(dims[0])) + "×" + faDigits(Math.round(dims[1])) + " mm";
+    if (pl) pl.textContent = (PAPER_LABELS[S.design.paper] || S.design.paper) + " · " +
+      faDigits(Math.round(dims[0])) + "×" + faDigits(Math.round(dims[1])) + " mm";
   }
 
   function updateSelBox() {
@@ -224,23 +288,28 @@
       locked: false, isFrame: false, text: "", field: "", prefix: "", suffix: "",
       font: "Vazirmatn", pt: 11, bold: false, italic: false, align: 0, lineSpacing: 1.25,
       textColor: "#111111", fillColor: "#ffffff", fillTransparent: true,
-      borderColor: "#333333", borderWidth: 1, corner: 0, padding: 1, opacity: 1,
+      borderColor: "#333333", borderWidth: 0.4, corner: 0, padding: 1, opacity: 1,
       visibility: 0, startValue: 1, step: 1, imgPath: ""
     };
     if (type === "label") { it.text = "متن"; it.w = 40; it.h = 8; }
     else if (type === "field") { it.w = 50; it.h = 8; }
-    else if (type === "hline") { it.w = 80; it.h = 1; it.borderWidth = 1; }
-    else if (type === "vline") { it.w = 1; it.h = 40; it.borderWidth = 1; }
+    else if (type === "hline") { it.w = 80; it.h = 1; it.borderWidth = 0.4; }
+    else if (type === "vline") { it.w = 1; it.h = 40; it.borderWidth = 0.4; }
     else if (type === "rect") { it.w = 50; it.h = 25; }
     else if (type === "frame") {
       var dm = paperDims(S.design.paper, S.design.orientation);
-      it.x = 4; it.y = 4; it.w = dm[0] - 8; it.h = dm[1] - 8; it.isFrame = true; it.borderWidth = 1.4;
+      it.x = 4; it.y = 4; it.w = dm[0] - 8; it.h = dm[1] - 8; it.isFrame = true; it.borderWidth = 0.6;
     }
     else if (type === "logo") { it.w = 28; it.h = 28; }
     else if (type === "photo") { it.w = 25; it.h = 32; }
     else if (type === "image") { it.w = 40; it.h = 25; }
     else if (type === "qr") { it.w = 24; it.h = 24; }
     else if (type === "apptno") { it.w = 30; it.h = 14; it.pt = 22; it.bold = true; it.align = 1; }
+    else if (type === "table") {
+      it.w = 90; it.h = 30; it.pt = 9; it.borderWidth = 0.4;
+      it.text = JSON.stringify({ cols: 3, rows: 4, header: true, widths: [1, 1, 1],
+        cells: [["ردیف", "شرح", "مبلغ"], ["", "", ""], ["", "", ""], ["", "", ""]] });
+    }
     return it;
   }
 
@@ -276,11 +345,11 @@
     var host = document.getElementById("paletteList");
     if (!host) return; host.innerHTML = "";
 
-    // 1) shapes / objects
     var objs = [
-      ["label", "متن ثابت"], ["hline", "خط افقی"], ["vline", "خط عمودی"],
-      ["rect", "کادر"], ["frame", "حاشیه صفحه"], ["logo", "لوگو"],
-      ["photo", "عکس بیمار"], ["image", "تصویر"], ["qr", "بارکد / QR"], ["apptno", "شماره نوبت"]
+      ["label", "متن ثابت"], ["field", "فیلد داده"], ["table", "جدول"],
+      ["hline", "خط افقی"], ["vline", "خط عمودی"], ["rect", "کادر"],
+      ["frame", "حاشیه صفحه"], ["logo", "لوگو"], ["photo", "عکس بیمار"],
+      ["image", "تصویر"], ["qr", "بارکد / QR"], ["apptno", "شماره نوبت"]
     ];
     var sec = document.createElement("div"); sec.className = "pl-cat";
     sec.innerHTML = "<div class='pl-cat-h'>عناصر طراحی</div>";
@@ -290,12 +359,15 @@
       b.className = "pl-tile"; b.dataset.kind = "obj"; b.dataset.type = o[0];
       b.innerHTML = "<span class='pl-ic'>" + (ITEM_ICONS[o[0]] || "•") + "</span><span class='pl-lb'>" + o[1] + "</span>";
       b.title = o[1];
-      b.addEventListener("click", function () { addItem(o[0]); });
+      b.addEventListener("click", function () {
+        if (o[0] === "table") { openTableBuilder(null); return; }
+        if (o[0] === "field") { switchTab("palette"); toast("یک فیلد از فهرست زیر را انتخاب کنید"); return; }
+        addItem(o[0]);
+      });
       grid.appendChild(b);
     });
     sec.appendChild(grid); host.appendChild(sec);
 
-    // 2) bindable fields (grouped) — these are BLUE tiles
     (window.AZ_FIELD_CATS || []).forEach(function (cat) {
       var c = document.createElement("div"); c.className = "pl-cat";
       c.innerHTML = "<div class='pl-cat-h'>" + cat.title + "</div>";
@@ -315,7 +387,7 @@
   function filterPalette(q) {
     q = (q || "").trim();
     Array.prototype.slice.call(document.querySelectorAll("#paletteList .pl-field,#paletteList .pl-tile")).forEach(function (b) {
-      var txt = (b.dataset.label || b.querySelector(".pl-lb") && b.querySelector(".pl-lb").textContent || "");
+      var txt = (b.dataset.label || (b.querySelector(".pl-lb") && b.querySelector(".pl-lb").textContent) || "");
       b.style.display = (!q || txt.indexOf(q) >= 0) ? "" : "none";
     });
   }
@@ -370,7 +442,6 @@
     function up(noUndo) { if (!noUndo) pushUndo(); renderAll(); updateSelBox(); }
     function grp(title) { var g = document.createElement("div"); g.className = "insp-grp"; g.innerHTML = "<div class='insp-grp-h'>" + title + "</div>"; body.appendChild(g); return g; }
 
-    // header
     var hd = document.createElement("div"); hd.className = "insp-head";
     hd.innerHTML = "<span class='insp-type'>" + (ITEM_LABELS[it.type] || it.type) + "</span>";
     var del = document.createElement("button"); del.className = "btn btn-sm btn-danger"; del.textContent = "حذف";
@@ -380,7 +451,6 @@
     hd.appendChild(dup); hd.appendChild(del);
     body.appendChild(hd);
 
-    // content
     if (it.type === "label") {
       var gc = grp("متن");
       gc.appendChild(row("متن", textInput(it.text, function (v) { it.text = v; up(true); }, "متن دلخواه")));
@@ -400,6 +470,13 @@
       ga.appendChild(row("گام", numInput(it.step, 1, 100, 1, function (v) { it.step = v; up(); })));
       ga.appendChild(row("پیشوند", textInput(it.prefix, function (v) { it.prefix = v; up(true); }, "نوبت ")));
     }
+    if (it.type === "table") {
+      var gtb = grp("جدول");
+      var edit = document.createElement("button"); edit.className = "btn btn-sm btn-primary"; edit.style.width = "100%";
+      edit.textContent = "ویرایش محتوای جدول…";
+      edit.addEventListener("click", function () { openTableBuilder(it); });
+      gtb.appendChild(edit);
+    }
     if (it.type === "logo" || it.type === "photo" || it.type === "image") {
       var gi = grp("تصویر");
       var up2 = document.createElement("button"); up2.className = "btn btn-sm btn-primary"; up2.style.width = "100%";
@@ -414,23 +491,26 @@
       }
     }
 
-    // typography (text-bearing)
-    if (it.type === "label" || it.type === "field" || it.type === "apptno") {
+    if (it.type === "label" || it.type === "field" || it.type === "apptno" || it.type === "table") {
       var gt = grp("قلم و متن");
-      gt.appendChild(row("فونت", selectInput([["Vazirmatn", "وزیر"], ["Tahoma", "تاهوما"], ["IRANSans", "ایران‌سنس"]], it.font, function (v) { it.font = v; up(); })));
+      if (it.type !== "table")
+        gt.appendChild(row("فونت", selectInput([["Vazirmatn", "وزیر"], ["Tahoma", "تاهوما"], ["IRANSans", "ایران‌سنس"]], it.font, function (v) { it.font = v; up(); })));
       gt.appendChild(row("اندازه (pt)", numInput(it.pt, 5, 96, 0.5, function (v) { it.pt = v; up(); })));
-      gt.appendChild(row("ضخیم", checkInput(it.bold, function (v) { it.bold = v; up(); })));
-      gt.appendChild(row("کج", checkInput(it.italic, function (v) { it.italic = v; up(); })));
-      gt.appendChild(row("چینش", selectInput([["0", "راست"], ["1", "وسط"], ["2", "چپ"]], it.align, function (v) { it.align = +v; up(); })));
+      if (it.type !== "table") {
+        gt.appendChild(row("ضخیم", checkInput(it.bold, function (v) { it.bold = v; up(); })));
+        gt.appendChild(row("کج", checkInput(it.italic, function (v) { it.italic = v; up(); })));
+        gt.appendChild(row("چینش", selectInput([["0", "راست"], ["1", "وسط"], ["2", "چپ"]], it.align, function (v) { it.align = +v; up(); })));
+      }
       gt.appendChild(row("رنگ متن", colorInput(it.textColor, function (v) { it.textColor = v; up(); })));
-      gt.appendChild(row("فاصله خطوط", numInput(it.lineSpacing, 1, 3, 0.05, function (v) { it.lineSpacing = v; up(); })));
+      if (it.type !== "table")
+        gt.appendChild(row("فاصله خطوط", numInput(it.lineSpacing, 1, 3, 0.05, function (v) { it.lineSpacing = v; up(); })));
     }
 
-    // box / line styling
-    if (it.type === "rect" || it.type === "frame" || it.type === "hline" || it.type === "vline" || it.type === "qr" || it.type === "logo" || it.type === "photo" || it.type === "image") {
+    if (it.type === "rect" || it.type === "frame" || it.type === "hline" || it.type === "vline" ||
+        it.type === "qr" || it.type === "logo" || it.type === "photo" || it.type === "image" || it.type === "table") {
       var gb = grp("کادر و خط");
       gb.appendChild(row("رنگ خط", colorInput(it.borderColor, function (v) { it.borderColor = v; up(); })));
-      gb.appendChild(row("ضخامت خط", numInput(it.borderWidth, 0, 10, 0.2, function (v) { it.borderWidth = v; up(); })));
+      gb.appendChild(row("ضخامت (mm)", numInput(it.borderWidth, 0, 5, 0.1, function (v) { it.borderWidth = v; up(); })));
       if (it.type === "rect" || it.type === "frame") {
         gb.appendChild(row("گردی گوشه", numInput(it.corner, 0, 30, 0.5, function (v) { it.corner = v; up(); })));
         gb.appendChild(row("بدون پُرکننده", checkInput(it.fillTransparent, function (v) { it.fillTransparent = v; up(); })));
@@ -438,7 +518,6 @@
       }
     }
 
-    // geometry
     var gg = grp("اندازه و موقعیت (mm)");
     gg.appendChild(row("X", numInput(it.x, 0, 1000, 0.5, function (v) { it.x = v; up(); })));
     gg.appendChild(row("Y", numInput(it.y, 0, 1000, 0.5, function (v) { it.y = v; up(); })));
@@ -458,7 +537,7 @@
       var nm = it.type === "label" ? (it.text || "متن") :
         it.type === "field" ? (window.AZ_FIELDS[it.field] ? window.AZ_FIELDS[it.field].label : "فیلد") :
           (ITEM_LABELS[it.type] || it.type);
-      r.innerHTML = "<span class='lyr-ic'>" + (ITEM_ICONS[it.type] || "•") + "</span><span class='lyr-nm'>" + nm + "</span>";
+      r.innerHTML = "<span class='lyr-ic'>" + (ITEM_ICONS[it.type] || "•") + "</span><span class='lyr-nm'>" + escapeHtml(nm) + "</span>";
       var up = document.createElement("button"); up.className = "lyr-b"; up.textContent = "▲"; up.title = "بالا";
       up.addEventListener("click", function (e) { e.stopPropagation(); pushUndo(); it.z = (it.z || 0) + 1; renderAll(); renderLayers(); });
       var dn = document.createElement("button"); dn.className = "lyr-b"; dn.textContent = "▼"; dn.title = "پایین";
@@ -489,13 +568,12 @@
   }
   function fitZoom() {
     var dm = paperDims(S.design.paper, S.design.orientation);
-    var availW = $scroll.clientWidth - 60, availH = $scroll.clientHeight - 60;
+    var availW = $scroll.clientWidth - 80, availH = $scroll.clientHeight - 90;
     var sw = availW / (dm[0] * S.pxPerMM), sh = availH / (dm[1] * S.pxPerMM);
-    setScale(Math.max(0.25, Math.min(sw, sh)));
+    setScale(Math.max(0.2, Math.min(sw, sh)));
     centerPaper();
   }
   function centerPaper() {
-    // center the paper within the scroll viewport
     $scroll.scrollLeft = ($stage.clientWidth - $scroll.clientWidth) / 2;
     $scroll.scrollTop = 40;
   }
@@ -507,13 +585,12 @@
   }
 
   function wireCanvas() {
-    // click empty space -> deselect ; drag empty space -> PAN the page
     var panning = false, panSX = 0, panSY = 0, scL = 0, scT = 0, moved = false;
 
     $scroll.addEventListener("mousedown", function (e) {
       var pi = e.target.closest && e.target.closest(".pi");
       var handle = e.target.closest && e.target.closest(".handle");
-      if (pi || handle) return;     // item / handle drag handled elsewhere
+      if (pi || handle) return;
       panning = true; moved = false;
       panSX = e.clientX; panSY = e.clientY; scL = $scroll.scrollLeft; scT = $scroll.scrollTop;
       $scroll.classList.add("panning");
@@ -529,12 +606,10 @@
       if (panning) { panning = false; $scroll.classList.remove("panning"); if (!moved) select(0); }
     });
 
-    // wheel = scroll ; ctrl+wheel = zoom
     $scroll.addEventListener("wheel", function (e) {
       if (e.ctrlKey) { e.preventDefault(); setScale(S.scale * (e.deltaY < 0 ? 1.1 : 0.9)); }
     }, { passive: false });
 
-    // item drag (move) + resize + rotate
     var drag = null;
     $paper.addEventListener("mousedown", function (e) {
       var handle = e.target.closest(".handle");
@@ -561,7 +636,7 @@
       else if (drag.mode === "rotate") {
         var cx = o.x + o.w / 2, cy = o.y + o.h / 2;
         it.rot = Math.round(Math.atan2(p.y - cy, p.x - cx) * 180 / Math.PI + 90);
-      } else { // resize
+      } else {
         var d = drag.dir;
         if (d.indexOf("e") >= 0) it.w = Math.max(2, o.w + dx);
         if (d.indexOf("s") >= 0) it.h = Math.max(2, o.h + dy);
@@ -572,7 +647,6 @@
     });
     window.addEventListener("mouseup", function () { if (drag) { drag = null; renderInspector(); } });
 
-    // keyboard nudges + delete
     window.addEventListener("keydown", function (e) {
       if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
       var it = selItem();
@@ -598,18 +672,88 @@
       var rd = new FileReader();
       rd.onload = function () {
         pushUndo(); it.imgPath = rd.result; renderAll(); renderInspector();
-        toast("تصویر بارگذاری شد");
+        toast("تصویر بارگذاری شد", "ok");
       };
       rd.readAsDataURL(f);
     });
     inp.click();
   }
 
+  /* -------------------------------------------------- table builder ------- */
+  var tblTarget = null;        // existing item being edited, or null = new
+  function openTableBuilder(it) {
+    tblTarget = it;
+    var model = it ? parseTable(it) : { cols: 3, rows: 4, header: true, widths: [1, 1, 1],
+      cells: [["ردیف", "شرح", "مبلغ"], ["", "", ""], ["", "", ""], ["", "", ""]] };
+    document.getElementById("tblCols").value = model.cols;
+    document.getElementById("tblRows").value = model.rows;
+    document.getElementById("tblHeader").checked = !!model.header;
+    renderTableEditor(model);
+    document.getElementById("tblOverlay").classList.remove("hidden");
+  }
+  function readTableModel() {
+    var cols = Math.max(1, Math.min(10, +document.getElementById("tblCols").value || 3));
+    var rows = Math.max(1, Math.min(40, +document.getElementById("tblRows").value || 4));
+    var header = document.getElementById("tblHeader").checked;
+    var cells = [], widths = [];
+    var inputs = document.querySelectorAll("#tblEditor input.cell");
+    var k = 0;
+    for (var r = 0; r < rows; r++) { cells[r] = []; for (var c = 0; c < cols; c++) { cells[r][c] = inputs[k] ? inputs[k].value : ""; k++; } }
+    for (var c2 = 0; c2 < cols; c2++) widths[c2] = 1;
+    return { cols: cols, rows: rows, header: header, widths: widths, cells: cells };
+  }
+  function renderTableEditor(model) {
+    var host = document.getElementById("tblEditor");
+    var html = "<table><tbody>";
+    for (var r = 0; r < model.rows; r++) {
+      html += "<tr>";
+      for (var c = 0; c < model.cols; c++) {
+        var v = (model.cells[r] && model.cells[r][c] != null) ? model.cells[r][c] : "";
+        var hd = (model.header && r === 0) ? "hd" : "";
+        html += "<td><input class='cell " + hd + "' value=\"" + escapeHtml(v).replace(/"/g, "&quot;") + "\"></td>";
+      }
+      html += "</tr>";
+    }
+    html += "</tbody></table>";
+    host.innerHTML = html;
+  }
+
+  function wireTableBuilder() {
+    document.getElementById("tblClose").addEventListener("click", function () { document.getElementById("tblOverlay").classList.add("hidden"); });
+    document.getElementById("tblCancel").addEventListener("click", function () { document.getElementById("tblOverlay").classList.add("hidden"); });
+    document.getElementById("tblRebuild").addEventListener("click", function () {
+      var cur = readTableModel();
+      var cols = Math.max(1, Math.min(10, +document.getElementById("tblCols").value || 3));
+      var rows = Math.max(1, Math.min(40, +document.getElementById("tblRows").value || 4));
+      var m = { cols: cols, rows: rows, header: document.getElementById("tblHeader").checked, widths: [], cells: [] };
+      for (var r = 0; r < rows; r++) { m.cells[r] = []; for (var c = 0; c < cols; c++) { m.cells[r][c] = (cur.cells[r] && cur.cells[r][c]) || ""; } }
+      renderTableEditor(m);
+    });
+    document.getElementById("tblInsert").addEventListener("click", function () {
+      var model = readTableModel();
+      if (tblTarget) {
+        pushUndo();
+        tblTarget.text = JSON.stringify(model);
+        renderAll(); renderInspector();
+      } else {
+        pushUndo();
+        var it = defaultItem("table");
+        it.text = JSON.stringify(model);
+        var dm = paperDims(S.design.paper, S.design.orientation);
+        it.w = Math.min(dm[0] - 16, 120); it.x = 8; it.y = 40;
+        it.h = Math.min(dm[1] - 50, model.rows * 8 + 2);
+        S.design.items.push(it); renderAll(); select(it.id);
+      }
+      document.getElementById("tblOverlay").classList.add("hidden");
+      toast("جدول اعمال شد", "ok");
+    });
+  }
+
   /* -------------------------------------------------- templates gallery --- */
   var TPL_GROUPS = [
-    { key: "reception", title: "پذیرش" },
+    { key: "reception", title: "پذیرش و صورتحساب" },
     { key: "appointment", title: "نوبت‌دهی" },
-    { key: "lab", title: "آزمایشگاه و رادیولوژی" }
+    { key: "lab", title: "آزمایشگاه و تصویربرداری" }
   ];
   function tplGroupOf(t) {
     var g = (t.group || "").toLowerCase();
@@ -636,14 +780,16 @@
         var thumb = document.createElement("div"); thumb.className = "tpl-thumb";
         thumb.appendChild(buildThumb(t));
         var nm = document.createElement("div"); nm.className = "tpl-nm"; nm.textContent = t.name || "طرح";
-        var meta = document.createElement("div"); meta.className = "tpl-meta"; meta.textContent = (t.paper || "A5") + " · " + ((t.items || []).length) + " آیتم";
+        var meta = document.createElement("div"); meta.className = "tpl-meta"; meta.textContent = (PAPER_LABELS[t.paper] || t.paper || "A5") + " · " + faDigits((t.items || []).length) + " آیتم";
         card.appendChild(thumb); card.appendChild(nm); card.appendChild(meta);
         card.addEventListener("click", function () { applyTemplate(t); ov.classList.add("hidden"); });
         grid.appendChild(card);
       });
     }
     TPL_GROUPS.forEach(function (g) {
-      var b = document.createElement("button"); b.className = "tpl-tab"; b.dataset.g = g.key; b.textContent = g.title;
+      var b = document.createElement("button"); b.className = "tpl-tab"; b.dataset.g = g.key;
+      var cnt = (S.templates || []).filter(function (t) { return tplGroupOf(t) === g.key; }).length;
+      b.textContent = g.title + " (" + faDigits(cnt) + ")";
       b.addEventListener("click", function () { current = g.key; renderTab(); });
       tabs.appendChild(b);
     });
@@ -651,19 +797,39 @@
     ov.classList.remove("hidden");
   }
 
-  // simple SVG-ish DOM thumbnail (scaled mini paper)
+  // High-fidelity mini preview: render real text/lines/boxes/tables.
   function buildThumb(t) {
     var dm = paperDims(t.paper || "A5", t.orientation || 0);
-    var scale = 150 / dm[1];
+    var maxH = 184, maxW = 168;
+    var scale = Math.min(maxH / dm[1], maxW / dm[0]);
     var p = document.createElement("div"); p.className = "mini-paper";
     p.style.width = (dm[0] * scale) + "px"; p.style.height = (dm[1] * scale) + "px";
-    (t.items || []).forEach(function (it) {
-      var e = document.createElement("div"); e.className = "mini-it mini-" + it.type;
+    var items = (t.items || []).slice().sort(function (a, b) { return (a.z || 0) - (b.z || 0); });
+    items.forEach(function (it) {
+      var e = document.createElement("div"); e.className = "mini-it";
       e.style.left = (it.x * scale) + "px"; e.style.top = (it.y * scale) + "px";
-      e.style.width = (it.w * scale) + "px"; e.style.height = Math.max(1, it.h * scale) + "px";
-      if (it.type === "hline" || it.type === "vline") e.style.background = "#445";
-      else if (it.type === "label" || it.type === "field" || it.type === "apptno") { e.style.background = it.type === "field" ? "#cfe0ff" : "#dfe3ea"; }
-      else e.style.border = "0.5px solid #889";
+      e.style.width = (it.w * scale) + "px"; e.style.height = Math.max(0.6, it.h * scale) + "px";
+      if (it.type === "hline") { e.style.borderTop = "0.7px solid " + (it.borderColor || "#444"); }
+      else if (it.type === "vline") { e.style.borderRight = "0.7px solid " + (it.borderColor || "#444"); }
+      else if (it.type === "rect" || it.type === "frame" || it.type === "table") {
+        e.style.border = "0.6px solid " + (it.borderColor || "#789");
+        if (!it.fillTransparent && it.fillColor && it.type === "rect") e.style.background = it.fillColor;
+      }
+      else if (it.type === "logo" || it.type === "photo" || it.type === "image" || it.type === "qr") {
+        e.style.border = "0.6px dashed #9aa7c2"; e.style.background = "#f3f6fb";
+      }
+      else if (it.type === "label" || it.type === "field" || it.type === "apptno") {
+        e.className += " mini-tx";
+        var txt = it.type === "label" ? (it.text || "") :
+          it.type === "apptno" ? "۱۲" :
+          ((it.prefix || "") + (window.AZ_FIELDS[it.field] ? window.AZ_FIELDS[it.field].label : "···"));
+        e.textContent = txt;
+        e.style.color = it.textColor || "#222";
+        e.style.fontSize = Math.max(3.5, (it.pt || 9) * scale * 1.05) + "px";
+        e.style.fontWeight = it.bold ? "700" : "400";
+        e.style.justifyContent = it.align === 1 ? "center" : (it.align === 2 ? "flex-start" : "flex-end");
+        if (it.type === "field") e.style.background = "rgba(207,224,255,.5)";
+      }
       p.appendChild(e);
     });
     return p;
@@ -672,13 +838,15 @@
   function applyTemplate(t) {
     pushUndo();
     var d = clone(t);
-    d.id = (S.design && S.design.id) || 0;   // keep binding id so save UPDATES current
+    d.id = (S.design && S.design.id) || 0;   // keep binding so save UPDATES current
     d.kind = "user";
     if (!d.name) d.name = t.name || "طرح";
     var k = 1; (d.items || []).forEach(function (it) { it.id = k++; });
     S.design = d; S.selId = 0;
+    document.getElementById("paperSel").value = S.design.paper;
+    document.getElementById("orientSel").value = S.design.orientation || 0;
     renderAll(); fitZoom(); renderLayers(); renderInspector();
-    toast("طرح اعمال شد: " + (t.name || ""));
+    toast("طرح اعمال شد: " + (t.name || ""), "ok");
   }
 
   /* ------------------------------------------------------------ save ------ */
@@ -693,28 +861,54 @@
       var btn = document.getElementById("btnSave"); if (btn) { btn.disabled = true; btn.textContent = "در حال ذخیره…"; }
       Bridge.request("save", { design: S.design }, function (res) {
         if (btn) { btn.disabled = false; btn.innerHTML = "💾 ذخیره و اعمال"; }
-        if (res && res.ok) { if (res.id) S.design.id = res.id; S.dirty = false; toast("ذخیره شد و بر بخش اعمال گردید ✓"); }
-        else toast("خطا در ذخیره — دوباره تلاش کنید", true);
+        if (res && res.ok) {
+          if (res.id) S.design.id = res.id;
+          S.dirty = false;
+          toast("ذخیره شد و بر بخش اعمال گردید ✓", "ok");
+        } else {
+          var why = (res && res.err) ? (" — " + res.err) : "";
+          console.error("[designer] save failed", res);
+          toast("خطا در ذخیره" + why + " (کنسول را ببینید)", "err");
+        }
       });
     } else {
-      try { localStorage.setItem("az_design", JSON.stringify(S.design)); } catch (_) {}
-      S.dirty = false; toast("ذخیره شد (حالت آزمایشی)");
+      try { localStorage.setItem("az_design", JSON.stringify(S.design)); } catch (e) { console.error(e); }
+      S.dirty = false; toast("ذخیره شد (حالت آزمایشی)", "ok");
     }
   }
+
+  // Real download: build a .aztpl file and let the browser save it. Works in
+  // the default browser the designer now opens in.
   function downloadDesign() {
-    var data = JSON.stringify(S.design);
-    if (Bridge.has()) { Bridge.request("download", { design: S.design, name: S.design.name }, function () {}); toast("درخواست دانلود ارسال شد"); return; }
-    var blob = new Blob([data], { type: "application/json" });
-    var a = document.createElement("a"); a.href = URL.createObjectURL(blob);
-    a.download = (S.design.name || "design") + ".aztpl"; a.click();
-    setTimeout(function () { URL.revokeObjectURL(a.href); }, 500);
+    try {
+      var data = JSON.stringify(S.design, null, 0);
+      var blob = new Blob([data], { type: "application/octet-stream" });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url;
+      a.download = (S.design.name || "design").replace(/[\\/:*?"<>|]/g, "_") + ".aztpl";
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+      toast("فایل طرح دانلود شد", "ok");
+    } catch (e) {
+      console.error("[designer] download failed", e);
+      toast("دانلود ناموفق بود (کنسول را ببینید)", "err");
+    }
   }
-  function uploadDesign() {
-    document.getElementById("fileInput").click();
-  }
+  function uploadDesign() { document.getElementById("fileInput").click(); }
 
   /* ------------------------------------------------------------ wire ------ */
+  function populatePaperSelect() {
+    var sel = document.getElementById("paperSel");
+    sel.innerHTML = "";
+    Object.keys(PAPER).forEach(function (k) {
+      var op = document.createElement("option"); op.value = k; op.textContent = PAPER_LABELS[k] || k;
+      sel.appendChild(op);
+    });
+  }
+
   function wire() {
+    populatePaperSelect();
     document.getElementById("paperSel").addEventListener("change", function () { pushUndo(); S.design.paper = this.value; renderAll(); fitZoom(); });
     document.getElementById("orientSel").addEventListener("change", function () { pushUndo(); S.design.orientation = +this.value; renderAll(); fitZoom(); });
     document.getElementById("btnUndo").addEventListener("click", doUndo);
@@ -732,6 +926,7 @@
       if (S.dirty && !confirm("تغییرات ذخیره‌نشده دارید. خارج می‌شوید؟")) return;
       if (Bridge.has()) Bridge.request("exit", {}, function () {});
       toast("جلسهٔ طراحی پایان یافت");
+      setTimeout(function () { try { window.close(); } catch (e) {} }, 400);
     });
     Array.prototype.slice.call(document.querySelectorAll(".rp-tab")).forEach(function (t) {
       t.addEventListener("click", function () {
@@ -746,11 +941,19 @@
       var f = e.target.files[0]; if (!f) return;
       var r = new FileReader();
       r.onload = function () {
-        try { var d = JSON.parse(r.result); pushUndo(); d.id = (S.design && S.design.id) || 0; S.design = d; S.selId = 0; renderAll(); fitZoom(); toast("طرح بارگذاری شد"); }
-        catch (_) { toast("فایل نامعتبر است", true); }
+        try {
+          var d = JSON.parse(r.result);
+          pushUndo(); d.id = (S.design && S.design.id) || 0; S.design = d; S.selId = 0;
+          if (!S.design.paper) S.design.paper = "A5"; if (!S.design.items) S.design.items = [];
+          document.getElementById("paperSel").value = S.design.paper;
+          document.getElementById("orientSel").value = S.design.orientation || 0;
+          renderAll(); fitZoom(); renderLayers(); toast("طرح بارگذاری شد", "ok");
+        } catch (err) { console.error("[designer] invalid file", err); toast("فایل نامعتبر است", "err"); }
       };
       r.readAsText(f); e.target.value = "";
     });
+
+    wireTableBuilder();
   }
 
   /* ------------------------------------------------------------ init ------ */
@@ -762,18 +965,18 @@
           if (res.design) initial = res.design;
           if (res.sectionName) secName = res.sectionName;
         }
-        Bridge.request("templates", {}, function (tr) {
-          if (tr && tr.templates && tr.templates.length) {
-            // merge C++ builtins with the rich JS gallery (JS gallery preferred for UX)
-            if (!S.templates || !S.templates.length) S.templates = tr.templates;
-          }
-          finish(initial, secName);
-        });
+        // Always prefer the rich JS gallery for the gallery itself.
+        if (!S.templates || !S.templates.length) {
+          Bridge.request("templates", {}, function (tr) {
+            if (tr && tr.templates && tr.templates.length) S.templates = tr.templates;
+            finish(initial, secName);
+          });
+        } else { finish(initial, secName); }
       });
     } else { finish(null, ""); }
 
     function finish(initial, secName) {
-      if (!initial) {
+      if (!initial || !(initial.items && initial.items.length)) {
         initial = clone((S.templates && S.templates[0]) || { paper: "A5", orientation: 0, items: [] });
         var k = 1; (initial.items || []).forEach(function (it) { it.id = k++; });
       }
