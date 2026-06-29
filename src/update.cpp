@@ -10,7 +10,7 @@
 #include <stdio.h>
 
 static const wchar_t* DEFAULT_UPDATE_URL =
-    L"https://raw.githubusercontent.com/perofesor/Azadi-Teb/main/update/version.txt";
+    L"https://raw.githubusercontent.com/prfacc2/AZADI_TEB/genspark_ai_developer/update/version.txt";
 
 static std::string httpGet(const std::wstring& url, bool* okOut){
     *okOut = false;
