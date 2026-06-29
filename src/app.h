@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.21.2"
+#define APP_VERSION_W   L"1.23.0"
 
 // ----------------------------------------------------------- logging policy -
 //  RELEASE 1.2.0 (Section A): all general user-behavior logging is gated behind
@@ -179,6 +179,12 @@ bool gpDrawTintedImageRes(HDC dc, int resId, RECT rc, COLORREF tint);
 bool gpDrawImageFileCircle(HDC dc, const std::wstring& path, RECT rc);
 // v1.20.0: aspect-fit an image (file path OR data:base64 URI) into a rect.
 bool gpDrawImageRectAny(HDC dc, const std::wstring& src, RECT rc);
+// v1.23.0: render an image with explicit object-fit + padding so the print
+// engine and the designer preview produce IDENTICAL output. The image is hard-
+// clipped to (rc minus padding) and can NEVER overflow.
+//   fit: 0=contain (aspect-fit, no crop) 1=cover (fill+crop) 2=fill (stretch)
+//   padPx: inner padding in device pixels applied on every side
+bool gpDrawImageRectFit(HDC dc, const std::wstring& src, RECT rc, int fit, int padPx);
 //  RCDATA ids of the print-action raster icons (see app.rc):
 #define IMG_IC_PRINTER 201
 #define IMG_IC_RECEIPT 202

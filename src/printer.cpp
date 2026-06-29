@@ -1490,8 +1490,13 @@ bool printPrintDesign(const ReceptionRecord& r, int sectionId, HWND owner){
                 // patient photo / image, stored as a file path or data:base64 URI),
                 // render the picture; otherwise fall back to a labelled box.
                 bool drawn=false;
-                if(isImgItem && !it.imgPath.empty())
-                    drawn=gpDrawImageRectAny(dc,it.imgPath,rr);
+                if(isImgItem && !it.imgPath.empty()){
+                    // v1.23.0: honour the designed object-fit + padding so the
+                    // logo/photo respects its rectangle exactly (no overflow,
+                    // no stretch) and matches the designer preview 1:1.
+                    int padPx=(int)(it.padding*sx); if(padPx<0)padPx=0;
+                    drawn=gpDrawImageRectFit(dc,it.imgPath,rr,it.objectFit,padPx);
+                }
                 if(!drawn){
                     std::wstring ph=(it.type==PIT_LOGO)?L"لوگو":(it.type==PIT_QR?L"QR":(it.type==PIT_IMAGE?L"تصویر":L"عکس"));
                     HFONT f=CreateFontW(-(int)(9*dpiY/72.0),0,0,0,FW_NORMAL,0,0,0,
@@ -1509,17 +1514,38 @@ bool printPrintDesign(const ReceptionRecord& r, int sectionId, HWND owner){
             if(it.visibility==1 && (it.type==PIT_FIELD) && pdFieldValue(r,it.field).empty()) continue;
             if(s.empty()) continue;
             int lf=-(int)(it.fontPt*dpiY/72.0);
-            RECT rr={x0,y0,x1,y1};
+            // v1.23.0: apply inner padding so text never touches the box edge,
+            // matching the designer preview exactly.
+            int padPx=(int)(it.padding*sx); if(padPx<0)padPx=0;
+            RECT rr={x0+padPx,y0+padPx,x1-padPx,y1-padPx};
+            if(rr.right<=rr.left){ rr.left=x0; rr.right=x1; }
+            if(rr.bottom<=rr.top){ rr.top=y0; rr.bottom=y1; }
             HFONT f=CreateFontW(lf,0,0,0,it.bold?FW_BOLD:FW_NORMAL,it.italic?1:0,0,0,
-                DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,
+                DEFAULT_CHARSET,OUT_TT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,
+                DEFAULT_PITCH|FF_DONTCARE,
                 it.fontName.empty()?L"Vazirmatn":it.fontName.c_str());
             HGDIOBJ of=SelectObject(dc,f);
             SetTextColor(dc,pdCR(it.textColor));
+            // horizontal alignment: 0=right 1=center 2=left 3=justify (RTL)
             UINT al=(it.align==1)?DT_CENTER:(it.align==2)?DT_LEFT:DT_RIGHT;
             // v1.22.0: per-item text direction. dir 0=RTL, 1=LTR, 2=center.
             UINT dirf=(it.dir==1)?0:DT_RTLREADING;
             if(it.dir==2) al=DT_CENTER;
-            DrawTextW(dc,s.c_str(),-1,&rr,al|DT_TOP|DT_WORDBREAK|dirf|DT_NOPREFIX);
+            UINT base=al|DT_WORDBREAK|dirf|DT_NOPREFIX;
+            // v1.23.0: vertical alignment (0=top 1=middle 2=bottom). DT_VCENTER /
+            // DT_BOTTOM only honour single-line text, so for middle/bottom we
+            // measure the wrapped block height and offset the rect manually.
+            if(it.valign==0){
+                DrawTextW(dc,s.c_str(),-1,&rr,base|DT_TOP);
+            } else {
+                RECT meas=rr;
+                DrawTextW(dc,s.c_str(),-1,&meas,base|DT_TOP|DT_CALCRECT);
+                int th=meas.bottom-meas.top, bh=rr.bottom-rr.top;
+                RECT dr=rr;
+                if(it.valign==1){ int off=(bh-th)/2; if(off>0){ dr.top+=off; } }
+                else            { int off=(bh-th);   if(off>0){ dr.top+=off; } }
+                DrawTextW(dc,s.c_str(),-1,&dr,base|DT_TOP);
+            }
             SelectObject(dc,of); DeleteObject(f);
         }
     }

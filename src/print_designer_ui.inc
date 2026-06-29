@@ -407,18 +407,37 @@ static void drawItemGdip(Graphics& g,DesignerState* st,const PrintItem& it,bool 
                 g.FillRectangle(&b,x+i*cell,y+j*cell,cell,cell);
         break; }
     case PIT_LOGO: case PIT_IMAGE: case PIT_PHOTO:{
-        Pen p(bc,1.0f); g.DrawRectangle(&p,x,y,w,hgt);
-        // §1.14.3: crash-proof font (was an unguarded FontFamily that could fault
-        // on machines without Vazirmatn installed — a real "open editor" crash).
-        double gpt=(double)(std::min(w,hgt)*0.5); if(gpt<1) gpt=1;
-        Font* f=makeSafeFont(L"Vazirmatn",gpt,FontStyleRegular);
-        if(f){
-            SolidBrush tb(Color(255,150,150,150));
-            StringFormat sf; sf.SetAlignment(StringAlignmentCenter);
-            sf.SetLineAlignment(StringAlignmentCenter);
-            const wchar_t* gl=(it.type==PIT_PHOTO)?L"\u0639":(it.type==PIT_LOGO)?L"\u0644":L"\u062a";
-            RectF rf(x,y,w,hgt); g.DrawString(gl,-1,f,rf,&sf,&tb);
-            delete f;
+        // v1.23.0 WYSIWYG: render the ACTUAL uploaded image (file path or
+        // data:base64 URI) using the SAME engine + object-fit + padding as the
+        // print output, so the preview is pixel-identical to the printed page.
+        bool drawn=false;
+        if(!it.imgPath.empty()){
+            RECT rr={(LONG)x,(LONG)y,(LONG)(x+w),(LONG)(y+hgt)};
+            int padPx=(int)(it.padding*pxPerMm(st)); if(padPx<0)padPx=0;
+            // Borrow the underlying HDC from the GDI+ Graphics so we reuse the
+            // exact print-time renderer. The HDC MUST be released before any
+            // further GDI+ drawing on `g`.
+            HDC hdc=g.GetHDC();
+            if(hdc){
+                drawn=gpDrawImageRectFit(hdc,it.imgPath,rr,it.objectFit,padPx);
+                g.ReleaseHDC(hdc);
+            }
+        }
+        if(!drawn){
+            // no image yet → labelled placeholder box (designer affordance only;
+            // never printed because the print engine also falls back per-item).
+            Pen p(bc,1.0f); g.DrawRectangle(&p,x,y,w,hgt);
+            // §1.14.3: crash-proof font.
+            double gpt=(double)(std::min(w,hgt)*0.5); if(gpt<1) gpt=1;
+            Font* f=makeSafeFont(L"Vazirmatn",gpt,FontStyleRegular);
+            if(f){
+                SolidBrush tb(Color(255,150,150,150));
+                StringFormat sf; sf.SetAlignment(StringAlignmentCenter);
+                sf.SetLineAlignment(StringAlignmentCenter);
+                const wchar_t* gl=(it.type==PIT_PHOTO)?L"\u0639":(it.type==PIT_LOGO)?L"\u0644":L"\u062a";
+                RectF rf(x,y,w,hgt); g.DrawString(gl,-1,f,rf,&sf,&tb);
+                delete f;
+            }
         }
         break; }
     case PIT_APPTNO: case PIT_LABEL: case PIT_FIELD: default:{
@@ -437,12 +456,25 @@ static void drawItemGdip(Graphics& g,DesignerState* st,const PrintItem& it,bool 
         if(f){
             SolidBrush tb(tc);
             StringFormat sf;
-            sf.SetFormatFlags(StringFormatFlagsDirectionRightToLeft);
-            if(it.align==1) sf.SetAlignment(StringAlignmentCenter);
-            else if(it.align==2) sf.SetAlignment(StringAlignmentFar);  // visual left in RTL
-            else sf.SetAlignment(StringAlignmentNear);                 // right
-            sf.SetLineAlignment(StringAlignmentCenter);
-            RectF rf(x,y,w,hgt);
+            // v1.23.0: per-item direction (0=RTL 1=LTR 2=center-auto) mirrors the
+            // print engine, so preview == print for mixed Persian/English.
+            bool rtl=(it.dir!=1);
+            if(rtl) sf.SetFormatFlags(StringFormatFlagsDirectionRightToLeft);
+            // horizontal alignment. In RTL, StringAlignmentNear == visual right.
+            int al=it.align; if(it.dir==2) al=1;        // center-auto
+            if(al==1) sf.SetAlignment(StringAlignmentCenter);
+            else if(al==2) sf.SetAlignment(rtl?StringAlignmentFar:StringAlignmentNear); // visual left
+            else           sf.SetAlignment(rtl?StringAlignmentNear:StringAlignmentFar); // visual right
+            // vertical alignment (0=top 1=middle 2=bottom).
+            sf.SetLineAlignment(it.valign==1?StringAlignmentCenter:
+                                it.valign==2?StringAlignmentFar:StringAlignmentNear);
+            // inner padding (mm → canvas px) so text never touches the box edge.
+            REAL padpx=(REAL)(it.padding*pxPerMm(st)); if(padpx<0)padpx=0;
+            REAL rw=w-2*padpx, rh=hgt-2*padpx;
+            REAL ox=x+padpx, oy=y+padpx;
+            if(rw<=0){ ox=x; rw=w; }
+            if(rh<=0){ oy=y; rh=hgt; }
+            RectF rf(ox,oy,rw,rh);
             g.DrawString(text.c_str(),-1,f,rf,&sf,&tb);
             delete f;
         }
@@ -644,6 +676,58 @@ static void designer_buildInspector(HWND h){
                 (HMENU)6013,g_hInst,NULL);
             if(e) SendMessageW(e,WM_SETFONT,(WPARAM)fUI,TRUE); add(e); y+=S(28);
         }
+        // v1.23.0: a 3-segment selector (standard push-buttons; the active one is
+        // drawn pressed via BS_PUSHLIKE checkbox so we keep ONLY std controls).
+        auto seg3=[&](const wchar_t* cap,int baseId,int cur,
+                      const wchar_t* a,const wchar_t* b,const wchar_t* c){
+            label(cap); y+=S(20);
+            int seg=(w-2*S(2))/3;
+            const wchar_t* t[3]={a,b,c};
+            for(int i=0;i<3;i++){
+                HWND bt=CreateWindowExW(0,L"BUTTON",t[i],
+                    WS_CHILD|WS_VISIBLE|BS_AUTOCHECKBOX|BS_PUSHLIKE,
+                    x0+i*(seg+S(2)),y,seg,S(26),h,
+                    (HMENU)(INT_PTR)(baseId+i),g_hInst,NULL);
+                if(bt){ SendMessageW(bt,WM_SETFONT,(WPARAM)fSm,TRUE);
+                    SendMessageW(bt,BM_SETCHECK,(i==cur)?BST_CHECKED:BST_UNCHECKED,0); }
+                add(bt);
+            }
+            y+=S(30);
+        };
+        // horizontal alignment: 0=right 1=center 2=left
+        seg3(L"\u0686\u06cc\u062f\u0645\u0627\u0646 \u0627\u0641\u0642\u06cc",6020,it->align,
+             L"\u0631\u0627\u0633\u062a",L"\u0648\u0633\u0637",L"\u0686\u067e");
+        // vertical alignment: 0=top 1=middle 2=bottom
+        seg3(L"\u0686\u06cc\u062f\u0645\u0627\u0646 \u0639\u0645\u0648\u062f\u06cc",6026,it->valign,
+             L"\u0628\u0627\u0644\u0627",L"\u0648\u0633\u0637",L"\u067e\u0627\u06cc\u06cc\u0646");
+        // direction: 0=RTL 1=LTR 2=center-auto
+        seg3(L"\u062c\u0647\u062a \u0645\u062a\u0646",6023,it->dir,
+             L"\u0641\u0627\u0631\u0633\u06cc",L"\u0644\u0627\u062a\u06cc\u0646",L"\u062e\u0648\u062f\u06a9\u0627\u0631");
+    }
+    // v1.23.0: image items expose object-fit + padding so the logo/photo fits its
+    // rectangle exactly the way the print engine renders it.
+    if(it->type==PIT_LOGO || it->type==PIT_IMAGE || it->type==PIT_PHOTO){
+        auto seg3i=[&](const wchar_t* cap,int baseId,int cur,
+                       const wchar_t* a,const wchar_t* b,const wchar_t* c){
+            label(cap); y+=S(20);
+            int seg=(w-2*S(2))/3;
+            const wchar_t* t[3]={a,b,c};
+            for(int i=0;i<3;i++){
+                HWND bt=CreateWindowExW(0,L"BUTTON",t[i],
+                    WS_CHILD|WS_VISIBLE|BS_AUTOCHECKBOX|BS_PUSHLIKE,
+                    x0+i*(seg+S(2)),y,seg,S(26),h,
+                    (HMENU)(INT_PTR)(baseId+i),g_hInst,NULL);
+                if(bt){ SendMessageW(bt,WM_SETFONT,(WPARAM)fSm,TRUE);
+                    SendMessageW(bt,BM_SETCHECK,(i==cur)?BST_CHECKED:BST_UNCHECKED,0); }
+                add(bt);
+            }
+            y+=S(30);
+        };
+        // object-fit: 0=contain 1=cover 2=fill
+        seg3i(L"\u062a\u0646\u0627\u0633\u0628 \u062a\u0635\u0648\u06cc\u0631",6029,it->objectFit,
+              L"\u062f\u0627\u062e\u0644",L"\u067e\u0648\u0634\u0634",L"\u06a9\u0634\u06cc\u062f\u0647");
+        label(L"\u062d\u0627\u0634\u06cc\u0647 \u062f\u0627\u062e\u0644\u06cc (mm)"); y+=S(20);
+        numEdit(6032,it->padding,x0,y,w); y+=S(28);
     }
     label(L"\u0631\u0646\u06af \u06a9\u0627\u062f\u0631"); y+=S(20);
     colorBtn(6009,x0,y,w); y+=S(28);
@@ -909,6 +993,22 @@ static LRESULT CALLBACK DesignerProc(HWND h,UINT m,WPARAM w,LPARAM l){
                 PrintItem n=*it; n.id=nextItemId(st); n.x+=10;n.y+=10;
                 st->design.items.push_back(n); st->selId=n.id; commit(st);
                 designer_buildInspector(h); InvalidateRect(h,NULL,FALSE); return 0; }
+            // v1.23.0: 3-segment selectors (BS_PUSHLIKE checkboxes). Set the
+            // chosen value, then rebuild the inspector so the sibling buttons
+            // un-check (radio behaviour without owner-draw state).
+            if(id>=6020 && id<=6031 && notify==BN_CLICKED){
+                if(id>=6020 && id<=6022) it->align=id-6020;        // R/C/L
+                else if(id>=6023 && id<=6025) it->dir=id-6023;     // RTL/LTR/auto
+                else if(id>=6026 && id<=6028) it->valign=id-6026;  // top/mid/bot
+                else if(id>=6029 && id<=6031) it->objectFit=id-6029; // contain/cover/fill
+                st->dirty=true; commit(st);
+                designer_buildInspector(h); InvalidateRect(h,NULL,FALSE); return 0;
+            }
+            if(id==6032 && notify==EN_KILLFOCUS){
+                double v=readNumEdit(h,6032); if(v<0)v=0; if(v>50)v=50;
+                it->padding=v; st->dirty=true; commit(st);
+                InvalidateRect(h,NULL,FALSE); return 0;
+            }
             return 0;
         }
         switch(id){

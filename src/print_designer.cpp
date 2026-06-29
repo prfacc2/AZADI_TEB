@@ -24,10 +24,11 @@ PrintItem::PrintItem()
     : id(0), type(PIT_LABEL), x(10), y(10), w(40), h(8), rot(0),
       locked(false), is_frame(false), z(0),
       fontName(L"Vazirmatn"), fontPt(10), bold(false), italic(false),
-      align(0), dir(0), lineSpacing(1.0),
+      align(0), dir(0), valign(0), lineSpacing(1.0),
       textColor(0x000000), fillColor(0xFFFFFF), fillTransparent(true),
       borderColor(0x000000), borderWidth(0), corner(0), padding(1),
       opacity(1.0), visibility(0),
+      objectFit(0),
       startValue(1), step(1) {}
 
 PrintDesign::PrintDesign()
@@ -121,6 +122,8 @@ std::string Design_ToJson(const PrintDesign& d){
         o << "\"italic\":" << (it.italic?1:0) << ",";
         o << "\"align\":" << inum(it.align) << ",";
         o << "\"dir\":" << inum(it.dir) << ",";
+        o << "\"valign\":" << inum(it.valign) << ",";
+        o << "\"fit\":" << inum(it.objectFit) << ",";
         o << "\"ls\":" << num(it.lineSpacing) << ",";
         o << "\"tc\":" << inum(it.textColor) << ",";
         o << "\"fc\":" << inum(it.fillColor) << ",";
@@ -232,6 +235,8 @@ bool Design_FromJson(const std::string& json, PrintDesign& out, std::wstring& er
                     else if(k=="italic") it.italic=jp.dbl()!=0;
                     else if(k=="align") it.align=(int)jp.dbl();
                     else if(k=="dir") it.dir=(int)jp.dbl();
+                    else if(k=="valign") it.valign=(int)jp.dbl();
+                    else if(k=="fit") it.objectFit=(int)jp.dbl();
                     else if(k=="ls") it.lineSpacing=jp.dbl();
                     else if(k=="tc") it.textColor=(unsigned)jp.dbl();
                     else if(k=="fc") it.fillColor=(unsigned)jp.dbl();

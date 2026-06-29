@@ -47,6 +47,7 @@ struct PrintItem {
     bool         bold, italic;
     int          align;         // 0=right 1=center 2=left 3=justify (RTL)
     int          dir;           // text direction: 0=RTL 1=LTR 2=center(auto). v1.22.0
+    int          valign;        // vertical align: 0=top 1=middle 2=bottom. v1.23.0
     double       lineSpacing;
 
     // appearance
@@ -62,6 +63,8 @@ struct PrintItem {
 
     // image
     std::wstring imgPath;       // for PIT_IMAGE / PIT_LOGO
+    int          objectFit;     // 0=contain (aspect-fit, no crop) 1=cover (fill,
+                                //   crop overflow) 2=fill (stretch). v1.23.0
 
     // appointment counter (§3.13)
     int          startValue;

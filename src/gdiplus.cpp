@@ -339,11 +339,22 @@ static std::string b64decode(const std::string& in){
     return out;
 }
 
-bool gpDrawImageRectAny(HDC dc, const std::wstring& src, RECT rc){
+// v1.23.0 core: render an image with explicit object-fit + inner padding so the
+// print engine and the designer preview are pixel-identical. The image is HARD-
+// clipped to (rc minus padding); it can never stretch (unless fit==fill), never
+// overflow, and never cover neighbouring text.
+bool gpDrawImageRectFit(HDC dc, const std::wstring& src, RECT rc, int fit, int padPx){
     if(!s_gdipOK || src.empty()) return false;
-    int W=rc.right-rc.left, H=rc.bottom-rc.top; if(W<=0||H<=0) return false;
-    Image* img=NULL; IStream* st=NULL;
+    if(padPx<0) padPx=0;
+    // apply padding (clamp so the box never inverts)
+    RECT box=rc;
+    box.left+=padPx; box.top+=padPx; box.right-=padPx; box.bottom-=padPx;
+    if(box.right<=box.left || box.bottom<=box.top){ box=rc; }
+    REAL X=(REAL)box.left, Y=(REAL)box.top;
+    REAL W=(REAL)(box.right-box.left), H=(REAL)(box.bottom-box.top);
+    if(W<=0||H<=0) return false;
 
+    Image* img=NULL; IStream* st=NULL;
     if(src.compare(0,5,L"data:")==0){
         size_t comma=src.find(L','); if(comma==std::wstring::npos) return false;
         std::string b64; b64.reserve(src.size()-comma);
@@ -362,18 +373,44 @@ bool gpDrawImageRectAny(HDC dc, const std::wstring& src, RECT rc){
     if(iw<=0||ih<=0){ delete img; if(st)st->Release(); return false; }
 
     Graphics g(dc);
+    // high-quality, high-DPI friendly resampling — no blur, no pixelation.
     g.SetInterpolationMode(InterpolationModeHighQualityBicubic);
     g.SetPixelOffsetMode(PixelOffsetModeHalf);
     g.SetSmoothingMode(SmoothingModeAntiAlias);
-    // v1.22.0: HARD-clip to the item's rect so an uploaded logo/photo can NEVER
-    // bleed outside its designed box (was: a large image overflowed onto the
-    // whole page background). Aspect-fit (contain) inside the rect.
-    g.SetClip(Rect(rc.left,rc.top,W,H));
-    REAL scale=(W/iw < H/ih)? W/iw : H/ih;   // contain (aspect-fit)
-    REAL dw=iw*scale, dh=ih*scale;
-    REAL dx=rc.left+(W-dw)/2, dy=rc.top+(H-dh)/2;
-    g.DrawImage(img, RectF(dx,dy,dw,dh), 0,0,iw,ih, UnitPixel);
+    g.SetCompositingQuality(CompositingQualityHighQuality);
+
+    // HARD-clip to the (padded) box: the image can NEVER bleed outside.
+    g.SetClip(Rect((INT)X,(INT)Y,(INT)W,(INT)H));
+
+    // image attributes: clamp the wrap mode so edge pixels don't smear when the
+    // image exactly fills its box (prevents 1-px transparent borders on cover).
+    ImageAttributes ia;
+    ia.SetWrapMode(WrapModeTileFlipXY);
+
+    REAL dx,dy,dw,dh;
+    if(fit==2){
+        // fill — stretch to the whole box (may change aspect ratio).
+        dx=X; dy=Y; dw=W; dh=H;
+    } else if(fit==1){
+        // cover — scale to the LARGER ratio so the box is fully covered; the
+        // clip above crops the overflow. Aspect ratio is preserved.
+        REAL scale=(W/iw > H/ih)? W/iw : H/ih;
+        dw=iw*scale; dh=ih*scale;
+        dx=X+(W-dw)/2; dy=Y+(H-dh)/2;
+    } else {
+        // contain (default) — scale to the SMALLER ratio so the whole image
+        // fits inside the box, centred, with no crop and no stretch.
+        REAL scale=(W/iw < H/ih)? W/iw : H/ih;
+        dw=iw*scale; dh=ih*scale;
+        dx=X+(W-dw)/2; dy=Y+(H-dh)/2;
+    }
+    g.DrawImage(img, RectF(dx,dy,dw,dh), 0,0,iw,ih, UnitPixel, &ia);
     g.ResetClip();
     delete img; if(st)st->Release();
     return true;
+}
+
+// Backward-compatible wrapper (existing callers): contain-fit, no padding.
+bool gpDrawImageRectAny(HDC dc, const std::wstring& src, RECT rc){
+    return gpDrawImageRectFit(dc, src, rc, 0, 0);
 }

@@ -112,7 +112,8 @@ static std::string designToWebJson(const PrintDesign& d){
         o+="\"prefix\":"+jstr(it.prefix)+",\"suffix\":"+jstr(it.suffix)+",";
         o+="\"font\":"+jstr(it.fontName)+",\"pt\":"+jnum(it.fontPt)+",";
         o+="\"bold\":"+jbool(it.bold)+",\"italic\":"+jbool(it.italic)+",";
-        o+="\"align\":"+jint(it.align)+",\"dir\":"+jint(it.dir)+",\"lineSpacing\":"+jnum(it.lineSpacing)+",";
+        o+="\"align\":"+jint(it.align)+",\"dir\":"+jint(it.dir)+",\"valign\":"+jint(it.valign)+",\"lineSpacing\":"+jnum(it.lineSpacing)+",";
+        o+="\"objectFit\":\""+std::string(it.objectFit==1?"cover":it.objectFit==2?"fill":"contain")+"\",";
         o+="\"textColor\":\""+hexColor(it.textColor)+"\",";
         o+="\"fillColor\":\""+hexColor(it.fillColor)+"\",";
         o+="\"fillTransparent\":"+jbool(it.fillTransparent)+",";
@@ -189,6 +190,15 @@ static bool webJsonToDesign(const std::string& json, PrintDesign& out){
                     else if(ik=="italic") it.italic=j.boolean();
                     else if(ik=="align") it.align=(int)j.dbl();
                     else if(ik=="dir") it.dir=(int)j.dbl();
+                    else if(ik=="valign") it.valign=(int)j.dbl();
+                    else if(ik=="objectFit"){
+                        // accept either a CSS string ("contain"/"cover"/"fill")
+                        // or a plain integer, for forward/backward compatibility.
+                        j.ws();
+                        if(j.p<j.s.size() && j.s[j.p]=='"'){ std::string v=j.str();
+                            it.objectFit=(v=="cover")?1:(v=="fill")?2:0; }
+                        else it.objectFit=(int)j.dbl();
+                    }
                     else if(ik=="lineSpacing") it.lineSpacing=j.dbl();
                     else if(ik=="textColor") it.textColor=parseHexColor(j.str());
                     else if(ik=="fillColor") it.fillColor=parseHexColor(j.str());
