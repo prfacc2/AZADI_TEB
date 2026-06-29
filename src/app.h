@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.18.2"
+#define APP_VERSION_W   L"1.23.0"
 
 // ----------------------------------------------------------- logging policy -
 //  RELEASE 1.2.0 (Section A): all general user-behavior logging is gated behind
@@ -177,6 +177,14 @@ bool gpDrawBackground(HDC dc, RECT rc, bool dark, COLORREF scrim, int scrimA);
 //  GDI+ / resource unavailable so callers fall back to the vector drawIcon().
 bool gpDrawTintedImageRes(HDC dc, int resId, RECT rc, COLORREF tint);
 bool gpDrawImageFileCircle(HDC dc, const std::wstring& path, RECT rc);
+// v1.20.0: aspect-fit an image (file path OR data:base64 URI) into a rect.
+bool gpDrawImageRectAny(HDC dc, const std::wstring& src, RECT rc);
+// v1.23.0: render an image with explicit object-fit + padding so the print
+// engine and the designer preview produce IDENTICAL output. The image is hard-
+// clipped to (rc minus padding) and can NEVER overflow.
+//   fit: 0=contain (aspect-fit, no crop) 1=cover (fill+crop) 2=fill (stretch)
+//   padPx: inner padding in device pixels applied on every side
+bool gpDrawImageRectFit(HDC dc, const std::wstring& src, RECT rc, int fit, int padPx);
 //  RCDATA ids of the print-action raster icons (see app.rc):
 #define IMG_IC_PRINTER 201
 #define IMG_IC_RECEIPT 202
@@ -378,6 +386,13 @@ void openPrintDesigner(HWND owner, int sectionIdx);
 //  Render the saved design for a section onto a printer DC for a real receipt.
 //  Returns false if no design exists (caller falls back to the classic layout).
 bool printDesignedReceipt(const ReceptionRecord& r, int sectionIdx, HWND owner);
+//  §1.19.0 — Render the new-model (print_designer.h PrintDesign) design bound
+//  to a *section id* onto the connected printer. The HTML/CSS/JS designer and
+//  the native designer both persist a PrintDesign per section. Returns false if
+//  no such design exists so the caller can fall back to printDesignedReceipt /
+//  printReceipt. First call (per session, no saved printer) shows the standard
+//  print dialog so the operator picks printer + paper (A4/A5).
+bool printPrintDesign(const ReceptionRecord& r, int sectionId, HWND owner);
 //  Pulse the cash drawer connected to the configured printer (ESC/POS kick),
 //  but only when the «باز کردن کشوی پول» option is enabled in printer settings.
 void kickCashDrawer();

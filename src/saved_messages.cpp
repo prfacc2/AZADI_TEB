@@ -19,6 +19,8 @@
 #include "app.h"
 #include "ui_kit.h"
 #include <windows.h>
+#include <commdlg.h>
+#include <shellapi.h>
 #include <vector>
 #include <string>
 
@@ -34,6 +36,7 @@ struct SavedWin {
     int contentH{0};
     int hotCard{-1};      // hovered card index
     int closeHot{0};      // close button hover
+    int composeHot{0};    // «پیام جدید» (new message) button hover
     std::vector<RECT> cardRects;  // hit map (client coords, pre-scroll baked in)
 };
 
@@ -93,9 +96,9 @@ static void paintHeader(HDC dc, SavedWin* w, const RECT& rc){
     drawIcon(dc,ICO_SAVED_MSG,ir,g_theme.accent,2);
     HFONT of=(HFONT)SelectObject(dc,g_fTitle);
     SetTextColor(dc,g_theme.text);
-    RECT tr{ pad()+S(40), 0, ir.left-S(8), S(HEADER_H) };
+    RECT tr{ rc.right/2, 0, ir.left-S(8), S(HEADER_H) };
     DrawTextW(dc,L"\u067e\u06cc\u0627\u0645\u200c\u0647\u0627\u06cc \u0630\u062e\u06cc\u0631\u0647\u200c\u0634\u062f\u0647",-1,&tr,
-        DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING);
+        DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_END_ELLIPSIS);
     SelectObject(dc,of);
     // close × (top-left)
     int cz=S(30);
@@ -103,7 +106,66 @@ static void paintHeader(HDC dc, SavedWin* w, const RECT& rc){
     if(w->closeHot){ gpRoundRectBg(dc,cb,S(8),g_theme.surface2,g_theme.border,g_theme.surface); }
     RECT xi{ cb.left+S(7), cb.top+S(7), cb.right-S(7), cb.bottom-S(7) };
     drawIcon(dc,ICO_X,xi,g_theme.textDim,2);
+    // «پیام جدید» compose pill (top-left, right of the close button)
+    {
+        const wchar_t* lbl=L"\u067e\u06cc\u0627\u0645 \u062c\u062f\u06cc\u062f"; // پیام جدید
+        SIZE sz; HFONT pf=(HFONT)SelectObject(dc,g_fUI);
+        GetTextExtentPoint32W(dc,lbl,(int)wcslen(lbl),&sz);
+        SelectObject(dc,pf);
+        int ph=S(32), icon=S(16);
+        RECT pb{ cb.right+S(10), (S(HEADER_H)-ph)/2,
+                 cb.right+S(10)+icon+sz.cx+S(26), (S(HEADER_H)-ph)/2+ph };
+        COLORREF base=w->composeHot ? blendColor(g_theme.accent,g_theme.surface,30)
+                                    : g_theme.accent;
+        gpRoundRectBg(dc,pb,ph/2,base,base,g_theme.surface);
+        RECT ii{ pb.left+S(10), pb.top+(ph-icon)/2, pb.left+S(10)+icon, pb.top+(ph-icon)/2+icon };
+        drawIcon(dc,ICO_PLUS,ii,RGB(255,255,255),2);
+        HFONT of=(HFONT)SelectObject(dc,g_fUI);
+        SetTextColor(dc,RGB(255,255,255));
+        RECT tr{ ii.right+S(4), pb.top, pb.right-S(8), pb.bottom };
+        DrawTextW(dc,lbl,-1,&tr,DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING);
+        SelectObject(dc,of);
+    }
 }
+
+// hit-rect of the compose pill (must mirror paintHeader geometry)
+static RECT composeRect(SavedWin* w){
+    HDC dc=GetDC(w->hwnd);
+    const wchar_t* lbl=L"\u067e\u06cc\u0627\u0645 \u062c\u062f\u06cc\u062f";
+    SIZE sz; HFONT pf=(HFONT)SelectObject(dc,g_fUI);
+    GetTextExtentPoint32W(dc,lbl,(int)wcslen(lbl),&sz);
+    SelectObject(dc,pf); ReleaseDC(w->hwnd,dc);
+    int cz=S(30), ph=S(32), icon=S(16);
+    int cbRight=pad()+cz;
+    RECT pb{ cbRight+S(10), (S(HEADER_H)-ph)/2,
+             cbRight+S(10)+icon+sz.cx+S(26), (S(HEADER_H)-ph)/2+ph };
+    return pb;
+}
+
+// ---------------------------------------------------------------------------
+//  Composer popup (پیام جدید): text body + severity + optional file attach.
+//  Modal child window; on «ذخیره» it persists via pushSavedMsg() and asks the
+//  parent to reload. Standard Win32 controls only (no custom uikit controls).
+// ---------------------------------------------------------------------------
+struct ComposeWin {
+    HWND hwnd{nullptr};
+    HWND owner{nullptr};      // the SavedWin window to refresh on success
+    HWND edText{nullptr};
+    HWND cbSev{nullptr};
+    HWND btAttach{nullptr};
+    HWND btSave{nullptr};
+    HWND btCancel{nullptr};
+    std::wstring attachPath;  // source path chosen by the user (copied on save)
+    bool saved{false};
+};
+
+enum {
+    CMP_TEXT   = 4101,
+    CMP_SEV    = 4102,
+    CMP_ATTACH = 4103,
+    CMP_SAVE   = 4104,
+    CMP_CANCEL = 4105
+};
 
 static void paintCard(HDC dc, SavedWin* w, int idx, const RECT& c){
     const SavedMsg& m=w->msgs[idx];
@@ -211,9 +273,190 @@ static void showDetail(SavedWin* w, int idx){
     if(!m.attachPath.empty())
         body += L"\u067e\u06cc\u0648\u0633\u062a: " + m.attachPath + L"\r\n";
     body += L"\r\n" + m.text;
+    if(!m.attachPath.empty()){
+        body += L"\r\n\r\n\u0628\u0631\u0627\u06cc \u0628\u0627\u0632 \u06a9\u0631\u062f\u0646 \u067e\u06cc\u0648\u0633\u062a \u00abYes\u00bb \u0631\u0627 \u0628\u0632\u0646\u06cc\u062f."; // برای باز کردن پیوست Yes را بزنید
+        int r=MessageBoxW(w->hwnd, body.c_str(),
+            L"\u067e\u06cc\u0627\u0645 \u0630\u062e\u06cc\u0631\u0647\u200c\u0634\u062f\u0647",
+            MB_YESNO|MB_ICONINFORMATION);
+        if(r==IDYES)
+            ShellExecuteW(w->hwnd,L"open",m.attachPath.c_str(),NULL,NULL,SW_SHOWNORMAL);
+        return;
+    }
     MessageBoxW(w->hwnd, body.c_str(),
         L"\u067e\u06cc\u0627\u0645 \u0630\u062e\u06cc\u0631\u0647\u200c\u0634\u062f\u0647",
         MB_OK|MB_ICONINFORMATION);
+}
+
+// ---------------------------------------------------------------------------
+//  Composer implementation
+// ---------------------------------------------------------------------------
+static const wchar_t* COMPOSE_CLASS = L"AzSavedMsgCompose";
+
+static void composeDoAttach(ComposeWin* c){
+    wchar_t buf[MAX_PATH]; buf[0]=0;
+    OPENFILENAMEW ofn{}; ofn.lStructSize=sizeof(ofn);
+    ofn.hwndOwner=c->hwnd;
+    ofn.lpstrFile=buf; ofn.nMaxFile=MAX_PATH;
+    ofn.lpstrFilter=L"\u0647\u0645\u0647 \u0641\u0627\u06cc\u0644\u200c\u0647\u0627\0*.*\0"
+                    L"\u062a\u0635\u0627\u0648\u06cc\u0631\0*.png;*.jpg;*.jpeg;*.bmp;*.gif\0"
+                    L"PDF\0*.pdf\0\0";
+    ofn.nFilterIndex=1;
+    ofn.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST|OFN_EXPLORER;
+    if(GetOpenFileNameW(&ofn)){
+        c->attachPath=buf;
+        size_t slash=c->attachPath.find_last_of(L"\\/");
+        std::wstring base=(slash==std::wstring::npos)?c->attachPath:c->attachPath.substr(slash+1);
+        std::wstring lbl=L"\U0001F4CE "+base;   // paperclip + name
+        SetWindowTextW(c->btAttach,lbl.c_str());
+    }
+}
+
+static void composeDoSave(ComposeWin* c){
+    int len=GetWindowTextLengthW(c->edText);
+    std::wstring text(len+1,L'\0');
+    GetWindowTextW(c->edText,&text[0],len+1);
+    text.resize(len);
+    // trim
+    size_t a=text.find_first_not_of(L" \t\r\n");
+    size_t b=text.find_last_not_of(L" \t\r\n");
+    std::wstring body = (a==std::wstring::npos)? L"" : text.substr(a,b-a+1);
+    if(body.empty() && c->attachPath.empty()){
+        MessageBoxW(c->hwnd,
+            L"\u0645\u062a\u0646 \u067e\u06cc\u0627\u0645 \u0631\u0627 \u0648\u0627\u0631\u062f \u06a9\u0646\u06cc\u062f \u06cc\u0627 \u06cc\u06a9 \u0641\u0627\u06cc\u0644 \u067e\u06cc\u0648\u0633\u062a \u06a9\u0646\u06cc\u062f.",
+            L"\u067e\u06cc\u0627\u0645 \u062c\u062f\u06cc\u062f", MB_OK|MB_ICONWARNING);
+        return;
+    }
+    int sev=(int)SendMessageW(c->cbSev,CB_GETCURSEL,0,0);
+    if(sev<0) sev=KMSG_NORMAL;
+    std::wstring stored;
+    if(!c->attachPath.empty()) stored=copyAttachmentLocal(c->attachPath);
+    std::wstring from = g_session.user.fullname.empty()
+        ? L"\u0645\u062f\u06cc\u0631\u06cc\u062a" : g_session.user.fullname;
+    pushSavedMsg(from, from, body, sev, stored);
+    c->saved=true;
+    if(c->owner && IsWindow(c->owner))
+        SendMessageW(c->owner, WM_APP+0x51, 0, 0);   // ask SavedWin to reload
+    DestroyWindow(c->hwnd);
+}
+
+static LRESULT CALLBACK ComposeProc(HWND h,UINT msg,WPARAM wp,LPARAM lp){
+    ComposeWin* c=(ComposeWin*)GetWindowLongPtrW(h,GWLP_USERDATA);
+    switch(msg){
+    case WM_CREATE:{
+        CREATESTRUCTW* cs=(CREATESTRUCTW*)lp;
+        c=(ComposeWin*)cs->lpCreateParams;
+        SetWindowLongPtrW(h,GWLP_USERDATA,(LONG_PTR)c);
+        c->hwnd=h;
+        RECT rc; GetClientRect(h,&rc);
+        int m=pad(), x=m, right=rc.right-m, w=right-x;
+        int y=m;
+        HFONT f=g_fUI?g_fUI:(HFONT)GetStockObject(DEFAULT_GUI_FONT);
+        // label-less; controls speak for themselves in RTL layout
+        // severity combo
+        c->cbSev=CreateWindowExW(0,L"COMBOBOX",NULL,
+            WS_CHILD|WS_VISIBLE|CBS_DROPDOWNLIST|WS_TABSTOP,
+            x,y,w,S(200),h,(HMENU)(INT_PTR)CMP_SEV,g_hInst,NULL);
+        SendMessageW(c->cbSev,WM_SETFONT,(WPARAM)f,TRUE);
+        SendMessageW(c->cbSev,CB_ADDSTRING,0,(LPARAM)L"\u0639\u0627\u062f\u06cc");      // عادی
+        SendMessageW(c->cbSev,CB_ADDSTRING,0,(LPARAM)L"\u0641\u0648\u0631\u06cc");      // فوری
+        SendMessageW(c->cbSev,CB_ADDSTRING,0,(LPARAM)L"\u0628\u062d\u0631\u0627\u0646\u06cc"); // بحرانی
+        SendMessageW(c->cbSev,CB_SETCURSEL,0,0);
+        y+=S(34)+S(10);
+        // multiline text body
+        int edH=rc.bottom - y - S(48) - S(10) - S(44) - S(10);
+        if(edH<S(120)) edH=S(120);
+        c->edText=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",NULL,
+            WS_CHILD|WS_VISIBLE|WS_TABSTOP|WS_VSCROLL|ES_MULTILINE|ES_AUTOVSCROLL|ES_WANTRETURN,
+            x,y,w,edH,h,(HMENU)(INT_PTR)CMP_TEXT,g_hInst,NULL);
+        SendMessageW(c->edText,WM_SETFONT,(WPARAM)f,TRUE);
+        y+=edH+S(10);
+        // attach button (full width)
+        c->btAttach=CreateWindowExW(0,L"BUTTON",
+            L"\U0001F4CE \u0627\u0641\u0632\u0648\u062f\u0646 \u0641\u0627\u06cc\u0644 \u067e\u06cc\u0648\u0633\u062a", // افزودن فایل پیوست
+            WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_PUSHBUTTON,
+            x,y,w,S(38),h,(HMENU)(INT_PTR)CMP_ATTACH,g_hInst,NULL);
+        SendMessageW(c->btAttach,WM_SETFONT,(WPARAM)f,TRUE);
+        y+=S(38)+S(10);
+        // save / cancel row
+        int bw=(w-S(10))/2;
+        c->btSave=CreateWindowExW(0,L"BUTTON",
+            L"\u0630\u062e\u06cc\u0631\u0647",   // ذخیره
+            WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_DEFPUSHBUTTON,
+            x+bw+S(10),y,bw,S(40),h,(HMENU)(INT_PTR)CMP_SAVE,g_hInst,NULL);
+        SendMessageW(c->btSave,WM_SETFONT,(WPARAM)f,TRUE);
+        c->btCancel=CreateWindowExW(0,L"BUTTON",
+            L"\u0627\u0646\u0635\u0631\u0627\u0641", // انصراف
+            WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_PUSHBUTTON,
+            x,y,bw,S(40),h,(HMENU)(INT_PTR)CMP_CANCEL,g_hInst,NULL);
+        SendMessageW(c->btCancel,WM_SETFONT,(WPARAM)f,TRUE);
+        SetFocus(c->edText);
+        return 0; }
+    case WM_CTLCOLOREDIT:
+    case WM_CTLCOLORLISTBOX:{
+        HDC dc=(HDC)wp;
+        SetTextColor(dc,g_theme.text);
+        SetBkColor(dc,g_theme.surface);
+        static HBRUSH br=NULL; if(br) DeleteObject(br);
+        br=CreateSolidBrush(g_theme.surface);
+        return (LRESULT)br; }
+    case WM_CTLCOLORSTATIC:
+    case WM_CTLCOLORBTN:{
+        HDC dc=(HDC)wp;
+        SetTextColor(dc,g_theme.text);
+        SetBkColor(dc,g_theme.bg);
+        static HBRUSH bb=NULL; if(bb) DeleteObject(bb);
+        bb=CreateSolidBrush(g_theme.bg);
+        return (LRESULT)bb; }
+    case WM_ERASEBKGND:{
+        HDC dc=(HDC)wp; RECT rc; GetClientRect(h,&rc);
+        HBRUSH b=CreateSolidBrush(g_theme.bg); FillRect(dc,&rc,b); DeleteObject(b);
+        return 1; }
+    case WM_COMMAND:{
+        int id=LOWORD(wp);
+        if(id==CMP_ATTACH && HIWORD(wp)==BN_CLICKED){ composeDoAttach(c); return 0; }
+        if(id==CMP_SAVE   && HIWORD(wp)==BN_CLICKED){ composeDoSave(c);   return 0; }
+        if(id==CMP_CANCEL && HIWORD(wp)==BN_CLICKED){ DestroyWindow(h);   return 0; }
+        return 0; }
+    case WM_KEYDOWN:
+        if(wp==VK_ESCAPE){ DestroyWindow(h); return 0; }
+        break;
+    case WM_CLOSE: DestroyWindow(h); return 0;
+    case WM_DESTROY:{
+        HWND own=c?c->owner:NULL;
+        if(c){ delete c; }
+        SetWindowLongPtrW(h,GWLP_USERDATA,0);
+        if(own && IsWindow(own)) EnableWindow(own,TRUE);
+        return 0; }
+    }
+    return DefWindowProcW(h,msg,wp,lp);
+}
+
+static void openComposer(SavedWin* sw){
+    static bool reg=false;
+    if(!reg){
+        WNDCLASSW wc{};
+        wc.lpfnWndProc=ComposeProc;
+        wc.hInstance=g_hInst;
+        wc.hCursor=LoadCursorW(NULL,IDC_ARROW);
+        wc.lpszClassName=COMPOSE_CLASS;
+        wc.hbrBackground=NULL;
+        RegisterClassW(&wc);
+        reg=true;
+    }
+    ComposeWin* c=new ComposeWin();
+    c->owner=sw->hwnd;
+    int wpx=S(440), hpx=S(440);
+    RECT pr{0,0,0,0}; GetWindowRect(sw->hwnd,&pr);
+    int px=pr.left+((pr.right-pr.left)-wpx)/2;
+    int py=pr.top +((pr.bottom-pr.top)-hpx)/2;
+    HWND h=CreateWindowExW(WS_EX_DLGMODALFRAME,COMPOSE_CLASS,
+        L"\u067e\u06cc\u0627\u0645 \u062c\u062f\u06cc\u062f",   // پیام جدید
+        WS_POPUP|WS_CAPTION|WS_SYSMENU,
+        px,py,wpx,hpx,sw->hwnd,NULL,g_hInst,c);
+    if(!h){ delete c; return; }
+    EnableWindow(sw->hwnd,FALSE);   // pseudo-modal
+    ShowWindow(h,SW_SHOW);
+    UpdateWindow(h);
 }
 
 static LRESULT CALLBACK SavedProc(HWND h,UINT msg,WPARAM wp,LPARAM lp){
@@ -232,14 +475,18 @@ static LRESULT CALLBACK SavedProc(HWND h,UINT msg,WPARAM wp,LPARAM lp){
         if(!w) break;
         POINT pt{ (short)LOWORD(lp), (short)HIWORD(lp) };
         int cz=S(30); RECT cb{ pad(), (S(HEADER_H)-cz)/2, pad()+cz, (S(HEADER_H)-cz)/2+cz };
+        RECT pb=composeRect(w);
         int ch = PtInRect(&cb,pt)?1:0;
+        int cm = PtInRect(&pb,pt)?1:0;
         int hc = (pt.y>S(HEADER_H)) ? hitCard(w,pt) : -1;
-        if(ch!=w->closeHot || hc!=w->hotCard){ w->closeHot=ch; w->hotCard=hc;
+        if(ch!=w->closeHot || cm!=w->composeHot || hc!=w->hotCard){
+            w->closeHot=ch; w->composeHot=cm; w->hotCard=hc;
             InvalidateRect(h,NULL,FALSE); }
         TRACKMOUSEEVENT tme{ sizeof(tme), TME_LEAVE, h, 0 }; TrackMouseEvent(&tme);
         return 0; }
     case WM_MOUSELEAVE:{
-        if(w && (w->hotCard!=-1||w->closeHot)){ w->hotCard=-1; w->closeHot=0;
+        if(w && (w->hotCard!=-1||w->closeHot||w->composeHot)){
+            w->hotCard=-1; w->closeHot=0; w->composeHot=0;
             InvalidateRect(h,NULL,FALSE); }
         return 0; }
     case WM_LBUTTONDOWN:{
@@ -247,7 +494,13 @@ static LRESULT CALLBACK SavedProc(HWND h,UINT msg,WPARAM wp,LPARAM lp){
         POINT pt{ (short)LOWORD(lp), (short)HIWORD(lp) };
         int cz=S(30); RECT cb{ pad(), (S(HEADER_H)-cz)/2, pad()+cz, (S(HEADER_H)-cz)/2+cz };
         if(PtInRect(&cb,pt)){ DestroyWindow(h); return 0; }
+        RECT pb=composeRect(w);
+        if(PtInRect(&pb,pt)){ openComposer(w); return 0; }
         if(pt.y>S(HEADER_H)){ int idx=hitCard(w,pt); if(idx>=0) showDetail(w,idx); }
+        return 0; }
+    case WM_APP+0x51:{   // composer saved → reload list
+        if(w){ w->msgs=loadSavedMsgs(); w->scrollY=0; clampScroll(w);
+               InvalidateRect(h,NULL,FALSE); }
         return 0; }
     case WM_MOUSEWHEEL:{
         if(!w) break;

@@ -407,18 +407,37 @@ static void drawItemGdip(Graphics& g,DesignerState* st,const PrintItem& it,bool 
                 g.FillRectangle(&b,x+i*cell,y+j*cell,cell,cell);
         break; }
     case PIT_LOGO: case PIT_IMAGE: case PIT_PHOTO:{
-        Pen p(bc,1.0f); g.DrawRectangle(&p,x,y,w,hgt);
-        // §1.14.3: crash-proof font (was an unguarded FontFamily that could fault
-        // on machines without Vazirmatn installed — a real "open editor" crash).
-        double gpt=(double)(std::min(w,hgt)*0.5); if(gpt<1) gpt=1;
-        Font* f=makeSafeFont(L"Vazirmatn",gpt,FontStyleRegular);
-        if(f){
-            SolidBrush tb(Color(255,150,150,150));
-            StringFormat sf; sf.SetAlignment(StringAlignmentCenter);
-            sf.SetLineAlignment(StringAlignmentCenter);
-            const wchar_t* gl=(it.type==PIT_PHOTO)?L"\u0639":(it.type==PIT_LOGO)?L"\u0644":L"\u062a";
-            RectF rf(x,y,w,hgt); g.DrawString(gl,-1,f,rf,&sf,&tb);
-            delete f;
+        // v1.23.0 WYSIWYG: render the ACTUAL uploaded image (file path or
+        // data:base64 URI) using the SAME engine + object-fit + padding as the
+        // print output, so the preview is pixel-identical to the printed page.
+        bool drawn=false;
+        if(!it.imgPath.empty()){
+            RECT rr={(LONG)x,(LONG)y,(LONG)(x+w),(LONG)(y+hgt)};
+            int padPx=(int)(it.padding*pxPerMm(st)); if(padPx<0)padPx=0;
+            // Borrow the underlying HDC from the GDI+ Graphics so we reuse the
+            // exact print-time renderer. The HDC MUST be released before any
+            // further GDI+ drawing on `g`.
+            HDC hdc=g.GetHDC();
+            if(hdc){
+                drawn=gpDrawImageRectFit(hdc,it.imgPath,rr,it.objectFit,padPx);
+                g.ReleaseHDC(hdc);
+            }
+        }
+        if(!drawn){
+            // no image yet → labelled placeholder box (designer affordance only;
+            // never printed because the print engine also falls back per-item).
+            Pen p(bc,1.0f); g.DrawRectangle(&p,x,y,w,hgt);
+            // §1.14.3: crash-proof font.
+            double gpt=(double)(std::min(w,hgt)*0.5); if(gpt<1) gpt=1;
+            Font* f=makeSafeFont(L"Vazirmatn",gpt,FontStyleRegular);
+            if(f){
+                SolidBrush tb(Color(255,150,150,150));
+                StringFormat sf; sf.SetAlignment(StringAlignmentCenter);
+                sf.SetLineAlignment(StringAlignmentCenter);
+                const wchar_t* gl=(it.type==PIT_PHOTO)?L"\u0639":(it.type==PIT_LOGO)?L"\u0644":L"\u062a";
+                RectF rf(x,y,w,hgt); g.DrawString(gl,-1,f,rf,&sf,&tb);
+                delete f;
+            }
         }
         break; }
     case PIT_APPTNO: case PIT_LABEL: case PIT_FIELD: default:{
@@ -437,12 +456,25 @@ static void drawItemGdip(Graphics& g,DesignerState* st,const PrintItem& it,bool 
         if(f){
             SolidBrush tb(tc);
             StringFormat sf;
-            sf.SetFormatFlags(StringFormatFlagsDirectionRightToLeft);
-            if(it.align==1) sf.SetAlignment(StringAlignmentCenter);
-            else if(it.align==2) sf.SetAlignment(StringAlignmentFar);  // visual left in RTL
-            else sf.SetAlignment(StringAlignmentNear);                 // right
-            sf.SetLineAlignment(StringAlignmentCenter);
-            RectF rf(x,y,w,hgt);
+            // v1.23.0: per-item direction (0=RTL 1=LTR 2=center-auto) mirrors the
+            // print engine, so preview == print for mixed Persian/English.
+            bool rtl=(it.dir!=1);
+            if(rtl) sf.SetFormatFlags(StringFormatFlagsDirectionRightToLeft);
+            // horizontal alignment. In RTL, StringAlignmentNear == visual right.
+            int al=it.align; if(it.dir==2) al=1;        // center-auto
+            if(al==1) sf.SetAlignment(StringAlignmentCenter);
+            else if(al==2) sf.SetAlignment(rtl?StringAlignmentFar:StringAlignmentNear); // visual left
+            else           sf.SetAlignment(rtl?StringAlignmentNear:StringAlignmentFar); // visual right
+            // vertical alignment (0=top 1=middle 2=bottom).
+            sf.SetLineAlignment(it.valign==1?StringAlignmentCenter:
+                                it.valign==2?StringAlignmentFar:StringAlignmentNear);
+            // inner padding (mm → canvas px) so text never touches the box edge.
+            REAL padpx=(REAL)(it.padding*pxPerMm(st)); if(padpx<0)padpx=0;
+            REAL rw=w-2*padpx, rh=hgt-2*padpx;
+            REAL ox=x+padpx, oy=y+padpx;
+            if(rw<=0){ ox=x; rw=w; }
+            if(rh<=0){ oy=y; rh=hgt; }
+            RectF rf(ox,oy,rw,rh);
             g.DrawString(text.c_str(),-1,f,rf,&sf,&tb);
             delete f;
         }
@@ -512,6 +544,22 @@ static void designer_paint(HWND h){
     EndPaint(h,&ps);
 }
 
+// ============================================================================
+//  Inspector — v1.18.3 FULL REWRITE.
+//  ROOT-CAUSE FIX of the deterministic "open editor" ACCESS_VIOLATION
+//  (AzadiTeb.exe+0x12789, every run at the same address): the inspector used
+//  the custom owner-drawn uikit controls (AzNumberSpinner / AzColorPicker /
+//  AzSwitch). Their per-instance heap state + the global handle table + the
+//  WM_COMMAND routing back into them is what faulted on the Management path.
+//  Per the brief we DO NOT keep patching them — the entire inspector now uses
+//  ONLY standard Win32 controls (EDIT / BUTTON / STATIC / CHECKBOX). Numbers
+//  are plain right-aligned EDIT boxes; colours are a plain BUTTON that opens
+//  ChooseColorW; the lock is a standard CHECKBOX. There is no custom control,
+//  no shared global handle table to corrupt, and no owner-draw state to free.
+//
+//  Color state is stored in the SELECTED PrintItem (textColor/borderColor), so
+//  the colour BUTTONs don't need any side state at all.
+// ============================================================================
 // Build the inspector child controls for the current selection.
 static HWND g_inspectorHwnds[64]; static int g_inspectorCount=0;
 static void clearInspector(){
@@ -520,26 +568,61 @@ static void clearInspector(){
     g_inspectorCount=0;
 }
 
+// helper: read a numeric EDIT box (tolerant of Persian/Arabic digits + blanks)
+static double readNumEdit(HWND h,int id){
+    HWND e=GetDlgItem(h,id); if(!e||!IsWindow(e)) return 0;
+    wchar_t b[64]={0}; GetWindowTextW(e,b,63);
+    // normalize Persian/Arabic digits to ASCII so _wtof works
+    for(wchar_t* p=b;*p;++p){
+        if(*p>=0x06F0 && *p<=0x06F9) *p=L'0'+(*p-0x06F0);     // Persian
+        else if(*p>=0x0660 && *p<=0x0669) *p=L'0'+(*p-0x0660);// Arabic
+    }
+    return _wtof(b);
+}
+
 static void designer_buildInspector(HWND h){
     DesignerState* st=(DesignerState*)GetWindowLongPtrW(h,GWLP_USERDATA);
     if(!st) return;
     clearInspector();
     RECT rc; GetClientRect(h,&rc);
+    if(rc.right<=0) return;
     int inspW=(int)(rc.right*0.30);
     int x0=rc.right-inspW+S(8), y=S(44)+S(60)+S(10), w=inspW-S(16);
-    auto add=[&](HWND c){ if(g_inspectorCount<64) g_inspectorHwnds[g_inspectorCount++]=c; };
+    if(w<S(60)) w=S(60);
+    HFONT fUI = g_fUI ? g_fUI : (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+    HFONT fSm = g_fSmall ? g_fSmall : fUI;
+    HFONT fB  = g_fUIB ? g_fUIB : fUI;
+    auto add=[&](HWND c){ if(c && g_inspectorCount<64) g_inspectorHwnds[g_inspectorCount++]=c; };
     auto label=[&](const wchar_t* t,int ww=0){
         HWND c=CreateWindowExW(0,L"STATIC",t,WS_CHILD|WS_VISIBLE|SS_RIGHT,
             x0,y,ww?ww:w,S(18),h,NULL,g_hInst,NULL);
-        SendMessageW(c,WM_SETFONT,(WPARAM)g_fSmall,TRUE); add(c); };
+        if(c) SendMessageW(c,WM_SETFONT,(WPARAM)fSm,TRUE); add(c); };
+    // a standard right-aligned numeric EDIT box
+    auto numEdit=[&](int id,double val,int ex,int ey,int ew){
+        wchar_t b[48];
+        if(val==(long long)val) swprintf(b,48,L"%lld",(long long)val);
+        else swprintf(b,48,L"%.2f",val);
+        HWND e=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",b,
+            WS_CHILD|WS_VISIBLE|ES_RIGHT|ES_AUTOHSCROLL,ex,ey,ew,S(24),h,
+            (HMENU)(INT_PTR)id,g_hInst,NULL);
+        if(e) SendMessageW(e,WM_SETFONT,(WPARAM)fUI,TRUE); add(e);
+    };
+    // a standard color BUTTON (owner-draw via BS_OWNERDRAW; current color read
+    // from the item at paint time — see WM_DRAWITEM in DesignerProc)
+    auto colorBtn=[&](int id,int ex,int ey,int ew){
+        HWND b=CreateWindowExW(0,L"BUTTON",L"",
+            WS_CHILD|WS_VISIBLE|BS_OWNERDRAW,ex,ey,ew,S(24),h,
+            (HMENU)(INT_PTR)id,g_hInst,NULL);
+        if(b) SendMessageW(b,WM_SETFONT,(WPARAM)fUI,TRUE); add(b);
+    };
 
     PrintItem* it = (st->selId>=0)? findItem(st,st->selId):nullptr;
     if(!it){
         // palette header (when nothing selected)
         HWND c=CreateWindowExW(0,L"STATIC",
-            L"\u0622\u06cc\u062a\u0645\u200c\u0647\u0627 \u2014 \u0628\u0631\u0627\u06cc \u0627\u0641\u0632\u0648\u062f\u0646 \u062f\u0648\u0628\u0627\u0631 \u06a9\u0644\u06cc\u06a9 \u06a9\u0646\u06cc\u062f",
+            L"\u0622\u06cc\u062a\u0645\u200c\u0647\u0627 \u2014 \u0628\u0631\u0627\u06cc \u0627\u0641\u0632\u0648\u062f\u0646 \u06a9\u0644\u06cc\u06a9 \u06a9\u0646\u06cc\u062f",
             WS_CHILD|WS_VISIBLE|SS_RIGHT,x0,y,w,S(20),h,NULL,g_hInst,NULL);
-        SendMessageW(c,WM_SETFONT,(WPARAM)g_fUIB,TRUE); add(c); y+=S(26);
+        if(c) SendMessageW(c,WM_SETFONT,(WPARAM)fB,TRUE); add(c); y+=S(28);
         struct PI{const wchar_t* t;int type;};
         static const PI pal[]={
             {L"\u0646\u0627\u0645 (\u0641\u06cc\u0644\u062f)",PIT_FIELD},
@@ -555,46 +638,118 @@ static void designer_buildInspector(HWND h){
             {L"\u0634\u0645\u0627\u0631\u0647 \u0646\u0648\u0628\u062a",PIT_APPTNO},
         };
         for(const auto& p:pal){
-            HWND b=createFlatButton(h,5000+p.type,p.t,ICO_PLUS,BS_OUTLINE,
-                x0,y,w,S(26)); add(b);
-            SetWindowLongPtrW(b,GWLP_USERDATA,(LONG_PTR)p.type);
+            // plain standard push-button (no custom flat-button owner state)
+            HWND b=CreateWindowExW(0,L"BUTTON",p.t,
+                WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,x0,y,w,S(26),h,
+                (HMENU)(INT_PTR)(5000+p.type),g_hInst,NULL);
+            if(b) SendMessageW(b,WM_SETFONT,(WPARAM)fUI,TRUE);
+            add(b);
             y+=S(30);
         }
         return;
     }
     // single-selection properties
     label(L"\u0645\u0648\u0642\u0639\u06cc\u062a (X, Y mm)"); y+=S(20);
-    add(uikit::AzNumberSpinner_Create(h,6001,it->x,0,500,1,x0+w/2+S(2),y,w/2-S(2),S(24)));
-    add(uikit::AzNumberSpinner_Create(h,6002,it->y,0,500,1,x0,y,w/2-S(2),S(24))); y+=S(28);
+    numEdit(6001,it->x,x0+w/2+S(2),y,w/2-S(2));
+    numEdit(6002,it->y,x0,y,w/2-S(2)); y+=S(28);
     label(L"\u0627\u0628\u0639\u0627\u062f (\u0639\u0631\u0636\u060c \u0627\u0631\u062a\u0641\u0627\u0639 mm)"); y+=S(20);
-    add(uikit::AzNumberSpinner_Create(h,6003,it->w,1,500,1,x0+w/2+S(2),y,w/2-S(2),S(24)));
-    add(uikit::AzNumberSpinner_Create(h,6004,it->h,1,500,1,x0,y,w/2-S(2),S(24))); y+=S(28);
+    numEdit(6003,it->w,x0+w/2+S(2),y,w/2-S(2));
+    numEdit(6004,it->h,x0,y,w/2-S(2)); y+=S(28);
     label(L"\u0686\u0631\u062e\u0634 (\u062f\u0631\u062c\u0647)"); y+=S(20);
-    add(uikit::AzNumberSpinner_Create(h,6005,it->rot,-180,180,1,x0,y,w,S(24))); y+=S(28);
+    numEdit(6005,it->rot,x0,y,w); y+=S(28);
     if(it->type==PIT_LABEL || it->type==PIT_FIELD || it->type==PIT_APPTNO){
         label(L"\u0627\u0646\u062f\u0627\u0632\u0647 \u0641\u0648\u0646\u062a (pt)"); y+=S(20);
-        add(uikit::AzNumberSpinner_Create(h,6006,it->fontPt,5,72,1,x0,y,w,S(24))); y+=S(28);
+        numEdit(6006,it->fontPt,x0,y,w); y+=S(28);
         label(L"\u0631\u0646\u06af \u0645\u062a\u0646"); y+=S(20);
-        add(uikit::AzColorPicker_Create(h,6007,
-            RGB((it->textColor>>16)&0xFF,(it->textColor>>8)&0xFF,it->textColor&0xFF),
-            x0,y,w,S(24))); y+=S(28);
+        colorBtn(6007,x0,y,w); y+=S(28);
         if(it->type==PIT_LABEL){
             label(L"\u0645\u062a\u0646"); y+=S(20);
             HWND e=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",it->text.c_str(),
                 WS_CHILD|WS_VISIBLE|ES_AUTOHSCROLL,x0,y,w,S(24),h,
                 (HMENU)6008,g_hInst,NULL);
-            SendMessageW(e,WM_SETFONT,(WPARAM)g_fUI,TRUE); add(e); y+=S(28);
+            if(e) SendMessageW(e,WM_SETFONT,(WPARAM)fUI,TRUE); add(e); y+=S(28);
         }
+        if(it->type==PIT_FIELD){
+            label(L"\u067e\u06cc\u0634\u0648\u0646\u062f"); y+=S(20);
+            HWND e=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",it->prefix.c_str(),
+                WS_CHILD|WS_VISIBLE|ES_AUTOHSCROLL,x0,y,w,S(24),h,
+                (HMENU)6013,g_hInst,NULL);
+            if(e) SendMessageW(e,WM_SETFONT,(WPARAM)fUI,TRUE); add(e); y+=S(28);
+        }
+        // v1.23.0: a 3-segment selector (standard push-buttons; the active one is
+        // drawn pressed via BS_PUSHLIKE checkbox so we keep ONLY std controls).
+        auto seg3=[&](const wchar_t* cap,int baseId,int cur,
+                      const wchar_t* a,const wchar_t* b,const wchar_t* c){
+            label(cap); y+=S(20);
+            int seg=(w-2*S(2))/3;
+            const wchar_t* t[3]={a,b,c};
+            for(int i=0;i<3;i++){
+                HWND bt=CreateWindowExW(0,L"BUTTON",t[i],
+                    WS_CHILD|WS_VISIBLE|BS_AUTOCHECKBOX|BS_PUSHLIKE,
+                    x0+i*(seg+S(2)),y,seg,S(26),h,
+                    (HMENU)(INT_PTR)(baseId+i),g_hInst,NULL);
+                if(bt){ SendMessageW(bt,WM_SETFONT,(WPARAM)fSm,TRUE);
+                    SendMessageW(bt,BM_SETCHECK,(i==cur)?BST_CHECKED:BST_UNCHECKED,0); }
+                add(bt);
+            }
+            y+=S(30);
+        };
+        // horizontal alignment: 0=right 1=center 2=left
+        seg3(L"\u0686\u06cc\u062f\u0645\u0627\u0646 \u0627\u0641\u0642\u06cc",6020,it->align,
+             L"\u0631\u0627\u0633\u062a",L"\u0648\u0633\u0637",L"\u0686\u067e");
+        // vertical alignment: 0=top 1=middle 2=bottom
+        seg3(L"\u0686\u06cc\u062f\u0645\u0627\u0646 \u0639\u0645\u0648\u062f\u06cc",6026,it->valign,
+             L"\u0628\u0627\u0644\u0627",L"\u0648\u0633\u0637",L"\u067e\u0627\u06cc\u06cc\u0646");
+        // direction: 0=RTL 1=LTR 2=center-auto
+        seg3(L"\u062c\u0647\u062a \u0645\u062a\u0646",6023,it->dir,
+             L"\u0641\u0627\u0631\u0633\u06cc",L"\u0644\u0627\u062a\u06cc\u0646",L"\u062e\u0648\u062f\u06a9\u0627\u0631");
+    }
+    // v1.23.0: image items expose object-fit + padding so the logo/photo fits its
+    // rectangle exactly the way the print engine renders it.
+    if(it->type==PIT_LOGO || it->type==PIT_IMAGE || it->type==PIT_PHOTO){
+        auto seg3i=[&](const wchar_t* cap,int baseId,int cur,
+                       const wchar_t* a,const wchar_t* b,const wchar_t* c){
+            label(cap); y+=S(20);
+            int seg=(w-2*S(2))/3;
+            const wchar_t* t[3]={a,b,c};
+            for(int i=0;i<3;i++){
+                HWND bt=CreateWindowExW(0,L"BUTTON",t[i],
+                    WS_CHILD|WS_VISIBLE|BS_AUTOCHECKBOX|BS_PUSHLIKE,
+                    x0+i*(seg+S(2)),y,seg,S(26),h,
+                    (HMENU)(INT_PTR)(baseId+i),g_hInst,NULL);
+                if(bt){ SendMessageW(bt,WM_SETFONT,(WPARAM)fSm,TRUE);
+                    SendMessageW(bt,BM_SETCHECK,(i==cur)?BST_CHECKED:BST_UNCHECKED,0); }
+                add(bt);
+            }
+            y+=S(30);
+        };
+        // object-fit: 0=contain 1=cover 2=fill
+        seg3i(L"\u062a\u0646\u0627\u0633\u0628 \u062a\u0635\u0648\u06cc\u0631",6029,it->objectFit,
+              L"\u062f\u0627\u062e\u0644",L"\u067e\u0648\u0634\u0634",L"\u06a9\u0634\u06cc\u062f\u0647");
+        label(L"\u062d\u0627\u0634\u06cc\u0647 \u062f\u0627\u062e\u0644\u06cc (mm)"); y+=S(20);
+        numEdit(6032,it->padding,x0,y,w); y+=S(28);
     }
     label(L"\u0631\u0646\u06af \u06a9\u0627\u062f\u0631"); y+=S(20);
-    add(uikit::AzColorPicker_Create(h,6009,
-        RGB((it->borderColor>>16)&0xFF,(it->borderColor>>8)&0xFF,it->borderColor&0xFF),
-        x0,y,w,S(24))); y+=S(28);
-    label(L"\u0642\u0641\u0644 \u0645\u0648\u0642\u0639\u06cc\u062a"); y+=S(20);
-    add(uikit::AzSwitch_Create(h,6010,it->locked,x0+w-S(48),y,S(48),S(24))); y+=S(30);
-    add(createFlatButton(h,6011,L"\u062d\u0630\u0641 \u0622\u06cc\u062a\u0645",ICO_TRASH,BS_DANGER,x0,y,w/2-S(2),S(28)));
-    add(createFlatButton(h,6012,L"\u06a9\u067e\u06cc \u0622\u06cc\u062a\u0645",ICO_SAVE,BS_OUTLINE,x0+w/2+S(2),y,w/2-S(2),S(28)));
-    y+=S(32);
+    colorBtn(6009,x0,y,w); y+=S(28);
+    {   // lock = standard checkbox
+        HWND cb=CreateWindowExW(0,L"BUTTON",L"\u0642\u0641\u0644 \u0645\u0648\u0642\u0639\u06cc\u062a",
+            WS_CHILD|WS_VISIBLE|BS_AUTOCHECKBOX|BS_RIGHT|BS_RIGHTBUTTON,
+            x0,y,w,S(24),h,(HMENU)6010,g_hInst,NULL);
+        if(cb){ SendMessageW(cb,WM_SETFONT,(WPARAM)fSm,TRUE);
+            SendMessageW(cb,BM_SETCHECK,it->locked?BST_CHECKED:BST_UNCHECKED,0); }
+        add(cb); y+=S(30);
+    }
+    {   // delete / duplicate as plain standard buttons
+        HWND bd=CreateWindowExW(0,L"BUTTON",L"\u062d\u0630\u0641 \u0622\u06cc\u062a\u0645",
+            WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,x0,y,w/2-S(2),S(28),h,
+            (HMENU)6011,g_hInst,NULL);
+        if(bd) SendMessageW(bd,WM_SETFONT,(WPARAM)fUI,TRUE); add(bd);
+        HWND bc=CreateWindowExW(0,L"BUTTON",L"\u06a9\u067e\u06cc \u0622\u06cc\u062a\u0645",
+            WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,x0+w/2+S(2),y,w/2-S(2),S(28),h,
+            (HMENU)6012,g_hInst,NULL);
+        if(bc) SendMessageW(bc,WM_SETFONT,(WPARAM)fUI,TRUE); add(bc);
+        y+=S(32);
+    }
 }
 
 static void designer_layout(HWND h){
@@ -612,7 +767,6 @@ static void designer_layout(HWND h){
     if(st->hOrientCombo) MoveWindow(st->hOrientCombo,rc.right/2+S(4),by,S(100),S(200),TRUE);
     if(st->hZoom) MoveWindow(st->hZoom,rc.right-S(180),by,S(170),bh,TRUE);
     designer_buildInspector(h);
-    uikit::AzLayoutGuard_Verify(h);
 }
 
 // add a palette item at canvas center
@@ -768,33 +922,92 @@ static LRESULT CALLBACK DesignerProc(HWND h,UINT m,WPARAM w,LPARAM l){
     case WM_COMMAND:{
         if(!st) break;
         int id=LOWORD(w);
+        int notify=HIWORD(w);
         if(id>=5000 && id<5100){ addPaletteItem(st,id-5000);
             designer_buildInspector(h); InvalidateRect(h,NULL,FALSE); return 0; }
         if(id>=6001 && id<6100){
+            // v1.18.3: inspector now uses ONLY standard controls.
+            //   6001-6006 = numeric EDIT boxes (commit on EN_KILLFOCUS so we
+            //               don't fight the user mid-typing)
+            //   6007/6009 = owner-draw color BUTTON (BN_CLICKED -> ChooseColorW)
+            //   6008/6013 = text/prefix EDIT (EN_CHANGE)
+            //   6010      = lock CHECKBOX (BN_CLICKED)
+            //   6011/6012 = delete / duplicate BUTTON (BN_CLICKED)
             PrintItem* it=findItem(st,st->selId);
-            if(it){
-                if(id==6001) it->x=uikit::AzNumberSpinner_Get((HWND)l);
-                else if(id==6002) it->y=uikit::AzNumberSpinner_Get((HWND)l);
-                else if(id==6003) it->w=uikit::AzNumberSpinner_Get((HWND)l);
-                else if(id==6004) it->h=uikit::AzNumberSpinner_Get((HWND)l);
-                else if(id==6005) it->rot=uikit::AzNumberSpinner_Get((HWND)l);
-                else if(id==6006) it->fontPt=uikit::AzNumberSpinner_Get((HWND)l);
-                else if(id==6007){ COLORREF c=uikit::AzColorPicker_Get((HWND)l);
-                    it->textColor=(GetRValue(c)<<16)|(GetGValue(c)<<8)|GetBValue(c); }
-                else if(id==6008 && HIWORD(w)==EN_CHANGE){ wchar_t b[256]={0};
-                    GetWindowTextW((HWND)l,b,255); it->text=b; }
-                else if(id==6009){ COLORREF c=uikit::AzColorPicker_Get((HWND)l);
+            if(!it) return 0;
+            // numeric edits: commit on focus-loss OR Enter
+            if(id>=6001 && id<=6006){
+                if(notify==EN_KILLFOCUS){
+                    double v=readNumEdit(h,id);
+                    if(id==6001) it->x=v;
+                    else if(id==6002) it->y=v;
+                    else if(id==6003){ it->w=(v<0.1?0.1:v); }
+                    else if(id==6004){ it->h=(v<0.1?0.1:v); }
+                    else if(id==6005){ if(v<-180)v=-180; if(v>180)v=180; it->rot=v; }
+                    else if(id==6006){ if(v<5)v=5; if(v>72)v=72; it->fontPt=v; }
+                    st->dirty=true; commit(st); InvalidateRect(h,NULL,FALSE);
+                }
+                return 0;
+            }
+            if(id==6007 && notify==BN_CLICKED){
+                static COLORREF custom[16]; CHOOSECOLORW cc; ZeroMemory(&cc,sizeof(cc));
+                cc.lStructSize=sizeof(cc); cc.hwndOwner=h;
+                cc.rgbResult=RGB((it->textColor>>16)&0xFF,(it->textColor>>8)&0xFF,it->textColor&0xFF);
+                cc.lpCustColors=custom; cc.Flags=CC_FULLOPEN|CC_RGBINIT|CC_ANYCOLOR;
+                if(ChooseColorW(&cc)){ COLORREF c=cc.rgbResult;
+                    it->textColor=(GetRValue(c)<<16)|(GetGValue(c)<<8)|GetBValue(c);
+                    st->dirty=true; commit(st);
+                    HWND b=GetDlgItem(h,6007); if(b) InvalidateRect(b,NULL,TRUE);
+                    InvalidateRect(h,NULL,FALSE); }
+                return 0;
+            }
+            if(id==6008 && notify==EN_CHANGE){ wchar_t b[256]={0};
+                GetWindowTextW((HWND)l,b,255); it->text=b; st->dirty=true;
+                InvalidateRect(h,NULL,FALSE); return 0; }
+            if(id==6013 && notify==EN_CHANGE){ wchar_t b[256]={0};
+                GetWindowTextW((HWND)l,b,255); it->prefix=b; st->dirty=true;
+                InvalidateRect(h,NULL,FALSE); return 0; }
+            if(id==6009 && notify==BN_CLICKED){
+                static COLORREF custom2[16]; CHOOSECOLORW cc; ZeroMemory(&cc,sizeof(cc));
+                cc.lStructSize=sizeof(cc); cc.hwndOwner=h;
+                cc.rgbResult=RGB((it->borderColor>>16)&0xFF,(it->borderColor>>8)&0xFF,it->borderColor&0xFF);
+                cc.lpCustColors=custom2; cc.Flags=CC_FULLOPEN|CC_RGBINIT|CC_ANYCOLOR;
+                if(ChooseColorW(&cc)){ COLORREF c=cc.rgbResult;
                     it->borderColor=(GetRValue(c)<<16)|(GetGValue(c)<<8)|GetBValue(c);
-                    if(it->borderWidth<0.2) it->borderWidth=0.3; }
-                else if(id==6010){ it->locked=uikit::AzSwitch_Get((HWND)l); }
-                else if(id==6011){ st->design.items.erase(std::remove_if(
+                    if(it->borderWidth<0.2) it->borderWidth=0.3;
+                    st->dirty=true; commit(st);
+                    HWND b=GetDlgItem(h,6009); if(b) InvalidateRect(b,NULL,TRUE);
+                    InvalidateRect(h,NULL,FALSE); }
+                return 0;
+            }
+            if(id==6010 && notify==BN_CLICKED){
+                it->locked=(SendMessageW((HWND)l,BM_GETCHECK,0,0)==BST_CHECKED);
+                st->dirty=true; commit(st); return 0; }
+            if(id==6011 && notify==BN_CLICKED){
+                st->design.items.erase(std::remove_if(
                     st->design.items.begin(),st->design.items.end(),
                     [&](const PrintItem&x){return x.id==st->selId;}),st->design.items.end());
-                    st->selId=-1; commit(st); designer_buildInspector(h); }
-                else if(id==6012){ PrintItem n=*it; n.id=nextItemId(st); n.x+=10;n.y+=10;
-                    st->design.items.push_back(n); st->selId=n.id; commit(st);
-                    designer_buildInspector(h); }
-                st->dirty=true; InvalidateRect(h,NULL,FALSE);
+                st->selId=-1; commit(st); designer_buildInspector(h);
+                InvalidateRect(h,NULL,FALSE); return 0; }
+            if(id==6012 && notify==BN_CLICKED){
+                PrintItem n=*it; n.id=nextItemId(st); n.x+=10;n.y+=10;
+                st->design.items.push_back(n); st->selId=n.id; commit(st);
+                designer_buildInspector(h); InvalidateRect(h,NULL,FALSE); return 0; }
+            // v1.23.0: 3-segment selectors (BS_PUSHLIKE checkboxes). Set the
+            // chosen value, then rebuild the inspector so the sibling buttons
+            // un-check (radio behaviour without owner-draw state).
+            if(id>=6020 && id<=6031 && notify==BN_CLICKED){
+                if(id>=6020 && id<=6022) it->align=id-6020;        // R/C/L
+                else if(id>=6023 && id<=6025) it->dir=id-6023;     // RTL/LTR/auto
+                else if(id>=6026 && id<=6028) it->valign=id-6026;  // top/mid/bot
+                else if(id>=6029 && id<=6031) it->objectFit=id-6029; // contain/cover/fill
+                st->dirty=true; commit(st);
+                designer_buildInspector(h); InvalidateRect(h,NULL,FALSE); return 0;
+            }
+            if(id==6032 && notify==EN_KILLFOCUS){
+                double v=readNumEdit(h,6032); if(v<0)v=0; if(v>50)v=50;
+                it->padding=v; st->dirty=true; commit(st);
+                InvalidateRect(h,NULL,FALSE); return 0;
             }
             return 0;
         }
@@ -844,6 +1057,27 @@ static LRESULT CALLBACK DesignerProc(HWND h,UINT m,WPARAM w,LPARAM l){
     }
     case WM_CTLCOLORSTATIC:{ HDC dc=(HDC)w; SetBkColor(dc,g_theme.bg);
         SetTextColor(dc,g_theme.text); return (LRESULT)g_brBg; }
+    case WM_CTLCOLOREDIT:{ HDC dc=(HDC)w; SetBkColor(dc,g_theme.inputBg);
+        SetTextColor(dc,g_theme.text); return (LRESULT)g_brSurface; }
+    case WM_DRAWITEM:{
+        // owner-draw colour buttons (6007 text, 6009 border)
+        LPDRAWITEMSTRUCT di=(LPDRAWITEMSTRUCT)l;
+        if(di && st && (di->CtlID==6007 || di->CtlID==6009)){
+            PrintItem* it=findItem(st,st->selId);
+            COLORREF c=RGB(0,0,0);
+            if(it){ unsigned v=(di->CtlID==6007)?it->textColor:it->borderColor;
+                c=RGB((v>>16)&0xFF,(v>>8)&0xFF,v&0xFF); }
+            RECT r=di->rcItem;
+            HBRUSH bg=CreateSolidBrush(g_theme.surface); FillRect(di->hDC,&r,bg); DeleteObject(bg);
+            RECT sw=r; InflateRect(&sw,-S(3),-S(3));
+            HBRUSH cb=CreateSolidBrush(c); FillRect(di->hDC,&sw,cb); DeleteObject(cb);
+            HBRUSH fr=CreateSolidBrush(g_theme.border); FrameRect(di->hDC,&sw,fr); DeleteObject(fr);
+            if(di->itemState & ODS_FOCUS){ HBRUSH ff=CreateSolidBrush(g_theme.accent);
+                FrameRect(di->hDC,&r,ff); DeleteObject(ff); }
+            return TRUE;
+        }
+        break;
+    }
     case WM_CLOSE:
         if(st && st->dirty){
             int r=MessageBoxW(h,
@@ -1092,7 +1326,18 @@ static void PrintDesigner_OpenCore(HWND hMain){
         }
     }
     Breadcrumb(L"print designer: open editor");
-    OpenDesignerWindow(hMain,launch,nullptr);
+    // §1.19.0: PREFER the HTML/CSS/JS designer hosted in an app-owned WebBrowser
+    // window (lightweight, modern, synced with C++ over the loopback /api
+    // bridge). If the host or control cannot be created (very old/locked-down
+    // box), fall back to the proven native GDI editor so the feature NEVER
+    // breaks on weak hardware or odd Windows builds.
+    bool webOk=false;
+    if(getSetting(L"designer_engine",L"web")!=L"native"){
+        Breadcrumb(L"print designer: try web host");
+        webOk = WebDesigner_Open(hMain, launch.sectionIds);
+        if(!webOk) Breadcrumb(L"print designer: web host unavailable, native fallback");
+    }
+    if(!webOk) OpenDesignerWindow(hMain,launch,nullptr);
     Breadcrumb(L"print designer: closed");
 }
 

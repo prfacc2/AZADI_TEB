@@ -28,7 +28,7 @@
 // It was previously only reachable from the hidden-admin panel, which was the
 // wrong surface. The hidden-admin patients tab is removed (see admin.cpp).
 enum { PG_DASH=0, PG_PATIENTS=1, PG_SECTS=2, PG_EMPS=3, PG_MSG=4, PG_REQS=5,
-       PG_SAVED=6, PG_BACKUP=7, PG_COUNT=8 };
+       PG_SAVED=6, PG_BACKUP=7, PG_PRINTCFG=8, PG_COUNT=9 };
 
 // control ids
 enum {
@@ -41,6 +41,7 @@ enum {
     MG_DESIGN_SEC,         // print-design for the selected section
     MG_PT_SEARCH=2050,     // patients page: search box
     MG_PT_LIST,            // patients page: virtualized ListView
+    MG_PT_ADD,             // patients page: «افزودن بیمار» button (§1.19.0)
     MG_NAV_BASE=2100,      // sidebar nav buttons (MG_NAV_BASE+page)
     MG_CARD_BASE=2200,     // clicking a section card
     MG_DETAIL_BASE=2400,   // clicking an employee row
@@ -80,6 +81,7 @@ struct ManageState {
     // ---- patients page (v1.3.0): moved here from the hidden-admin panel ----
     HWND ptSearch=nullptr;      // debounced search box
     HWND ptList=nullptr;        // LVS_OWNERDATA virtualized list
+    HWND ptAdd=nullptr;         // «افزودن بیمار» button (§1.19.0)
     std::vector<PatientRow>* ptAll=nullptr;   // owned full set (heap)
     std::vector<int> ptView;    // indices into *ptAll after filtering
     std::wstring ptQuery;       // last applied search text
@@ -1641,16 +1643,662 @@ static void openNewEmployee(HWND owner){
 }
 
 // ============================================================================
+//  §1.19.0 — «افزودن بیمار» (Add Patient) modal. Mirrors the reception form so
+//  the manager can register a patient with ALL the same fields (name, family,
+//  national code, father, birth, gender, mobile, landline, address, insurance,
+//  supplementary insurance). Persisted via rememberPatient() into the SAME
+//  local store the reception national-ID auto-fill reads from — so a patient
+//  added here is instantly recalled by code at the reception desk.
+// ============================================================================
+#define MGPAT_CLASS L"AzNewPatient"
+enum {
+    NP_E_FIRST=3501, NP_E_LAST, NP_E_NID, NP_E_FATHER, NP_E_BIRTH,
+    NP_E_MOBILE, NP_E_LAND, NP_E_ADDR, NP_CB_GENDER, NP_CB_INS, NP_CB_SUPP,
+    NP_B_OK, NP_B_CANCEL
+};
+struct NewPatState {
+    HWND eFirst,eLast,eNid,eFather,eBirth,eMobile,eLand,eAddr,
+         cGender,cIns,cSupp,bOk,bCancel;
+};
+static HWND s_np=NULL; static NewPatState* s_nps=NULL;
+static void npClose(){ if(s_np&&IsWindow(s_np)){ HWND v=s_np; s_np=NULL; DestroyWindow(v);} }
+static RECT npCard(HWND h){ RECT rc; GetClientRect(h,&rc);
+    int w=S(720),hh=S(560);
+    if(hh>rc.bottom-S(20)) hh=rc.bottom-S(20);
+    RECT c={(rc.right-w)/2,(rc.bottom-hh)/2,(rc.right+w)/2,(rc.bottom+hh)/2}; return c; }
+static void npLayout(HWND h){
+    if(!s_nps) return; RECT c=npCard(h);
+    int top=c.top+S(64), fh=S(30), lh=S(24), gap=S(10), colGap=S(24);
+    int colW=(c.right-c.left-S(48)-colGap)/2;
+    int rCol=c.right-S(24); int rColL=rCol-colW;
+    int lColR=rColL-colGap; int lColL=lColR-colW;
+    int yR=top, yL=top;
+    auto row=[&](HWND ctl, int& y, int colRight, int colLeft, int fieldH){
+        MoveWindow(ctl, colLeft, y+lh, colRight-colLeft, fieldH, TRUE);
+        ShowWindow(ctl,SW_SHOW); y += lh + fieldH + gap; };
+    // RIGHT column — identity
+    row(s_nps->eFirst, yR, rCol, rColL, fh);
+    row(s_nps->eLast,  yR, rCol, rColL, fh);
+    row(s_nps->eNid,   yR, rCol, rColL, fh);
+    row(s_nps->eFather,yR, rCol, rColL, fh);
+    row(s_nps->cGender,yR, rCol, rColL, S(160));
+    // LEFT column — contact + insurance
+    row(s_nps->eBirth, yL, lColR, lColL, fh);
+    row(s_nps->eMobile,yL, lColR, lColL, fh);
+    row(s_nps->eLand,  yL, lColR, lColL, fh);
+    row(s_nps->cIns,   yL, lColR, lColL, S(200));
+    row(s_nps->cSupp,  yL, lColR, lColL, S(200));
+    // address spans full width near the bottom
+    int addrY=c.bottom-S(108);
+    MoveWindow(s_nps->eAddr, lColL, addrY, rCol-lColL, S(40), TRUE);
+    ShowWindow(s_nps->eAddr,SW_SHOW);
+    int by=c.bottom-S(52), bw=S(150);
+    MoveWindow(s_nps->bOk,     rCol-bw,         by, bw, S(38), TRUE);
+    MoveWindow(s_nps->bCancel, rCol-bw-S(8)-bw, by, bw, S(38), TRUE);
+}
+static void npDoSave(HWND h){
+    if(!s_nps) return;
+    wchar_t first[128]={0},last[128]={0},nid[32]={0},father[96]={0},
+            birth[32]={0},mobile[32]={0},land[32]={0},addr[256]={0};
+    GetWindowTextW(s_nps->eFirst,first,128);
+    GetWindowTextW(s_nps->eLast,last,128);
+    GetWindowTextW(s_nps->eNid,nid,32);
+    GetWindowTextW(s_nps->eFather,father,96);
+    GetWindowTextW(s_nps->eBirth,birth,32);
+    GetWindowTextW(s_nps->eMobile,mobile,32);
+    GetWindowTextW(s_nps->eLand,land,32);
+    GetWindowTextW(s_nps->eAddr,addr,256);
+    std::wstring fn=trim(first), ln=trim(last), id=trim(nid);
+    if(fn.empty()||ln.empty()){
+        MessageBoxW(h,L"نام و نام خانوادگی بیمار الزامی است.",L"افزودن بیمار",MB_OK|MB_ICONWARNING); return; }
+    if(id.empty()||!validNationalId(id)){
+        MessageBoxW(h,L"کد ملی معتبر ۱۰ رقمی الزامی است.",L"افزودن بیمار",MB_OK|MB_ICONWARNING); return; }
+    int gi=(int)SendMessageW(s_nps->cGender,CB_GETCURSEL,0,0);
+    std::wstring gender = gi==1?L"زن":L"مرد";
+    std::vector<int> ins;
+    int ii=(int)SendMessageW(s_nps->cIns,CB_GETCURSEL,0,0);
+    if(ii>0 && ii<N_INSURANCES) ins.push_back(ii);
+    // persist into the SAME store reception reads (national-ID dedup inside)
+    rememberPatient(id, fn, ln, trim(father), gender, trim(birth), trim(mobile), ins);
+    if(s_mg){ s_mg->msg=L"بیمار «"+fn+L" "+ln+L"» با کد ملی "+toFaDigits(id)+L" ثبت شد.";
+        s_mg->msgCol=g_theme.success; }
+    // force the patients list to reload so the new row appears
+    if(s_mg){ s_mg->ptLoaded=false; s_mg->ptLoading=false;
+        if(s_mg->ptAll){ delete s_mg->ptAll; s_mg->ptAll=nullptr; } }
+    npClose();
+    if(g_hManage){ mgPatientsLoadAsync(g_hManage); InvalidateRect(g_hManage,NULL,TRUE); }
+}
+static LRESULT CALLBACK npProc(HWND h, UINT m, WPARAM w, LPARAM l){
+    switch(m){
+    case WM_CREATE:{
+        s_nps=new NewPatState();
+        DWORD es=WS_CHILD|WS_TABSTOP|ES_AUTOHSCROLL;
+        auto mk=[&](int id,DWORD extra)->HWND{
+            HWND e=CreateWindowExW(0,L"EDIT",L"",es|extra,0,0,10,10,h,(HMENU)(UINT_PTR)id,g_hInst,0);
+            SendMessageW(e,WM_SETFONT,(WPARAM)g_fUI,TRUE);
+            enableEnterNavigation(e); return e; };
+        s_nps->eFirst=mk(NP_E_FIRST,0); s_nps->eLast=mk(NP_E_LAST,0);
+        s_nps->eNid=mk(NP_E_NID,ES_NUMBER); s_nps->eFather=mk(NP_E_FATHER,0);
+        s_nps->eBirth=mk(NP_E_BIRTH,0); s_nps->eMobile=mk(NP_E_MOBILE,0);
+        s_nps->eLand=mk(NP_E_LAND,0); s_nps->eAddr=mk(NP_E_ADDR,0);
+        SendMessageW(s_nps->eBirth,EM_SETCUEBANNER,TRUE,(LPARAM)L"۱۳۷۰/۰۵/۲۰");
+        s_nps->cGender=CreateWindowExW(0,L"COMBOBOX",L"",
+            WS_CHILD|WS_VISIBLE|WS_TABSTOP|CBS_DROPDOWNLIST,0,0,10,10,h,(HMENU)NP_CB_GENDER,g_hInst,0);
+        s_nps->cIns=CreateWindowExW(0,L"COMBOBOX",L"",
+            WS_CHILD|WS_VISIBLE|WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL,0,0,10,10,h,(HMENU)NP_CB_INS,g_hInst,0);
+        s_nps->cSupp=CreateWindowExW(0,L"COMBOBOX",L"",
+            WS_CHILD|WS_VISIBLE|WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL,0,0,10,10,h,(HMENU)NP_CB_SUPP,g_hInst,0);
+        for(HWND cb:{s_nps->cGender,s_nps->cIns,s_nps->cSupp})
+            SendMessageW(cb,WM_SETFONT,(WPARAM)g_fUI,TRUE);
+        SendMessageW(s_nps->cGender,CB_ADDSTRING,0,(LPARAM)L"مرد");
+        SendMessageW(s_nps->cGender,CB_ADDSTRING,0,(LPARAM)L"زن");
+        SendMessageW(s_nps->cGender,CB_SETCURSEL,0,0);
+        for(int i=0;i<N_INSURANCES;i++) SendMessageW(s_nps->cIns,CB_ADDSTRING,0,(LPARAM)INSURANCES[i].name);
+        SendMessageW(s_nps->cIns,CB_SETCURSEL,0,0);
+        for(int i=0;i<N_SUPP;i++) SendMessageW(s_nps->cSupp,CB_ADDSTRING,0,(LPARAM)SUPP_INSURANCES[i].name);
+        SendMessageW(s_nps->cSupp,CB_SETCURSEL,0,0);
+        s_nps->bOk=createFlatButton(h,NP_B_OK,L"ثبت بیمار",ICO_PLUS,BS_PRIMARY,0,0,10,10);
+        s_nps->bCancel=createFlatButton(h,NP_B_CANCEL,L"انصراف",ICO_X,BS_OUTLINE,0,0,10,10);
+        npLayout(h); SetFocus(s_nps->eFirst);
+        return 0; }
+    case WM_SIZE: npLayout(h); return 0;
+    case WM_NCDESTROY: if(s_nps){ delete s_nps; s_nps=NULL; } s_np=NULL;
+        if(g_hFrame) InvalidateRect(g_hFrame,NULL,TRUE); return 0;
+    case WM_ERASEBKGND: return 1;
+    case WM_CTLCOLOREDIT: case WM_CTLCOLORLISTBOX:{ HDC dc=(HDC)w;
+        SetTextColor(dc,g_theme.inputText); SetBkColor(dc,g_theme.inputBg);
+        return (LRESULT)g_brInput; }
+    case WM_CTLCOLORSTATIC:{ HDC dc=(HDC)w;
+        SetTextColor(dc,g_theme.text); SetBkColor(dc,g_theme.surface);
+        return (LRESULT)g_brSurface; }
+    case WM_COMMAND:{ int id=LOWORD(w);
+        if(id==NP_B_OK) npDoSave(h);
+        else if(id==NP_B_CANCEL) npClose();
+        return 0; }
+    case WM_KEYDOWN: if(w==VK_ESCAPE){ npClose(); return 0; } break;
+    case WM_PAINT:{ PAINTSTRUCT ps; HDC dc0=BeginPaint(h,&ps);
+        RECT rc; GetClientRect(h,&rc);
+        HDC dc=CreateCompatibleDC(dc0);
+        HBITMAP bmp=CreateCompatibleBitmap(dc0,rc.right,rc.bottom);
+        HGDIOBJ obm=SelectObject(dc,bmp);
+        { HBRUSH sb=CreateSolidBrush(g_dark?RGB(6,9,14):RGB(28,36,48));
+          FillRect(dc,&rc,sb); DeleteObject(sb); }
+        gpFillAlpha(dc,rc,0,g_dark?RGB(0,0,0):RGB(20,28,40),120);
+        RECT c=npCard(h);
+        gpShadow(dc,c,S(20),S(22),80);
+        gpGradRoundRectBg(dc,c,S(18),g_theme.surfaceTop,g_theme.surface,g_theme.border,
+            g_dark?RGB(6,9,14):RGB(28,36,48));
+        SetBkMode(dc,TRANSPARENT);
+        SelectObject(dc,g_fTitle); SetTextColor(dc,g_theme.accent);
+        RECT tr={c.left+S(28),c.top+S(16),c.right-S(28),c.top+S(46)};
+        DrawTextW(dc,L"افزودن بیمار جدید",-1,&tr,
+            DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+        SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
+        auto lbl=[&](HWND ctl,const wchar_t* t){
+            RECT wr; GetWindowRect(ctl,&wr);
+            POINT p1={wr.left,wr.top}; ScreenToClient(h,&p1);
+            int wcw=wr.right-wr.left;
+            RECT lr={p1.x,p1.y-S(20),p1.x+wcw,p1.y-S(2)};
+            DrawTextW(dc,t,-1,&lr,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX); };
+        if(s_nps){
+            lbl(s_nps->eFirst,L"نام *");
+            lbl(s_nps->eLast,L"نام خانوادگی *");
+            lbl(s_nps->eNid,L"کد ملی *");
+            lbl(s_nps->eFather,L"نام پدر");
+            lbl(s_nps->cGender,L"جنسیت");
+            lbl(s_nps->eBirth,L"تاریخ تولد");
+            lbl(s_nps->eMobile,L"تلفن همراه");
+            lbl(s_nps->eLand,L"تلفن ثابت");
+            lbl(s_nps->cIns,L"بیمه");
+            lbl(s_nps->cSupp,L"بیمه تکمیلی");
+            lbl(s_nps->eAddr,L"آدرس");
+        }
+        BitBlt(dc0,0,0,rc.right,rc.bottom,dc,0,0,SRCCOPY);
+        SelectObject(dc,obm); DeleteObject(bmp); DeleteDC(dc);
+        EndPaint(h,&ps); return 0; }
+    }
+    return DefWindowProcW(h,m,w,l);
+}
+static void openNewPatient(HWND owner){
+    (void)owner;
+    if(s_np&&IsWindow(s_np)) npClose();
+    static bool reg=false;
+    if(!reg){ WNDCLASSW wc={0}; wc.lpfnWndProc=npProc; wc.hInstance=g_hInst;
+        wc.hCursor=LoadCursor(NULL,IDC_ARROW); wc.lpszClassName=MGPAT_CLASS;
+        RegisterClassW(&wc); reg=true; }
+    RECT rc; GetClientRect(g_hFrame,&rc);
+    POINT org={0,0}; ClientToScreen(g_hFrame,&org);
+    s_np=CreateWindowExW(WS_EX_TOPMOST,MGPAT_CLASS,L"",WS_POPUP|WS_VISIBLE,
+        org.x,org.y,rc.right,rc.bottom,g_hFrame,NULL,g_hInst,NULL);
+    BringWindowToTop(s_np); SetFocus(s_np);
+}
+
+// ============================================================================
+//  §1.19.0 — «تنظیمات چاپ» (Print Settings). The manager picks a defined
+//  section (e.g. پذیرش) from a list, sees a WYSIWYG preview of the design that
+//  section currently prints with (enlargeable), and can:
+//    • دانلود طرح فعلی  — export the current design as a .aztpl JSON file
+//    • بارگذاری طرح     — import a .aztpl JSON file from disk
+//    • اعمال            — apply the (imported) design to the selected section
+//  After «اعمال», that section prints with the chosen design (reception نسخه
+//  included), via printPrintDesign() at the reception desk.
+// ============================================================================
+#define MGPCFG_CLASS L"AzPrintCfg"
+enum { PC_LIST=3601, PC_B_DOWNLOAD, PC_B_UPLOAD, PC_B_APPLY, PC_B_ENLARGE,
+       PC_B_DESIGN, PC_B_CLOSE, PC_B_ZOOMIN, PC_B_ZOOMOUT };
+struct PrintCfgState {
+    HWND list, bDownload, bUpload, bApply, bEnlarge, bDesign, bClose;
+    HWND bZoomIn, bZoomOut;
+    std::vector<Section> sects;     // active sections
+    int  sel = -1;                  // selected list index
+    PrintDesign preview;            // currently-resolved design for sel
+    bool havePreview = false;
+    PrintDesign pending;            // imported-but-not-yet-applied design
+    bool havePending = false;
+    bool enlarged = false;          // preview occupies the whole card
+    double zoom = 1.0;              // v1.22.0: real preview zoom (0.4..4.0)
+};
+static HWND s_pc=NULL; static PrintCfgState* s_pcs=NULL;
+static void pcClose(){ if(s_pc&&IsWindow(s_pc)){ HWND v=s_pc; s_pc=NULL; DestroyWindow(v);} }
+static RECT pcCard(HWND h){ RECT rc; GetClientRect(h,&rc);
+    int w=S(940),hh=S(640);
+    if(w>rc.right-S(20)) w=rc.right-S(20);
+    if(hh>rc.bottom-S(20)) hh=rc.bottom-S(20);
+    RECT c={(rc.right-w)/2,(rc.bottom-hh)/2,(rc.right+w)/2,(rc.bottom+hh)/2}; return c; }
+// preview pane rect (left side of the card; full card when enlarged)
+static RECT pcPreviewRect(HWND h){
+    RECT c=pcCard(h);
+    if(s_pcs && s_pcs->enlarged){
+        RECT r={c.left+S(20),c.top+S(64),c.right-S(20),c.bottom-S(64)}; return r; }
+    int listW=S(260);
+    RECT r={c.left+S(20),c.top+S(64),c.right-S(20)-listW-S(16),c.bottom-S(64)};
+    return r;
+}
+// Render a PrintDesign scaled-to-fit inside `area` (WYSIWYG paper preview).
+// ---- v1.21.0: self-contained helpers for the Print-Settings preview --------
+// (printer.cpp's equivalents are file-static, so we duplicate compact versions.)
+static inline COLORREF pcCR(unsigned int rgb){
+    return RGB((rgb>>16)&0xFF,(rgb>>8)&0xFF,rgb&0xFF);   // 0x00RRGGBB → COLORREF
+}
+struct PcTable {
+    int cols=0,rows=0; bool header=false;
+    std::vector<double> widths;
+    std::vector<std::vector<std::wstring>> cells;
+};
+static std::wstring pcU8toW(const std::string& s){
+    int n=MultiByteToWideChar(CP_UTF8,0,s.c_str(),(int)s.size(),NULL,0);
+    std::wstring w(n,0); if(n) MultiByteToWideChar(CP_UTF8,0,s.c_str(),(int)s.size(),&w[0],n);
+    return w;
+}
+static bool pcParseTable(const std::wstring& jsonW, PcTable& t){
+    int n=WideCharToMultiByte(CP_UTF8,0,jsonW.c_str(),(int)jsonW.size(),NULL,0,NULL,NULL);
+    std::string s(n,0); if(n) WideCharToMultiByte(CP_UTF8,0,jsonW.c_str(),(int)jsonW.size(),&s[0],n,NULL,NULL);
+    size_t p=0; auto ws=[&]{ while(p<s.size()&&(s[p]==' '||s[p]=='\t'||s[p]=='\n'||s[p]=='\r'))++p; };
+    auto rdStr=[&](std::string& out)->bool{ ws(); if(p>=s.size()||s[p]!='"')return false; ++p;
+        while(p<s.size()&&s[p]!='"'){ char c=s[p++]; if(c=='\\'&&p<s.size()){ char e=s[p++];
+            switch(e){case 'n':out+='\n';break;case 'r':out+='\r';break;case 't':out+='\t';break;
+                case '"':out+='"';break;case '\\':out+='\\';break;case '/':out+='/';break;
+                case 'u':{ if(p+4<=s.size()){ unsigned v=(unsigned)strtoul(s.substr(p,4).c_str(),NULL,16); p+=4;
+                    if(v<0x80)out+=(char)v; else if(v<0x800){out+=(char)(0xC0|(v>>6));out+=(char)(0x80|(v&0x3F));}
+                    else{out+=(char)(0xE0|(v>>12));out+=(char)(0x80|((v>>6)&0x3F));out+=(char)(0x80|(v&0x3F));} } break; }
+                default:out+=e; } } else out+=c; }
+        if(p<s.size()&&s[p]=='"')++p; return true; };
+    auto rdNum=[&]()->double{ ws(); size_t st=p; while(p<s.size()&&(isdigit((unsigned char)s[p])||s[p]=='-'||s[p]=='+'||s[p]=='.'||s[p]=='e'||s[p]=='E'))++p; return atof(s.substr(st,p-st).c_str()); };
+    ws(); if(p>=s.size()||s[p]!='{') return false; ++p;
+    while(true){ ws(); if(p<s.size()&&s[p]=='}'){++p;break;} if(p>=s.size())break;
+        std::string key; if(!rdStr(key))break; ws(); if(p<s.size()&&s[p]==':')++p;
+        if(key=="cols") t.cols=(int)rdNum();
+        else if(key=="rows") t.rows=(int)rdNum();
+        else if(key=="header"){ ws(); if(s.compare(p,4,"true")==0){t.header=true;p+=4;} else if(s.compare(p,5,"false")==0){t.header=false;p+=5;} else rdNum(); }
+        else if(key=="widths"){ ws(); if(p<s.size()&&s[p]=='['){++p; while(true){ ws(); if(p<s.size()&&s[p]==']'){++p;break;} t.widths.push_back(rdNum()); ws(); if(p<s.size()&&s[p]==','){++p;continue;} if(p<s.size()&&s[p]==']'){++p;break;} break; } } }
+        else if(key=="cells"){ ws(); if(p<s.size()&&s[p]=='['){++p;
+            while(true){ ws(); if(p<s.size()&&s[p]==']'){++p;break;}
+                if(p<s.size()&&s[p]=='['){++p; std::vector<std::wstring> rowv;
+                    while(true){ ws(); if(p<s.size()&&s[p]==']'){++p;break;} std::string cv; if(rdStr(cv)) rowv.push_back(pcU8toW(cv)); else { rdNum(); rowv.push_back(L""); }
+                        ws(); if(p<s.size()&&s[p]==','){++p;continue;} if(p<s.size()&&s[p]==']'){++p;break;} break; }
+                    t.cells.push_back(rowv); }
+                ws(); if(p<s.size()&&s[p]==','){++p;continue;} if(p<s.size()&&s[p]==']'){++p;break;} break; } } }
+        else { ws(); if(p<s.size()&&s[p]=='"'){ std::string tmp; rdStr(tmp); }
+            else if(p<s.size()&&s[p]=='{'){ int d2=0; do{ if(s[p]=='{')d2++; else if(s[p]=='}')d2--; ++p; }while(p<s.size()&&d2>0); }
+            else if(p<s.size()&&s[p]=='['){ int d2=0; do{ if(s[p]=='[')d2++; else if(s[p]==']')d2--; ++p; }while(p<s.size()&&d2>0); }
+            else rdNum(); }
+        ws(); if(p<s.size()&&s[p]==','){++p;continue;} ws(); if(p<s.size()&&s[p]=='}'){++p;break;}
+        if(p>=s.size())break;
+    }
+    if(t.cols<=0||t.rows<=0||t.cells.empty()) return false;
+    if((int)t.widths.size()!=t.cols) t.widths.assign(t.cols,1.0);
+    return true;
+}
+// preview-mode table: shows raw cell text (no live record substitution)
+static void pcDrawTable(HDC dc, const PrintItem& it, const RECT& box, double scPxMm){
+    PcTable t; if(!pcParseTable(it.text,t)) return;
+    int X0=box.left,Y0=box.top,X1=box.right,Y1=box.bottom;
+    int W=X1-X0,H=Y1-Y0; if(W<=0||H<=0) return;
+    double sumw=0; for(double w:t.widths) sumw+=w; if(sumw<=0) sumw=t.cols;
+    std::vector<int> cx; cx.push_back(X1); double acc=0;
+    for(int c=0;c<t.cols;++c){ acc+=t.widths[c]; cx.push_back(X1-(int)(W*(acc/sumw))); }
+    std::vector<int> ry; for(int rr=0;rr<=t.rows;++rr) ry.push_back(Y0+(int)((double)H*rr/t.rows));
+    if(t.header && t.rows>0){ RECT hr={cx[t.cols],ry[0],cx[0],ry[1]};
+        HBRUSH hb=CreateSolidBrush(RGB(238,242,251)); FillRect(dc,&hr,hb); DeleteObject(hb); }
+    double fontPt=it.fontPt>0?it.fontPt:9.0;
+    int lf=-(int)(fontPt*scPxMm*25.4/72.0 + 0.5);   // pt → px (WYSIWYG)
+    if(lf>-2) lf=-2;
+    HFONT fN=CreateFontW(lf,0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,
+        it.fontName.empty()?L"Vazirmatn":it.fontName.c_str());
+    HFONT fH=CreateFontW(lf,0,0,0,FW_BOLD,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,
+        it.fontName.empty()?L"Vazirmatn":it.fontName.c_str());
+    int pad=S(3); SetTextColor(dc,pcCR(it.textColor));
+    for(int rr=0;rr<t.rows;++rr){ bool hd=(t.header&&rr==0);
+        HGDIOBJ of=SelectObject(dc,hd?fH:fN);
+        for(int c=0;c<t.cols;++c){ std::wstring cell;
+            if(rr<(int)t.cells.size()&&c<(int)t.cells[rr].size()) cell=t.cells[rr][c];
+            RECT cr={cx[c+1]+pad,ry[rr],cx[c]-pad,ry[rr+1]};
+            if(cr.right<=cr.left||cr.bottom<=cr.top) continue;
+            DrawTextW(dc,cell.c_str(),-1,&cr,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_END_ELLIPSIS|DT_NOPREFIX);
+        } SelectObject(dc,of); }
+    DeleteObject(fN); DeleteObject(fH);
+    int bw=1; HPEN pen=CreatePen(PS_SOLID,bw,pcCR(it.borderColor)); HGDIOBJ op=SelectObject(dc,pen);
+    for(int c=0;c<=t.cols;++c){ MoveToEx(dc,cx[c],ry[0],0); LineTo(dc,cx[c],ry[t.rows]); }
+    for(int rr=0;rr<=t.rows;++rr){ MoveToEx(dc,cx[t.cols],ry[rr],0); LineTo(dc,cx[0],ry[rr]); }
+    SelectObject(dc,op); DeleteObject(pen);
+}
+
+static void pcPaintDesign(HDC dc, const RECT& area, const PrintDesign& d, double zoom){
+    double pw=d.paperW, ph=d.paperH;
+    if(pw<=0||ph<=0){ if(!Paper_Dims(d.paper,pw,ph)){ pw=148; ph=210; }
+        if(d.orientation==1) std::swap(pw,ph); }
+    int aw=area.right-area.left, ah=area.bottom-area.top;
+    if(aw<10||ah<10) return;
+    double sc = (aw/pw < ah/ph) ? aw/pw : ah/ph;     // mm→px fit
+    if(zoom<=0) zoom=1.0;
+    sc *= zoom;                                       // v1.22.0: apply zoom
+    // clip drawing to the preview pane so a zoomed-in page never spills out
+    HRGN clip=CreateRectRgn(area.left,area.top,area.right,area.bottom);
+    SelectClipRgn(dc,clip);
+    int pgW=(int)(pw*sc), pgH=(int)(ph*sc);
+    int px=area.left+(aw-pgW)/2, py=area.top+(ah-pgH)/2;
+    // paper sheet (white) + shadow
+    RECT sh={px+S(4),py+S(4),px+pgW+S(4),py+pgH+S(4)};
+    HBRUSH shB=CreateSolidBrush(RGB(0,0,0)); FillRect(dc,&sh,shB); DeleteObject(shB);
+    RECT pg={px,py,px+pgW,py+pgH};
+    HBRUSH wB=CreateSolidBrush(RGB(255,255,255)); FillRect(dc,&pg,wB); DeleteObject(wB);
+    { HPEN bp=CreatePen(PS_SOLID,1,RGB(180,180,180)); HGDIOBJ o=SelectObject(dc,bp);
+      HGDIOBJ ob=SelectObject(dc,GetStockObject(NULL_BRUSH));
+      Rectangle(dc,px,py,px+pgW,py+pgH);
+      SelectObject(dc,ob); SelectObject(dc,o); DeleteObject(bp); }
+    auto mmX=[&](double mm){ return px+(int)(mm*sc); };
+    auto mmY=[&](double mm){ return py+(int)(mm*sc); };
+    // items in z-order
+    std::vector<const PrintItem*> ord;
+    for(const auto& it:d.items) ord.push_back(&it);
+    for(size_t i=1;i<ord.size();++i){ const PrintItem* k=ord[i]; size_t j=i;
+        while(j>0 && ord[j-1]->z > k->z){ ord[j]=ord[j-1]; --j; } ord[j]=k; }
+    SetBkMode(dc,TRANSPARENT);
+    for(const PrintItem* pit:ord){
+        const PrintItem& it=*pit;
+        int x0=mmX(it.x), y0=mmY(it.y), x1=mmX(it.x+it.w), y1=mmY(it.y+it.h);
+        if(it.type==PIT_TABLE){
+            RECT rr={x0,y0,x1,y1}; pcDrawTable(dc,it,rr,sc);
+        } else if(it.type==PIT_HLINE){
+            HPEN p=CreatePen(PS_SOLID,1,pcCR(it.borderColor)); HGDIOBJ o=SelectObject(dc,p);
+            MoveToEx(dc,x0,y0,0); LineTo(dc,x1,y0); SelectObject(dc,o); DeleteObject(p);
+        } else if(it.type==PIT_VLINE){
+            HPEN p=CreatePen(PS_SOLID,1,pcCR(it.borderColor)); HGDIOBJ o=SelectObject(dc,p);
+            MoveToEx(dc,x0,y0,0); LineTo(dc,x0,y1); SelectObject(dc,o); DeleteObject(p);
+        } else if(it.type==PIT_RECT||it.type==PIT_FRAME||it.type==PIT_LOGO||
+                  it.type==PIT_PHOTO||it.type==PIT_QR||it.type==PIT_IMAGE){
+            bool isImgItem=(it.type==PIT_LOGO||it.type==PIT_PHOTO||it.type==PIT_IMAGE);
+            // fill rect/frame background when not transparent (WYSIWYG)
+            if((it.type==PIT_RECT||it.type==PIT_FRAME) && !it.fillTransparent){
+                RECT fr={x0,y0,x1,y1}; HBRUSH fb=CreateSolidBrush(pcCR(it.fillColor));
+                FillRect(dc,&fr,fb); DeleteObject(fb);
+            }
+            // real image (uploaded logo / photo / image) → draw the picture
+            bool drawn=false;
+            if(isImgItem && !it.imgPath.empty()){
+                RECT rr={x0,y0,x1,y1}; drawn=gpDrawImageRectAny(dc,it.imgPath,rr);
+            }
+            if(!drawn){
+                HPEN p=CreatePen(PS_SOLID,1,pcCR(it.borderColor)); HGDIOBJ o=SelectObject(dc,p);
+                HGDIOBJ ob=SelectObject(dc,GetStockObject(NULL_BRUSH));
+                Rectangle(dc,x0,y0,x1,y1);
+                SelectObject(dc,ob); SelectObject(dc,o); DeleteObject(p);
+                if(it.type==PIT_LOGO||it.type==PIT_QR||it.type==PIT_PHOTO||it.type==PIT_IMAGE){
+                    const wchar_t* ph2=(it.type==PIT_LOGO)?L"لوگو":(it.type==PIT_QR?L"QR":(it.type==PIT_IMAGE?L"تصویر":L"عکس"));
+                    RECT rr={x0,y0,x1,y1}; SetTextColor(dc,RGB(150,150,150));
+                    HFONT f=CreateFontW(-S(11),0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,0,0,
+                        CLEARTYPE_QUALITY,0,L"Vazirmatn");
+                    HGDIOBJ of=SelectObject(dc,f);
+                    DrawTextW(dc,ph2,-1,&rr,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
+                    SelectObject(dc,of); DeleteObject(f);
+                }
+            }
+        } else { // text: LABEL / FIELD / APPTNO — show sample/text
+            std::wstring s=it.text;
+            if(it.type==PIT_FIELD){ std::wstring v=it.field.empty()?L"":(L"["+it.field+L"]");
+                s=it.prefix+(it.text.empty()?v:it.text)+it.suffix; }
+            else if(it.type==PIT_APPTNO){ s=it.prefix+toFaDigits(std::to_wstring(it.startValue>0?it.startValue:1)); }
+            else s=it.prefix+it.text+it.suffix;
+            if(s.empty()) continue;
+            // WYSIWYG font size: pt → px.  sc is px-per-mm, and 1pt = 1/72 in =
+            // 25.4/72 mm, so px = pt * sc * (25.4/72).  (The old 3.78/2.83 factor
+            // was ~3.8× too large and made text overlap.)
+            int lf=-(int)(it.fontPt*sc*25.4/72.0 + 0.5);
+            if(lf>-2) lf=-2;
+            RECT rr={x0,y0,x1,y1};
+            HFONT f=CreateFontW(lf,0,0,0,it.bold?FW_BOLD:FW_NORMAL,it.italic?1:0,0,0,
+                DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,
+                it.fontName.empty()?L"Vazirmatn":it.fontName.c_str());
+            HGDIOBJ of=SelectObject(dc,f); SetTextColor(dc,pcCR(it.textColor));
+            UINT al=(it.align==1)?DT_CENTER:(it.align==2)?DT_LEFT:DT_RIGHT;
+            UINT dirf=(it.dir==1)?0:DT_RTLREADING;
+            if(it.dir==2) al=DT_CENTER;
+            DrawTextW(dc,s.c_str(),-1,&rr,al|DT_TOP|DT_WORDBREAK|dirf|DT_NOPREFIX);
+            SelectObject(dc,of); DeleteObject(f);
+        }
+    }
+    SelectClipRgn(dc,NULL); DeleteObject(clip);
+}
+// (re)load the resolved design for the selected section into preview
+static void pcLoadPreview(){
+    if(!s_pcs) return;
+    s_pcs->havePreview=false; s_pcs->havePending=false; s_pcs->enlarged=false;
+    s_pcs->zoom=1.0;
+    if(s_pcs->sel<0 || s_pcs->sel>=(int)s_pcs->sects.size()) return;
+    PrintDesign d;
+    if(SectionDesign_Resolve(s_pcs->sects[s_pcs->sel].id, d)){
+        s_pcs->preview=d; s_pcs->havePreview=true;
+    }
+}
+static void pcLayout(HWND h){
+    if(!s_pcs) return; RECT c=pcCard(h);
+    int listW=S(260), listX=c.right-S(20)-listW;
+    int listTop=c.top+S(64), listH=c.bottom-S(64)-S(60)-listTop;
+    MoveWindow(s_pcs->list, listX, listTop, listW, listH, TRUE);
+    int by=c.bottom-S(52), bw=S(108), gap=S(7), x=c.right-S(20);
+    int zw=S(40);
+    MoveWindow(s_pcs->bClose,   x-bw, by, bw, S(38), TRUE); x-=bw+gap;
+    MoveWindow(s_pcs->bApply,   x-bw, by, bw, S(38), TRUE); x-=bw+gap;
+    MoveWindow(s_pcs->bUpload,  x-bw, by, bw, S(38), TRUE); x-=bw+gap;
+    MoveWindow(s_pcs->bDownload,x-bw, by, bw, S(38), TRUE); x-=bw+gap;
+    MoveWindow(s_pcs->bDesign,  x-bw, by, bw, S(38), TRUE); x-=bw+gap;
+    MoveWindow(s_pcs->bEnlarge, x-bw, by, bw, S(38), TRUE); x-=bw+gap;
+    MoveWindow(s_pcs->bZoomIn,  x-zw, by, zw, S(38), TRUE); x-=zw+gap;
+    MoveWindow(s_pcs->bZoomOut, x-zw, by, zw, S(38), TRUE);
+    for(HWND w:{s_pcs->list,s_pcs->bClose,s_pcs->bApply,s_pcs->bUpload,
+                s_pcs->bDownload,s_pcs->bDesign,s_pcs->bEnlarge,
+                s_pcs->bZoomIn,s_pcs->bZoomOut}) ShowWindow(w,SW_SHOW);
+}
+static std::wstring pcDesignsDir(){
+    std::wstring d=dataDir()+L"\\exported_designs";
+    CreateDirectoryW(d.c_str(),NULL); return d;
+}
+static void pcDownload(HWND h){
+    if(!s_pcs||!s_pcs->havePreview){
+        MessageBoxW(h,L"ابتدا یک بخش را انتخاب کنید.",L"دانلود طرح",MB_OK|MB_ICONINFORMATION); return; }
+    const PrintDesign& d = s_pcs->havePending? s_pcs->pending : s_pcs->preview;
+    std::wstring suggest = (s_pcs->sel>=0? s_pcs->sects[s_pcs->sel].name_fa : L"design")+L".aztpl";
+    wchar_t fn[MAX_PATH]={0}; wcsncpy(fn,suggest.c_str(),MAX_PATH-1);
+    OPENFILENAMEW ofn={sizeof(ofn)}; ofn.hwndOwner=h;
+    ofn.lpstrFilter=L"طرح چاپ آزادی‌طب\0*.aztpl\0همه\0*.*\0";
+    ofn.lpstrFile=fn; ofn.nMaxFile=MAX_PATH; ofn.lpstrDefExt=L"aztpl";
+    ofn.Flags=OFN_OVERWRITEPROMPT|OFN_PATHMUSTEXIST;
+    if(!GetSaveFileNameW(&ofn)) return;
+    std::string json=Design_ToJson(d);
+    // write UTF-8 bytes
+    HANDLE hf=CreateFileW(fn,GENERIC_WRITE,0,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
+    if(hf==INVALID_HANDLE_VALUE){ MessageBoxW(h,L"نوشتن فایل ناموفق بود.",L"دانلود طرح",MB_OK|MB_ICONERROR); return; }
+    DWORD wr=0; WriteFile(hf,json.data(),(DWORD)json.size(),&wr,NULL); CloseHandle(hf);
+    MessageBoxW(h,L"طرح فعلی با موفقیت ذخیره شد.",L"دانلود طرح",MB_OK|MB_ICONINFORMATION);
+}
+static void pcUpload(HWND h){
+    if(!s_pcs) return;
+    wchar_t fn[MAX_PATH]={0};
+    OPENFILENAMEW ofn={sizeof(ofn)}; ofn.hwndOwner=h;
+    ofn.lpstrFilter=L"طرح چاپ آزادی‌طب\0*.aztpl;*.json\0همه\0*.*\0";
+    ofn.lpstrFile=fn; ofn.nMaxFile=MAX_PATH;
+    ofn.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST;
+    if(!GetOpenFileNameW(&ofn)) return;
+    // read bytes
+    HANDLE hf=CreateFileW(fn,GENERIC_READ,FILE_SHARE_READ,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);
+    if(hf==INVALID_HANDLE_VALUE){ MessageBoxW(h,L"خواندن فایل ناموفق بود.",L"بارگذاری طرح",MB_OK|MB_ICONERROR); return; }
+    DWORD sz=GetFileSize(hf,NULL); std::string buf; buf.resize(sz);
+    DWORD rd=0; ReadFile(hf,&buf[0],sz,&rd,NULL); CloseHandle(hf); buf.resize(rd);
+    // strip a UTF-8 BOM if present
+    if(buf.size()>=3 && (unsigned char)buf[0]==0xEF && (unsigned char)buf[1]==0xBB && (unsigned char)buf[2]==0xBF)
+        buf.erase(0,3);
+    PrintDesign d; std::wstring err; bool ok=false;
+    // v1.21.1: accept BOTH file shapes —
+    //   (a) native AZTEMPLATE/1 (written by «دانلود طرح» here), and
+    //   (b) the browser designer's JS-shaped JSON (written by «دانلود» in the
+    //       web designer). Try native first, then fall back to the web parser.
+    if(buf.find("AZTEMPLATE/1")!=std::string::npos){
+        ok=Design_FromJson(buf,d,err);
+    } else {
+        ok=Design_FromWebJson(buf,d);
+        if(!ok) err=L"ساختار فایل طرح شناسایی نشد (نه AZTEMPLATE/1 و نه طرح طراح وب).";
+    }
+    if(ok && d.items.empty()){ ok=false; err=L"فایل طرح هیچ آیتمی ندارد."; }
+    if(!ok){
+        MessageBoxW(h,(L"فایل طرح نامعتبر است.\n"+err).c_str(),L"بارگذاری طرح",MB_OK|MB_ICONERROR); return; }
+    // make sure paper dimensions are resolved for the preview
+    if(d.paperW<=0||d.paperH<=0){ double pw,ph; if(Paper_Dims(d.paper,pw,ph)){ d.paperW=pw; d.paperH=ph;
+        if(d.orientation==1) std::swap(d.paperW,d.paperH); } else { d.paperW=148; d.paperH=210; } }
+    s_pcs->pending=d; s_pcs->havePending=true; s_pcs->preview=d; s_pcs->havePreview=true;
+    s_pcs->enlarged=false;
+    MessageBoxW(h,L"طرح بارگذاری شد. برای اعمال روی بخش، «اعمال» را بزنید.",L"بارگذاری طرح",MB_OK|MB_ICONINFORMATION);
+    InvalidateRect(h,NULL,FALSE);
+}
+static void pcApply(HWND h){
+    if(!s_pcs||s_pcs->sel<0||s_pcs->sel>=(int)s_pcs->sects.size()){
+        MessageBoxW(h,L"ابتدا یک بخش را انتخاب کنید.",L"اعمال طرح",MB_OK|MB_ICONINFORMATION); return; }
+    if(!s_pcs->havePending){
+        MessageBoxW(h,L"ابتدا یک طرح بارگذاری کنید.",L"اعمال طرح",MB_OK|MB_ICONINFORMATION); return; }
+    PrintDesign d=s_pcs->pending;
+    d.id=0;   // force a NEW design row (never overwrite a built-in/existing one)
+    if(d.name.empty()) d.name=s_pcs->sects[s_pcs->sel].name_fa+L" — وارداتی";
+    int newId=Designs_Insert(d);
+    if(newId<=0){ MessageBoxW(h,L"ثبت طرح ناموفق بود.",L"اعمال طرح",MB_OK|MB_ICONERROR); return; }
+    if(!SectionDesign_Set(s_pcs->sects[s_pcs->sel].id,newId)){
+        MessageBoxW(h,L"اتصال طرح به بخش ناموفق بود.",L"اعمال طرح",MB_OK|MB_ICONERROR); return; }
+    s_pcs->havePending=false;
+    pcLoadPreview();   // re-resolve to confirm
+    MessageBoxW(h,L"طرح روی بخش انتخاب‌شده اعمال شد. از این پس چاپ این بخش با طرح جدید انجام می‌شود.",
+        L"اعمال طرح",MB_OK|MB_ICONINFORMATION);
+    InvalidateRect(h,NULL,FALSE);
+}
+static LRESULT CALLBACK pcProc(HWND h, UINT m, WPARAM w, LPARAM l){
+    switch(m){
+    case WM_CREATE:{
+        s_pcs=new PrintCfgState();
+        s_pcs->list=CreateWindowExW(WS_EX_CLIENTEDGE,L"LISTBOX",L"",
+            WS_CHILD|WS_TABSTOP|WS_VSCROLL|LBS_NOTIFY,0,0,10,10,h,(HMENU)PC_LIST,g_hInst,0);
+        SendMessageW(s_pcs->list,WM_SETFONT,(WPARAM)g_fUI,TRUE);
+        Sections_All(s_pcs->sects);
+        // keep only active sections
+        { std::vector<Section> act; for(auto&s:s_pcs->sects) if(s.is_active) act.push_back(s);
+          s_pcs->sects.swap(act); }
+        for(auto&s:s_pcs->sects)
+            SendMessageW(s_pcs->list,LB_ADDSTRING,0,(LPARAM)s.name_fa.c_str());
+        s_pcs->bZoomOut =createFlatButton(h,PC_B_ZOOMOUT, L"−",         ICO_NONE,   BS_OUTLINE,0,0,10,10);
+        s_pcs->bZoomIn  =createFlatButton(h,PC_B_ZOOMIN,  L"+",         ICO_NONE,   BS_OUTLINE,0,0,10,10);
+        s_pcs->bEnlarge =createFlatButton(h,PC_B_ENLARGE, L"تمام‌صفحه", ICO_REFRESH,BS_OUTLINE,0,0,10,10);
+        s_pcs->bDesign  =createFlatButton(h,PC_B_DESIGN,  L"طراحی",     ICO_GEAR,   BS_OUTLINE,0,0,10,10);
+        s_pcs->bDownload=createFlatButton(h,PC_B_DOWNLOAD,L"دانلود طرح",ICO_SAVE,   BS_OUTLINE,0,0,10,10);
+        s_pcs->bUpload  =createFlatButton(h,PC_B_UPLOAD,  L"بارگذاری",  ICO_ID,     BS_OUTLINE,0,0,10,10);
+        s_pcs->bApply   =createFlatButton(h,PC_B_APPLY,   L"اعمال",     ICO_PLUS,   BS_PRIMARY,0,0,10,10);
+        s_pcs->bClose   =createFlatButton(h,PC_B_CLOSE,   L"بستن",      ICO_X,      BS_OUTLINE,0,0,10,10);
+        if(!s_pcs->sects.empty()){ SendMessageW(s_pcs->list,LB_SETCURSEL,0,0);
+            s_pcs->sel=0; pcLoadPreview(); }
+        pcLayout(h);
+        return 0; }
+    case WM_SIZE: pcLayout(h); return 0;
+    case WM_NCDESTROY: if(s_pcs){ delete s_pcs; s_pcs=NULL; } s_pc=NULL;
+        if(g_hManage) InvalidateRect(g_hManage,NULL,TRUE); return 0;
+    case WM_ERASEBKGND: return 1;
+    case WM_CTLCOLORLISTBOX:{ HDC dc=(HDC)w;
+        SetTextColor(dc,g_theme.inputText); SetBkColor(dc,g_theme.inputBg);
+        return (LRESULT)g_brInput; }
+    case WM_COMMAND:{ int id=LOWORD(w), code=HIWORD(w);
+        if(id==PC_LIST && code==LBN_SELCHANGE){
+            s_pcs->sel=(int)SendMessageW(s_pcs->list,LB_GETCURSEL,0,0);
+            pcLoadPreview(); InvalidateRect(h,NULL,FALSE);
+        } else if(id==PC_B_ENLARGE){ s_pcs->enlarged=!s_pcs->enlarged;
+            pcLayout(h); InvalidateRect(h,NULL,FALSE);
+        } else if(id==PC_B_ZOOMIN){ s_pcs->zoom*=1.25; if(s_pcs->zoom>4.0)s_pcs->zoom=4.0;
+            InvalidateRect(h,NULL,FALSE);
+        } else if(id==PC_B_ZOOMOUT){ s_pcs->zoom/=1.25; if(s_pcs->zoom<0.4)s_pcs->zoom=0.4;
+            InvalidateRect(h,NULL,FALSE);
+        } else if(id==PC_B_DOWNLOAD){ pcDownload(h);
+        } else if(id==PC_B_UPLOAD){ pcUpload(h);
+        } else if(id==PC_B_APPLY){ pcApply(h);
+        } else if(id==PC_B_DESIGN){
+            // open the full visual designer for this section, then refresh
+            if(s_pcs->sel>=0 && s_pcs->sel<(int)s_pcs->sects.size()){
+                HWND owner=g_hFrame; pcClose();
+                PrintDesigner_Open(owner);
+                return 0;
+            }
+        } else if(id==PC_B_CLOSE){ pcClose(); }
+        return 0; }
+    case WM_KEYDOWN: if(w==VK_ESCAPE){ pcClose(); return 0; } break;
+    case WM_PAINT:{ PAINTSTRUCT ps; HDC dc0=BeginPaint(h,&ps);
+        RECT rc; GetClientRect(h,&rc);
+        HDC dc=CreateCompatibleDC(dc0);
+        HBITMAP bmp=CreateCompatibleBitmap(dc0,rc.right,rc.bottom);
+        HGDIOBJ obm=SelectObject(dc,bmp);
+        { HBRUSH sb=CreateSolidBrush(g_dark?RGB(6,9,14):RGB(28,36,48));
+          FillRect(dc,&rc,sb); DeleteObject(sb); }
+        gpFillAlpha(dc,rc,0,g_dark?RGB(0,0,0):RGB(20,28,40),120);
+        RECT c=pcCard(h);
+        gpShadow(dc,c,S(20),S(22),80);
+        gpGradRoundRectBg(dc,c,S(18),g_theme.surfaceTop,g_theme.surface,g_theme.border,
+            g_dark?RGB(6,9,14):RGB(28,36,48));
+        SetBkMode(dc,TRANSPARENT);
+        SelectObject(dc,g_fTitle); SetTextColor(dc,g_theme.accent);
+        RECT tr={c.left+S(28),c.top+S(16),c.right-S(28),c.top+S(46)};
+        DrawTextW(dc,L"تنظیمات چاپ — انتخاب بخش و طرح",-1,&tr,
+            DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+        // preview pane background
+        RECT pr=pcPreviewRect(h);
+        gpRoundRectBg(dc,pr,S(12),g_theme.bg,g_theme.border,g_theme.surface);
+        if(s_pcs && s_pcs->havePreview){
+            RECT inner={pr.left+S(10),pr.top+S(10),pr.right-S(10),pr.bottom-S(10)};
+            pcPaintDesign(dc,inner,s_pcs->preview,s_pcs->zoom);
+            // zoom % badge
+            SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.accent);
+            wchar_t zb[32]; swprintf(zb,32,L"بزرگ‌نمایی: %d%%",(int)(s_pcs->zoom*100));
+            RECT zr={pr.left+S(12),pr.top+S(6),pr.left+S(170),pr.top+S(26)};
+            DrawTextW(dc,toFaDigits(zb).c_str(),-1,&zr,DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+        } else {
+            SelectObject(dc,g_fUI); SetTextColor(dc,g_theme.textDim);
+            DrawTextW(dc,L"یک بخش را انتخاب کنید تا پیش‌نمایش طرح آن نمایش داده شود.",-1,&pr,
+                DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+        }
+        // list caption
+        if(!(s_pcs&&s_pcs->enlarged)){
+            SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
+            int listW=S(260), listX=c.right-S(20)-listW;
+            RECT lc={listX,c.top+S(44),listX+listW,c.top+S(62)};
+            DrawTextW(dc,L"بخش‌های تعریف‌شده",-1,&lc,
+                DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+            if(s_pcs&&s_pcs->havePending){
+                SetTextColor(dc,g_theme.warn);
+                RECT pdR={pr.left,pr.bottom-S(2),pr.right,pr.bottom+S(18)};
+                (void)pdR;
+            }
+        }
+        BitBlt(dc0,0,0,rc.right,rc.bottom,dc,0,0,SRCCOPY);
+        SelectObject(dc,obm); DeleteObject(bmp); DeleteDC(dc);
+        EndPaint(h,&ps); return 0; }
+    }
+    return DefWindowProcW(h,m,w,l);
+}
+static void openPrintCfg(HWND owner){
+    (void)owner;
+    if(s_pc&&IsWindow(s_pc)) pcClose();
+    static bool reg=false;
+    if(!reg){ WNDCLASSW wc={0}; wc.lpfnWndProc=pcProc; wc.hInstance=g_hInst;
+        wc.hCursor=LoadCursor(NULL,IDC_ARROW); wc.lpszClassName=MGPCFG_CLASS;
+        RegisterClassW(&wc); reg=true; }
+    RECT rc; GetClientRect(g_hFrame,&rc);
+    POINT org={0,0}; ClientToScreen(g_hFrame,&org);
+    s_pc=CreateWindowExW(WS_EX_TOPMOST,MGPCFG_CLASS,L"",WS_POPUP|WS_VISIBLE,
+        org.x,org.y,rc.right,rc.bottom,g_hFrame,NULL,g_hInst,NULL);
+    BringWindowToTop(s_pc); SetFocus(s_pc);
+}
+
+// ============================================================================
 //  DASHBOARD shell — left nav rail + content pages
 // ============================================================================
 static int  mgNavW(){ return S(220); }     // sidebar width
 static int  mgHeadH(){ return S(64); }      // content header height
 static const wchar_t* MG_NAV_LABELS[PG_COUNT] = {
     L"داشبورد", L"بیماران", L"بخش‌ها", L"کارمندان", L"پیام به کارمندان",
-    L"درخواست‌ها", L"پیام‌های ذخیره‌شده", L"پشتیبان‌گیری"
+    L"درخواست‌ها", L"پیام‌های ذخیره‌شده", L"پشتیبان‌گیری", L"تنظیمات چاپ"
 };
 static int MG_NAV_ICONS[PG_COUNT] = {
-    ICO_TAB, ICO_ID, ICO_SHIELD, ICO_USER, ICO_BELL, ICO_GEAR, ICO_SAVE, ICO_REFRESH
+    ICO_TAB, ICO_ID, ICO_SHIELD, ICO_USER, ICO_BELL, ICO_GEAR, ICO_SAVE, ICO_REFRESH, ICO_GEAR
 };
 //  content area to the LEFT of the RTL nav rail (rail is on the RIGHT)
 static RECT mgContentRect(HWND h){
@@ -1725,18 +2373,22 @@ static void mgLayout(HWND h){
         s_mg->bSecNew,s_mg->bSecBack,s_mg->bAbc,s_mg->bNew,s_mg->bCreated,
         s_mg->bAddEmp,s_mg->cDept,s_mg->bMsg,s_mg->bReqs,s_mg->bProfReqs,
         s_mg->eNote,s_mg->bNoteAttach,s_mg->bNoteSend,
-        s_mg->ptSearch,s_mg->ptList};
+        s_mg->ptSearch,s_mg->ptList,s_mg->ptAdd};
     for(HWND w:all) if(w) ShowWindow(w,SW_HIDE);
 
     if(s_mg->page==PG_PATIENTS){
-        // search box (full width, right-aligned RTL) then the list fills the rest
-        int y=top;
-        MoveWindow(s_mg->ptSearch, a.left+S(12), y, (a.right-a.left)-S(24), fh, TRUE);
+        // «افزودن بیمار» button on the LEFT, search box fills the rest (RTL), then
+        // the list fills the remaining height below.
+        int y=top, addW=S(150);
+        MoveWindow(s_mg->ptAdd, a.left+S(12), y, addW, fh, TRUE);
+        int searchL=a.left+S(12)+addW+S(10);
+        MoveWindow(s_mg->ptSearch, searchL, y, rEdge-searchL, fh, TRUE);
         int ly=y+fh+S(10);
         MoveWindow(s_mg->ptList, a.left+S(12), ly,
                    (a.right-a.left)-S(24), a.bottom-ly-S(8), TRUE);
         ShowWindow(s_mg->ptSearch,SW_SHOW);
         ShowWindow(s_mg->ptList,SW_SHOW);
+        ShowWindow(s_mg->ptAdd,SW_SHOW);
     } else if(s_mg->page==PG_SECTS){
         if(s_mg->secAddMode){
             // «ایجاد بخش» add form: name • manager • id • auto-checkbox • add
@@ -1839,6 +2491,7 @@ static const wchar_t* mgCardTitle(int page){
         case PG_REQS:  return L"درخواست‌های تغییر";
         case PG_SAVED: return L"پیام‌های ذخیره‌شده";
         case PG_BACKUP:return L"پشتیبان‌گیری و بازیابی";
+        case PG_PRINTCFG: return L"تنظیمات چاپ بخش‌ها";
     }
     return L"";
 }
@@ -2057,12 +2710,56 @@ static void mgPaintEmps(HDC dc, HWND h){
     }
 }
 
+// v1.22.0: row rect for the employee list shown on the «پیام به کارمندان» page.
+static RECT mgMsgEmpRowRect(HWND h, int idx){
+    RECT a=mgContentRect(h);
+    // compose button sits at top+30..top+74 (see mgLayout PG_MSG); list starts below.
+    int y=a.top+mgHeadH()+S(132)+idx*(mgEmpRowH()+S(8));
+    RECT r={a.left+S(12),y,a.right-S(12),y+mgEmpRowH()}; return r;
+}
 static void mgPaintMsg(HDC dc, HWND h){
     RECT a=mgContentRect(h);
+    // hint above the compose button
     SetTextColor(dc,g_theme.textDim); SelectObject(dc,g_fUI);
-    RECT tr={a.left+S(24),a.top+mgHeadH()+S(96),a.right-S(24),a.top+mgHeadH()+S(140)};
+    RECT tr={a.left+S(24),a.top+mgHeadH()+S(86),a.right-S(24),a.top+mgHeadH()+S(112)};
     DrawTextW(dc,L"برای ارسال پیام، رسانه و هدف‌گذاری، دکمهٔ «نوشتن پیام» را بزنید.",-1,&tr,
         DT_CENTER|DT_WORDBREAK|DT_RTLREADING|DT_NOPREFIX);
+
+    // ---- employee list (so management can see who will receive the message) --
+    int hy=a.top+mgHeadH()+S(118);
+    gpLine(dc,a.left+S(12),hy,a.right-S(12),hy,g_theme.border,1);
+    SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.accent);
+    RECT hr={a.left+S(12),hy+S(6),a.right-S(12),hy+S(28)};
+    std::wstring hdr=L"کارمندان ("+toFaDigits(std::to_wstring((int)s_mg->emps.size()))+L" نفر)";
+    DrawTextW(dc,hdr.c_str(),-1,&hr,DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+
+    if(s_mg->emps.empty()){
+        SetTextColor(dc,g_theme.textDim); SelectObject(dc,g_fUI);
+        RECT er={a.left,hy+S(60),a.right,hy+S(100)};
+        DrawTextW(dc,L"کارمندی برای نمایش وجود ندارد.",-1,&er,
+            DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+        return;
+    }
+    for(int i=0;i<(int)s_mg->emps.size();i++){
+        RECT r=mgMsgEmpRowRect(h,i);
+        if(r.top>a.bottom) break;
+        gpRoundRectBg(dc,r,S(12), g_theme.surface, g_theme.border, g_theme.bg);
+        const EmpRow& e=s_mg->emps[i];
+        // online dot
+        { RECT dot={r.right-S(34),r.top+(r.bottom-r.top)/2-S(6),r.right-S(22),r.top+(r.bottom-r.top)/2+S(6)};
+          gpRoundRectBg(dc,dot,S(6), e.online?g_theme.success:g_theme.textDim,
+                        e.online?g_theme.success:g_theme.textDim, g_theme.surface); }
+        SetTextColor(dc,g_theme.text); SelectObject(dc,g_fUIB);
+        RECT nr={r.left+S(14),r.top+S(8),r.right-S(48),r.top+S(32)};
+        DrawTextW(dc,e.user.fullname.c_str(),-1,&nr,DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_WORD_ELLIPSIS|DT_NOPREFIX);
+        SetTextColor(dc,g_theme.textDim); SelectObject(dc,g_fSmall);
+        std::wstring sub=e.deptName;
+        if(!e.prof.empId.empty()) sub+=L"  •  کد: "+toFaDigits(e.prof.empId);
+        if(!e.prof.position.empty()) sub+=L"  •  "+e.prof.position;
+        sub+=e.online? L"  •  آنلاین" : L"  •  آفلاین";
+        RECT sr={r.left+S(14),r.top+S(32),r.right-S(48),r.bottom-S(8)};
+        DrawTextW(dc,sub.c_str(),-1,&sr,DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_WORD_ELLIPSIS|DT_NOPREFIX);
+    }
 }
 
 static void mgPaintReqs(HDC dc, HWND h){
@@ -2330,9 +3027,13 @@ static void mgFillDeptCombo(){
 
 static void mgGoPage(HWND h, int page){
     if(!s_mg) return;
+    // §1.19.0: «تنظیمات چاپ» is a modal, not a flat page — open it and keep the
+    // current page underneath (don't blank the content area).
+    if(page==PG_PRINTCFG){ openPrintCfg(h); return; }
     s_mg->page=page; s_mg->secAddMode=false; s_mg->msg.clear();
     if(page==PG_SECTS){ mgLoadCats(); mgUpdateAutoIdPreview(); }
     else if(page==PG_EMPS){ mgLoadEmps(); mgFillDeptCombo(); }
+    else if(page==PG_MSG){ mgLoadEmps(); }   // v1.22.0: show employee list
     else if(page==PG_PATIENTS){ mgPatientsLoadAsync(h); }
     mgLayout(h);
     InvalidateRect(h,NULL,TRUE);
@@ -2383,6 +3084,7 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         s_mg->ptSearch=CreateWindowExW(0,L"EDIT",L"",
             WS_CHILD|WS_TABSTOP|ES_AUTOHSCROLL,0,0,10,10,h,(HMENU)MG_PT_SEARCH,g_hInst,0);
         SendMessageW(s_mg->ptSearch,WM_SETFONT,(WPARAM)g_fUI,TRUE);
+        s_mg->ptAdd=createFlatButton(h,MG_PT_ADD,L"افزودن بیمار",ICO_PLUS,BS_PRIMARY,0,0,10,10);
         s_mg->ptList=CreateWindowExW(WS_EX_CLIENTEDGE,WC_LISTVIEWW,L"",
             WS_CHILD|WS_TABSTOP|LVS_OWNERDATA|LVS_REPORT|LVS_SHOWSELALWAYS|LVS_SINGLESEL,
             0,0,10,10,h,(HMENU)MG_PT_LIST,g_hInst,0);
@@ -2500,6 +3202,7 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         case MG_FILTER_NEW: s_mg->empSort=1; mgRefreshSortBtns(); mgLoadEmps(); InvalidateRect(h,NULL,FALSE); break;
         case MG_FILTER_CREATED: s_mg->empSort=2; mgRefreshSortBtns(); mgLoadEmps(); InvalidateRect(h,NULL,FALSE); break;
         case MG_ADD_EMP: openNewEmployee(h); break;
+        case MG_PT_ADD: openNewPatient(h); break;   // §1.19.0 add-patient modal
         case MG_MSG:  openMsgCompose(h); break;
         case MG_REQS: openSetReqs(h); break;
         case MG_PROFREQS: openProfReqs(h); break;
@@ -2617,4 +3320,24 @@ HWND createManageScreen(HWND frame){
         rc.left,rc.top,rc.right-rc.left,rc.bottom-rc.top,frame,NULL,g_hInst,NULL);
     if(s_mg) mgLayout(h);
     return h;
+}
+
+// §1.19.1 — public «تنظیمات چاپ» entry, reachable from the management Settings
+// menu (user_settings.cpp). Opens the print-settings panel as a MODAL surface
+// (its own message pump) so it works whether or not the management screen is
+// the active surface. Independent of the dashboard's s_mg state.
+void PrintCfg_Open(HWND hMain){
+    HWND owner = hMain ? hMain : g_hFrame;
+    openPrintCfg(owner);
+    if(!s_pc || !IsWindow(s_pc)) return;
+    if(owner && IsWindow(owner)) EnableWindow(owner,FALSE);
+    MSG msg;
+    while(s_pc && IsWindow(s_pc) && GetMessageW(&msg,NULL,0,0)){
+        if(msg.message==WM_QUIT){ PostQuitMessage((int)msg.wParam); break; }
+        if(!(s_pc && IsWindow(s_pc))) break;
+        if(IsDialogMessageW(s_pc,&msg)){ if(!(s_pc && IsWindow(s_pc))) break; continue; }
+        TranslateMessage(&msg); DispatchMessageW(&msg);
+        if(!(s_pc && IsWindow(s_pc))) break;
+    }
+    if(owner && IsWindow(owner)){ EnableWindow(owner,TRUE); SetForegroundWindow(owner); }
 }

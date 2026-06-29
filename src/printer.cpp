@@ -1125,3 +1125,431 @@ bool printDesignedReceipt(const ReceptionRecord& r, int sectionIdx, HWND owner){
             +L" ×"+std::to_wstring(copies));
     return true;
 }
+
+// ============================================================================
+//  §1.19.0 — RENDER A NEW (print_designer JSON) DESIGN ONTO A PRINTER DC
+//  The HTML/CSS/JS designer + native designer both persist a `PrintDesign`
+//  (print_designer.h) bound to a section id. This renderer resolves that design
+//  for the given section and prints it on the connected printer. The first time
+//  (per session) it asks A4/A5 via the standard print dialog so the operator can
+//  pick paper + printer; afterwards it reuses the saved default printer.
+// ============================================================================
+// ----------------------------------------------------------------------------
+//  §1.21.0 — table model. A PIT_TABLE item stores its grid as JSON inside
+//  `it.text`: {"cols":n,"rows":n,"header":bool,"widths":[..],"cells":[[..]]}.
+//  We parse it here with a tiny tolerant reader so print + preview render the
+//  EXACT same grid the designer shows (true WYSIWYG). Cells may contain {field}
+//  tokens which are substituted with live data at print time.
+// ----------------------------------------------------------------------------
+struct PdTable {
+    int cols=0, rows=0; bool header=false;
+    std::vector<double> widths;
+    std::vector<std::vector<std::wstring>> cells;
+};
+static std::wstring pdU8toW(const std::string& s){
+    int n=MultiByteToWideChar(CP_UTF8,0,s.c_str(),(int)s.size(),NULL,0);
+    std::wstring w(n,0); if(n) MultiByteToWideChar(CP_UTF8,0,s.c_str(),(int)s.size(),&w[0],n);
+    return w;
+}
+// PrintItem colours are stored as 0x00RRGGBB (web/CSS order). GDI COLORREF is
+// 0x00BBGGRR, so we must swap R<->B to print the *exact* colour designed.
+static inline COLORREF pdCR(unsigned int rgb){
+    return RGB((rgb>>16)&0xFF, (rgb>>8)&0xFF, rgb&0xFF);
+}
+static bool pdParseTable(const std::wstring& jsonW, PdTable& t){
+    // convert to utf8 for byte parsing, but keep strings as wstring
+    int n=WideCharToMultiByte(CP_UTF8,0,jsonW.c_str(),(int)jsonW.size(),NULL,0,NULL,NULL);
+    std::string s(n,0); if(n) WideCharToMultiByte(CP_UTF8,0,jsonW.c_str(),(int)jsonW.size(),&s[0],n,NULL,NULL);
+    size_t p=0; auto ws=[&]{ while(p<s.size()&&(s[p]==' '||s[p]=='\t'||s[p]=='\n'||s[p]=='\r'))++p; };
+    auto rdStr=[&](std::string& out)->bool{ ws(); if(p>=s.size()||s[p]!='"')return false; ++p;
+        while(p<s.size()&&s[p]!='"'){ char c=s[p++]; if(c=='\\'&&p<s.size()){ char e=s[p++];
+            switch(e){case 'n':out+='\n';break;case 'r':out+='\r';break;case 't':out+='\t';break;
+                case '"':out+='"';break;case '\\':out+='\\';break;case '/':out+='/';break;
+                case 'u':{ if(p+4<=s.size()){ unsigned v=(unsigned)strtoul(s.substr(p,4).c_str(),NULL,16); p+=4;
+                    if(v<0x80)out+=(char)v; else if(v<0x800){out+=(char)(0xC0|(v>>6));out+=(char)(0x80|(v&0x3F));}
+                    else{out+=(char)(0xE0|(v>>12));out+=(char)(0x80|((v>>6)&0x3F));out+=(char)(0x80|(v&0x3F));} } break; }
+                default:out+=e; } } else out+=c; }
+        if(p<s.size()&&s[p]=='"')++p; return true; };
+    auto rdNum=[&]()->double{ ws(); size_t st=p; while(p<s.size()&&(isdigit((unsigned char)s[p])||s[p]=='-'||s[p]=='+'||s[p]=='.'||s[p]=='e'||s[p]=='E'))++p; return atof(s.substr(st,p-st).c_str()); };
+    ws(); if(p>=s.size()||s[p]!='{') return false; ++p;
+    while(true){ ws(); if(p<s.size()&&s[p]=='}'){++p;break;} if(p>=s.size())break;
+        std::string key; if(!rdStr(key))break; ws(); if(p<s.size()&&s[p]==':')++p;
+        if(key=="cols") t.cols=(int)rdNum();
+        else if(key=="rows") t.rows=(int)rdNum();
+        else if(key=="header"){ ws(); if(s.compare(p,4,"true")==0){t.header=true;p+=4;} else if(s.compare(p,5,"false")==0){t.header=false;p+=5;} else rdNum(); }
+        else if(key=="widths"){ ws(); if(p<s.size()&&s[p]=='['){++p; while(true){ ws(); if(p<s.size()&&s[p]==']'){++p;break;} t.widths.push_back(rdNum()); ws(); if(p<s.size()&&s[p]==','){++p;continue;} if(p<s.size()&&s[p]==']'){++p;break;} break; } } }
+        else if(key=="cells"){ ws(); if(p<s.size()&&s[p]=='['){++p;
+            while(true){ ws(); if(p<s.size()&&s[p]==']'){++p;break;}
+                if(p<s.size()&&s[p]=='['){++p; std::vector<std::wstring> rowv;
+                    while(true){ ws(); if(p<s.size()&&s[p]==']'){++p;break;} std::string cv; if(rdStr(cv)) rowv.push_back(pdU8toW(cv)); else { rdNum(); rowv.push_back(L""); }
+                        ws(); if(p<s.size()&&s[p]==','){++p;continue;} if(p<s.size()&&s[p]==']'){++p;break;} break; }
+                    t.cells.push_back(rowv); }
+                ws(); if(p<s.size()&&s[p]==','){++p;continue;} if(p<s.size()&&s[p]==']'){++p;break;} break; } } }
+        else { // skip unknown value
+            ws(); if(p<s.size()&&s[p]=='"'){ std::string tmp; rdStr(tmp); }
+            else if(p<s.size()&&s[p]=='{'){ int d=0; do{ if(s[p]=='{')d++; else if(s[p]=='}')d--; ++p; }while(p<s.size()&&d>0); }
+            else if(p<s.size()&&s[p]=='['){ int d=0; do{ if(s[p]=='[')d++; else if(s[p]==']')d--; ++p; }while(p<s.size()&&d>0); }
+            else rdNum();
+        }
+        ws(); if(p<s.size()&&s[p]==','){++p;continue;} ws(); if(p<s.size()&&s[p]=='}'){++p;break;}
+        if(p>=s.size())break;
+    }
+    if(t.cols<=0||t.rows<=0||t.cells.empty()) return false;
+    if((int)t.widths.size()!=t.cols){ t.widths.assign(t.cols,1.0); }
+    return true;
+}
+// substitute {field} tokens inside an arbitrary string with live record data.
+static std::wstring pdSubstFields(const ReceptionRecord& r, const std::wstring& in,
+                                  std::wstring (*resolver)(const ReceptionRecord&, const std::wstring&)){
+    std::wstring out; size_t i=0;
+    while(i<in.size()){
+        if(in[i]==L'{'){ size_t e=in.find(L'}',i);
+            if(e!=std::wstring::npos){ std::wstring tok=in.substr(i,e-i+1);
+                std::wstring v=resolver(r,tok);
+                if(!v.empty() || tok.size()>2) { out+=v; i=e+1; continue; } } }
+        out+=in[i++];
+    }
+    return out;
+}
+
+static std::wstring pdFieldValue(const ReceptionRecord& r, const std::wstring& tok){
+    // The new designer's field keys mirror the legacy {token} vocabulary, plus
+    // a few extras. Reuse the classic resolver, then handle the new ones.
+    if(tok==L"{first}")    return r.firstName;
+    if(tok==L"{last}")     return r.lastName;
+    if(tok==L"{full}")     return r.firstName+L" "+r.lastName;
+    if(tok==L"{father}")   return r.fatherName;
+    if(tok==L"{nid}")      return toFaDigits(r.nationalId);
+    if(tok==L"{birth}")    return toFaDigits(r.birthDate);
+    if(tok==L"{gender}")   return r.gender;
+    if(tok==L"{mobile}")   return toFaDigits(r.mobile);
+    if(tok==L"{landline}") return toFaDigits(r.landline);
+    if(tok==L"{address}")  return r.address;
+    if(tok==L"{ptype}")    return r.patientType;
+    if(tok==L"{ins}")      return r.insurance;
+    if(tok==L"{supp}")     return r.suppInsurance;
+    if(tok==L"{insno}")    return L"";              // not captured yet
+    if(tok==L"{insexp}")   return L"";
+    if(tok==L"{queue}"){ wchar_t b[16]; swprintf(b,16,L"%d",r.queueNo); return toFaDigits(b); }
+    if(tok==L"{date}")     return toFaDigits(r.apptDate);
+    if(tok==L"{time}")     return toFaDigits(r.apptTime);
+    if(tok==L"{datetime}") return toFaDigits(r.apptDate+L" - "+r.apptTime);
+    if(tok==L"{shift}")    return r.shift;
+    if(tok==L"{dept}")     return r.dept;
+    if(tok==L"{doctor}")   return L"";              // doctor not captured yet
+    if(tok==L"{apptdate}") return toFaDigits(r.apptDate);
+    if(tok==L"{appttime}") return toFaDigits(r.apptTime);
+    if(tok==L"{appttype}") return r.patientType;
+    if(tok==L"{user}")     return r.userName;
+    if(tok==L"{clinic}")   return L"درمانگاه آزادی طب";
+    if(tok==L"{receiptNo}"){ wchar_t b[16]; swprintf(b,16,L"%d",r.queueNo); return toFaDigits(b); }
+    if(tok==L"{total}")    return toFaDigits(formatMoney(r.total))+L" ریال";
+    if(tok==L"{insshare}") return toFaDigits(formatMoney(r.mainShare))+L" ریال";
+    if(tok==L"{discount}") return toFaDigits(formatMoney(r.discount))+L" ریال";
+    if(tok==L"{paid}")     return toFaDigits(formatMoney(r.paid))+L" ریال";
+    if(tok==L"{service}")  return L"ویزیت";
+    if(tok==L"{issued}")   return L"چاپ توسط پذیرش: "+
+        (r.userName.empty()?g_session.user.fullname:r.userName);
+    // v1.22.0 — extra fields modelled on real Iranian clinic forms.
+    if(tok==L"{clinicaddr}")  return getSetting(L"clinic_address",L"");
+    if(tok==L"{clinicphone}") return toFaDigits(getSetting(L"clinic_phone",L""));
+    if(tok==L"{clinicmgr}")   return getSetting(L"clinic_manager",L"");
+    if(tok==L"{cliniclic}")   return toFaDigits(getSetting(L"clinic_license",L""));
+    if(tok==L"{age}"){
+        // derive age from birthDate (Jalali "YYYY/MM/DD") roughly.
+        std::wstring bd=r.birthDate; if(bd.size()>=4){
+            int by=_wtoi(bd.substr(0,4).c_str());
+            if(by>1200 && by<1500){ SYSTEMTIME st; GetLocalTime(&st);
+                int jy=st.wYear-621; int age=jy-by;
+                if(age>0&&age<150){ wchar_t b[16]; swprintf(b,16,L"%d",age); return toFaDigits(b)+L" سال"; } } }
+        return L"";
+    }
+    if(tok==L"{patientshare}") return toFaDigits(formatMoney(r.patientShare))+L" ریال";
+    if(tok==L"{finaltotal}")   return toFaDigits(formatMoney(r.finalTotal))+L" ریال";
+    if(tok==L"{visittype}")    return r.patientType;
+    if(tok==L"{insidx}")     { wchar_t b[16]; swprintf(b,16,L"%d",r.insIdx); return toFaDigits(b); }
+    if(tok==L"{shiftuser}")    return r.shift+L" — "+(r.userName.empty()?g_session.user.fullname:r.userName);
+    if(tok==L"{barcode}")      return toFaDigits(r.nationalId);   // barcode payload = NID
+    if(tok==L"{nationalcard}") return toFaDigits(r.nationalId);
+    if(tok==L"{regdate}")      return toFaDigits(r.apptDate);
+    if(tok==L"{regtime}")      return toFaDigits(r.apptTime);
+    if(tok==L"{insshareonly}") return toFaDigits(formatMoney(r.mainShare));
+    if(tok==L"{paidonly}")     return toFaDigits(formatMoney(r.paid));
+    if(tok==L"{totalonly}")    return toFaDigits(formatMoney(r.total));
+    return L"";
+}
+
+// Draw a PIT_TABLE grid inside `box` (device px). RTL: column 0 is the rightmost.
+//   pxPerMmX/Y : device pixels per millimetre (for border width scaling)
+//   live       : when non-NULL, substitutes {field} tokens with record data;
+//                otherwise (preview with no record) shows the raw cell text.
+static void pdDrawTable(HDC dc, const PrintItem& it, const RECT& box,
+                        double pxPerMmX, double pxPerMmY,
+                        double fontPxPerPt, const ReceptionRecord* live){
+    PdTable t; if(!pdParseTable(it.text,t)) return;
+    int X0=box.left, Y0=box.top, X1=box.right, Y1=box.bottom;
+    int W=X1-X0, H=Y1-Y0; if(W<=0||H<=0) return;
+
+    // column x-boundaries (RTL: col index 0 starts at the right edge)
+    double sumw=0; for(double w:t.widths) sumw+=w; if(sumw<=0) sumw=t.cols;
+    std::vector<int> cx; cx.reserve(t.cols+1);
+    cx.push_back(X1);
+    double acc=0;
+    for(int c=0;c<t.cols;++c){ acc+=t.widths[c]; cx.push_back(X1-(int)(W*(acc/sumw))); }
+    // row y-boundaries (top → bottom), equal height
+    std::vector<int> ry; ry.reserve(t.rows+1);
+    for(int rr=0;rr<=t.rows;++rr) ry.push_back(Y0+(int)((double)H*rr/t.rows));
+
+    // fill header row background
+    if(t.header && t.rows>0){
+        RECT hr={cx[t.cols], ry[0], cx[0], ry[1]};
+        HBRUSH hb=CreateSolidBrush(RGB(238,242,251));
+        FillRect(dc,&hr,hb); DeleteObject(hb);
+    }
+
+    // cell text
+    double fontPt = it.fontPt>0 ? it.fontPt : 9.0;
+    int lf=-(int)(fontPt*fontPxPerPt);
+    HFONT fNorm=CreateFontW(lf,0,0,0,FW_NORMAL,it.italic?1:0,0,0,DEFAULT_CHARSET,0,0,
+        CLEARTYPE_QUALITY,0,it.fontName.empty()?L"Vazirmatn":it.fontName.c_str());
+    HFONT fHead=CreateFontW(lf,0,0,0,FW_BOLD,0,0,0,DEFAULT_CHARSET,0,0,
+        CLEARTYPE_QUALITY,0,it.fontName.empty()?L"Vazirmatn":it.fontName.c_str());
+    int pad=(int)(1.2*pxPerMmX); if(pad<2)pad=2;
+    SetTextColor(dc,pdCR(it.textColor));
+    for(int rr=0;rr<t.rows;++rr){
+        bool isHead=(t.header && rr==0);
+        HGDIOBJ of=SelectObject(dc, isHead?fHead:fNorm);
+        for(int c=0;c<t.cols;++c){
+            std::wstring cell;
+            if(rr<(int)t.cells.size() && c<(int)t.cells[rr].size()) cell=t.cells[rr][c];
+            if(live) cell=pdSubstFields(*live,cell,pdFieldValue);
+            // RTL: visual column c occupies [cx[c+1] .. cx[c]]
+            RECT cr={cx[c+1]+pad, ry[rr]+pad/2, cx[c]-pad, ry[rr+1]-pad/2};
+            if(cr.right<=cr.left||cr.bottom<=cr.top) continue;
+            DrawTextW(dc,cell.c_str(),-1,&cr,
+                DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_END_ELLIPSIS|DT_NOPREFIX);
+        }
+        SelectObject(dc,of);
+    }
+    DeleteObject(fNorm); DeleteObject(fHead);
+
+    // grid lines
+    int bw=(int)(it.borderWidth*pxPerMmX); if(bw<1)bw=1;
+    HPEN pen=CreatePen(PS_SOLID,bw,pdCR(it.borderColor));
+    HGDIOBJ op=SelectObject(dc,pen);
+    for(int c=0;c<=t.cols;++c){ MoveToEx(dc,cx[c],ry[0],0); LineTo(dc,cx[c],ry[t.rows]); }
+    for(int rr=0;rr<=t.rows;++rr){ MoveToEx(dc,cx[t.cols],ry[rr],0); LineTo(dc,cx[0],ry[rr]); }
+    SelectObject(dc,op); DeleteObject(pen);
+}
+
+// Map a design paper name to a Windows DMPAPER_* code. Returns 0 for custom.
+static short pdPaperCode(const std::wstring& name){
+    if(name==L"A3")     return DMPAPER_A3;       // 8
+    if(name==L"A4")     return DMPAPER_A4;       // 9
+    if(name==L"A5")     return DMPAPER_A5;       // 11
+    if(name==L"A6")     return DMPAPER_A6;       // 70
+    if(name==L"B5")     return DMPAPER_B5;       // 13
+    if(name==L"Letter") return DMPAPER_LETTER;   // 1
+    if(name==L"Legal")  return DMPAPER_LEGAL;    // 5
+    return 0; // R80/R58/L90/L100/custom → set explicit dimensions instead
+}
+// Create a printer DC whose DEVMODE paper size & orientation match the design,
+// so an A5 design actually prints on A5 (not the printer's default A4). Falls
+// back to a plain DC if the printer doesn't expose its properties.
+static HDC pdCreatePrinterDC(const std::wstring& prn, const PrintDesign& d){
+    if(prn.empty()) return NULL;
+    HANDLE hp=NULL;
+    if(!OpenPrinterW((LPWSTR)prn.c_str(),&hp,NULL) || !hp)
+        return CreateDCW(L"WINSPOOL",prn.c_str(),NULL,NULL);
+    LONG need=DocumentPropertiesW(NULL,hp,(LPWSTR)prn.c_str(),NULL,NULL,0);
+    HDC dc=NULL;
+    if(need>0){
+        std::vector<BYTE> buf(need);
+        DEVMODEW* dm=(DEVMODEW*)buf.data();
+        if(DocumentPropertiesW(NULL,hp,(LPWSTR)prn.c_str(),dm,NULL,DM_OUT_BUFFER)==IDOK){
+            short code=pdPaperCode(d.paper);
+            // orientation
+            dm->dmFields |= DM_ORIENTATION;
+            dm->dmOrientation = (d.orientation==1)?DMORIENT_LANDSCAPE:DMORIENT_PORTRAIT;
+            if(code>0){
+                dm->dmFields |= DM_PAPERSIZE;
+                dm->dmPaperSize = code;
+                dm->dmFields &= ~(DM_PAPERWIDTH|DM_PAPERLENGTH);
+            } else {
+                // custom / receipt / small-laser: set explicit size in 0.1 mm.
+                double wmm=d.paperW, hmm=d.paperH;
+                if(d.orientation==1 && wmm<hmm) std::swap(wmm,hmm);
+                dm->dmFields |= (DM_PAPERSIZE|DM_PAPERWIDTH|DM_PAPERLENGTH);
+                dm->dmPaperSize   = DMPAPER_USER;       // 256
+                dm->dmPaperWidth  = (short)(wmm*10.0);   // tenths of a millimetre
+                dm->dmPaperLength = (short)(hmm*10.0);
+            }
+            // let the driver validate/merge our changes
+            DocumentPropertiesW(NULL,hp,(LPWSTR)prn.c_str(),dm,dm,DM_IN_BUFFER|DM_OUT_BUFFER);
+            dc=CreateDCW(L"WINSPOOL",prn.c_str(),NULL,dm);
+        }
+    }
+    ClosePrinter(hp);
+    if(!dc) dc=CreateDCW(L"WINSPOOL",prn.c_str(),NULL,NULL);
+    return dc;
+}
+
+bool printPrintDesign(const ReceptionRecord& r, int sectionId, HWND owner){
+    PrintDesign d;
+    if(!SectionDesign_Resolve(sectionId, d)) return false;   // no design → caller falls back
+    if(d.items.empty()) return false;
+    if(d.paperW<=0 || d.paperH<=0){
+        double pw,ph; if(Paper_Dims(d.paper,pw,ph)){ d.paperW=pw; d.paperH=ph;
+            if(d.orientation==1) std::swap(d.paperW,d.paperH); }
+        else { d.paperW=148; d.paperH=210; }
+    }
+
+    // Resolve a printer DC whose paper size matches the DESIGN (so an A5 design
+    // prints on A5, an 80mm receipt design on the receipt roll, etc.). First
+    // time (no saved printer) → standard dialog so the operator picks a printer.
+    std::wstring prn=currentPrinter();
+    HDC dc = pdCreatePrinterDC(prn, d);
+    if(!dc){
+        PRINTDLGW pd={0}; pd.lStructSize=sizeof(pd); pd.hwndOwner=owner;
+        pd.Flags=PD_RETURNDC|PD_NOPAGENUMS|PD_NOSELECTION|PD_USEDEVMODECOPIES;
+        if(!PrintDlgW(&pd)) return true;   // user cancelled → treat as handled
+        dc=pd.hDC;
+    }
+    if(!dc) return false;
+
+    int dpiX=GetDeviceCaps(dc,LOGPIXELSX), dpiY=GetDeviceCaps(dc,LOGPIXELSY);
+    int offX=GetDeviceCaps(dc,PHYSICALOFFSETX), offY=GetDeviceCaps(dc,PHYSICALOFFSETY);
+    double sx=dpiX/25.4, sy=dpiY/25.4;
+    auto mmX=[&](double mm){ return (int)(mm*sx)-offX; };
+    auto mmY=[&](double mm){ return (int)(mm*sy)-offY; };
+
+    DOCINFOW di={sizeof(di)};
+    std::wstring docName=std::wstring(APP_NAME_W)+L" — print";
+    di.lpszDocName=docName.c_str();
+    if(StartDocW(dc,&di)<=0){
+        // The stored/default printer rejected the job (common with virtual
+        // "app" printers e.g. some PDF/photo apps → "doesn't support print
+        // preview"). Fall back to the standard dialog so the operator picks a
+        // working printer, then re-resolve DPI/offsets for the new DC.
+        DeleteDC(dc); dc=NULL;
+        PRINTDLGW pd={0}; pd.lStructSize=sizeof(pd); pd.hwndOwner=owner;
+        pd.Flags=PD_RETURNDC|PD_NOPAGENUMS|PD_NOSELECTION|PD_USEDEVMODECOPIES;
+        if(!PrintDlgW(&pd)) return true;        // cancelled → handled
+        dc=pd.hDC; if(!dc) return false;
+        dpiX=GetDeviceCaps(dc,LOGPIXELSX); dpiY=GetDeviceCaps(dc,LOGPIXELSY);
+        offX=GetDeviceCaps(dc,PHYSICALOFFSETX); offY=GetDeviceCaps(dc,PHYSICALOFFSETY);
+        sx=dpiX/25.4; sy=dpiY/25.4;
+        if(StartDocW(dc,&di)<=0){
+            MessageBoxW(owner,L"چاپگر انتخاب‌شده از چاپ این سند پشتیبانی نمی‌کند.\n"
+                L"لطفاً یک چاپگر واقعی (نه «Microsoft Print to PDF» یا برنامهٔ عکس) انتخاب کنید.",
+                L"چاپ طرح",MB_OK|MB_ICONWARNING);
+            DeleteDC(dc); return false; }
+    }
+    StartPage(dc);
+    SetBkMode(dc,TRANSPARENT);
+
+    // paint items in z-order
+    std::vector<const PrintItem*> ord;
+    for(const auto& it:d.items) ord.push_back(&it);
+    // simple insertion sort by z (avoids pulling in <algorithm>; item counts are tiny)
+    for(size_t i=1;i<ord.size();++i){ const PrintItem* k=ord[i]; size_t j=i;
+        while(j>0 && ord[j-1]->z > k->z){ ord[j]=ord[j-1]; --j; } ord[j]=k; }
+
+    for(const PrintItem* pit : ord){
+        const PrintItem& it=*pit;
+        int x0=mmX(it.x), y0=mmY(it.y), x1=mmX(it.x+it.w), y1=mmY(it.y+it.h);
+        if(it.type==PIT_TABLE){
+            RECT rr={x0,y0,x1,y1};
+            pdDrawTable(dc, it, rr, sx, sy, dpiY/72.0, &r);
+        } else if(it.type==PIT_HLINE){
+            int wpx=(int)(it.borderWidth*sx); if(wpx<1)wpx=1;
+            HPEN p=CreatePen(PS_SOLID,wpx,pdCR(it.borderColor)); HGDIOBJ o=SelectObject(dc,p);
+            MoveToEx(dc,x0,y0,0); LineTo(dc,x1,y0); SelectObject(dc,o); DeleteObject(p);
+        } else if(it.type==PIT_VLINE){
+            int wpx=(int)(it.borderWidth*sx); if(wpx<1)wpx=1;
+            HPEN p=CreatePen(PS_SOLID,wpx,pdCR(it.borderColor)); HGDIOBJ o=SelectObject(dc,p);
+            MoveToEx(dc,x0,y0,0); LineTo(dc,x0,y1); SelectObject(dc,o); DeleteObject(p);
+        } else if(it.type==PIT_RECT||it.type==PIT_FRAME||it.type==PIT_LOGO||
+                  it.type==PIT_PHOTO||it.type==PIT_QR||it.type==PIT_IMAGE){
+            int wpx=(int)(it.borderWidth*sx); if(wpx<1)wpx=1;
+            bool isImgItem=(it.type==PIT_LOGO||it.type==PIT_PHOTO||it.type==PIT_IMAGE);
+            // v1.21.0: fill rect/frame background when not transparent (WYSIWYG).
+            if((it.type==PIT_RECT||it.type==PIT_FRAME) && !it.fillTransparent){
+                RECT fr={x0,y0,x1,y1}; HBRUSH fb=CreateSolidBrush(pdCR(it.fillColor));
+                FillRect(dc,&fr,fb); DeleteObject(fb);
+            }
+            HPEN p=CreatePen(PS_SOLID,wpx,pdCR(it.borderColor)); HGDIOBJ o=SelectObject(dc,p);
+            HGDIOBJ ob=SelectObject(dc,GetStockObject(NULL_BRUSH));
+            // v1.20.0: PIT_IMAGE with a real picture draws no border box.
+            if(!(isImgItem && !it.imgPath.empty()))
+                Rectangle(dc,x0,y0,x1,y1);
+            SelectObject(dc,ob); SelectObject(dc,o); DeleteObject(p);
+            if(it.type==PIT_LOGO||it.type==PIT_QR||it.type==PIT_PHOTO||it.type==PIT_IMAGE){
+                RECT rr={x0,y0,x1,y1};
+                // v1.20.0: if the item carries an actual image (uploaded logo /
+                // patient photo / image, stored as a file path or data:base64 URI),
+                // render the picture; otherwise fall back to a labelled box.
+                bool drawn=false;
+                if(isImgItem && !it.imgPath.empty()){
+                    // v1.23.0: honour the designed object-fit + padding so the
+                    // logo/photo respects its rectangle exactly (no overflow,
+                    // no stretch) and matches the designer preview 1:1.
+                    int padPx=(int)(it.padding*sx); if(padPx<0)padPx=0;
+                    drawn=gpDrawImageRectFit(dc,it.imgPath,rr,it.objectFit,padPx);
+                }
+                if(!drawn){
+                    std::wstring ph=(it.type==PIT_LOGO)?L"لوگو":(it.type==PIT_QR?L"QR":(it.type==PIT_IMAGE?L"تصویر":L"عکس"));
+                    HFONT f=CreateFontW(-(int)(9*dpiY/72.0),0,0,0,FW_NORMAL,0,0,0,
+                        DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Vazirmatn");
+                    HGDIOBJ of=SelectObject(dc,f); SetTextColor(dc,RGB(150,150,150));
+                    DrawTextW(dc,ph.c_str(),-1,&rr,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
+                    SelectObject(dc,of); DeleteObject(f);
+                }
+            }
+        } else { // text-bearing: LABEL / FIELD / APPTNO
+            std::wstring s=it.text;
+            if(it.type==PIT_FIELD && !it.field.empty()) s=it.prefix+pdFieldValue(r,it.field)+it.suffix;
+            else if(it.type==PIT_APPTNO){ wchar_t b[16]; swprintf(b,16,L"%d",r.queueNo>0?r.queueNo:it.startValue); s=it.prefix+toFaDigits(b); }
+            else s=it.prefix+it.text+it.suffix;
+            if(it.visibility==1 && (it.type==PIT_FIELD) && pdFieldValue(r,it.field).empty()) continue;
+            if(s.empty()) continue;
+            int lf=-(int)(it.fontPt*dpiY/72.0);
+            // v1.23.0: apply inner padding so text never touches the box edge,
+            // matching the designer preview exactly.
+            int padPx=(int)(it.padding*sx); if(padPx<0)padPx=0;
+            RECT rr={x0+padPx,y0+padPx,x1-padPx,y1-padPx};
+            if(rr.right<=rr.left){ rr.left=x0; rr.right=x1; }
+            if(rr.bottom<=rr.top){ rr.top=y0; rr.bottom=y1; }
+            HFONT f=CreateFontW(lf,0,0,0,it.bold?FW_BOLD:FW_NORMAL,it.italic?1:0,0,0,
+                DEFAULT_CHARSET,OUT_TT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,
+                DEFAULT_PITCH|FF_DONTCARE,
+                it.fontName.empty()?L"Vazirmatn":it.fontName.c_str());
+            HGDIOBJ of=SelectObject(dc,f);
+            SetTextColor(dc,pdCR(it.textColor));
+            // horizontal alignment: 0=right 1=center 2=left 3=justify (RTL)
+            UINT al=(it.align==1)?DT_CENTER:(it.align==2)?DT_LEFT:DT_RIGHT;
+            // v1.22.0: per-item text direction. dir 0=RTL, 1=LTR, 2=center.
+            UINT dirf=(it.dir==1)?0:DT_RTLREADING;
+            if(it.dir==2) al=DT_CENTER;
+            UINT base=al|DT_WORDBREAK|dirf|DT_NOPREFIX;
+            // v1.23.0: vertical alignment (0=top 1=middle 2=bottom). DT_VCENTER /
+            // DT_BOTTOM only honour single-line text, so for middle/bottom we
+            // measure the wrapped block height and offset the rect manually.
+            if(it.valign==0){
+                DrawTextW(dc,s.c_str(),-1,&rr,base|DT_TOP);
+            } else {
+                RECT meas=rr;
+                DrawTextW(dc,s.c_str(),-1,&meas,base|DT_TOP|DT_CALCRECT);
+                int th=meas.bottom-meas.top, bh=rr.bottom-rr.top;
+                RECT dr=rr;
+                if(it.valign==1){ int off=(bh-th)/2; if(off>0){ dr.top+=off; } }
+                else            { int off=(bh-th);   if(off>0){ dr.top+=off; } }
+                DrawTextW(dc,s.c_str(),-1,&dr,base|DT_TOP);
+            }
+            SelectObject(dc,of); DeleteObject(f);
+        }
+    }
+    EndPage(dc); EndDoc(dc); DeleteDC(dc);
+    logLine(L"print_designer design printed for section "+std::to_wstring(sectionId));
+    return true;
+}

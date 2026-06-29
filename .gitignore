@@ -16,3 +16,10 @@ data/profile_requests_inbox/
 data/profile_requests_outbox/
 data/profile_requests_archive/
 _design/
+
+# §1.19.0 — sandbox-only HTML designer test artifacts (not part of the EXE build)
+node_modules/
+package.json
+package-lock.json
+test_designer.mjs
+designer_test.png

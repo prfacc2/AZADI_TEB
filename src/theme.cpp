@@ -366,13 +366,44 @@ void drawIcon(HDC dc, int icon, RECT rc, COLORREF col, int thick){
 }
 
 // ============================================================ flat button ==
+// v1.18.3 THEME-TOGGLE BUG FIX: previously BtnData::bg cached an ABSOLUTE
+// COLORREF (e.g. the value of g_theme.surface at button-creation time). When
+// the theme toggled (dark→light), applyTheme() changed g_theme.surface but the
+// button still held the OLD raw colour — so the rounded-corner background stayed
+// the previous theme's colour (the "black behind buttons" bug). The fix: store a
+// SEMANTIC TOKEN identifying WHICH theme colour the button sits on, and resolve
+// it to the LIVE g_theme value at paint time, so a theme switch is always
+// reflected immediately with no per-button refresh bookkeeping.
+enum BtnBgToken {
+    BBG_PARENT = 0,   // ask parent (CLR_INVALID behaviour)
+    BBG_BG,           // g_theme.bg
+    BBG_BG2,          // g_theme.bg2
+    BBG_SURFACE,      // g_theme.surface
+    BBG_SURFACE2,     // g_theme.surface2
+    BBG_HEADERTOP,    // g_theme.headerTop
+    BBG_EXPLICIT      // a literal colour stored in `bg` (theme-independent)
+};
 struct BtnData {
     std::wstring text, sub;
     int icon, style;
     bool hover, down;
-    COLORREF bg;     // explicit colour behind rounded corners (CLR_INVALID = ask parent)
+    COLORREF bg;     // literal colour (only used when bgToken==BBG_EXPLICIT)
+    int      bgToken;// which live theme colour to paint behind the corners
     int imgIcon;     // RCDATA id of a raster icon (0 = use vector `icon`)
 };
+// resolve the live background colour for a button from its semantic token.
+static COLORREF btnBgColor(const BtnData* d){
+    if(!d) return CLR_INVALID;
+    switch(d->bgToken){
+        case BBG_BG:        return g_theme.bg;
+        case BBG_BG2:       return g_theme.bg2;
+        case BBG_SURFACE:   return g_theme.surface;
+        case BBG_SURFACE2:  return g_theme.surface2;
+        case BBG_HEADERTOP: return g_theme.headerTop;
+        case BBG_EXPLICIT:  return d->bg;
+        case BBG_PARENT: default: return CLR_INVALID;
+    }
+}
 static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
     BtnData* d = (BtnData*)GetWindowLongPtrW(h, GWLP_USERDATA);
     switch(m){
@@ -383,6 +414,7 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
         d->style = HIWORD((UINT_PTR)cs->lpCreateParams);
         d->hover = d->down = false;
         d->bg    = CLR_INVALID;
+        d->bgToken = BBG_PARENT;
         d->imgIcon = 0;
         if(cs->lpszName) d->text = cs->lpszName;
         SetWindowLongPtrW(h, GWLP_USERDATA, (LONG_PTR)d);
@@ -436,8 +468,9 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
         // the exact colour it sits on (header gradient, surface2 bar, card,…)
         // we paint THAT solid colour so the antialiased corners blend perfectly
         // — this is the definitive fix for the "white corners in dark mode" bug.
-        if(d && d->bg!=CLR_INVALID){
-            HBRUSH eb=CreateSolidBrush(d->bg);
+        COLORREF liveBg = btnBgColor(d);   // resolves the LIVE theme colour
+        if(d && liveBg!=CLR_INVALID){
+            HBRUSH eb=CreateSolidBrush(liveBg);
             FillRect(dc,&rc,eb); DeleteObject(eb);
         } else {
             HWND par = GetParent(h);
@@ -606,7 +639,20 @@ void setFlatButtonIcon(HWND btn, int icon){
 void setFlatButtonBg(HWND btn, COLORREF bg){
     if(!btn || !IsWindow(btn)) return;
     BtnData* d=(BtnData*)GetWindowLongPtrW(btn,GWLP_USERDATA);
-    if(d){ d->bg = bg; InvalidateRect(btn,NULL,TRUE); }
+    if(!d) return;
+    // v1.18.3: map the caller's colour to a SEMANTIC theme token where it
+    // matches a live g_theme colour, so a later theme toggle re-resolves it
+    // automatically (fixes the "black behind buttons after dark→light" bug).
+    // Any colour that is not a recognised theme slot is kept as an explicit
+    // literal (theme-independent, e.g. a one-off brand colour).
+    if(bg==CLR_INVALID)              d->bgToken = BBG_PARENT;
+    else if(bg==g_theme.bg)          d->bgToken = BBG_BG;
+    else if(bg==g_theme.bg2)         d->bgToken = BBG_BG2;
+    else if(bg==g_theme.surface)     d->bgToken = BBG_SURFACE;
+    else if(bg==g_theme.surface2)    d->bgToken = BBG_SURFACE2;
+    else if(bg==g_theme.headerTop)   d->bgToken = BBG_HEADERTOP;
+    else { d->bgToken = BBG_EXPLICIT; d->bg = bg; }
+    InvalidateRect(btn,NULL,TRUE);
 }
 //  v1.4.1: give a flat button a real raster icon (RCDATA id). Pass 0 to clear
 //  and fall back to the vector icon.

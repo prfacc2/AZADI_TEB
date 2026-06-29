@@ -190,7 +190,22 @@ bool printReceipt(const ReceptionRecord& r, int kind, HWND owner){
     std::wstring docName = std::wstring(APP_NAME_W) + L" — " + names[kind];
     di.lpszDocName = docName.c_str();
 
-    if(StartDocW(dc,&di) <= 0){ DeleteDC(dc); return false; }
+    if(StartDocW(dc,&di) <= 0){
+        // Selected/default printer rejected the job — typically a virtual "app"
+        // device (PDF/photo app → "doesn't support print preview"). Re-open the
+        // dialog so the operator can choose a real printer.
+        DeleteDC(dc); dc=NULL;
+        PRINTDLGW pd2={0}; pd2.lStructSize=sizeof(pd2); pd2.hwndOwner=owner;
+        pd2.Flags=PD_RETURNDC|PD_NOPAGENUMS|PD_NOSELECTION|PD_USEDEVMODECOPIES;
+        if(!PrintDlgW(&pd2)){
+            DeleteObject(fT); DeleteObject(fN); DeleteObject(fB); return false; }
+        dc=pd2.hDC; if(!dc){ DeleteObject(fT); DeleteObject(fN); DeleteObject(fB); return false; }
+        if(StartDocW(dc,&di) <= 0){
+            MessageBoxW(owner,L"چاپگر انتخاب‌شده از چاپ این سند پشتیبانی نمی‌کند.\n"
+                L"لطفاً یک چاپگر واقعی (نه «Microsoft Print to PDF» یا برنامهٔ عکس) انتخاب کنید.",
+                L"چاپ",MB_OK|MB_ICONWARNING);
+            DeleteDC(dc); DeleteObject(fT); DeleteObject(fN); DeleteObject(fB); return false; }
+    }
     StartPage(dc);
     SetBkMode(dc, TRANSPARENT);
     SetTextAlign(dc, TA_RIGHT|TA_RTLREADING);

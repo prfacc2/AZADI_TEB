@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>طراح چاپ — آزادی طب</title>
+<link rel="stylesheet" href="bootstrap.min.css">
+<link rel="stylesheet" href="designer.css">
+</head>
+<body>
+
+<!-- ===================== Top toolbar ===================== -->
+<header id="topbar">
+  <div class="tb-group tb-brand">
+    <span class="brand-logo">🖨</span>
+    <span class="brand">طراح چاپ<small id="secName"></small></span>
+  </div>
+
+  <div class="tb-group tb-center">
+    <button class="btn btn-templates" id="btnTemplates" title="انتخاب از طرح‌های آماده">
+      ✨ طرح‌های آماده
+    </button>
+    <button class="btn btn-mydesigns" id="btnMyDesigns" title="طرح‌هایی که خودتان ذخیره کرده‌اید">
+      📁 طراحی‌های من
+    </button>
+    <span class="paper-lbl" id="paperLbl"></span>
+  </div>
+
+  <div class="tb-group tb-actions">
+    <select id="paperSel" class="form-select form-select-sm" title="اندازه کاغذ"></select>
+    <select id="orientSel" class="form-select form-select-sm" title="جهت کاغذ">
+      <option value="0">عمودی</option>
+      <option value="1">افقی</option>
+    </select>
+    <label class="reflow-toggle" title="با تغییر اندازهٔ کاغذ، همهٔ عناصر متناسب جابه‌جا و تغییر اندازه می‌دهند">
+      <input type="checkbox" id="chkReflow" checked> واکنش‌گرا
+    </label>
+    <span class="tb-sep"></span>
+    <button class="btn btn-sm btn-outline" id="btnUndo" title="بازگشت (Ctrl+Z)">↶</button>
+    <button class="btn btn-sm btn-outline" id="btnRedo" title="جلو (Ctrl+Y)">↷</button>
+    <span class="tb-sep"></span>
+    <button class="btn btn-sm btn-outline" id="btnZoomOut" title="کوچک‌نمایی">−</button>
+    <span id="zoomLbl" class="zoom-lbl">۱۰۰٪</span>
+    <button class="btn btn-sm btn-outline" id="btnZoomIn" title="بزرگ‌نمایی">+</button>
+    <button class="btn btn-sm btn-outline" id="btnZoomFit" title="متناسب با صفحه">⤢</button>
+    <span class="tb-sep"></span>
+    <button class="btn btn-sm btn-outline" id="btnDownload" title="دانلود طرح به‌صورت فایل">⬇ دانلود</button>
+    <button class="btn btn-sm btn-outline" id="btnUpload" title="بارگذاری طرح از فایل">⬆ بارگذاری</button>
+    <button class="btn btn-sm btn-primary" id="btnSave" title="ذخیره و اعمال (Ctrl+S)">💾 ذخیره و اعمال</button>
+    <button class="btn btn-sm btn-danger" id="btnExit" title="خروج">✕</button>
+  </div>
+</header>
+
+<div id="workspace">
+  <!-- ===================== Right panel (tools / settings) ===================== -->
+  <aside id="rightPanel">
+    <div class="rp-tabs">
+      <button class="rp-tab active" data-tab="palette">عناصر</button>
+      <button class="rp-tab" data-tab="inspector">تنظیمات</button>
+      <button class="rp-tab" data-tab="layers">لایه‌ها</button>
+    </div>
+
+    <section class="rp-pane active" id="pane-palette">
+      <input type="search" id="paletteSearch" class="form-control form-control-sm" placeholder="جستجوی عنصر یا فیلد…">
+      <div id="paletteList"></div>
+    </section>
+
+    <section class="rp-pane" id="pane-inspector">
+      <div id="inspectorEmpty" class="muted">یک آیتم را روی صفحه انتخاب کنید تا تنظیمات کامل و حرفه‌ای آن نمایش داده شود.</div>
+      <div id="inspectorBody" class="hidden"></div>
+    </section>
+
+    <section class="rp-pane" id="pane-layers">
+      <div id="layerList"></div>
+    </section>
+  </aside>
+
+  <!-- ===================== Preview / Canvas (LEFT in RTL) ===================== -->
+  <main id="canvasWrap">
+    <div id="canvasScroll">
+      <div id="canvasStage">
+        <div id="paper">
+          <div id="selBox" class="sel-box hidden">
+            <span class="handle h-nw"></span><span class="handle h-ne"></span>
+            <span class="handle h-sw"></span><span class="handle h-se"></span>
+            <span class="handle h-n"></span><span class="handle h-s"></span>
+            <span class="handle h-w"></span><span class="handle h-e"></span>
+            <span class="handle h-rot"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="canvasHint">پیش‌نمایش زنده · فضای خالی را بکشید تا صفحه جابه‌جا شود · چرخ ماوس = اسکرول · Ctrl+چرخ = زوم · کلیدهای جهت = جابه‌جایی دقیق</div>
+  </main>
+</div>
+
+<!-- ===================== Templates gallery overlay ===================== -->
+<div id="tplOverlay" class="overlay hidden">
+  <div class="tpl-modal">
+    <div class="tpl-modal-head">
+      <span class="tpl-title">✨ طرح‌های آمادهٔ حرفه‌ای درمانگاه</span>
+      <button id="tplClose" class="btn btn-sm btn-outline">بستن ✕</button>
+    </div>
+    <div id="tplTabs" class="tpl-tabs"></div>
+    <div id="tplGrid" class="tpl-grid"></div>
+  </div>
+</div>
+
+<!-- ===================== My Designs overlay ===================== -->
+<div id="myOverlay" class="overlay hidden">
+  <div class="tpl-modal">
+    <div class="tpl-modal-head">
+      <span class="tpl-title">📁 طراحی‌های من</span>
+      <button id="myClose" class="btn btn-sm btn-outline">بستن ✕</button>
+    </div>
+    <div id="myGrid" class="tpl-grid"></div>
+  </div>
+</div>
+
+<!-- ===================== Table builder overlay ===================== -->
+<div id="tblOverlay" class="overlay hidden">
+  <div class="tbl-modal">
+    <div class="tpl-modal-head">
+      <span class="tpl-title">📊 طراحی جدول</span>
+      <button id="tblClose" class="btn btn-sm btn-outline">بستن ✕</button>
+    </div>
+    <div class="tbl-body">
+      <div class="tbl-controls">
+        <div class="insp-row"><label>تعداد ستون‌ها</label><input type="number" id="tblCols" class="form-control form-control-sm" min="1" max="10" value="3"></div>
+        <div class="insp-row"><label>تعداد ردیف‌ها</label><input type="number" id="tblRows" class="form-control form-control-sm" min="1" max="40" value="4"></div>
+        <div class="insp-row"><label>ردیف سرستون</label><input type="checkbox" id="tblHeader" class="form-check" checked></div>
+        <button class="btn btn-sm btn-outline" id="tblRebuild" style="width:100%">بازسازی شبکهٔ جدول</button>
+        <div class="tbl-quickbtns">
+          <button class="btn btn-sm btn-outline" id="tblAddRow" title="افزودن ردیف">＋ ردیف</button>
+          <button class="btn btn-sm btn-outline" id="tblAddCol" title="افزودن ستون">＋ ستون</button>
+          <button class="btn btn-sm btn-outline" id="tblDelRow" title="حذف ردیف انتخاب‌شده">－ ردیف</button>
+          <button class="btn btn-sm btn-outline" id="tblDelCol" title="حذف ستون انتخاب‌شده">－ ستون</button>
+        </div>
+        <p class="muted" style="font-size:12px;margin-top:8px">روی هر سلول کلیک کنید تا انتخاب شود؛ سپس می‌توانید ردیف/ستون افزوده یا حذف کنید، یا از فهرست زیر یک فیلد داده‌ای را داخل آن سلول درج کنید.</p>
+        <label style="font-size:12px;font-weight:700;margin-top:6px;display:block">درج فیلد در سلول انتخاب‌شده:</label>
+        <select id="tblFieldSel" class="form-control form-control-sm"></select>
+        <button class="btn btn-sm btn-primary" id="tblFieldInsert" style="width:100%;margin-top:6px">درج فیلد در سلول</button>
+      </div>
+      <div class="tbl-grid-wrap"><div id="tblEditor"></div></div>
+    </div>
+    <div class="tbl-foot">
+      <button class="btn btn-sm btn-outline" id="tblCancel">انصراف</button>
+      <button class="btn btn-sm btn-primary" id="tblInsert">درج جدول در طرح</button>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="fileInput" accept=".aztpl,.json" class="hidden">
+<div id="toast" class="toast-msg"></div>
+
+<script src="fields.js"></script>
+<script src="templates.js"></script>
+<script src="designer.js"></script>
+</body>
+</html>

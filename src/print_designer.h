@@ -20,7 +20,11 @@ enum PrintItemType {
     PIT_LOGO,          // clinic logo (image)
     PIT_QR,            // QR / barcode (encodes the receipt number)
     PIT_PHOTO,         // patient personal photo placeholder
-    PIT_APPTNO         // appointment-number counter (§3.13)
+    PIT_APPTNO,        // appointment-number counter (§3.13)
+    PIT_TABLE          // §1.21.0: grid/table. Model stored as JSON in `text`:
+                       //   {"cols":n,"rows":n,"header":bool,"widths":[..],
+                       //    "cells":[[..],..]}  — round-trips through C++ as a
+                       //    plain string so it never breaks the data model.
 };
 
 // Each PrintItem lives in millimetre space (paper coordinates).
@@ -42,6 +46,8 @@ struct PrintItem {
     double       fontPt;
     bool         bold, italic;
     int          align;         // 0=right 1=center 2=left 3=justify (RTL)
+    int          dir;           // text direction: 0=RTL 1=LTR 2=center(auto). v1.22.0
+    int          valign;        // vertical align: 0=top 1=middle 2=bottom. v1.23.0
     double       lineSpacing;
 
     // appearance
@@ -57,6 +63,8 @@ struct PrintItem {
 
     // image
     std::wstring imgPath;       // for PIT_IMAGE / PIT_LOGO
+    int          objectFit;     // 0=contain (aspect-fit, no crop) 1=cover (fill,
+                                //   crop overflow) 2=fill (stretch). v1.23.0
 
     // appointment counter (§3.13)
     int          startValue;
@@ -86,6 +94,12 @@ bool Paper_Dims(const std::wstring& name, double& wmm, double& hmm);
 std::string  Design_ToJson(const PrintDesign& d);
 bool         Design_FromJson(const std::string& json, PrintDesign& out,
                              std::wstring& err);
+
+// v1.21.1: the web designer (browser) downloads files in its own JS-shaped JSON
+// (string item types, #rrggbb colours, no AZTEMPLATE magic). These let the
+// native UI (Print Settings import) round-trip those same files.
+std::string  Design_ToWebJson(const PrintDesign& d);
+bool         Design_FromWebJson(const std::string& json, PrintDesign& out);
 
 // ----------------------------------------------------------- design store ----
 void Designs_Init();                       // seed 20 built-ins on first run
@@ -119,3 +133,7 @@ int  ApptCounter_Peek(int sectionId);
 void PrintDesigner_Open(HWND hMain);
 //  Management → "بازگردانی دیزاین چاپ": import an .aztpl and apply to sections.
 void RestoreDesign_Open(HWND hMain);
+//  §1.19.1 — «تنظیمات چاپ» (Print Settings): pick a section, preview its current
+//  print design (enlargeable), download/upload an .aztpl, and apply it to the
+//  section. Reachable from the management Settings menu.
+void PrintCfg_Open(HWND hMain);
