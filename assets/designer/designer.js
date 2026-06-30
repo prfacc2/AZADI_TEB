@@ -82,10 +82,26 @@
     S.design.items.forEach(function (it) {
       it.x = Math.round(it.x * sx * 100) / 100;
       it.y = Math.round(it.y * sy * 100) / 100;
-      it.w = Math.round(it.w * sx * 100) / 100;
-      it.h = Math.round(it.h * sy * 100) / 100;
-      if (typeof it.fontSize === "number" && it.fontSize > 0)
-        it.fontSize = Math.max(4, Math.round(it.fontSize * sf * 10) / 10);
+      // v1.24.0: square media (logo / QR / photo) must keep their aspect ratio
+      // when the page is rescaled — scale both sides by the SAME (uniform)
+      // factor so a logo never gets stretched into an oblong blob.
+      if (it.type === "logo" || it.type === "qr") {
+        it.w = Math.round(it.w * sf * 100) / 100;
+        it.h = Math.round(it.h * sf * 100) / 100;
+      } else {
+        it.w = Math.round(it.w * sx * 100) / 100;
+        it.h = Math.round(it.h * sy * 100) / 100;
+      }
+      // v1.24.0 FIX: the font size property is `pt` (was wrongly scaling a
+      // non-existent `fontSize`, so text never resized → on a bigger/smaller
+      // page the type overflowed or looked tiny). Scale pt, padding and corner
+      // by the uniform factor too, so the whole layout is truly responsive.
+      if (typeof it.pt === "number" && it.pt > 0)
+        it.pt = Math.max(4, Math.round(it.pt * sf * 10) / 10);
+      if (typeof it.padding === "number" && it.padding > 0)
+        it.padding = Math.round(it.padding * sf * 100) / 100;
+      if (typeof it.corner === "number" && it.corner > 0)
+        it.corner = Math.round(it.corner * sf * 100) / 100;
       if (typeof it.borderWidth === "number" && it.borderWidth > 0)
         it.borderWidth = Math.max(0.1, Math.round(it.borderWidth * sf * 100) / 100);
       // keep inside new page
@@ -254,14 +270,25 @@
       t.style.fontWeight = it.bold ? "700" : "400";
       t.style.fontStyle = it.italic ? "italic" : "normal";
       t.style.fontFamily = (it.font || "Vazirmatn") + ",Tahoma,sans-serif";
-      t.style.justifyContent = it.align === 1 ? "center" : (it.align === 2 ? "flex-start" : "flex-end");
-      t.style.textAlign = it.align === 1 ? "center" : (it.align === 2 ? "left" : "right");
-      t.style.alignItems = "flex-start";   // matches GDI DT_TOP
       t.style.lineHeight = (it.lineSpacing && it.lineSpacing > 0) ? it.lineSpacing : 1.25;
-      // v1.22.0: text direction (RTL/LTR/Center). dir 0=RTL 1=LTR 2=center.
-      if (it.dir === 1) { t.style.direction = "ltr"; if (it.align == null || it.align === 0) { t.style.justifyContent = "flex-start"; t.style.textAlign = "left"; } }
-      else if (it.dir === 2) { t.style.direction = "rtl"; t.style.justifyContent = "center"; t.style.textAlign = "center"; }
-      else { t.style.direction = "rtl"; }
+      // v1.24.0: BLOCK layout (not flex) so wrapped RTL text aligns reliably and
+      // never hugs the wrong edge. Direction drives the default side; align can
+      // override. dir 0=RTL 1=LTR 2=center. This mirrors the GDI print engine
+      // (DT_RIGHT|DT_RTLREADING for RTL, DT_LEFT for LTR, DT_CENTER for center).
+      var dir = (it.dir == null) ? 0 : it.dir;
+      var al = it.align;                          // 0=right 1=center 2=left (may be undefined)
+      if (dir === 2) { t.style.direction = "rtl"; t.style.textAlign = "center"; }
+      else if (dir === 1) {                       // LTR
+        t.style.direction = "ltr";
+        t.style.textAlign = (al === 1) ? "center" : (al === 0) ? "right" : "left";
+      } else {                                    // RTL (default)
+        t.style.direction = "rtl";
+        t.style.textAlign = (al === 1) ? "center" : (al === 2) ? "left" : "right";
+      }
+      // vertical placement inside the box (0=top 1=middle 2=bottom) — matches GDI valign
+      t.style.display = "block";
+      t.style.alignItems = "";
+      t.style.justifyContent = "";
       el.appendChild(t);
     } else if (it.type === "table") {
       el.innerHTML = tableHtml(it, false);
@@ -310,10 +337,33 @@
     var items = (S.design.items || []).slice().sort(function (a, b) { return (a.z || 0) - (b.z || 0); });
     items.forEach(function (it) { $paper.appendChild(buildItemEl(it)); });
 
+    // v1.24.0: auto-fit text so a value never overflows / gets clipped (mirrors
+    // the GDI print engine's shrink-to-fit). Runs after layout so we can measure.
+    autoFitTexts();
+
     updateSelBox();
     var pl = document.getElementById("paperLbl");
     if (pl) pl.textContent = (PAPER_LABELS[S.design.paper] || S.design.paper) + " · " +
       faDigits(Math.round(dims[0])) + "×" + faDigits(Math.round(dims[1])) + " mm";
+  }
+
+  // v1.24.0: shrink any text element whose content overflows its box (height or
+  // width) so letters are never sheared/clipped — matches the print auto-fit.
+  function autoFitTexts() {
+    var nodes = $paper.querySelectorAll(".pi-text");
+    Array.prototype.forEach.call(nodes, function (t) {
+      var box = t.parentNode; if (!box) return;
+      var bw = box.clientWidth, bh = box.clientHeight;
+      if (bw <= 0 || bh <= 0) return;
+      var px = parseFloat(t.style.fontSize) || 12;
+      var floor = Math.max(4.5, px * 0.55);
+      var guard = 0;
+      while ((t.scrollHeight > bh + 1 || t.scrollWidth > bw + 1) && px > floor && guard < 20) {
+        px = px * 0.92; if (px < floor) px = floor;
+        t.style.fontSize = px + "px";
+        guard++;
+      }
+    });
   }
 
   function updateSelBox() {
@@ -556,7 +606,17 @@
         gt.appendChild(row("ضخیم", checkInput(it.bold, function (v) { it.bold = v; up(); })));
         gt.appendChild(row("کج", checkInput(it.italic, function (v) { it.italic = v; up(); })));
         gt.appendChild(row("چینش", selectInput([["0", "راست"], ["1", "وسط"], ["2", "چپ"]], it.align, function (v) { it.align = +v; up(); })));
-        gt.appendChild(row("جهت متن", selectInput([["0", "راست‌به‌چپ (RTL)"], ["1", "چپ‌به‌راست (LTR)"], ["2", "وسط‌چین (Center)"]], it.dir || 0, function (v) { it.dir = +v; up(); })));
+        gt.appendChild(row("جهت متن", selectInput([["0", "راست‌به‌چپ (RTL)"], ["1", "چپ‌به‌راست (LTR)"], ["2", "وسط‌چین (Center)"]], it.dir || 0, function (v) {
+          it.dir = +v;
+          // v1.24.0: choosing a direction also moves the text to the natural
+          // side so the toggle has a *visible* effect (was: dir changed reading
+          // order only, text stayed where it was → users thought RTL "did
+          // nothing"). RTL → right-align, LTR → left-align, Center → center.
+          if (it.dir === 0) it.align = 0;        // RTL  → راست
+          else if (it.dir === 1) it.align = 2;   // LTR  → چپ
+          else if (it.dir === 2) it.align = 1;   // وسط
+          up(); renderInspector();
+        })));
       }
       gt.appendChild(row("رنگ متن", colorInput(it.textColor, function (v) { it.textColor = v; up(); })));
       if (it.type !== "table")
