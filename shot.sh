@@ -18,7 +18,7 @@ SRCS="src/main.cpp src/util.cpp src/handlers.cpp src/theme.cpp src/users.cpp \
       src/backup.cpp src/ui_kit.cpp src/backup_analyzer.cpp src/backup_log.cpp \
       src/sections.cpp src/print_designer.cpp src/user_settings.cpp \
       src/net_sync.cpp src/profile_requests.cpp src/backup_log_viewer.cpp \
-      src/backup_mtf.cpp src/saved_messages.cpp src/setup_splash.cpp"
+      src/backup_mtf.cpp src/saved_messages.cpp src/setup_splash.cpp src/web_designer.cpp"
 $CXX -std=c++17 -O2 -municode -mwindows -DAZ_DEBUG_BUILD \
     -D_WIN32_IE=0x0700 -static -static-libgcc -static-libstdc++ \
     -Wall -Wno-unused-variable $SRCS obj/app.res \
@@ -26,7 +26,7 @@ $CXX -std=c++17 -O2 -municode -mwindows -DAZ_DEBUG_BUILD \
     -lcomctl32 -lcomdlg32 -lgdi32 -lgdiplus -lmsimg32 -ldwmapi -luxtheme \
     -luser32 -lshlwapi -lwininet -ladvapi32 -lshell32 -lwinspool \
     -lole32 -luuid -lversion -lwinmm -ldbghelp \
-    -lwinhttp -lurlmon -lcrypt32 -lwintrust -lwtsapi32 >/dev/null
+    -lwinhttp -lurlmon -lcrypt32 -lwintrust -lwtsapi32 -lpsapi -lws2_32 -loleaut32 >/dev/null
 i686-w64-mingw32-strip build/AzadiTeb_dbg.exe
 
 export WINEDEBUG=-all
