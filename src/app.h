@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.27.1"
+#define APP_VERSION_W   L"1.28.0"
 
 // ----------------------------------------------------------- logging policy -
 //  RELEASE 1.2.0 (Section A): all general user-behavior logging is gated behind
@@ -431,6 +431,31 @@ void       saveEmpProfile(const EmpProfile& p);
 bool       isUserOnline(const std::wstring& username);   // session presence (heartbeat <90s)
 void       setUserOnline(const std::wstring& username, bool on);
 void       heartbeatUser(const std::wstring& username);  // §G: refresh presence on a timer
+
+// ------------------------------------------------------------- services --
+//  Clinic services managed from the «مدیریت خدمات» (Service Management) page.
+//  Saved to data/services.dat (one pipe-delimited line per service, UTF-8).
+//  Admission picks services from this list; the price ALWAYS comes from here —
+//  the admission operator never types a price.
+struct ServiceDef {
+    std::wstring code;      // کد خدمت (unique)
+    std::wstring name;      // نام خدمت
+    std::wstring category;  // دسته/گروه
+    std::wstring dept;      // بخش (department id or name)
+    long long    price;     // مبلغ پایه (ریال)
+    std::wstring insType;   // نوع بیمه (free text / label)
+    std::wstring desc;      // توضیحات
+    int          status;    // 1=فعال 0=غیرفعال
+    std::wstring created;   // تاریخ ایجاد (Jalali)
+    std::wstring modified;  // تاریخ ویرایش (Jalali)
+    std::wstring extra;     // §H forward-compat: unknown trailing columns
+    ServiceDef():price(0),status(1){}
+};
+std::vector<ServiceDef> loadServices();
+bool  addService(const ServiceDef& s, std::wstring& err);   // insert (code must be unique)
+bool  updateService(const ServiceDef& s, std::wstring& err);// edit by code
+bool  removeService(const std::wstring& code);
+const ServiceDef* findService(const std::wstring& code);    // NULL when not found
 
 // ------------------------------------------------------------------ kartabl --
 //  Cartable / inbox messages pushed from management to a user (or broadcast).
