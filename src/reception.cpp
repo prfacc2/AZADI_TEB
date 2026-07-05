@@ -494,58 +494,62 @@ struct CenterV {
 };
 static void computeCenterV(const RecH& m, CenterV& v, const TabPage* t, int H){
     (void)m;
-    const int rh   = S(28);          // compact input height (fits one screen)
-    const int lbl  = S(15);          // label band above each input
-    const int rgap = S(6);           // gap between grid rows
+    //  v1.27.0 UI REDESIGN — the reference image demands readable labels, real
+    //  breathing room and a clear visual hierarchy. Inputs are ~34px, the label
+    //  band above each control is 18px (13px medium font + 5px gap), and the
+    //  row gap is 12px so labels never touch the control below them.
+    const int rh   = S(34);          // input height (was 28 — too compressed)
+    const int lbl  = S(20);          // label band above each input (font + gap)
+    const int rgap = S(12);          // gap between grid rows (min 10 required)
     v.rh = rh; v.lbl = lbl;
     v.panelOpen = t ? t->svcPanelOpen : false;
     v.svcRows   = t ? (int)t->services.size() : 0;
     int y = S(RC_OUT);
     // ----- card 1: اطلاعات بیمار (3 rows × 3 cols) -----
     v.c1Top = y;
-    int rowsTop = y + S(30);                       // card header band
+    int rowsTop = y + S(40);                       // taller card header band
     for(int i=0;i<3;i++) v.r1y[i] = rowsTop + lbl + i*(lbl+rh+rgap);
-    v.c1Bot = v.r1y[2] + rh + S(10);
-    y = v.c1Bot + S(8);
+    v.c1Bot = v.r1y[2] + rh + S(14);
+    y = v.c1Bot + S(12);
     // ----- row of THREE cards -----
     v.dpTop = y;
-    int dpRowsTop = y + S(26);
+    int dpRowsTop = y + S(38);                      // taller header (section title)
     v.dpR1y = dpRowsTop + lbl;
     v.dpR2y = v.dpR1y + rh + rgap + lbl;
     v.dpR3y = v.dpR2y + rh + rgap + lbl;
-    v.dpBot = v.dpR3y + rh + S(10);
-    y = v.dpBot + S(8);
+    v.dpBot = v.dpR3y + rh + S(14);
+    y = v.dpBot + S(12);
     // ----- scheduling strip (single row) -----
     v.apTop = y;
-    v.apR1y = y + S(8) + lbl;
-    v.apBot = v.apR1y + rh + S(8);
-    y = v.apBot + S(8);
+    v.apR1y = y + S(12) + lbl;
+    v.apBot = v.apR1y + rh + S(12);
+    y = v.apBot + S(12);
     // ----- TWO bottom panels — stretch to fill the remaining height -----
-    v.btnH = S(40);
+    v.btnH = S(42);
     v.bTop = y;
-    int wantBot = H - S(RC_OUT) - v.btnH - S(8);   // panels end above buttons
-    int minBot  = v.bTop + S(170);                 // never collapse below this
+    int wantBot = H - S(RC_OUT) - v.btnH - S(12);  // panels end above buttons
+    int minBot  = v.bTop + S(180);                 // never collapse below this
     v.bBot = wantBot > minBot ? wantBot : minBot;
     // services panel internals
-    v.svcToolY = v.bTop + S(8);
-    int sy2 = v.svcToolY + rh + S(6);
-    if(v.panelOpen){ v.svcPanelY = sy2; sy2 += rh + S(8); }
+    v.svcToolY = v.bTop + S(12);
+    int sy2 = v.svcToolY + rh + S(10);
+    if(v.panelOpen){ v.svcPanelY = sy2; sy2 += rh + S(10); }
     else            v.svcPanelY = 0;
     v.svcHeadY = sy2;
-    v.svcBodyY = v.svcHeadY + S(24);
-    v.svcFootY = v.bBot - S(28);
+    v.svcBodyY = v.svcHeadY + S(30);               // 30px header (40 look, RTL)
+    v.svcFootY = v.bBot - S(32);
     v.svcBodyBot = v.svcFootY - S(4);
     if(v.svcBodyBot < v.svcBodyY) v.svcBodyBot = v.svcBodyY;
     // unpaid panel internals
-    v.upTabY  = v.bTop + S(8);
-    v.upToolY = v.upTabY + S(26) + S(6);
-    v.upHeadY = v.upToolY + rh + S(6);
-    v.upBodyY = v.upHeadY + S(24);
-    v.upFootY = v.bBot - S(26);
+    v.upTabY  = v.bTop + S(12);
+    v.upToolY = v.upTabY + S(30) + S(8);
+    v.upHeadY = v.upToolY + rh + S(10);
+    v.upBodyY = v.upHeadY + S(30);
+    v.upFootY = v.bBot - S(30);
     v.upBodyBot = v.upFootY - S(4);
     if(v.upBodyBot < v.upBodyY) v.upBodyBot = v.upBodyY;
     // ----- bottom buttons row -----
-    v.btnY = v.bBot + S(8);
+    v.btnY = v.bBot + S(12);
     v.totalBot = v.btnY + v.btnH + S(RC_OUT);
     if(v.totalBot < H) v.totalBot = H;
 }
@@ -594,7 +598,7 @@ static void computeInfoLayout(int infoL, int infoR, int H, InfoLayout& L){
     int ipad=S(12);
     L.iL=infoL+ipad; L.iR=infoR-ipad; L.iw=L.iR-L.iL;
     L.cardTop=S(RC_OUT); L.cardBot=H-S(RC_OUT);
-    L.rh2=S(28); L.gp=S(6); L.btnW=S(52); L.lblH=S(14);
+    L.rh2=S(32); L.gp=S(6); L.btnW=S(52); L.lblH=S(17);
     // --- header zone (matches painter) ---
     //  smaller avatar + «بیمار جدید/کد پرونده» caption + green «نسخه الکترونیک»
     //  chip + a row of two counter boxes (نسخه سرپایی / نسخه الکترونیکی).
@@ -604,9 +608,9 @@ static void computeInfoLayout(int infoL, int infoR, int H, InfoLayout& L){
     L.chipH=S(22); L.chipY=y;            y+=L.chipH+S(8);
     L.boxH =S(38); L.boxY =y;            y+=L.boxH +S(10); // two counter boxes
     L.psH  =0;     L.psY  =y;                                // unused now
-    int lblGap=S(1);   // gap between a label line and its control
-    int rowGap=S(6);   // gap between control rows
-    int grpGap=S(10);  // gap before next group title
+    int lblGap=S(4);   // gap between a label line and its control (breathing room)
+    int rowGap=S(10);  // gap between control rows
+    int grpGap=S(14);  // gap before next group title
     auto labelled=[&](int& lblY,int& ctlY){
         lblY=y; y+=L.lblH+lblGap; ctlY=y; y+=L.rh2+rowGap;
     };
@@ -1689,7 +1693,7 @@ static void paintInfoGroup(HDC dc, int iL, int iR, int y, const wchar_t* title, 
 }
 //  Helper: draw a small field caption (right-aligned, dim) above a control.
 static void paintInfoLabel(HDC dc, int iL, int iR, int y, const wchar_t* txt){
-    SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
+    SelectObject(dc,g_fLabel); SetTextColor(dc,g_theme.labelInk);
     RECT tr={iL,y,iR,y+S(16)};
     DrawTextW(dc,txt,-1,&tr,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
 }
@@ -2782,29 +2786,41 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         const int rh=v.rh, cgap=m.cgap, cw=m.ccolW;
         (void)fw;
         auto colX=[&](int c){ return formR - (c+1)*cw - c*cgap; };
-        //  draw a white sub-card with a header (icon flush-right + title).
+        //  v1.27.0: draw a white sub-card with a STRONG section header (icon
+        //  flush-right + 16-bold title + a thin divider under it, matching the
+        //  approved reference). The title uses g_fSection / sectionInk so it
+        //  clearly stands above the fields.
         auto subcard=[&](int top,int bot,const wchar_t* title,int icon){
             RECT cr={m.cardL,Y(top),m.cardR,Y(bot)};
-            gpRoundRectBg(dc,cr,S(12),g_theme.surface,g_theme.border,g_theme.bg);
-            int icoW=S(16);
-            RECT hi={formR-icoW,cr.top+S(8),formR,cr.top+S(24)};
+            gpRoundRectBg(dc,cr,S(14),g_theme.surface,g_theme.border,g_theme.bg);
+            int icoW=S(20);
+            RECT hi={formR-icoW,cr.top+S(12),formR,cr.top+S(12)+icoW};
             drawIcon(dc,icon,hi,g_theme.accent,S(2));
-            SetTextColor(dc,g_theme.text); SelectObject(dc,g_fUIB);
-            RECT ht={formL,cr.top+S(6),formR-icoW-S(6),cr.top+S(26)};
+            SetTextColor(dc,g_theme.sectionInk); SelectObject(dc,g_fSection);
+            RECT ht={formL,cr.top+S(10),formR-icoW-S(8),cr.top+S(36)};
             DrawTextW(dc,title,-1,&ht,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+            // thin divider under the section title (12px padding below title)
+            HPEN pn=CreatePen(PS_SOLID,1,g_theme.border);
+            HGDIOBJ op=SelectObject(dc,pn);
+            int dy=cr.top+S(40);
+            MoveToEx(dc,formL,dy,NULL); LineTo(dc,formR,dy);
+            SelectObject(dc,op); DeleteObject(pn);
         };
-        //  draw a field label (with optional red required asterisk) above (x,y).
+        //  v1.27.0: draw a field label (with optional red required asterisk)
+        //  above (x,y). Uses the readable 13-medium label font + labelInk color
+        //  so labels never blend into the card background. 5px sits between the
+        //  label baseline and the control below it (the lbl band is 20px, the
+        //  label text is 16px tall → ~4px breathing room).
         auto fieldLabel=[&](int x,int y,int w,const wchar_t* txt,bool req){
-            SelectObject(dc,g_fSmall);
-            // measure the label so the asterisk can sit just to its LEFT (RTL).
-            RECT lr={x,Y(y),x+w,Y(y)+S(14)};
-            SetTextColor(dc,g_theme.textDim);
+            SelectObject(dc,g_fLabel);
+            RECT lr={x,Y(y),x+w,Y(y)+S(16)};
+            SetTextColor(dc,g_theme.labelInk);
             DrawTextW(dc,txt,-1,&lr,DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
             if(req){
                 SIZE sz; GetTextExtentPoint32W(dc,txt,(int)wcslen(txt),&sz);
                 int ax = x+w - sz.cx - S(8);
                 SetTextColor(dc,g_theme.danger);
-                RECT ar={ax-S(10),Y(y),ax,Y(y)+S(14)};
+                RECT ar={ax-S(10),Y(y),ax,Y(y)+S(16)};
                 DrawTextW(dc,L"*",-1,&ar,DT_RIGHT|DT_SINGLELINE|DT_NOPREFIX);
             }
         };
@@ -2828,13 +2844,19 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             int in=S(10);
             auto card3=[&](int L0,int R0,const wchar_t* title,int icon){
                 RECT cr={L0,Y(v.dpTop),R0,Y(v.dpBot)};
-                gpRoundRectBg(dc,cr,S(12),g_theme.surface,g_theme.border,g_theme.bg);
-                int icoW=S(14);
-                RECT hi={R0-in-icoW,cr.top+S(7),R0-in,cr.top+S(21)};
+                gpRoundRectBg(dc,cr,S(14),g_theme.surface,g_theme.border,g_theme.bg);
+                int icoW=S(18);
+                RECT hi={R0-in-icoW,cr.top+S(11),R0-in,cr.top+S(11)+icoW};
                 drawIcon(dc,icon,hi,g_theme.accent,S(2));
-                SetTextColor(dc,g_theme.text); SelectObject(dc,g_fUIB);
-                RECT ht={L0+in,cr.top+S(5),R0-in-icoW-S(5),cr.top+S(23)};
+                SetTextColor(dc,g_theme.sectionInk); SelectObject(dc,g_fSection);
+                RECT ht={L0+in,cr.top+S(9),R0-in-icoW-S(6),cr.top+S(33)};
                 DrawTextW(dc,title,-1,&ht,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+                // divider under the sub-card title
+                HPEN pn=CreatePen(PS_SOLID,1,g_theme.border);
+                HGDIOBJ op=SelectObject(dc,pn);
+                int dy=cr.top+S(36);
+                MoveToEx(dc,L0+in,dy,NULL); LineTo(dc,R0-in,dy);
+                SelectObject(dc,op); DeleteObject(pn);
             };
             // — انجام دهنده (rightmost)
             card3(mc.perfL,mc.perfR,L"انجام دهنده",ICO_USER);
@@ -2906,16 +2928,16 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             int in=S(10);
             int svL=bp.svL+in, svR=bp.svR-in, svW=svR-svL;
             RECT cr={bp.svL,Y(v.bTop),bp.svR,Y(v.bBot)};
-            gpRoundRectBg(dc,cr,S(12),g_theme.surface,g_theme.border,g_theme.bg);
+            gpRoundRectBg(dc,cr,S(14),g_theme.surface,g_theme.border,g_theme.bg);
             // header row: «خدمات» title flush-right + (افزودن خدمت btn = control)
-            SetTextColor(dc,g_theme.text); SelectObject(dc,g_fUIB);
+            SetTextColor(dc,g_theme.sectionInk); SelectObject(dc,g_fSection);
             { RECT ht={svL,Y(v.svcToolY),svR,Y(v.svcToolY)+rh};
               DrawTextW(dc,L"خدمات",-1,&ht,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX); }
             // table header strip — reference columns (RTL):
             // ردیف | نام خدمت | مبلغ (ریال) | تخفیف بیمه (ریال) | سهم بیمه (ریال) | عملیات
-            RECT head={svL,Y(v.svcHeadY),svR,Y(v.svcHeadY)+S(22)};
+            RECT head={svL,Y(v.svcHeadY),svR,Y(v.svcHeadY)+S(28)};
             fillRoundRect(dc,head,S(6),g_theme.surface2,g_theme.border);
-            SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
+            SelectObject(dc,g_fLabel); SetTextColor(dc,g_theme.text);
             const wchar_t* cols[6]={L"ردیف",L"نام خدمت",L"مبلغ (ریال)",
                 L"تخفیف بیمه (ریال)",L"سهم بیمه (ریال)",L"عملیات"};
             int weights[6]={7,24,18,20,19,12};
@@ -2927,7 +2949,7 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             }
             s_svcHits.clear();
             long long sumAmt=0,sumDisc=0,sumIns=0,sumPat=0;
-            int rowH=S(26);
+            int rowH=S(32);
             int maxRows=(v.svcBodyBot-v.svcBodyY)/rowH; if(maxRows<0) maxRows=0;
             if(v.svcRows==0){
                 int ecy=Y(v.svcBodyY)+(v.svcBodyBot-v.svcBodyY)/2-S(10);
@@ -3013,9 +3035,9 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             // ---- toolbar captions (controls themselves are real windows) ----
             // ---- table header: بارکد/کد پرونده | نام بیمار | تاریخ | زمان |
             //      دقیقه پیش | عملیات ----
-            RECT uhead={upL,Y(v.upHeadY),upR,Y(v.upHeadY)+S(22)};
+            RECT uhead={upL,Y(v.upHeadY),upR,Y(v.upHeadY)+S(28)};
             fillRoundRect(dc,uhead,S(6),g_theme.surface2,g_theme.border);
-            SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
+            SelectObject(dc,g_fLabel); SetTextColor(dc,g_theme.text);
             const wchar_t* ucols[6]={L"بارکد/کد پرونده",L"نام بیمار",L"تاریخ",
                 L"زمان",L"دقیقه پیش",L"عملیات"};
             int uwt[6]={20,26,16,12,12,14};
@@ -3061,7 +3083,7 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 shown.push_back(i);
             }
             s_upHits.clear();
-            int urowH=S(26);
+            int urowH=S(32);
             int umax=(v.upBodyBot-v.upBodyY)/urowH; if(umax<0) umax=0;
             if(shown.empty()){
                 int ecy=Y(v.upBodyY)+(v.upBodyBot-v.upBodyY)/2-S(10);
@@ -3197,25 +3219,25 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             RECT card={m.billL,Y(sumTop),m.billR,Y(sumBot)};
             gpRoundRectBg(dc,card,S(12),g_theme.surface,g_theme.border,g_theme.bg);
             int bl=card.left+S(10), br=card.right-S(10);
-            // header «صورت حساب» (icon flush-right, RTL)
-            { int icoW=S(16);
-              RECT bi={br-icoW,card.top+S(7),br,card.top+S(23)};
+            // header «صورت حساب» (icon flush-right, RTL) — strong section title
+            { int icoW=S(18);
+              RECT bi={br-icoW,card.top+S(7),br,card.top+S(7)+icoW};
               drawIcon(dc,ICO_RECEIPT,bi,g_theme.accent,S(2));
-              SetTextColor(dc,g_theme.text); SelectObject(dc,g_fUIB);
-              RECT bt={bl,card.top+S(4),br-icoW-S(6),card.top+S(26)};
+              SetTextColor(dc,g_theme.sectionInk); SelectObject(dc,g_fSection);
+              RECT bt={bl,card.top+S(4),br-icoW-S(6),card.top+S(28)};
               DrawTextW(dc,L"صورت حساب",-1,&bt,
                   DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX); }
             int ry=card.top+S(30);
-            // group title (accent, bold-ish small) + money-row helpers
+            // group title (accent bold) + money-row helpers
             auto grp=[&](const wchar_t* g){
-                SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.accent);
+                SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.accent);
                 RECT gr={bl,ry,br,ry+S(20)};
                 DrawTextW(dc,g,-1,&gr,
                     DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
                 ry+=S(20);
             };
             auto row=[&](const wchar_t* k,long long val,COLORREF vc){
-                SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
+                SelectObject(dc,g_fLabel); SetTextColor(dc,g_theme.labelInk);
                 RECT kr={bl,ry,br,ry+S(20)};
                 DrawTextW(dc,k,-1,&kr,
                     DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
@@ -3276,8 +3298,8 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
 
             // ----- 3) «چاپ» group title (buttons positioned by tabPageLayout) -
             int prTop = recPrintGroupTop() - sy;
-            SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.text);
-            int icoW=S(16);
+            SelectObject(dc,g_fSection); SetTextColor(dc,g_theme.sectionInk);
+            int icoW=S(18);
             RECT pi={br-icoW,prTop,br,prTop+S(18)};
             drawIcon(dc,ICO_PRINT,pi,g_theme.accent,S(2));
             RECT pt={bl,prTop,br-icoW-S(6),prTop+S(18)};

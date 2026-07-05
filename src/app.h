@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.26.0"
+#define APP_VERSION_W   L"1.27.0"
 
 // ----------------------------------------------------------- logging policy -
 //  RELEASE 1.2.0 (Section A): all general user-behavior logging is gated behind
@@ -41,6 +41,10 @@ extern bool      g_dark;            // dark theme active
 
 // fonts (Vazirmatn, embedded)
 extern HFONT g_fUI, g_fUIB, g_fSmall, g_fTitle, g_fBig, g_fHuge, g_fMono;
+// v1.27.0 UI redesign: dedicated field-label font (13px medium — readable, not
+// tiny) and a stronger section-title font (16 bold). Used by the reception
+// admission form so labels never blend into the background.
+extern HFONT g_fLabel, g_fSection;
 // §G (1.11.0): a TRUE fixed-pitch font for section / personnel CODES so digits
 // align in a clean column. Falls back Consolas → Courier New at build time.
 extern HFONT g_fCode;
@@ -71,6 +75,8 @@ struct Theme {
     COLORREF border;      // borders / separators
     COLORREF text;        // primary text
     COLORREF textDim;     // secondary text
+    COLORREF labelInk;    // v1.27.0: form field labels — readable (#374151 light)
+    COLORREF sectionInk;  // v1.27.0: section titles — strong (#1F2937 light)
     COLORREF accent;      // primary accent
     COLORREF accent2;     // accent gradient end (for buttons/header)
     COLORREF accentHover;

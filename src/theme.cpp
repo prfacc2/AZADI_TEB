@@ -25,6 +25,8 @@ void applyTheme(bool dark){
         g_theme.border      = RGB(54, 62, 76);    // clearly visible separators
         g_theme.text        = RGB(238, 243, 249);
         g_theme.textDim     = RGB(170, 182, 198); // brighter dim text (legible)
+        g_theme.labelInk    = RGB(205, 214, 226); // dark theme: light-gray labels
+        g_theme.sectionInk  = RGB(238, 243, 249); // dark theme: bright titles
         g_theme.accent      = RGB(56, 170, 255);  // bright sky-blue
         g_theme.accent2     = RGB(30, 120, 220);  // gradient end
         g_theme.accentHover = RGB(96, 190, 255);
@@ -69,6 +71,8 @@ void applyTheme(bool dark){
         g_theme.border      = RGB(0xDC, 0xE6, 0xF2); // #DCE6F2 hairline
         g_theme.text        = RGB(0x23, 0x30, 0x42); // #233042 primary ink
         g_theme.textDim     = RGB(0x6B, 0x7A, 0x90); // #6B7A90 muted
+        g_theme.labelInk    = RGB(0x37, 0x41, 0x51); // #374151 readable labels
+        g_theme.sectionInk  = RGB(0x1F, 0x29, 0x37); // #1F2937 strong titles
         g_theme.accent      = RGB(0x19, 0x76, 0xF3); // #1976F3 primary actions
         g_theme.accent2     = RGB(0x2D, 0x8C, 0xFF); // #2D8CFF gradient end / hover
         g_theme.accentHover = RGB(0x2D, 0x8C, 0xFF); // #2D8CFF lighter accent on hover
