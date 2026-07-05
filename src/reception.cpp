@@ -387,11 +387,15 @@ static void recalc(TabPage* t){
 //  with an empty-state, and a row of four action buttons. The exact spacing,
 //  border radii, label-with-red-asterisk and light input wells reproduce the
 //  reference design.
-static const int RC_OUT = 12;   // outer page padding
-static const int RC_GAP = 10;   // gap between the three columns
-static const int RC_IN  = 14;   // inner card padding (center cards)
-static const int BILL_W = 208;  // billing card width  (LEFT)
-static const int INFO_W = 216;  // right info-panel width
+//  v1.27.0 UI CORRECTION — match the approved reference proportions:
+//  outer margin 16, gap between cards 14, internal card padding 16. The right
+//  sidebar is wider (~250px) and the left billing panel ~200px, so the CENTER
+//  keeps ~70% of the width (reference structure).
+static const int RC_OUT = 16;   // outer page padding
+static const int RC_GAP = 14;   // gap between the three columns
+static const int RC_IN  = 16;   // inner card padding (center cards)
+static const int BILL_W = 200;  // billing card width  (LEFT)
+static const int INFO_W = 250;  // right info-panel width
 
 //  ----- horizontal metrics: the three column bounds + center grid columns.
 //  cx[0..2] = LEFT edges of the 3 center columns (col 0 is the RIGHT-most in
@@ -494,62 +498,66 @@ struct CenterV {
 };
 static void computeCenterV(const RecH& m, CenterV& v, const TabPage* t, int H){
     (void)m;
-    //  v1.27.0 UI REDESIGN — the reference image demands readable labels, real
-    //  breathing room and a clear visual hierarchy. Inputs are ~34px, the label
-    //  band above each control is 18px (13px medium font + 5px gap), and the
-    //  row gap is 12px so labels never touch the control below them.
-    const int rh   = S(34);          // input height (was 28 — too compressed)
-    const int lbl  = S(20);          // label band above each input (font + gap)
-    const int rgap = S(12);          // gap between grid rows (min 10 required)
+    //  v1.27.0 UI CORRECTION — match the approved reference pixel-for-pixel:
+    //    • control height 38px (textboxes == comboboxes)
+    //    • label band 24px above each control = 13px medium label + 6px gap
+    //    • row gap 12px, column gap 12px, internal card padding 16px
+    //    • the TOP HALF (patient info + 3 cards) is given generous height so it
+    //      is NOT compressed; the two bottom tables fill the remaining space.
+    const int rh   = S(38);          // input height (reference == 38)
+    const int lbl  = S(22);          // label band (13px label + 6px gap)
+    const int rgap = S(12);          // gap between grid rows
+    const int hdr1 = S(40);          // patient-card header band (title + divider)
+    const int hdr3 = S(38);          // 3-card header band
     v.rh = rh; v.lbl = lbl;
     v.panelOpen = t ? t->svcPanelOpen : false;
     v.svcRows   = t ? (int)t->services.size() : 0;
     int y = S(RC_OUT);
     // ----- card 1: اطلاعات بیمار (3 rows × 3 cols) -----
     v.c1Top = y;
-    int rowsTop = y + S(40);                       // taller card header band
+    int rowsTop = y + hdr1;                         // header band
     for(int i=0;i<3;i++) v.r1y[i] = rowsTop + lbl + i*(lbl+rh+rgap);
-    v.c1Bot = v.r1y[2] + rh + S(14);
-    y = v.c1Bot + S(12);
+    v.c1Bot = v.r1y[2] + rh + S(14);                // bottom padding
+    y = v.c1Bot + S(RC_GAP);
     // ----- row of THREE cards -----
     v.dpTop = y;
-    int dpRowsTop = y + S(38);                      // taller header (section title)
+    int dpRowsTop = y + hdr3;                        // header (section title)
     v.dpR1y = dpRowsTop + lbl;
     v.dpR2y = v.dpR1y + rh + rgap + lbl;
     v.dpR3y = v.dpR2y + rh + rgap + lbl;
     v.dpBot = v.dpR3y + rh + S(14);
-    y = v.dpBot + S(12);
+    y = v.dpBot + S(RC_GAP);
     // ----- scheduling strip (single row) -----
     v.apTop = y;
-    v.apR1y = y + S(12) + lbl;
-    v.apBot = v.apR1y + rh + S(12);
-    y = v.apBot + S(12);
+    v.apR1y = y + S(14) + lbl;
+    v.apBot = v.apR1y + rh + S(14);
+    y = v.apBot + S(RC_GAP);
     // ----- TWO bottom panels — stretch to fill the remaining height -----
-    v.btnH = S(42);
+    v.btnH = S(46);                                // main action buttons 46-48px
     v.bTop = y;
-    int wantBot = H - S(RC_OUT) - v.btnH - S(12);  // panels end above buttons
-    int minBot  = v.bTop + S(180);                 // never collapse below this
+    int wantBot = H - S(RC_OUT) - v.btnH - S(RC_GAP);  // panels end above buttons
+    int minBot  = v.bTop + S(200);                 // never collapse below this
     v.bBot = wantBot > minBot ? wantBot : minBot;
-    // services panel internals
-    v.svcToolY = v.bTop + S(12);
-    int sy2 = v.svcToolY + rh + S(10);
-    if(v.panelOpen){ v.svcPanelY = sy2; sy2 += rh + S(10); }
+    // services panel internals — 44px toolbar, 40px header, 36px rows
+    v.svcToolY = v.bTop + S(14);
+    int sy2 = v.svcToolY + rh + S(12);
+    if(v.panelOpen){ v.svcPanelY = sy2; sy2 += rh + S(12); }
     else            v.svcPanelY = 0;
     v.svcHeadY = sy2;
-    v.svcBodyY = v.svcHeadY + S(30);               // 30px header (40 look, RTL)
-    v.svcFootY = v.bBot - S(32);
+    v.svcBodyY = v.svcHeadY + S(40);               // 40px header
+    v.svcFootY = v.bBot - S(36);
     v.svcBodyBot = v.svcFootY - S(4);
     if(v.svcBodyBot < v.svcBodyY) v.svcBodyBot = v.svcBodyY;
     // unpaid panel internals
-    v.upTabY  = v.bTop + S(12);
-    v.upToolY = v.upTabY + S(30) + S(8);
-    v.upHeadY = v.upToolY + rh + S(10);
-    v.upBodyY = v.upHeadY + S(30);
-    v.upFootY = v.bBot - S(30);
+    v.upTabY  = v.bTop + S(14);
+    v.upToolY = v.upTabY + S(32) + S(10);
+    v.upHeadY = v.upToolY + rh + S(12);
+    v.upBodyY = v.upHeadY + S(40);
+    v.upFootY = v.bBot - S(34);
     v.upBodyBot = v.upFootY - S(4);
     if(v.upBodyBot < v.upBodyY) v.upBodyBot = v.upBodyY;
     // ----- bottom buttons row -----
-    v.btnY = v.bBot + S(12);
+    v.btnY = v.bBot + S(RC_GAP);
     v.totalBot = v.btnY + v.btnH + S(RC_OUT);
     if(v.totalBot < H) v.totalBot = H;
 }
@@ -752,9 +760,10 @@ static void tabPageLayout(HWND h, TabPage* t){
         MoveWindow(t->cNType, gx(1), Y(v.dpR1y), gw, S(200), TRUE);
         MoveWindow(t->cIns,   gx(2), Y(v.dpR1y), gw, S(240), TRUE);
         MoveWindow(t->cSupp,  gx(3), Y(v.dpR1y), gw, S(240), TRUE);
-        // row2: مبلغ خدمت (ریال)* | سهم بیمه % | تخفیف (ریال)
-        MoveWindow(t->ePrice,    gx(0), Y(v.dpR2y), 2*gw+cgap, rh, TRUE);
-        MoveWindow(t->eDiscount, gx(2), Y(v.dpR2y), gw, rh, TRUE);
+        // row2: مبلغ خدمت (col0) | تخفیف (col1) | سهم بیمه ٪ chip (col2, painted)
+        //       | سهم بیمه تکمیلی ٪ chip (col3, painted)
+        MoveWindow(t->ePrice,    gx(0), Y(v.dpR2y), gw, rh, TRUE);
+        MoveWindow(t->eDiscount, gx(1), Y(v.dpR2y), gw, rh, TRUE);
         // (v.dpR3y band is used only by the پزشک معالج card — the بیمه card
         // paints the share percentages as read-only chips there.)
     }
@@ -2865,9 +2874,11 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             // — پزشک معالج (middle)
             card3(mc.docL,mc.docR,L"پزشک معالج",ICO_CROSS_MED);
             fieldLabel(mc.docL+in,v.dpR1y-v.lbl,mc.docR-mc.docL-2*in,L"شماره نظام پزشکی",false);
-            fieldLabel(mc.docL+in,v.dpR2y-v.lbl,mc.docR-mc.docL-2*in,L"نام و نام خانوادگی پزشک",false);
+            fieldLabel(mc.docL+in,v.dpR2y-v.lbl,mc.docR-mc.docL-2*in,L"نام پزشک",false);
             fieldLabel(mc.docL+in,v.dpR3y-v.lbl,mc.docR-mc.docL-2*in,L"درصد بیمه مکمل",false);
-            // — بیمه و نوبت (left, widest)
+            // — بیمه و نوبت (left, widest) — reference row layout:
+            //   row1: بیمه تکمیلی | نوع بیمه پایه | نوع نوبت | نوع پذیرش  (RTL)
+            //   row2: مبلغ خدمت | سهم بیمه | تخفیف | (سهم بیمه ٪ chip)   (RTL)
             card3(mc.insL,mc.insR,L"بیمه و نوبت",ICO_SHIELD);
             { int inL=mc.insL+in, inR=mc.insR-in;
               int gw=(inR-inL-3*cgap)/4;
@@ -2876,18 +2887,25 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
               fieldLabel(gx(1),v.dpR1y-v.lbl,gw,L"نوع نوبت",false);
               fieldLabel(gx(2),v.dpR1y-v.lbl,gw,L"نوع بیمه پایه",false);
               fieldLabel(gx(3),v.dpR1y-v.lbl,gw,L"بیمه تکمیلی",false);
-              fieldLabel(gx(0),v.dpR2y-v.lbl,2*gw+cgap,L"مبلغ خدمت (ریال)",true);
-              fieldLabel(gx(2),v.dpR2y-v.lbl,gw,L"تخفیف (ریال)",false);
-              fieldLabel(gx(3),v.dpR2y-v.lbl,gw,L"سهم بیمه",false);
-              // read-only share chip (سهم بیمه ٪) — third row band of the card
+              fieldLabel(gx(0),v.dpR2y-v.lbl,gw,L"مبلغ خدمت (ریال)",true);
+              fieldLabel(gx(1),v.dpR2y-v.lbl,gw,L"تخفیف (ریال)",false);
+              fieldLabel(gx(2),v.dpR2y-v.lbl,gw,L"سهم بیمه",false);
+              fieldLabel(gx(3),v.dpR2y-v.lbl,gw,L"سهم بیمه تکمیلی",false);
+              // read-only share chips: سهم بیمه ٪ (col2) + سهم مکمل ٪ (col3)
               { int insIdx=(int)SendMessageW(t->cIns,CB_GETCURSEL,0,0);
                 if(insIdx<0||insIdx>=N_INSURANCES) insIdx=0;
-                wchar_t pb[32]; swprintf(pb,32,L"%d ٪",INSURANCES[insIdx].pct);
-                RECT chip={gx(3),Y(v.dpR2y),gx(3)+gw,Y(v.dpR2y)+rh};
-                fillRoundRect(dc,chip,S(6),g_theme.surface2,g_theme.border);
-                SelectObject(dc,g_fUI); SetTextColor(dc,g_theme.text);
-                DrawTextW(dc,toFaDigits(pb).c_str(),-1,&chip,
-                    DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+                int suppIdx=(int)SendMessageW(t->cSupp,CB_GETCURSEL,0,0);
+                auto shareChip=[&](int col,int pct){
+                    wchar_t pb[24]; swprintf(pb,24,L"%d ٪",pct);
+                    RECT chip={gx(col),Y(v.dpR2y),gx(col)+gw,Y(v.dpR2y)+rh};
+                    fillRoundRect(dc,chip,S(6),g_theme.surface2,g_theme.border);
+                    SelectObject(dc,g_fUI); SetTextColor(dc,g_theme.text);
+                    DrawTextW(dc,toFaDigits(pb).c_str(),-1,&chip,
+                        DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+                };
+                shareChip(2, INSURANCES[insIdx].pct);
+                int suppPct=(suppIdx>0 && suppIdx<N_SUPP)?SUPP_INSURANCES[suppIdx].pct:0;
+                shareChip(3, suppPct);
               }
             }
         }
