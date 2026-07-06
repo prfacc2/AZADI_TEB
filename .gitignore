@@ -8,6 +8,9 @@ crashdumps/
 build/AzadiTeb_dbg.exe
 shot_*.png
 shots/
+# sandbox-only visual-verification helper scripts (wine + Xvfb screenshots)
+shot2.sh
+dbgbuild.sh
 scripts/*.tar.gz
 scripts/AzadiTeb_v*.exe
 # v1.4.0 runtime stores (never committed)
