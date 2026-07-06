@@ -506,11 +506,20 @@ static void computeCenterV(const RecH& m, CenterV& v, const TabPage* t, int H){
     //    • row gap 12px, column gap 12px, internal card padding 16px
     //    • the TOP HALF (patient info + 3 cards) is given generous height so it
     //      is NOT compressed; the two bottom tables fill the remaining space.
-    const int rh   = S(38);          // input height (reference == 38)
-    const int lbl  = S(22);          // label band (13px label + 6px gap)
-    const int rgap = S(12);          // gap between grid rows
-    const int hdr1 = S(40);          // patient-card header band (title + divider)
-    const int hdr3 = S(38);          // 3-card header band
+    //  v1.29.0 UI CORRECTION — pixel-match the approved reference AND guarantee
+    //  the WHOLE admission page fits inside one frame with NO page scrolling:
+    //    • top «اطلاعات بیمار» card ≈ 25% (3 rows × 3 cols)
+    //    • middle row of THREE cards ≈ 25%  — reference has only TWO field rows
+    //      (انجام دهنده = code + name; پزشک معالج = code + name; بیمه و نوبت =
+    //       row1 four combos + row2 «درصد بیمه تکمیل»). The 3rd row of the doctor
+    //       card (the DUPLICATE «درصد بیمه مکمل») is REMOVED.
+    //    • a very slim scheduling strip (تاریخ/شیفت نوبت)
+    //    • the two bottom tables fill the remaining ≈40% and never overflow.
+    const int rh   = S(34);          // input height (compact, reference-like)
+    const int lbl  = S(18);          // label band (13px label + gap)
+    const int rgap = S(8);           // gap between grid rows
+    const int hdr1 = S(32);          // patient-card header band (title + divider)
+    const int hdr3 = S(32);          // 3-card header band
     v.rh = rh; v.lbl = lbl;
     v.panelOpen = t ? t->svcPanelOpen : false;
     v.svcRows   = t ? (int)t->services.size() : 0;
@@ -519,26 +528,27 @@ static void computeCenterV(const RecH& m, CenterV& v, const TabPage* t, int H){
     v.c1Top = y;
     int rowsTop = y + hdr1;                         // header band
     for(int i=0;i<3;i++) v.r1y[i] = rowsTop + lbl + i*(lbl+rh+rgap);
-    v.c1Bot = v.r1y[2] + rh + S(14);                // bottom padding
+    v.c1Bot = v.r1y[2] + rh + S(10);                // bottom padding
     y = v.c1Bot + S(RC_GAP);
-    // ----- row of THREE cards -----
+    // ----- row of THREE cards (TWO field rows only) -----
     v.dpTop = y;
     int dpRowsTop = y + hdr3;                        // header (section title)
     v.dpR1y = dpRowsTop + lbl;
     v.dpR2y = v.dpR1y + rh + rgap + lbl;
-    v.dpR3y = v.dpR2y + rh + rgap + lbl;
-    v.dpBot = v.dpR3y + rh + S(14);
+    v.dpR3y = v.dpR2y;               // 3rd row RETIRED (no duplicate percentage)
+    v.dpBot = v.dpR2y + rh + S(10);
     y = v.dpBot + S(RC_GAP);
-    // ----- scheduling strip (single row) -----
-    v.apTop = y;
-    v.apR1y = y + S(14) + lbl;
-    v.apBot = v.apR1y + rh + S(14);
-    y = v.apBot + S(RC_GAP);
+    // ----- scheduling strip RETIRED -----
+    //  v1.29.0: تاریخ نوبت / شیفت نوبت moved INTO the «بیمه و نوبت» card 2nd row
+    //  (cols 0/1, next to «درصد بیمه تکمیل» on col3). This removes an entire
+    //  ~90px strip so the whole page fits on ONE frame with no scrolling. The
+    //  appointment controls now share the middle-row baselines (dpR2y).
+    v.apTop = v.dpBot; v.apR1y = v.dpR2y; v.apBot = v.dpBot;
     // ----- TWO bottom panels — stretch to fill the remaining height -----
-    v.btnH = S(46);                                // main action buttons 46-48px
+    v.btnH = S(44);                                // main action buttons
     v.bTop = y;
     int wantBot = H - S(RC_OUT) - v.btnH - S(RC_GAP);  // panels end above buttons
-    int minBot  = v.bTop + S(200);                 // never collapse below this
+    int minBot  = v.bTop + S(190);                 // never collapse below this
     v.bBot = wantBot > minBot ? wantBot : minBot;
     // services panel internals — 44px toolbar, 40px header, 36px rows
     v.svcToolY = v.bTop + S(14);
@@ -690,9 +700,16 @@ static int recClampScroll(HWND h, TabPage* t){
     return maxS;
 }
 //  Sync the WS_VSCROLL thumb to the current scroll state.
+//  v1.29.0: when the whole page fits (VH<=client height) the vertical scrollbar
+//  is HIDDEN entirely so the admission screen reads as a single, fixed frame
+//  (the reference «no page scrolling» requirement). It reappears automatically
+//  only if a very small display would otherwise clip content.
 static void recUpdateScrollbar(HWND h, TabPage* t){
     RECT rc; GetClientRect(h,&rc);
     int VH=recPageVH(rc.right,rc.bottom,t);
+    bool needScroll = VH > rc.bottom;
+    ShowScrollBar(h, SB_VERT, needScroll);
+    if(!needScroll){ t->scrollY=0; return; }
     SCROLLINFO si={sizeof(si)};
     si.fMask=SIF_RANGE|SIF_PAGE|SIF_POS;
     si.nMin=0; si.nMax=VH-1; si.nPage=rc.bottom; si.nPos=t->scrollY;
@@ -750,11 +767,15 @@ static void tabPageLayout(HWND h, TabPage* t){
         int pfL=mc.perfL+in, pfW=mc.perfR-in-pfL;
         MoveWindow(t->ePerfCode, pfL, Y(v.dpR1y), pfW, rh, TRUE);
         MoveWindow(t->cPerfList, pfL, Y(v.dpR2y), pfW, S(240), TRUE);
-        // — پزشک معالج (¼): code + name + supp-pct (3 rows)
+        // — پزشک معالج (¼): code + name (2 rows). The 3rd «درصد بیمه مکمل»
+        //   row is REMOVED — the SINGLE complementary-percentage field lives in
+        //   the «بیمه و نوبت» card (eSuppPctIns). eSuppPct2 is kept alive but
+        //   hidden so any legacy read still works.
         int dcL=mc.docL+in, dcW=mc.docR-in-dcL;
         MoveWindow(t->eDoc2Code, dcL, Y(v.dpR1y), dcW, rh, TRUE);
         MoveWindow(t->cDoc2List, dcL, Y(v.dpR2y), dcW, S(240), TRUE);
-        MoveWindow(t->eSuppPct2, dcL, Y(v.dpR3y), dcW, rh, TRUE);
+        MoveWindow(t->eSuppPct2, 0, 0, 0, 0, FALSE);
+        ShowWindow(t->eSuppPct2, SW_HIDE);
         // — بیمه و نوبت (left ~½): 2 rows × 4 fields (RTL inside the card)
         int inL=mc.insL+in, inR=mc.insR-in;
         int gw=(inR-inL-3*cgap)/4;
@@ -764,33 +785,32 @@ static void tabPageLayout(HWND h, TabPage* t){
         MoveWindow(t->cNType, gx(1), Y(v.dpR1y), gw, S(200), TRUE);
         MoveWindow(t->cIns,   gx(2), Y(v.dpR1y), gw, S(240), TRUE);
         MoveWindow(t->cSupp,  gx(3), Y(v.dpR1y), gw, S(240), TRUE);
-        // row2: درصد بیمه تکمیل ٪  (ONE percentage field, under «بیمه تکمیلی»).
-        //  All manual PRICE fields (مبلغ خدمت / تخفیف / سهم بیمه chips) belong to
-        //  Management and are REMOVED from the admission UI. ePrice/eDiscount are
-        //  kept alive (hidden) so the auto-tariff billing recalc still works.
+        // row2 (RTL inside «بیمه و نوبت»):
+        //   col3 → درصد بیمه تکمیل ٪  (the ONE complementary-percentage field)
+        //   col2 → شیفت نوبت
+        //   col1 → تاریخ نوبت
+        //   col0 → (free)
+        //  The separate scheduling strip is RETIRED (v1.29.0) so the whole page
+        //  fits on one frame with no scrolling. All manual PRICE fields belong to
+        //  Management and are hidden (ePrice/eDiscount kept alive for the
+        //  auto-tariff billing recalc).
         MoveWindow(t->eSuppPctIns, gx(3), Y(v.dpR2y), gw, rh, TRUE);
         ShowWindow(t->eSuppPctIns, SW_SHOW);
+        MoveWindow(t->cApptShift, gx(2), Y(v.dpR2y), gw, S(200), TRUE);
+        MoveWindow(t->eApptDate,  gx(1), Y(v.dpR2y), gw, rh, TRUE);
+        ShowWindow(t->cApptShift, SW_SHOW);
+        ShowWindow(t->eApptDate,  SW_SHOW);
         MoveWindow(t->ePrice,    0, 0, 0, 0, FALSE);
         MoveWindow(t->eDiscount, 0, 0, 0, 0, FALSE);
         ShowWindow(t->ePrice,    SW_HIDE);
         ShowWindow(t->eDiscount, SW_HIDE);
-    }
-    ShowWindow(t->chkIns, SW_HIDE);
-
-    // ===== scheduling strip: تاریخ نوبت | شیفت نوبت (only) =====
-    //  The old پیش‌نمایش P/S preview + the duplicate P/S numeric wells are
-    //  REMOVED — the single P/S location is the right sidebar profile card.
-    {
-        int aw=S(140);
-        int x=m.formR;
-        x-=aw;         MoveWindow(t->eApptDate,  x, Y(v.apR1y), aw, rh, TRUE);
-        x-=cgap+aw;    MoveWindow(t->cApptShift, x, Y(v.apR1y), aw, S(200), TRUE);
-        // hide the duplicate P/S numeric wells that used to sit in this strip
+        // hide the duplicate P/S numeric wells that used to sit in the strip
         MoveWindow(t->eApptS, 0,0,0,0, FALSE);
         MoveWindow(t->eApptP, 0,0,0,0, FALSE);
         ShowWindow(t->eApptS, SW_HIDE);
         ShowWindow(t->eApptP, SW_HIDE);
     }
+    ShowWindow(t->chkIns, SW_HIDE);
 
     // ===== bottom RIGHT panel: خدمات (toolbar + optional inline add row) =====
     {
@@ -2947,11 +2967,10 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             card3(mc.perfL,mc.perfR,L"انجام دهنده",ICO_USER);
             fieldLabel(mc.perfL+in,v.dpR1y-v.lbl,mc.perfR-mc.perfL-2*in,L"کد انجام دهنده",false);
             fieldLabel(mc.perfL+in,v.dpR2y-v.lbl,mc.perfR-mc.perfL-2*in,L"نام انجام دهنده",false);
-            // — پزشک معالج (middle)
+            // — پزشک معالج (middle) — 2 rows only (no duplicate percentage)
             card3(mc.docL,mc.docR,L"پزشک معالج",ICO_CROSS_MED);
             fieldLabel(mc.docL+in,v.dpR1y-v.lbl,mc.docR-mc.docL-2*in,L"شماره نظام پزشکی",false);
             fieldLabel(mc.docL+in,v.dpR2y-v.lbl,mc.docR-mc.docL-2*in,L"نام پزشک",false);
-            fieldLabel(mc.docL+in,v.dpR3y-v.lbl,mc.docR-mc.docL-2*in,L"درصد بیمه مکمل",false);
             // — بیمه و نوبت (left, widest) — reference row layout:
             //   row1: بیمه تکمیلی | نوع بیمه پایه | نوع نوبت | نوع پذیرش  (RTL)
             //   row2: مبلغ خدمت | سهم بیمه | تخفیف | (سهم بیمه ٪ chip)   (RTL)
@@ -2964,30 +2983,21 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
               fieldLabel(gx(1),v.dpR1y-v.lbl,gw,L"نوع نوبت",false);
               fieldLabel(gx(2),v.dpR1y-v.lbl,gw,L"نوع بیمه",false);
               fieldLabel(gx(3),v.dpR1y-v.lbl,gw,L"بیمه تکمیلی",false);
-              //  row2: ONLY «درصد بیمه تکمیل ٪» under «بیمه تکمیلی» (col3).
-              //  No price / discount / insurance-share fields on the admission
-              //  page anymore.
+              //  row2 (RTL): col3 «درصد بیمه تکمیل ٪» | col2 «شیفت نوبت» |
+              //  col1 «تاریخ نوبت» | col0 free. No price/discount/share fields.
               fieldLabel(gx(3),v.dpR2y-v.lbl,gw,L"درصد بیمه تکمیل",false);
               { RECT pu={gx(3)+gw-S(20),Y(v.dpR2y),gx(3)+gw,Y(v.dpR2y)+rh};
                 SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
                 DrawTextW(dc,L"٪",-1,&pu,DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX); }
+              fieldLabel(gx(2),v.dpR2y-v.lbl,gw,L"شیفت نوبت",false);
+              fieldLabel(gx(1),v.dpR2y-v.lbl,gw,L"تاریخ نوبت",false);
             }
-        }
-
-        // ===== SCHEDULING STRIP: تاریخ نوبت | شیفت نوبت (only) =====
-        //  The old پیش‌نمایش P/S preview and the duplicate P/S wells were
-        //  removed — the single P/S location is the right-sidebar profile card.
-        {
-            RECT cr={m.cardL,Y(v.apTop),m.cardR,Y(v.apBot)};
-            gpRoundRectBg(dc,cr,S(12),g_theme.surface,g_theme.border,g_theme.bg);
-            int aw=S(140);
-            int x=formR;
-            fieldLabel(x-aw,v.apR1y-v.lbl,aw,L"تاریخ نوبت",false);
-            x-=aw+cgap;
-            fieldLabel(x-aw,v.apR1y-v.lbl,aw,L"شیفت نوبت",false);
-            // clear the stale preview hit-rects so clicks in this area are inert
+            // clear the stale preview hit-rects so clicks in that old area are inert
             SetRectEmpty(&s_psPRect); SetRectEmpty(&s_psSRect);
         }
+        // ===== SCHEDULING STRIP RETIRED (v1.29.0) =====
+        //  تاریخ/شیفت نوبت now live inside the «بیمه و نوبت» card (row 2) so the
+        //  whole admission page fits on one frame without any page scrolling.
 
         // ==== BOTTOM RIGHT PANEL: خدمات table (matches the reference) ====
         {
