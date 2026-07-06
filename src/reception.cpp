@@ -515,62 +515,91 @@ static void computeCenterV(const RecH& m, CenterV& v, const TabPage* t, int H){
     //       card (the DUPLICATE «درصد بیمه مکمل») is REMOVED.
     //    • a very slim scheduling strip (تاریخ/شیفت نوبت)
     //    • the two bottom tables fill the remaining ≈40% and never overflow.
-    const int rh   = S(34);          // input height (compact, reference-like)
-    const int lbl  = S(18);          // label band (13px label + gap)
-    const int rgap = S(8);           // gap between grid rows
-    const int hdr1 = S(32);          // patient-card header band (title + divider)
-    const int hdr3 = S(32);          // 3-card header band
-    v.rh = rh; v.lbl = lbl;
+    //  v1.30.0 RESPONSIVE FIX — the center column now measures its own natural
+    //  height (patient card + the row of three cards + the two bottom tables +
+    //  action buttons) and shrinks its row heights / gaps by ONE fit-factor when
+    //  that natural height would exceed the frame. This guarantees the whole
+    //  admission page fits on ONE frame at every resolution — no bottom overflow,
+    //  no clipped controls, no page scrolling — while giving controls generous,
+    //  readable heights (40px) and clear label→control spacing whenever there is
+    //  room. The two bottom tables always absorb the remaining slack so they
+    //  stretch to the buttons row without pushing anything off-screen.
+
+    //  Two bottom tables need at least this much to stay usable (header + a few
+    //  rows + footer). Everything above them is the "fixed" region we may shrink.
+    auto plan=[&](double f)->int{
+        auto SF=[&](int px){ int r=(int)(S(px)*f+0.5); return r<1?1:r; };
+        const int rh   = SF(40);   // control height (textbox == combobox)
+        const int lbl  = SF(22);   // label band (13-14px label + 6-8px gap)
+        const int rgap = SF(12);   // gap between grid rows
+        const int hdr1 = SF(38);   // patient-card header band (title + divider)
+        const int hdr3 = SF(38);   // 3-card header band
+        const int gap  = SF(RC_GAP);
+        const int out  = SF(RC_OUT);
+        v.rh = rh; v.lbl = lbl;
+        int y = out;
+        // ----- card 1: اطلاعات بیمار (3 rows × 3 cols) -----
+        v.c1Top = y;
+        int rowsTop = y + hdr1;
+        for(int i=0;i<3;i++) v.r1y[i] = rowsTop + lbl + i*(lbl+rh+rgap);
+        v.c1Bot = v.r1y[2] + rh + SF(14);
+        y = v.c1Bot + gap;
+        // ----- row of THREE cards (TWO field rows only) -----
+        v.dpTop = y;
+        int dpRowsTop = y + hdr3;
+        v.dpR1y = dpRowsTop + lbl;
+        v.dpR2y = v.dpR1y + rh + rgap + lbl;
+        v.dpR3y = v.dpR2y;               // 3rd row RETIRED (no dup percentage)
+        v.dpBot = v.dpR2y + rh + SF(14);
+        y = v.dpBot + gap;
+        v.apTop = v.dpBot; v.apR1y = v.dpR2y; v.apBot = v.dpBot;
+        // ----- bottom action buttons + the two tables region -----
+        v.btnH = SF(44);
+        v.bTop = y;
+        v.btnY = 0;                      // filled by caller after v.bBot known
+        // natural height demanded by the fixed region + a minimum table band
+        int minTable = SF(180);
+        return v.bTop + minTable + gap + v.btnH + out;
+    };
+
     v.panelOpen = t ? t->svcPanelOpen : false;
     v.svcRows   = t ? (int)t->services.size() : 0;
-    int y = S(RC_OUT);
-    // ----- card 1: اطلاعات بیمار (3 rows × 3 cols) -----
-    v.c1Top = y;
-    int rowsTop = y + hdr1;                         // header band
-    for(int i=0;i<3;i++) v.r1y[i] = rowsTop + lbl + i*(lbl+rh+rgap);
-    v.c1Bot = v.r1y[2] + rh + S(10);                // bottom padding
-    y = v.c1Bot + S(RC_GAP);
-    // ----- row of THREE cards (TWO field rows only) -----
-    v.dpTop = y;
-    int dpRowsTop = y + hdr3;                        // header (section title)
-    v.dpR1y = dpRowsTop + lbl;
-    v.dpR2y = v.dpR1y + rh + rgap + lbl;
-    v.dpR3y = v.dpR2y;               // 3rd row RETIRED (no duplicate percentage)
-    v.dpBot = v.dpR2y + rh + S(10);
-    y = v.dpBot + S(RC_GAP);
-    // ----- scheduling strip RETIRED -----
-    //  v1.29.0: تاریخ نوبت / شیفت نوبت moved INTO the «بیمه و نوبت» card 2nd row
-    //  (cols 0/1, next to «درصد بیمه تکمیل» on col3). This removes an entire
-    //  ~90px strip so the whole page fits on ONE frame with no scrolling. The
-    //  appointment controls now share the middle-row baselines (dpR2y).
-    v.apTop = v.dpBot; v.apR1y = v.dpR2y; v.apBot = v.dpBot;
-    // ----- TWO bottom panels — stretch to fill the remaining height -----
-    v.btnH = S(44);                                // main action buttons
-    v.bTop = y;
-    int wantBot = H - S(RC_OUT) - v.btnH - S(RC_GAP);  // panels end above buttons
-    int minBot  = v.bTop + S(190);                 // never collapse below this
+
+    int natural = plan(1.0);
+    if(natural > H){
+        double f = (double)H / (double)natural;
+        if(f<0.66) f=0.66;               // never crush below readable
+        if(f>1.0)  f=1.0;
+        plan(f);
+    }
+
+    // ----- the two bottom tables absorb all remaining vertical slack -----
+    const int gap = (int)(S(RC_GAP)*((double)v.rh/S(40))+0.5);
+    const int out = (int)(S(RC_OUT)*((double)v.rh/S(40))+0.5);
+    int wantBot = H - out - v.btnH - gap;            // panels end above buttons
+    int minBot  = v.bTop + (int)(S(180)*((double)v.rh/S(40))+0.5);
     v.bBot = wantBot > minBot ? wantBot : minBot;
-    // services panel internals — 44px toolbar, 40px header, 36px rows
+    // services panel internals
     v.svcToolY = v.bTop + S(14);
-    int sy2 = v.svcToolY + rh + S(12);
-    if(v.panelOpen){ v.svcPanelY = sy2; sy2 += rh + S(12); }
+    int sy2 = v.svcToolY + v.rh + S(12);
+    if(v.panelOpen){ v.svcPanelY = sy2; sy2 += v.rh + S(12); }
     else            v.svcPanelY = 0;
     v.svcHeadY = sy2;
-    v.svcBodyY = v.svcHeadY + S(40);               // 40px header
+    v.svcBodyY = v.svcHeadY + S(40);
     v.svcFootY = v.bBot - S(36);
     v.svcBodyBot = v.svcFootY - S(4);
     if(v.svcBodyBot < v.svcBodyY) v.svcBodyBot = v.svcBodyY;
     // unpaid panel internals
     v.upTabY  = v.bTop + S(14);
     v.upToolY = v.upTabY + S(32) + S(10);
-    v.upHeadY = v.upToolY + rh + S(12);
+    v.upHeadY = v.upToolY + v.rh + S(12);
     v.upBodyY = v.upHeadY + S(40);
     v.upFootY = v.bBot - S(34);
     v.upBodyBot = v.upFootY - S(4);
     if(v.upBodyBot < v.upBodyY) v.upBodyBot = v.upBodyY;
     // ----- bottom buttons row -----
-    v.btnY = v.bBot + S(RC_GAP);
-    v.totalBot = v.btnY + v.btnH + S(RC_OUT);
+    v.btnY = v.bBot + gap;
+    v.totalBot = v.btnY + v.btnH + out;
     if(v.totalBot < H) v.totalBot = H;
 }
 //  Natural full height the center form needs (for the scroll decision). When
@@ -613,45 +642,68 @@ struct InfoLayout {
     int rh2, gp, btnW, lblH;
 };
 static void computeInfoLayout(int infoL, int infoR, int H, InfoLayout& L){
-    //  v1.26.0: compressed so the whole panel fits on ONE screen at 1024×600
-    //  (no scrolling needed — the reference design requirement).
+    //  v1.30.0 RESPONSIVE FIX — the RIGHT info panel is the tallest column and
+    //  used to overflow the frame bottom (clipping «پزشک معالج») and force the
+    //  whole page to scroll. It now measures its own natural height and, when
+    //  that exceeds the available panel height, shrinks its row heights and gaps
+    //  by a single fit-factor so the LAST control always sits above cardBot with
+    //  a safe margin. This guarantees the panel fits on ONE frame at 1366×768,
+    //  1600×900 and 1920×1080 with no clipping and no page scrolling, while
+    //  keeping generous, readable spacing whenever there is room.
     int ipad=S(12);
     L.iL=infoL+ipad; L.iR=infoR-ipad; L.iw=L.iR-L.iL;
     L.cardTop=S(RC_OUT); L.cardBot=H-S(RC_OUT);
-    L.rh2=S(32); L.gp=S(6); L.btnW=S(52); L.lblH=S(17);
-    // --- header zone (matches painter) ---
-    //  smaller avatar + «بیمار جدید/کد پرونده» caption + green «نسخه الکترونیک»
-    //  chip + a row of two counter boxes (نسخه سرپایی / نسخه الکترونیکی).
-    L.avR=S(26); L.avCx=(L.iL+L.iR)/2; L.avCy=L.cardTop+S(10)+L.avR;
-    int y=L.avCy+L.avR+S(6);
-    y += S(32);                          // «بیمار جدید» + «کد پرونده» two lines
-    L.chipH=S(22); L.chipY=y;            y+=L.chipH+S(8);
-    L.boxH =S(38); L.boxY =y;            y+=L.boxH +S(8);  // two counter boxes
-    //  P (yellow) / S (green) squares — the SINGLE location, right under the
-    //  «نسخه الکترونیک» area (all duplicates elsewhere were removed).
-    L.psH  =S(40);  L.psY  =y;           y+=L.psH  +S(10);
-    int lblGap=S(4);   // gap between a label line and its control (breathing room)
-    int rowGap=S(10);  // gap between control rows
-    int grpGap=S(14);  // gap before next group title
-    auto labelled=[&](int& lblY,int& ctlY){
-        lblY=y; y+=L.lblH+lblGap; ctlY=y; y+=L.rh2+rowGap;
+    int avail = L.cardBot - L.cardTop;                 // usable panel height
+
+    //  Pass 1: lay the panel out at the PREFERRED (generous) metrics, then
+    //  measure the natural bottom. Pass 2 re-runs with a shrink factor if needed.
+    auto build=[&](double f)->int{
+        auto SF=[&](int px){ int r=(int)(S(px)*f+0.5); return r<1?1:r; };
+        L.rh2 = SF(38); L.gp = SF(6); L.btnW = S(52); L.lblH = SF(16);
+        // --- header zone (matches painter) ---
+        L.avR = SF(26); L.avCx=(L.iL+L.iR)/2; L.avCy=L.cardTop+SF(10)+L.avR;
+        int y=L.avCy+L.avR+SF(6);
+        y += SF(32);                     // «بیمار جدید» + «کد پرونده» two lines
+        L.chipH=SF(22); L.chipY=y;       y+=L.chipH+SF(8);
+        L.boxH =SF(38); L.boxY =y;       y+=L.boxH +SF(8);  // two counter boxes
+        //  P (yellow) / S (green) squares — the SINGLE location, right under the
+        //  «نسخه الکترونیک» area (all duplicates elsewhere were removed).
+        L.psH  =SF(40); L.psY  =y;       y+=L.psH  +SF(12);
+        int lblGap=SF(5);   // label → its control
+        int rowGap=SF(12);  // control row → next control row
+        int grpGap=SF(16);  // gap before next group title
+        int titleH=SF(22);
+        auto labelled=[&](int& lblY,int& ctlY){
+            lblY=y; y+=L.lblH+lblGap; ctlY=y; y+=L.rh2+rowGap;
+        };
+        // group 1 — جستجو و فیلتر
+        L.g1TitleY=y; y+=titleH;
+        labelled(L.archiveLblY,L.archiveY);
+        labelled(L.fileLblY,   L.fileY);
+        y+=grpGap-rowGap;
+        // group 2 — بیمه
+        L.g2TitleY=y; y+=titleH;
+        labelled(L.bookLblY, L.bookY);
+        labelled(L.validLblY,L.validY);
+        labelled(L.rxLblY,   L.rxY);
+        labelled(L.suppLblY, L.suppY);
+        y+=grpGap-rowGap;
+        // group 3 — پزشک معالج
+        L.g3TitleY=y; y+=titleH;
+        labelled(L.docCodeLblY,L.docCodeY);
+        labelled(L.docNameLblY,L.docNameY);
+        return y + L.rh2 + SF(14);        // natural bottom (last control + pad)
     };
-    // group 1 — جستجو و فیلتر
-    L.g1TitleY=y; y+=S(20);
-    labelled(L.archiveLblY,L.archiveY);
-    labelled(L.fileLblY,   L.fileY);
-    y+=grpGap-rowGap;
-    // group 2 — بیمه
-    L.g2TitleY=y; y+=S(20);
-    labelled(L.bookLblY, L.bookY);
-    labelled(L.validLblY,L.validY);
-    labelled(L.rxLblY,   L.rxY);
-    labelled(L.suppLblY, L.suppY);
-    y+=grpGap-rowGap;
-    // group 3 — پزشک معالج
-    L.g3TitleY=y; y+=S(20);
-    labelled(L.docCodeLblY,L.docCodeY);
-    labelled(L.docNameLblY,L.docNameY);
+    int natural = build(1.0);
+    if(natural > L.cardBot){
+        // shrink uniformly so the natural bottom == cardBot (with a tiny margin)
+        int headroom = avail;            // full panel height is the target
+        int growable = natural - L.cardTop;
+        double f = growable>0 ? (double)headroom / (double)growable : 1.0;
+        if(f<0.62) f=0.62;               // never crush below readable
+        if(f>1.0)  f=1.0;
+        build(f);
+    }
 }
 
 //  v2: the virtual page height — the taller of the visible client area and the
