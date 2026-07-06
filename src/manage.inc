@@ -27,8 +27,8 @@
 // panel — index 1, right after the dashboard (RTL: visually first after it).
 // It was previously only reachable from the hidden-admin panel, which was the
 // wrong surface. The hidden-admin patients tab is removed (see admin.cpp).
-enum { PG_DASH=0, PG_PATIENTS=1, PG_SECTS=2, PG_EMPS=3, PG_MSG=4, PG_REQS=5,
-       PG_SAVED=6, PG_BACKUP=7, PG_PRINTCFG=8, PG_COUNT=9 };
+enum { PG_DASH=0, PG_PATIENTS=1, PG_SECTS=2, PG_SERVICES=3, PG_EMPS=4, PG_MSG=5,
+       PG_REQS=6, PG_SAVED=7, PG_BACKUP=8, PG_PRINTCFG=9, PG_COUNT=10 };
 
 // control ids
 enum {
@@ -46,6 +46,21 @@ enum {
     MG_CARD_BASE=2200,     // clicking a section card
     MG_DETAIL_BASE=2400,   // clicking an employee row
     MG_QA_BASE=2600,       // dashboard quick-action tiles
+    // ---- v1.28.0: مدیریت خدمات (Service Management) page ----
+    MG_SV_CODE=2700,       // کد خدمت
+    MG_SV_NAME,            // نام خدمت
+    MG_SV_CAT,             // دسته
+    MG_SV_DEPT,            // بخش (combo)
+    MG_SV_PRICE,           // مبلغ پایه
+    MG_SV_INS,             // نوع بیمه (combo)
+    MG_SV_STATUS,          // وضعیت (combo: فعال/غیرفعال)
+    MG_SV_DESC,            // توضیحات
+    MG_SV_SAVE,            // ذخیره / افزودن
+    MG_SV_EDIT,            // ویرایش (بارگذاری ردیف انتخابی در فرم)
+    MG_SV_DELETE,          // حذف
+    MG_SV_CLEAR,           // فرم جدید (پاک کردن)
+    MG_SV_SEARCH,          // جستجو
+    MG_SV_LIST,            // جدول خدمات (ListView)
 };
 
 struct EmpRow {
@@ -86,6 +101,16 @@ struct ManageState {
     std::vector<int> ptView;    // indices into *ptAll after filtering
     std::wstring ptQuery;       // last applied search text
     bool ptLoading=false, ptLoaded=false;
+    // ---- services page (v1.28.0) ----
+    HWND svCode=nullptr, svName=nullptr, svCat=nullptr, svDept=nullptr,
+         svPrice=nullptr, svIns=nullptr, svStatus=nullptr, svDesc=nullptr,
+         svSave=nullptr, svEdit=nullptr, svDelete=nullptr, svClear=nullptr,
+         svSearch=nullptr, svList=nullptr;
+    std::vector<ServiceDef> svAll;      // all services (loaded)
+    std::vector<int>        svView;     // filtered indices into svAll
+    std::wstring            svQuery;    // last search text
+    std::wstring            svEditCode; // code currently loaded in the form ("" = new)
+    bool                    svLoaded=false;
 };
 // background patient loader → UI thread marshal (no HWND access off-thread)
 #define WM_MG_PATIENTS_READY (WM_APP+74)
@@ -142,6 +167,156 @@ static void mgPatientsLoadAsync(HWND h){
         if(IsWindow(target)) PostMessageW(target,WM_MG_PATIENTS_READY,0,(LPARAM)vec);
         else delete vec;
     }).detach();
+}
+
+// ================================================= SERVICES PAGE (v1.28.0) ==
+//  In-memory model, filter, and form <-> record helpers for «مدیریت خدمات».
+static void mgServicesFilter(){
+    if(!s_mg) return;
+    std::wstring q=uikit::NormalizeFa(trim(s_mg->svQuery));
+    s_mg->svView.clear();
+    s_mg->svView.reserve(s_mg->svAll.size());
+    for(int i=0;i<(int)s_mg->svAll.size();++i){
+        const ServiceDef& s=s_mg->svAll[i];
+        if(q.empty()){ s_mg->svView.push_back(i); continue; }
+        std::wstring code=uikit::NormalizeFa(s.code);
+        std::wstring name=uikit::NormalizeFa(s.name);
+        std::wstring cat =uikit::NormalizeFa(s.category);
+        if(code.find(q)!=std::wstring::npos ||
+           name.find(q)!=std::wstring::npos ||
+           cat.find(q)!=std::wstring::npos)
+            s_mg->svView.push_back(i);
+    }
+    if(s_mg->svList){
+        ListView_SetItemCountEx(s_mg->svList,(int)s_mg->svView.size(),
+            LVSICF_NOINVALIDATEALL|LVSICF_NOSCROLL);
+        InvalidateRect(s_mg->svList,NULL,FALSE);
+    }
+}
+//  (Re)populate the department combo for the services form from the live
+//  section list, then apply the current filter and refresh the table.
+static void mgServicesReload(){
+    if(!s_mg) return;
+    s_mg->svAll=loadServices();
+    s_mg->svLoaded=true;
+    // department combo: «— همه —»/blank first, then each section.
+    if(s_mg->svDept){
+        std::wstring cur; { wchar_t b[128]={0}; GetWindowTextW(s_mg->svDept,b,128); cur=b; }
+        SendMessageW(s_mg->svDept,CB_RESETCONTENT,0,0);
+        auto cats=loadDepts();
+        SendMessageW(s_mg->svDept,CB_ADDSTRING,0,(LPARAM)L"—");
+        for(auto&c:cats) SendMessageW(s_mg->svDept,CB_ADDSTRING,0,(LPARAM)c.name.c_str());
+        int idx=0;
+        if(!cur.empty()){
+            for(int i=0;i<(int)cats.size();++i) if(cats[i].name==cur){ idx=i+1; break; }
+        }
+        SendMessageW(s_mg->svDept,CB_SETCURSEL,idx,0);
+    }
+    mgServicesFilter();
+}
+//  Clear the form for a NEW service.
+static void mgServicesClearForm(){
+    if(!s_mg) return;
+    SetWindowTextW(s_mg->svCode,L"");
+    SetWindowTextW(s_mg->svName,L"");
+    SetWindowTextW(s_mg->svCat, L"");
+    SetWindowTextW(s_mg->svPrice,L"");
+    SetWindowTextW(s_mg->svDesc,L"");
+    if(s_mg->svDept)   SendMessageW(s_mg->svDept,CB_SETCURSEL,0,0);
+    if(s_mg->svIns)    SendMessageW(s_mg->svIns,CB_SETCURSEL,0,0);
+    if(s_mg->svStatus) SendMessageW(s_mg->svStatus,CB_SETCURSEL,0,0);
+    s_mg->svEditCode.clear();
+}
+//  Load a record into the form (for editing).
+static void mgServicesLoadForm(const ServiceDef& s){
+    if(!s_mg) return;
+    SetWindowTextW(s_mg->svCode,s.code.c_str());
+    SetWindowTextW(s_mg->svName,s.name.c_str());
+    SetWindowTextW(s_mg->svCat, s.category.c_str());
+    { wchar_t pb[32]; swprintf(pb,32,L"%lld",s.price); SetWindowTextW(s_mg->svPrice,pb); }
+    SetWindowTextW(s_mg->svDesc,s.desc.c_str());
+    // department combo by name
+    if(s_mg->svDept){
+        int n=(int)SendMessageW(s_mg->svDept,CB_GETCOUNT,0,0), sel=0;
+        for(int i=0;i<n;i++){ wchar_t b[128]={0};
+            SendMessageW(s_mg->svDept,CB_GETLBTEXT,i,(LPARAM)b);
+            if(s.dept==b){ sel=i; break; } }
+        SendMessageW(s_mg->svDept,CB_SETCURSEL,sel,0);
+    }
+    if(s_mg->svIns){
+        int n=(int)SendMessageW(s_mg->svIns,CB_GETCOUNT,0,0), sel=0;
+        for(int i=0;i<n;i++){ wchar_t b[128]={0};
+            SendMessageW(s_mg->svIns,CB_GETLBTEXT,i,(LPARAM)b);
+            if(s.insType==b){ sel=i; break; } }
+        SendMessageW(s_mg->svIns,CB_SETCURSEL,sel,0);
+    }
+    if(s_mg->svStatus) SendMessageW(s_mg->svStatus,CB_SETCURSEL,s.status?0:1,0);
+    s_mg->svEditCode=s.code;
+}
+//  Read the form into a ServiceDef.
+static ServiceDef mgServicesReadForm(){
+    ServiceDef s;
+    if(!s_mg) return s;
+    wchar_t b[512]={0};
+    GetWindowTextW(s_mg->svCode,b,512);  s.code=trim(b);
+    GetWindowTextW(s_mg->svName,b,512);  s.name=trim(b);
+    GetWindowTextW(s_mg->svCat, b,512);  s.category=trim(b);
+    GetWindowTextW(s_mg->svPrice,b,512); s.price=parseMoney(b);
+    GetWindowTextW(s_mg->svDesc,b,512);  s.desc=trim(b);
+    if(s_mg->svDept){ wchar_t d[128]={0};
+        int sel=(int)SendMessageW(s_mg->svDept,CB_GETCURSEL,0,0);
+        if(sel>0){ SendMessageW(s_mg->svDept,CB_GETLBTEXT,sel,(LPARAM)d); s.dept=d; } }
+    if(s_mg->svIns){ wchar_t it[128]={0};
+        int sel=(int)SendMessageW(s_mg->svIns,CB_GETCURSEL,0,0); if(sel<0) sel=0;
+        SendMessageW(s_mg->svIns,CB_GETLBTEXT,sel,(LPARAM)it); s.insType=it; }
+    s.status = (SendMessageW(s_mg->svStatus,CB_GETCURSEL,0,0)==1)?0:1;
+    return s;
+}
+//  «ذخیره» — insert a new service or update the one loaded in the form.
+static void mgServicesSave(HWND h){
+    if(!s_mg) return;
+    ServiceDef s=mgServicesReadForm();
+    std::wstring err; bool ok;
+    if(!s_mg->svEditCode.empty() && s.code==s_mg->svEditCode){
+        ok=updateService(s,err);
+        if(ok){ s_mg->msg=L"خدمت «"+s.name+L"» ویرایش شد."; s_mg->msgCol=g_theme.success; }
+    } else {
+        ok=addService(s,err);
+        if(ok){ s_mg->msg=L"خدمت «"+s.name+L"» اضافه شد."; s_mg->msgCol=g_theme.success; }
+    }
+    if(!ok){ s_mg->msg=err; s_mg->msgCol=g_theme.danger; }
+    else    mgServicesClearForm();
+    mgServicesReload();
+    InvalidateRect(h,NULL,TRUE);
+}
+//  «حذف» — delete the selected row (with confirm).
+static void mgServicesDelete(HWND h){
+    if(!s_mg || !s_mg->svList) return;
+    int sel=ListView_GetNextItem(s_mg->svList,-1,LVNI_SELECTED);
+    if(sel<0 || sel>=(int)s_mg->svView.size()){
+        s_mg->msg=L"ابتدا یک خدمت را از جدول انتخاب کنید."; s_mg->msgCol=g_theme.danger;
+        InvalidateRect(h,NULL,TRUE); return;
+    }
+    const ServiceDef& s=s_mg->svAll[s_mg->svView[sel]];
+    std::wstring q=L"حذف خدمت «"+s.name+L"»؟";
+    if(MessageBoxW(h,q.c_str(),L"تأیید حذف",MB_YESNO|MB_ICONWARNING)!=IDYES) return;
+    removeService(s.code);
+    s_mg->msg=L"خدمت حذف شد."; s_mg->msgCol=g_theme.success;
+    mgServicesClearForm();
+    mgServicesReload();
+    InvalidateRect(h,NULL,TRUE);
+}
+//  «ویرایش» / double-click — load the selected row into the form.
+static void mgServicesEditSelected(HWND h){
+    if(!s_mg || !s_mg->svList) return;
+    int sel=ListView_GetNextItem(s_mg->svList,-1,LVNI_SELECTED);
+    if(sel<0 || sel>=(int)s_mg->svView.size()){
+        s_mg->msg=L"ابتدا یک خدمت را از جدول انتخاب کنید."; s_mg->msgCol=g_theme.danger;
+        InvalidateRect(h,NULL,TRUE); return;
+    }
+    mgServicesLoadForm(s_mg->svAll[s_mg->svView[sel]]);
+    InvalidateRect(h,NULL,TRUE);
+    SetFocus(s_mg->svName);
 }
 
 // ---- data refresh ----------------------------------------------------------
@@ -2294,11 +2469,13 @@ static void openPrintCfg(HWND owner){
 static int  mgNavW(){ return S(220); }     // sidebar width
 static int  mgHeadH(){ return S(64); }      // content header height
 static const wchar_t* MG_NAV_LABELS[PG_COUNT] = {
-    L"داشبورد", L"بیماران", L"بخش‌ها", L"کارمندان", L"پیام به کارمندان",
-    L"درخواست‌ها", L"پیام‌های ذخیره‌شده", L"پشتیبان‌گیری", L"تنظیمات چاپ"
+    L"داشبورد", L"بیماران", L"بخش‌ها", L"مدیریت خدمات", L"کارمندان",
+    L"پیام به کارمندان", L"درخواست‌ها", L"پیام‌های ذخیره‌شده",
+    L"پشتیبان‌گیری", L"تنظیمات چاپ"
 };
 static int MG_NAV_ICONS[PG_COUNT] = {
-    ICO_TAB, ICO_ID, ICO_SHIELD, ICO_USER, ICO_BELL, ICO_GEAR, ICO_SAVE, ICO_REFRESH, ICO_GEAR
+    ICO_TAB, ICO_ID, ICO_SHIELD, ICO_PLUS, ICO_USER, ICO_BELL, ICO_GEAR,
+    ICO_SAVE, ICO_REFRESH, ICO_GEAR
 };
 //  content area to the LEFT of the RTL nav rail (rail is on the RIGHT)
 static RECT mgContentRect(HWND h){
@@ -2373,7 +2550,10 @@ static void mgLayout(HWND h){
         s_mg->bSecNew,s_mg->bSecBack,s_mg->bAbc,s_mg->bNew,s_mg->bCreated,
         s_mg->bAddEmp,s_mg->cDept,s_mg->bMsg,s_mg->bReqs,s_mg->bProfReqs,
         s_mg->eNote,s_mg->bNoteAttach,s_mg->bNoteSend,
-        s_mg->ptSearch,s_mg->ptList,s_mg->ptAdd};
+        s_mg->ptSearch,s_mg->ptList,s_mg->ptAdd,
+        s_mg->svCode,s_mg->svName,s_mg->svCat,s_mg->svDept,s_mg->svPrice,
+        s_mg->svIns,s_mg->svStatus,s_mg->svDesc,s_mg->svSave,s_mg->svEdit,
+        s_mg->svDelete,s_mg->svClear,s_mg->svSearch,s_mg->svList};
     for(HWND w:all) if(w) ShowWindow(w,SW_HIDE);
 
     if(s_mg->page==PG_PATIENTS){
@@ -2451,6 +2631,54 @@ static void mgLayout(HWND h){
         ShowWindow(s_mg->eNote,SW_SHOW);
         ShowWindow(s_mg->bNoteAttach,SW_SHOW);
         ShowWindow(s_mg->bNoteSend,SW_SHOW);
+    } else if(s_mg->page==PG_SERVICES){
+        // ---- service-management form (top) + services table (fills rest) ----
+        //  A white form card (painted in mgPaintServices) holds the inputs; the
+        //  controls are positioned here on a shared grid so labels (painted just
+        //  above each control) never overlap them.
+        int lh=S(20), fgap=S(14);
+        int formL=a.left+S(12), formR=rEdge;
+        int formW=formR-formL;
+        int cgap=S(12);
+        int colW=(formW-2*cgap)/3;               // 3 columns
+        auto cx=[&](int c){ return formR-(c+1)*colW-c*cgap; };  // RTL col left edge
+        int y=top+S(28);                          // room for the card title
+        // row1: کد خدمت | نام خدمت | دسته
+        int r1c=y+lh;
+        MoveWindow(s_mg->svCode, cx(0), r1c, colW, fh, TRUE);
+        MoveWindow(s_mg->svName, cx(1), r1c, colW, fh, TRUE);
+        MoveWindow(s_mg->svCat,  cx(2), r1c, colW, fh, TRUE);
+        // row2: بخش | مبلغ پایه | نوع بیمه
+        int r2l=r1c+fh+fgap;
+        int r2c=r2l+lh;
+        MoveWindow(s_mg->svDept,  cx(0), r2c, colW, S(220), TRUE);
+        MoveWindow(s_mg->svPrice, cx(1), r2c, colW, fh, TRUE);
+        MoveWindow(s_mg->svIns,   cx(2), r2c, colW, S(160), TRUE);
+        // row3: وضعیت (col0) | توضیحات (spans col1..col2)
+        int r3l=r2c+fh+fgap;
+        int r3c=r3l+lh;
+        int descL=cx(2), descW=cx(1)+colW-descL;
+        MoveWindow(s_mg->svStatus, cx(0), r3c, colW, S(120), TRUE);
+        MoveWindow(s_mg->svDesc,   descL, r3c, descW, fh, TRUE);
+        // action buttons row
+        int by=r3c+fh+fgap+S(4);
+        int bw=S(120), bgap=S(10), bx=formR;
+        MoveWindow(s_mg->svSave,   bx-bw, by, bw, S(40), TRUE); bx-=bw+bgap;
+        MoveWindow(s_mg->svEdit,   bx-bw, by, bw, S(40), TRUE); bx-=bw+bgap;
+        MoveWindow(s_mg->svDelete, bx-bw, by, bw, S(40), TRUE); bx-=bw+bgap;
+        MoveWindow(s_mg->svClear,  bx-bw, by, bw, S(40), TRUE);
+        // search box (left) below the form card
+        int listTop = by+S(40)+S(16);
+        int srchH=fh, srchTop=listTop;
+        int srchW=S(320);
+        MoveWindow(s_mg->svSearch, formL, srchTop, srchW, srchH, TRUE);
+        int ly=srchTop+srchH+S(10);
+        MoveWindow(s_mg->svList, formL, ly, formW, a.bottom-ly-S(8), TRUE);
+        HWND show[]={s_mg->svCode,s_mg->svName,s_mg->svCat,s_mg->svDept,
+            s_mg->svPrice,s_mg->svIns,s_mg->svStatus,s_mg->svDesc,
+            s_mg->svSave,s_mg->svEdit,s_mg->svDelete,s_mg->svClear,
+            s_mg->svSearch,s_mg->svList};
+        for(HWND w:show) if(w) ShowWindow(w,SW_SHOW);
     }
 }
 
@@ -2486,6 +2714,7 @@ static const wchar_t* mgCardTitle(int page){
         case PG_DASH:  return L"داشبورد مدیریت";
         case PG_PATIENTS: return L"مدیریت بیماران";
         case PG_SECTS: return L"مدیریت بخش‌ها";
+        case PG_SERVICES: return L"مدیریت خدمات";
         case PG_EMPS:  return L"فهرست کارمندان";
         case PG_MSG:   return L"پیام به کارمندان";
         case PG_REQS:  return L"درخواست‌های تغییر";
@@ -2920,6 +3149,59 @@ static void mgPaintPatients(HDC dc, HWND h){
     DrawTextW(dc,s.c_str(),-1,&sr,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
 }
 
+// ---- «مدیریت خدمات» page body: form card labels + hint + status message ----
+static void mgPaintServices(HDC dc, HWND h){
+    if(!s_mg) return;
+    RECT a=mgContentRect(h);
+    int rEdge=a.right-S(12), fh=S(34);
+    int top=a.top+mgHeadH()+S(12);
+    int lh=S(20), fgap=S(14);
+    int formL=a.left+S(12), formR=rEdge, formW=formR-formL;
+    int cgap=S(12);
+    int colW=(formW-2*cgap)/3;
+    auto cx=[&](int c){ return formR-(c+1)*colW-c*cgap; };
+    int y=top+S(28);
+    int r1c=y+lh;
+    int r2l=r1c+fh+fgap, r2c=r2l+lh;
+    int r3l=r2c+fh+fgap, r3c=r3l+lh;
+    int by=r3c+fh+fgap+S(4);
+    int cardBot=by+S(40)+S(10);
+    // ---- form card background ----
+    RECT card={formL-S(4),top-S(2),formR+S(4),cardBot};
+    gpRoundRectBg(dc,card,S(12),g_theme.surface,g_theme.border,g_theme.bg);
+    // card title
+    SelectObject(dc,g_fSection); SetTextColor(dc,g_theme.sectionInk);
+    { RECT tr={formL,top+S(2),formR,top+S(26)};
+      DrawTextW(dc,L"مشخصات خدمت",-1,&tr,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX); }
+    // field label helper (drawn just above its control)
+    auto lbl=[&](int x,int ly,int w,const wchar_t* txt){
+        SelectObject(dc,g_fLabel); SetTextColor(dc,g_theme.labelInk);
+        RECT lr={x,ly,x+w,ly+S(16)};
+        DrawTextW(dc,txt,-1,&lr,DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+    };
+    lbl(cx(0),r1c-lh,colW,L"کد خدمت (خودکار در صورت خالی)");
+    lbl(cx(1),r1c-lh,colW,L"نام خدمت");
+    lbl(cx(2),r1c-lh,colW,L"دسته");
+    lbl(cx(0),r2c-lh,colW,L"بخش");
+    lbl(cx(1),r2c-lh,colW,L"مبلغ پایه (ریال)");
+    lbl(cx(2),r2c-lh,colW,L"نوع بیمه");
+    lbl(cx(0),r3c-lh,colW,L"وضعیت");
+    { int descL=cx(2), descW=cx(1)+colW-descL; lbl(descL,r3c-lh,descW,L"توضیحات"); }
+    // ---- status message (below the buttons) ----
+    if(!s_mg->msg.empty()){
+        SelectObject(dc,g_fSmall); SetTextColor(dc,s_mg->msgCol);
+        RECT mr={formL,cardBot+S(4),formR,cardBot+S(24)};
+        DrawTextW(dc,s_mg->msg.c_str(),-1,&mr,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+    }
+    // ---- empty-state hint for the table ----
+    if(s_mg->svView.empty()){
+        SelectObject(dc,g_fUI); SetTextColor(dc,g_theme.textDim);
+        RECT er={formL,by+S(40)+S(70),formR,by+S(40)+S(110)};
+        DrawTextW(dc,L"هنوز خدمتی ثبت نشده است — فرم بالا را پر کنید و «ذخیره» را بزنید.",
+            -1,&er,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+    }
+}
+
 // ---- the dashboard shell: nav rail (right) + content card (left) -----------
 static void mgPaintShell(HDC dc, HWND h){
     RECT rc; GetClientRect(h,&rc);
@@ -2970,6 +3252,7 @@ static void mgPaintShell(HDC dc, HWND h){
             case PG_DASH:  mgPaintDash(dc,h);  break;
             case PG_PATIENTS: mgPaintPatients(dc,h); break;
             case PG_SECTS: mgPaintSects(dc,h); break;
+            case PG_SERVICES: mgPaintServices(dc,h); break;
             case PG_EMPS:  mgPaintEmps(dc,h);  break;
             case PG_MSG:   mgPaintMsg(dc,h);   break;
             case PG_REQS:  mgPaintReqs(dc,h);  break;
@@ -3035,6 +3318,7 @@ static void mgGoPage(HWND h, int page){
     else if(page==PG_EMPS){ mgLoadEmps(); mgFillDeptCombo(); }
     else if(page==PG_MSG){ mgLoadEmps(); }   // v1.22.0: show employee list
     else if(page==PG_PATIENTS){ mgPatientsLoadAsync(h); }
+    else if(page==PG_SERVICES){ mgServicesClearForm(); mgServicesReload(); }
     mgLayout(h);
     InvalidateRect(h,NULL,TRUE);
 }
@@ -3099,6 +3383,52 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             for(int i=0;i<6;i++){ lc.pszText=(LPWSTR)cols[i].t; lc.cx=cols[i].w;
                 ListView_InsertColumn(s_mg->ptList,i,&lc); }
         }
+        // ---- services page controls (v1.28.0) ----
+        s_mg->svCode  =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)MG_SV_CODE,g_hInst,0);
+        s_mg->svName  =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)MG_SV_NAME,g_hInst,0);
+        s_mg->svCat   =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)MG_SV_CAT,g_hInst,0);
+        s_mg->svDept  =createThemedCombo(h,MG_SV_DEPT);
+        s_mg->svPrice =CreateWindowExW(0,L"EDIT",L"",es|ES_NUMBER,0,0,10,10,h,(HMENU)MG_SV_PRICE,g_hInst,0);
+        s_mg->svIns   =createThemedCombo(h,MG_SV_INS);
+        s_mg->svStatus=createThemedCombo(h,MG_SV_STATUS);
+        s_mg->svDesc  =CreateWindowExW(0,L"EDIT",L"",
+            WS_CHILD|WS_TABSTOP|ES_AUTOVSCROLL|ES_MULTILINE|WS_VSCROLL,
+            0,0,10,10,h,(HMENU)MG_SV_DESC,g_hInst,0);
+        s_mg->svSave  =createFlatButton(h,MG_SV_SAVE,  L"ذخیره",  ICO_SAVE, BS_PRIMARY,0,0,10,10);
+        s_mg->svEdit  =createFlatButton(h,MG_SV_EDIT,  L"ویرایش", ICO_GEAR, BS_OUTLINE,0,0,10,10);
+        s_mg->svDelete=createFlatButton(h,MG_SV_DELETE,L"حذف",    ICO_TRASH,BS_DANGER, 0,0,10,10);
+        s_mg->svClear =createFlatButton(h,MG_SV_CLEAR, L"فرم جدید",ICO_PLUS, BS_OUTLINE,0,0,10,10);
+        s_mg->svSearch=CreateWindowExW(0,L"EDIT",L"",
+            WS_CHILD|WS_TABSTOP|ES_AUTOHSCROLL,0,0,10,10,h,(HMENU)MG_SV_SEARCH,g_hInst,0);
+        s_mg->svList  =CreateWindowExW(WS_EX_CLIENTEDGE,WC_LISTVIEWW,L"",
+            WS_CHILD|WS_TABSTOP|LVS_OWNERDATA|LVS_REPORT|LVS_SHOWSELALWAYS|LVS_SINGLESEL,
+            0,0,10,10,h,(HMENU)MG_SV_LIST,g_hInst,0);
+        ListView_SetExtendedListViewStyle(s_mg->svList,
+            LVS_EX_FULLROWSELECT|LVS_EX_DOUBLEBUFFER|LVS_EX_GRIDLINES);
+        SendMessageW(s_mg->svList,WM_SETFONT,(WPARAM)g_fUI,TRUE);
+        {   // RTL columns (rightmost first): کد | نام | دسته | مبلغ | وضعیت | ویرایش
+            struct { const wchar_t* t; int w; } cols[]={
+                {L"کد خدمت",S(90)},{L"نام خدمت",S(230)},{L"دسته",S(130)},
+                {L"مبلغ (ریال)",S(130)},{L"وضعیت",S(90)},{L"آخرین ویرایش",S(120)} };
+            LVCOLUMNW lc={0}; lc.mask=LVCF_TEXT|LVCF_WIDTH|LVCF_FMT; lc.fmt=LVCFMT_RIGHT;
+            for(int i=0;i<6;i++){ lc.pszText=(LPWSTR)cols[i].t; lc.cx=cols[i].w;
+                ListView_InsertColumn(s_mg->svList,i,&lc); }
+        }
+        SendMessageW(s_mg->svSearch,WM_SETFONT,(WPARAM)g_fUI,TRUE);
+        { HWND se[]={s_mg->svCode,s_mg->svName,s_mg->svCat,s_mg->svPrice,s_mg->svDesc};
+          for(HWND e:se){ SendMessageW(e,WM_SETFONT,(WPARAM)g_fUI,TRUE); enableEnterNavigation(e); }
+          HWND sc[]={s_mg->svDept,s_mg->svIns,s_mg->svStatus};
+          for(HWND c:sc) SendMessageW(c,WM_SETFONT,(WPARAM)g_fUI,TRUE);
+        }
+        // status combo values
+        SendMessageW(s_mg->svStatus,CB_ADDSTRING,0,(LPARAM)L"فعال");
+        SendMessageW(s_mg->svStatus,CB_ADDSTRING,0,(LPARAM)L"غیرفعال");
+        SendMessageW(s_mg->svStatus,CB_SETCURSEL,0,0);
+        // insurance-type combo values (labels only; no pricing here)
+        { const wchar_t* it[]={L"آزاد",L"بیمه پایه",L"بیمه پایه + مکمل"};
+          for(int i=0;i<3;i++) SendMessageW(s_mg->svIns,CB_ADDSTRING,0,(LPARAM)it[i]);
+          SendMessageW(s_mg->svIns,CB_SETCURSEL,0,0); }
+
         SendMessageW(s_mg->eNote,WM_SETFONT,(WPARAM)g_fUI,TRUE);
         HWND eds[3]={s_mg->eName,s_mg->eMgr,s_mg->eId};
         for(HWND e:eds){ SendMessageW(e,WM_SETFONT,(WPARAM)g_fUI,TRUE); enableEnterNavigation(e); }
@@ -3117,6 +3447,7 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 else if(!wcscmp(dbgp,L"msg"))    pg=PG_MSG;
                 else if(!wcscmp(dbgp,L"emps"))   pg=PG_EMPS;
                 else if(!wcscmp(dbgp,L"sects"))  pg=PG_SECTS;
+                else if(!wcscmp(dbgp,L"services")) pg=PG_SERVICES;
                 if(pg>=0){ mgGoPage(h,pg); InvalidateRect(h,NULL,TRUE); }
             }
         }
@@ -3174,6 +3505,29 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 return 0;
             }
         }
+        // ---- services table (v1.28.0) ----
+        if(nh && nh->hwndFrom==s_mg->svList){
+            if(nh->code==LVN_GETDISPINFOW){
+                NMLVDISPINFOW* di=(NMLVDISPINFOW*)l;
+                int vi=di->item.iItem;
+                if(vi>=0 && vi<(int)s_mg->svView.size() && (di->item.mask & LVIF_TEXT)){
+                    const ServiceDef& s=s_mg->svAll[s_mg->svView[vi]];
+                    static wchar_t cell[256];
+                    switch(di->item.iSubItem){
+                        case 0: wcsncpy(cell,toFaDigits(s.code).c_str(),255); break;
+                        case 1: wcsncpy(cell,s.name.c_str(),255); break;
+                        case 2: wcsncpy(cell,s.category.c_str(),255); break;
+                        case 3: wcsncpy(cell,toFaDigits(formatMoney(s.price)).c_str(),255); break;
+                        case 4: wcsncpy(cell,s.status?L"فعال":L"غیرفعال",255); break;
+                        case 5: wcsncpy(cell,toFaDigits(s.modified).c_str(),255); break;
+                        default: cell[0]=0; break;
+                    }
+                    cell[255]=0; di->item.pszText=cell;
+                }
+                return 0;
+            }
+            if(nh->code==NM_DBLCLK){ mgServicesEditSelected(h); return 0; }
+        }
         break; }
     case WM_COMMAND:{
         if(!s_mg) return 0;
@@ -3181,6 +3535,18 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         if(id==MG_PT_SEARCH && HIWORD(w)==EN_CHANGE){
             SetTimer(h,0xB1,250,NULL);  // debounce 250 ms
             return 0;
+        }
+        if(id==MG_SV_SEARCH && HIWORD(w)==EN_CHANGE){
+            wchar_t b[256]={0}; GetWindowTextW(s_mg->svSearch,b,256);
+            s_mg->svQuery=b; mgServicesFilter();
+            return 0;
+        }
+        switch(id){
+            case MG_SV_SAVE:   mgServicesSave(h); return 0;
+            case MG_SV_EDIT:   mgServicesEditSelected(h); return 0;
+            case MG_SV_DELETE: mgServicesDelete(h); return 0;
+            case MG_SV_CLEAR:  mgServicesClearForm(); s_mg->msg.clear();
+                               InvalidateRect(h,NULL,TRUE); return 0;
         }
         if(id==MG_CB_DEPT && HIWORD(w)==CBN_SELCHANGE){
             int sel=(int)SendMessageW(s_mg->cDept,CB_GETCURSEL,0,0);

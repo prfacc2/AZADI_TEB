@@ -13,6 +13,7 @@ double    g_scale = 1.0;
 Session   g_session;
 
 HFONT g_fUI=0, g_fUIB=0, g_fSmall=0, g_fTitle=0, g_fBig=0, g_fHuge=0, g_fMono=0;
+HFONT g_fLabel=0, g_fSection=0;   // v1.27.0 UI redesign fonts
 HFONT g_fCode=0;   // §G: fixed-pitch code font (Consolas → Courier New)
 
 // frame children
@@ -66,6 +67,8 @@ static void buildFonts(){
     if(g_fHuge) DeleteObject(g_fHuge);
     if(g_fMono) DeleteObject(g_fMono);
     if(g_fCode) DeleteObject(g_fCode);
+    if(g_fLabel)  DeleteObject(g_fLabel);
+    if(g_fSection)DeleteObject(g_fSection);
     g_fUI    = mkFont(15, FW_NORMAL);
     g_fUIB   = mkFont(15, FW_BOLD);
     g_fSmall = mkFont(12, FW_NORMAL);
@@ -74,6 +77,11 @@ static void buildFonts(){
     g_fHuge  = mkFont(38, FW_BOLD);
     g_fMono  = mkFont(24, FW_BOLD);
     g_fCode  = mkMonoFont(12, FW_NORMAL);   // §G: section / personnel codes
+    // v1.27.0 UI redesign: readable field labels (13 medium) + strong section
+    // titles (16 bold). Vazirmatn has no true "medium" cut, so FW_SEMIBOLD gives
+    // the label the requested weight without looking bold.
+    g_fLabel   = mkFont(13, FW_SEMIBOLD);
+    g_fSection = mkFont(16, FW_BOLD);
 }
 
 // ------------------------------------------------------------- frame rects -

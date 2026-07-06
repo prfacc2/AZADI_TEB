@@ -1276,6 +1276,24 @@ static std::wstring pdFieldValue(const ReceptionRecord& r, const std::wstring& t
     if(tok==L"{insshareonly}") return toFaDigits(formatMoney(r.mainShare));
     if(tok==L"{paidonly}")     return toFaDigits(formatMoney(r.paid));
     if(tok==L"{totalonly}")    return toFaDigits(formatMoney(r.total));
+    // v1.24.0 — additional fields used by the new professional templates.
+    // Not (yet) captured at reception → resolve to empty/sensible defaults so
+    // a design that references them still prints cleanly (the field simply
+    // shows blank, or is hidden when visibility==1).
+    if(tok==L"{refdoctor}")    return L"";
+    if(tok==L"{room}")         return r.dept;            // unit/room ≈ section
+    if(tok==L"{nextvisit}")    return L"";
+    if(tok==L"{weight}")       return L"";
+    if(tok==L"{height}")       return L"";
+    if(tok==L"{bp}")           return L"";
+    if(tok==L"{temp}")         return L"";
+    if(tok==L"{pulse}")        return L"";
+    if(tok==L"{allergy}")      return L"";
+    if(tok==L"{diagnosis}")    return L"";
+    if(tok==L"{servicecode}")  return L"";
+    if(tok==L"{visitfee}")     return toFaDigits(formatMoney(r.total))+L" ریال";
+    if(tok==L"{paytype}")      return L"نقدی";
+    if(tok==L"{cashier}")      return r.userName.empty()?g_session.user.fullname:r.userName;
     return L"";
 }
 
@@ -1513,40 +1531,53 @@ bool printPrintDesign(const ReceptionRecord& r, int sectionId, HWND owner){
             else s=it.prefix+it.text+it.suffix;
             if(it.visibility==1 && (it.type==PIT_FIELD) && pdFieldValue(r,it.field).empty()) continue;
             if(s.empty()) continue;
-            int lf=-(int)(it.fontPt*dpiY/72.0);
             // v1.23.0: apply inner padding so text never touches the box edge,
             // matching the designer preview exactly.
             int padPx=(int)(it.padding*sx); if(padPx<0)padPx=0;
             RECT rr={x0+padPx,y0+padPx,x1-padPx,y1-padPx};
             if(rr.right<=rr.left){ rr.left=x0; rr.right=x1; }
             if(rr.bottom<=rr.top){ rr.top=y0; rr.bottom=y1; }
-            HFONT f=CreateFontW(lf,0,0,0,it.bold?FW_BOLD:FW_NORMAL,it.italic?1:0,0,0,
-                DEFAULT_CHARSET,OUT_TT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,
-                DEFAULT_PITCH|FF_DONTCARE,
-                it.fontName.empty()?L"Vazirmatn":it.fontName.c_str());
-            HGDIOBJ of=SelectObject(dc,f);
-            SetTextColor(dc,pdCR(it.textColor));
-            // horizontal alignment: 0=right 1=center 2=left 3=justify (RTL)
+            int boxW=rr.right-rr.left, boxH=rr.bottom-rr.top;
+            // horizontal alignment: 0=right 1=center 2=left (RTL)
             UINT al=(it.align==1)?DT_CENTER:(it.align==2)?DT_LEFT:DT_RIGHT;
             // v1.22.0: per-item text direction. dir 0=RTL, 1=LTR, 2=center.
             UINT dirf=(it.dir==1)?0:DT_RTLREADING;
             if(it.dir==2) al=DT_CENTER;
-            UINT base=al|DT_WORDBREAK|dirf|DT_NOPREFIX;
-            // v1.23.0: vertical alignment (0=top 1=middle 2=bottom). DT_VCENTER /
-            // DT_BOTTOM only honour single-line text, so for middle/bottom we
-            // measure the wrapped block height and offset the rect manually.
-            if(it.valign==0){
-                DrawTextW(dc,s.c_str(),-1,&rr,base|DT_TOP);
-            } else {
-                RECT meas=rr;
+            // v1.24.0: AUTO-FIT so text is NEVER clipped / cut in half. We start
+            // at the designed point size and shrink (down to a sensible floor)
+            // until the wrapped block fits inside the box height AND each line
+            // fits the width. This kills the "half-cut letters / missing ر"
+            // problem the operator reported on real prints.
+            double basePt = it.fontPt>0 ? it.fontPt : 10.0;
+            UINT base = al|DT_WORDBREAK|dirf|DT_NOPREFIX;
+            HFONT f=NULL; HGDIOBJ of=NULL; RECT meas; int th=0;
+            double pt=basePt; double floorPt = (basePt<7.0)? basePt*0.7 : 6.0;
+            for(int tries=0; tries<14; ++tries){
+                int lf=-(int)(pt*dpiY/72.0+0.5);
+                f=CreateFontW(lf,0,0,0,it.bold?FW_BOLD:FW_NORMAL,it.italic?1:0,0,0,
+                    DEFAULT_CHARSET,OUT_TT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,
+                    DEFAULT_PITCH|FF_DONTCARE,
+                    it.fontName.empty()?L"Vazirmatn":it.fontName.c_str());
+                of=SelectObject(dc,f);
+                meas=rr; meas.bottom=rr.top+30000;     // unbounded height for measure
                 DrawTextW(dc,s.c_str(),-1,&meas,base|DT_TOP|DT_CALCRECT);
-                int th=meas.bottom-meas.top, bh=rr.bottom-rr.top;
-                RECT dr=rr;
-                if(it.valign==1){ int off=(bh-th)/2; if(off>0){ dr.top+=off; } }
-                else            { int off=(bh-th);   if(off>0){ dr.top+=off; } }
-                DrawTextW(dc,s.c_str(),-1,&dr,base|DT_TOP);
+                th=meas.bottom-meas.top;
+                int mw=meas.right-meas.left;
+                if(th<=boxH && mw<=boxW+1) break;       // fits → done
+                if(pt<=floorPt){ break; }               // can't shrink further
+                SelectObject(dc,of); DeleteObject(f); f=NULL;
+                pt = pt*0.92; if(pt<floorPt) pt=floorPt;
             }
-            SelectObject(dc,of); DeleteObject(f);
+            SetTextColor(dc,pdCR(it.textColor));
+            // v1.23.0: vertical alignment (0=top 1=middle 2=bottom).
+            RECT dr=rr;
+            int bh=boxH;
+            if(it.valign==1){ int off=(bh-th)/2; if(off>0) dr.top+=off; }
+            else if(it.valign==2){ int off=(bh-th); if(off>0) dr.top+=off; }
+            // DT_NOCLIP guarantees the LAST line is fully drawn even if the box is
+            // a hair short, so descenders/letters are never sheared.
+            DrawTextW(dc,s.c_str(),-1,&dr,base|DT_TOP|DT_NOCLIP);
+            if(of) SelectObject(dc,of); if(f) DeleteObject(f);
         }
     }
     EndPage(dc); EndDoc(dc); DeleteDC(dc);

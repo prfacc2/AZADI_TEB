@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.23.0"
+#define APP_VERSION_W   L"1.29.0"
 
 // ----------------------------------------------------------- logging policy -
 //  RELEASE 1.2.0 (Section A): all general user-behavior logging is gated behind
@@ -41,6 +41,10 @@ extern bool      g_dark;            // dark theme active
 
 // fonts (Vazirmatn, embedded)
 extern HFONT g_fUI, g_fUIB, g_fSmall, g_fTitle, g_fBig, g_fHuge, g_fMono;
+// v1.27.0 UI redesign: dedicated field-label font (13px medium — readable, not
+// tiny) and a stronger section-title font (16 bold). Used by the reception
+// admission form so labels never blend into the background.
+extern HFONT g_fLabel, g_fSection;
 // §G (1.11.0): a TRUE fixed-pitch font for section / personnel CODES so digits
 // align in a clean column. Falls back Consolas → Courier New at build time.
 extern HFONT g_fCode;
@@ -71,6 +75,8 @@ struct Theme {
     COLORREF border;      // borders / separators
     COLORREF text;        // primary text
     COLORREF textDim;     // secondary text
+    COLORREF labelInk;    // v1.27.0: form field labels — readable (#374151 light)
+    COLORREF sectionInk;  // v1.27.0: section titles — strong (#1F2937 light)
     COLORREF accent;      // primary accent
     COLORREF accent2;     // accent gradient end (for buttons/header)
     COLORREF accentHover;
@@ -425,6 +431,31 @@ void       saveEmpProfile(const EmpProfile& p);
 bool       isUserOnline(const std::wstring& username);   // session presence (heartbeat <90s)
 void       setUserOnline(const std::wstring& username, bool on);
 void       heartbeatUser(const std::wstring& username);  // §G: refresh presence on a timer
+
+// ------------------------------------------------------------- services --
+//  Clinic services managed from the «مدیریت خدمات» (Service Management) page.
+//  Saved to data/services.dat (one pipe-delimited line per service, UTF-8).
+//  Admission picks services from this list; the price ALWAYS comes from here —
+//  the admission operator never types a price.
+struct ServiceDef {
+    std::wstring code;      // کد خدمت (unique)
+    std::wstring name;      // نام خدمت
+    std::wstring category;  // دسته/گروه
+    std::wstring dept;      // بخش (department id or name)
+    long long    price;     // مبلغ پایه (ریال)
+    std::wstring insType;   // نوع بیمه (free text / label)
+    std::wstring desc;      // توضیحات
+    int          status;    // 1=فعال 0=غیرفعال
+    std::wstring created;   // تاریخ ایجاد (Jalali)
+    std::wstring modified;  // تاریخ ویرایش (Jalali)
+    std::wstring extra;     // §H forward-compat: unknown trailing columns
+    ServiceDef():price(0),status(1){}
+};
+std::vector<ServiceDef> loadServices();
+bool  addService(const ServiceDef& s, std::wstring& err);   // insert (code must be unique)
+bool  updateService(const ServiceDef& s, std::wstring& err);// edit by code
+bool  removeService(const std::wstring& code);
+const ServiceDef* findService(const std::wstring& code);    // NULL when not found
 
 // ------------------------------------------------------------------ kartabl --
 //  Cartable / inbox messages pushed from management to a user (or broadcast).

@@ -1,2 +1,2 @@
-1.23.0
+1.29.0
 https://raw.githubusercontent.com/prfacc2/AZADI_TEB/genspark_ai_developer/build/AzadiTeb.exe
