@@ -137,6 +137,12 @@ struct TabPage {
     // ---- v1.25.0: inline «افزودن خدمت» panel ----
     HWND eSvcCode, eSvcName, eSvcQty, chkSvcFree, eSvcFreeAmt, bSvcConfirm;
     bool svcPanelOpen;                // whether the inline add panel is shown
+    //  v1.31.0: collapsible service / queue lists (script items #20-24). When
+    //  collapsed the list body shows only a few rows so the whole page fits on
+    //  one frame with no scrolling; expanding lets the body grow (and only THEN
+    //  may the body scroll internally if it is genuinely long).
+    bool svcCollapsed;                // خدمات list collapsed → show few rows
+    bool upCollapsed;                 // صندوق/صف list collapsed → show few rows
     std::vector<SvcRow> services;     // the خدمات table rows
     int  svcHotRow, svcHotBtn;        // hover state for row operations
     // ---- v1.25.0: bottom tab area ----
@@ -192,6 +198,7 @@ struct TabPage {
     int  contentH;           // last computed total content height
     std::wstring lastMsg; COLORREF msgCol;
     TabPage():page(0),kind(TK_RECEPTION),svcPanelOpen(false),
+        svcCollapsed(true),upCollapsed(true),
         svcHotRow(-1),svcHotBtn(0),bottomTab(0),appt(0),web(0),
         total(0),mainShare(0),patientShare(0),
         baseDiff(0),orgShare(0),paid(0),detached(false),autoPrice(false),
@@ -228,6 +235,9 @@ static RECT s_psPRect={0,0,0,0}, s_psSRect={0,0,0,0}; // P / S preview squares
 // v1.26.0: bottom-left unpaid-box panel hit maps (tabs + per-row delete).
 static RECT s_upTabR[2]={{0,0,0,0},{0,0,0,0}};        // صندوق نرفته‌ها | صف پذیرش
 static RECT s_upAddRect={0,0,0,0};                    // «+ افزودن به …» blue link
+// v1.31.0: collapse/expand chevron hit-rects for the two bottom lists.
+static RECT s_svcToggleR={0,0,0,0};                   // خدمات list collapse toggle
+static RECT s_upToggleR ={0,0,0,0};                   // صندوق/صف list collapse toggle
 struct UpHit { RECT del; int idx; };                  // idx into the loaded rows
 static std::vector<UpHit> s_upHits;
 // one parsed line of unpaid_box.dat / recept_queue.dat
@@ -497,6 +507,7 @@ struct CenterV {
     int totalBot;            // total content bottom (== H when it fits)
     int svcRows;             // number of service rows
     bool panelOpen;
+    double fitF;             // v1.31.0 fit-factor used (labels/titles scale by it)
 };
 static void computeCenterV(const RecH& m, CenterV& v, const TabPage* t, int H){
     (void)m;
@@ -565,12 +576,37 @@ static void computeCenterV(const RecH& m, CenterV& v, const TabPage* t, int H){
     v.panelOpen = t ? t->svcPanelOpen : false;
     v.svcRows   = t ? (int)t->services.size() : 0;
 
+    double usedF = 1.0;
     int natural = plan(1.0);
     if(natural > H){
         double f = (double)H / (double)natural;
         if(f<0.66) f=0.66;               // never crush below readable
         if(f>1.0)  f=1.0;
+        usedF = f;
         plan(f);
+    }
+    v.fitF = usedF;
+    // v1.31.0 GUARANTEE: the label band must always be tall enough to hold the
+    // (fit-scaled) 13px label font PLUS a real 5-6px gap to the control below.
+    // Even at the smallest fit-factor a label can then never be clipped or sit
+    // under the textbox. If the plan's band is too small we grow it and reflow
+    // every row baseline downwards by the delta (which the two bottom tables
+    // absorb, so nothing overflows the frame).
+    { int lblFont=(int)(S(13)*usedF+0.5); if(lblFont<9) lblFont=9;
+      int minBand=lblFont+(int)(S(6)*usedF+0.5)+2;   // font + gap + 2px safety
+      if(v.lbl<minBand){
+          int d=minBand-v.lbl;
+          v.lbl=minBand;
+          // push the identity rows / three-card rows down by the extra band so
+          // the extra label space is real (labels are drawn at r1y - v.lbl).
+          for(int i=0;i<3;i++) v.r1y[i]+=d*(i+1);
+          v.c1Bot+=d*3;
+          int shift=d*3;
+          v.dpTop+=shift; v.dpR1y+=shift+d; v.dpR2y+=shift+2*d; v.dpR3y=v.dpR2y;
+          v.dpBot+=shift+2*d;
+          v.apTop=v.dpBot; v.apR1y=v.dpR2y; v.apBot=v.dpBot;
+          v.bTop+=shift+2*d;
+      }
     }
 
     // ----- the two bottom tables absorb all remaining vertical slack -----
@@ -579,6 +615,22 @@ static void computeCenterV(const RecH& m, CenterV& v, const TabPage* t, int H){
     int wantBot = H - out - v.btnH - gap;            // panels end above buttons
     int minBot  = v.bTop + (int)(S(180)*((double)v.rh/S(40))+0.5);
     v.bBot = wantBot > minBot ? wantBot : minBot;
+    //  v1.31.0 COLLAPSE: when BOTH bottom lists are collapsed the panel region is
+    //  capped to a compact height (header + tabs + toolbar + ~3 rows + footer) so
+    //  the whole admission page reads as one tidy frame with lots of breathing
+    //  room and the action buttons pulled up right beneath it. When either list
+    //  is expanded the region grows back to fill the frame (and only THEN may its
+    //  body scroll internally if the list is genuinely long).
+    {
+        int rowH=S(32);
+        bool bothCollapsed = (t? (t->svcCollapsed && t->upCollapsed) : false);
+        if(bothCollapsed){
+            // header band up to body start (mirror the internals computed below)
+            int toBody = S(14) + S(32) + S(10) + v.rh + S(12) + S(40);
+            int compact = v.bTop + toBody + 3*rowH + S(8) + S(36);
+            if(compact < v.bBot) v.bBot = compact;
+        }
+    }
     // services panel internals
     v.svcToolY = v.bTop + S(14);
     int sy2 = v.svcToolY + v.rh + S(12);
@@ -622,9 +674,11 @@ struct InfoLayout {
     int iL, iR, iw;                 // inner padded bounds
     int cardTop, cardBot;
     int avCx, avCy, avR;            // avatar centre + radius
+    int capY;                       // «بیمار جدید» caption top (v1.31.0)
     int chipY, chipH;               // نسخه الکترونیک chip
     int boxY,  boxH;                // قبض/بارکد box
     int psY,   psH;                 // P:S counters line
+    double fitF;                    // v1.31.0 fit-factor (painter scales fonts)
     // group "کلیدهای جستجو"
     int g1TitleY;
     int archiveLblY, archiveY;
@@ -658,21 +712,31 @@ static void computeInfoLayout(int infoL, int infoR, int H, InfoLayout& L){
     //  Pass 1: lay the panel out at the PREFERRED (generous) metrics, then
     //  measure the natural bottom. Pass 2 re-runs with a shrink factor if needed.
     auto build=[&](double f)->int{
+        L.fitF=f;
         auto SF=[&](int px){ int r=(int)(S(px)*f+0.5); return r<1?1:r; };
-        L.rh2 = SF(38); L.gp = SF(6); L.btnW = S(52); L.lblH = SF(16);
+        L.rh2 = SF(38); L.gp = SF(6); L.btnW = S(52);
+        //  v1.31.0: the label band must always hold the (fit-scaled) 13px label
+        //  font, so it is at least lblFont+2px. This is what keeps the right-panel
+        //  captions (شماره دفترچه / تاریخ اعتبار / …) from being clipped.
+        int lblFont=(int)(S(13)*f+0.5); if(lblFont<9) lblFont=9;
+        L.lblH = SF(16); if(L.lblH<lblFont+2) L.lblH=lblFont+2;
         // --- header zone (matches painter) ---
-        L.avR = SF(26); L.avCx=(L.iL+L.iR)/2; L.avCy=L.cardTop+SF(10)+L.avR;
-        int y=L.avCy+L.avR+SF(6);
-        y += SF(32);                     // «بیمار جدید» + «کد پرونده» two lines
-        L.chipH=SF(22); L.chipY=y;       y+=L.chipH+SF(8);
-        L.boxH =SF(38); L.boxY =y;       y+=L.boxH +SF(8);  // two counter boxes
+        //  v1.31.0: give the avatar a bit more top inset so «بیمار جدید» never
+        //  touches the rounded top border of the card (script items #15).
+        L.avR = SF(26); L.avCx=(L.iL+L.iR)/2; L.avCy=L.cardTop+SF(14)+L.avR;
+        int y=L.avCy+L.avR+SF(8);
+        L.capY=y;
+        y += SF(36);                     // «بیمار جدید» + «بدون سابقه» two lines
+        L.chipH=SF(24); L.chipY=y;       y+=L.chipH+SF(10);
+        L.boxH =SF(40); L.boxY =y;       y+=L.boxH +SF(10); // two counter boxes
         //  P (yellow) / S (green) squares — the SINGLE location, right under the
         //  «نسخه الکترونیک» area (all duplicates elsewhere were removed).
-        L.psH  =SF(40); L.psY  =y;       y+=L.psH  +SF(12);
-        int lblGap=SF(5);   // label → its control
+        L.psH  =SF(42); L.psY  =y;       y+=L.psH  +SF(14);
+        int lblGap=SF(6);   // label → its control (never < 4px)
+        if(lblGap<4) lblGap=4;
         int rowGap=SF(12);  // control row → next control row
         int grpGap=SF(16);  // gap before next group title
-        int titleH=SF(22);
+        int titleH=SF(24);
         auto labelled=[&](int& lblY,int& ctlY){
             lblY=y; y+=L.lblH+lblGap; ctlY=y; y+=L.rh2+rowGap;
         };
@@ -869,7 +933,10 @@ static void tabPageLayout(HWND h, TabPage* t){
         BotPanels bp; rcBotPanels(m,bp);
         int in=S(10);
         int svL=bp.svL+in, svR=bp.svR-in, svW=svR-svL;
-        int addW=S(110);
+        //  v1.31.0: widen «افزودن خدمت» so the icon + full caption are never
+        //  clipped (script item #12). The button font is one step smaller so the
+        //  wider caption still reads cleanly at every scale.
+        int addW=S(132);
         MoveWindow(t->bSvcAdd, svL, Y(v.svcToolY), addW, rh, TRUE);
         ShowWindow(t->bSvcAdd,SW_SHOW);
         ShowWindow(t->eSvcSearch,SW_HIDE);      // search box lives on the LEFT panel
@@ -1807,22 +1874,24 @@ static void drawGuestAvatar(HDC dc, int cx, int cy, int r, bool female){
     DeleteObject(clip);
     DeleteObject(br); DeleteObject(pn); DeleteObject(brh);
 }
-static void paintInfoGroup(HDC dc, int iL, int iR, int y, const wchar_t* title, int icon){
-    SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.accent);
-    int icoW=S(16);
-    RECT si={iR-icoW,y+S(1),iR,y+S(17)};
+static void paintInfoGroup(HDC dc, int iL, int iR, int y, const wchar_t* title, int icon, double f=1.0){
+    int titleH=(int)(S(18)*f+0.5); if(titleH<S(13)) titleH=S(13);
+    int icoW=(int)(S(16)*f+0.5); if(icoW<S(12)) icoW=S(12);
+    SelectObject(dc,fitFont(15,FW_BOLD,f)); SetTextColor(dc,g_theme.accent);
+    RECT si={iR-icoW,y+(titleH-icoW)/2,iR,y+(titleH-icoW)/2+icoW};
     drawIcon(dc,icon,si,g_theme.accent,S(2));
-    RECT sr={iL,y,iR-icoW-S(6),y+S(18)};
-    DrawTextW(dc,title,-1,&sr,DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+    RECT sr={iL,y,iR-icoW-S(6),y+titleH};
+    DrawTextW(dc,title,-1,&sr,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
     HPEN pn=CreatePen(PS_SOLID,1,g_theme.border);
     HGDIOBJ op=SelectObject(dc,pn);
-    MoveToEx(dc,iL,y+S(20),0); LineTo(dc,iR,y+S(20));
+    MoveToEx(dc,iL,y+titleH+S(2),0); LineTo(dc,iR,y+titleH+S(2));
     SelectObject(dc,op); DeleteObject(pn);
 }
 //  Helper: draw a small field caption (right-aligned, dim) above a control.
-static void paintInfoLabel(HDC dc, int iL, int iR, int y, const wchar_t* txt){
-    SelectObject(dc,g_fLabel); SetTextColor(dc,g_theme.labelInk);
-    RECT tr={iL,y,iR,y+S(16)};
+static void paintInfoLabel(HDC dc, int iL, int iR, int y, const wchar_t* txt, double f=1.0){
+    int lblH=(int)(S(16)*f+0.5); if(lblH<S(11)) lblH=S(11);
+    SelectObject(dc,fitFont(13,FW_SEMIBOLD,f)); SetTextColor(dc,g_theme.labelInk);
+    RECT tr={iL,y,iR,y+lblH};
     DrawTextW(dc,txt,-1,&tr,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
 }
 static void paintInfoPanel(HDC dc, TabPage* t, int infoL, int infoR, int H, int sy){
@@ -1837,87 +1906,93 @@ static void paintInfoPanel(HDC dc, TabPage* t, int infoL, int infoR, int H, int 
     // shift the whole computed layout up by the scroll offset
     #define SY(v) ((v)-sy)
     const int iL=L.iL, iR=L.iR;
+    //  v1.31.0: fit-scaled fonts so the whole profile card scales with the panel
+    //  and never overlaps (بیمار جدید touching the border / chip on top of boxes).
+    const double f=L.fitF;
+    HFONT fCap = fitFont(15, FW_BOLD,     f);   // «بیمار جدید»
+    HFONT fSm  = fitFont(12, FW_NORMAL,   f);   // sub-captions
+    HFONT fVal = fitFont(15, FW_BOLD,     f);   // counter values / P·S digits
+    HFONT fBadge=fitFont(15, FW_BOLD,     f);   // P / S glyph
+    int   capLnH=(int)(S(18)*f+0.5); if(capLnH<S(13)) capLnH=S(13);
     // gender from the combo
     bool female = (SendMessageW(t->cGender,CB_GETCURSEL,0,0)==1);
     // --- avatar (neutral gray, perfectly centred) ---
     drawGuestAvatar(dc,L.avCx,SY(L.avCy),L.avR,female);
-    // --- «بیمار جدید» + «بدون سابقه» caption ---
-    { int capY=SY(L.avCy)+L.avR+S(8);
-      SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.text);
-      RECT t1={iL,capY,iR,capY+S(20)};
+    // --- «بیمار جدید» + «بدون سابقه» caption (layout-driven, no fixed offset) ---
+    { int capY=SY(L.capY);
+      SelectObject(dc,fCap); SetTextColor(dc,g_theme.text);
+      RECT t1={iL,capY,iR,capY+capLnH+S(2)};
       DrawTextW(dc,L"بیمار جدید",-1,&t1,DT_CENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
-      SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
-      RECT t2={iL,capY+S(18),iR,capY+S(34)};
+      SelectObject(dc,fSm); SetTextColor(dc,g_theme.textDim);
+      RECT t2={iL,capY+capLnH+S(2),iR,capY+2*capLnH+S(4)};
       DrawTextW(dc,L"بدون سابقه",-1,&t2,DT_CENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX); }
     // --- نسخه الکترونیک chip (GREEN, soft fill) ---
-    { RECT chip={iL+L.iw/4,SY(L.chipY),iR-L.iw/4,SY(L.chipY)+L.chipH};
+    { RECT chip={iL+L.iw/5,SY(L.chipY),iR-L.iw/5,SY(L.chipY)+L.chipH};
       COLORREF gfill=blendColor(g_theme.success,g_theme.surface,78);
       fillRoundRect(dc,chip,S(12),gfill,blendColor(g_theme.success,g_theme.surface,40));
-      SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.success);
+      SelectObject(dc,fSm); SetTextColor(dc,g_theme.success);
       DrawTextW(dc,L"نسخه الکترونیک",-1,&chip,
           DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX); }
     // --- two counter boxes: نسخه (سرپایی) | نسخه (الکترونیکی) ---
     { int half=(L.iw-S(8))/2;
+      int lnH=(int)(L.boxH*0.45); if(lnH<S(13)) lnH=S(13);
       RECT bL={iL,SY(L.boxY),iL+half,SY(L.boxY)+L.boxH};
       RECT bR={iR-half,SY(L.boxY),iR,SY(L.boxY)+L.boxH};
       for(int k=0;k<2;k++){
           RECT bx = k==0?bR:bL;          // RTL: first box on the RIGHT
           fillRoundRect(dc,bx,S(8),g_theme.inputBg,g_theme.border);
-          SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
-          RECT lr={bx.left,bx.top+S(4),bx.right,bx.top+S(20)};
+          SelectObject(dc,fSm); SetTextColor(dc,g_theme.textDim);
+          RECT lr={bx.left,bx.top+S(3),bx.right,bx.top+lnH};
           DrawTextW(dc,k==0?L"نسخه (سرپایی)":L"نسخه (الکترونیکی)",-1,&lr,
               DT_CENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
-          SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.text);
-          RECT vr={bx.left,bx.top+S(20),bx.right,bx.bottom-S(2)};
-          DrawTextW(dc,L"0",-1,&vr,DT_CENTER|DT_SINGLELINE|DT_NOPREFIX);
+          SelectObject(dc,fVal); SetTextColor(dc,g_theme.text);
+          RECT vr={bx.left,bx.top+lnH,bx.right,bx.bottom-S(2)};
+          DrawTextW(dc,L"۰",-1,&vr,DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX);
       }
     }
     // --- P (پرداختی, YELLOW) / S (صندوق, GREEN) squares — SINGLE location ---
     { int sq=L.psH; int half=(L.iw-S(8))/2;
+      int lnH=(int)(sq*0.42); if(lnH<S(12)) lnH=S(12);
       RECT pBox={iR-half,SY(L.psY),iR,SY(L.psY)+sq};       // P on the RIGHT
       RECT sBox={iL,SY(L.psY),iL+half,SY(L.psY)+sq};       // S on the LEFT
       // P card (yellow accent square + label + value)
       { RECT sqR={pBox.right-sq,pBox.top,pBox.right,pBox.bottom};
         fillRoundRect(dc,sqR,S(8),g_theme.warn,g_theme.warn);
-        SelectObject(dc,g_fUIB); SetTextColor(dc,RGB(40,40,40));
+        SelectObject(dc,fBadge); SetTextColor(dc,RGB(40,40,40));
         DrawTextW(dc,L"P",-1,&sqR,DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX);
-        RECT lr={pBox.left,pBox.top+S(4),pBox.right-sq-S(4),pBox.top+S(18)};
-        SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
+        RECT lr={pBox.left,pBox.top+S(4),pBox.right-sq-S(4),pBox.top+S(4)+lnH};
+        SelectObject(dc,fSm); SetTextColor(dc,g_theme.textDim);
         DrawTextW(dc,L"پرداختی",-1,&lr,DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
-        RECT vr={pBox.left,pBox.top+S(18),pBox.right-sq-S(4),pBox.bottom-S(2)};
-        SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.text);
-        DrawTextW(dc,L"0",-1,&vr,DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX); }
+        RECT vr={pBox.left,pBox.top+S(4)+lnH,pBox.right-sq-S(4),pBox.bottom-S(2)};
+        SelectObject(dc,fVal); SetTextColor(dc,g_theme.text);
+        DrawTextW(dc,L"۰",-1,&vr,DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX); }
       // S card (green accent square + label + value)
       { RECT sqR={sBox.right-sq,sBox.top,sBox.right,sBox.bottom};
         fillRoundRect(dc,sqR,S(8),g_theme.success,g_theme.success);
-        SelectObject(dc,g_fUIB); SetTextColor(dc,RGB(255,255,255));
+        SelectObject(dc,fBadge); SetTextColor(dc,RGB(255,255,255));
         DrawTextW(dc,L"S",-1,&sqR,DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX);
-        RECT lr={sBox.left,sBox.top+S(4),sBox.right-sq-S(4),sBox.top+S(18)};
-        SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
+        RECT lr={sBox.left,sBox.top+S(4),sBox.right-sq-S(4),sBox.top+S(4)+lnH};
+        SelectObject(dc,fSm); SetTextColor(dc,g_theme.textDim);
         DrawTextW(dc,L"صندوق",-1,&lr,DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
-        RECT vr={sBox.left,sBox.top+S(18),sBox.right-sq-S(4),sBox.bottom-S(2)};
-        SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.text);
-        DrawTextW(dc,L"0",-1,&vr,DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX); }
+        RECT vr={sBox.left,sBox.top+S(4)+lnH,sBox.right-sq-S(4),sBox.bottom-S(2)};
+        SelectObject(dc,fVal); SetTextColor(dc,g_theme.text);
+        DrawTextW(dc,L"۰",-1,&vr,DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX); }
     }
     // group titles + per-row field captions — share the SAME layout as controls
-    paintInfoGroup(dc,iL,iR,SY(L.g1TitleY),L"کلیدهای جستجو",ICO_ID);
-    paintInfoLabel(dc,iL,iR,SY(L.archiveLblY),L"شماره بایگانی");
-    paintInfoLabel(dc,iL,iR,SY(L.fileLblY),   L"شماره پرونده");
-    paintInfoGroup(dc,iL,iR,SY(L.g2TitleY),L"بیمه",ICO_SHIELD);
-    paintInfoLabel(dc,iL,iR,SY(L.bookLblY), L"شماره دفترچه");
-    paintInfoLabel(dc,iL,iR,SY(L.validLblY),L"تاریخ اعتبار");
-    paintInfoLabel(dc,iL,iR,SY(L.rxLblY),   L"تاریخ نسخه");
-    paintInfoLabel(dc,iL,iR,SY(L.suppLblY), L"بیمه مکمل");
-    paintInfoGroup(dc,iL,iR,SY(L.g3TitleY),L"پزشک معالج",ICO_CROSS_MED);
-    paintInfoLabel(dc,iL,iR,SY(L.docCodeLblY),L"کد نظام پزشکی");
-    paintInfoLabel(dc,iL,iR,SY(L.docNameLblY),L"نام پزشک");
-    // --- انجام دهنده (current user) at the very bottom ---
-    { SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
-      std::wstring who=L"انجام دهنده: "+
-          (g_session.user.fullname.empty()?g_session.user.username:g_session.user.fullname);
-      RECT tr={iL,card.bottom-S(26),iR,card.bottom-S(8)};
-      DrawTextW(dc,who.c_str(),-1,&tr,
-          DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX); }
+    paintInfoGroup(dc,iL,iR,SY(L.g1TitleY),L"کلیدهای جستجو",ICO_ID,f);
+    paintInfoLabel(dc,iL,iR,SY(L.archiveLblY),L"شماره بایگانی",f);
+    paintInfoLabel(dc,iL,iR,SY(L.fileLblY),   L"شماره پرونده",f);
+    paintInfoGroup(dc,iL,iR,SY(L.g2TitleY),L"بیمه",ICO_SHIELD,f);
+    paintInfoLabel(dc,iL,iR,SY(L.bookLblY), L"شماره دفترچه",f);
+    paintInfoLabel(dc,iL,iR,SY(L.validLblY),L"تاریخ اعتبار",f);
+    paintInfoLabel(dc,iL,iR,SY(L.rxLblY),   L"تاریخ نسخه",f);
+    paintInfoLabel(dc,iL,iR,SY(L.suppLblY), L"بیمه مکمل",f);
+    paintInfoGroup(dc,iL,iR,SY(L.g3TitleY),L"جستجوی پزشک معالج",ICO_CROSS_MED,f);
+    paintInfoLabel(dc,iL,iR,SY(L.docCodeLblY),L"شماره نظام پزشکی",f);
+    paintInfoLabel(dc,iL,iR,SY(L.docNameLblY),L"نام پزشک",f);
+    //  v1.31.0: the bottom «انجام دهنده: <user>» line was a DUPLICATE of the
+    //  «انجام دهنده» performer card in the center column — REMOVED per the UI
+    //  script (item #27) so the right panel has no duplicate performer block.
     #undef SY
 }
 
@@ -2788,6 +2863,17 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 SetFocus(t->eApptS); SendMessageW(t->eApptS,EM_SETSEL,0,-1);
                 return 0;
             }
+            // 2.5) v1.31.0 — collapse/expand toggles for the two bottom lists.
+            if(PtInRect(&s_svcToggleR,pt)){
+                t->svcCollapsed=!t->svcCollapsed;
+                tabPageLayout(h,t); InvalidateRect(h,NULL,FALSE);
+                return 0;
+            }
+            if(PtInRect(&s_upToggleR,pt)){
+                t->upCollapsed=!t->upCollapsed;
+                tabPageLayout(h,t); InvalidateRect(h,NULL,FALSE);
+                return 0;
+            }
             // 3) v1.26.0 — bottom-left panel: flat tabs صندوق نرفته‌ها|صف پذیرش
             for(int k=0;k<2;k++){
                 if(PtInRect(&s_upTabR[k],pt)){
@@ -2947,19 +3033,25 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         //  flush-right + 16-bold title + a thin divider under it, matching the
         //  approved reference). The title uses g_fSection / sectionInk so it
         //  clearly stands above the fields.
+        //  v1.31.0: fit-scaled title/label fonts so titles & labels shrink with
+        //  the band on tight screens and never clip or hide behind controls.
+        HFONT fSec = fitFont(16, FW_BOLD,     v.fitF);
+        HFONT fLbl = fitFont(13, FW_SEMIBOLD, v.fitF);
+        int   hband= (int)(S(38)*v.fitF+0.5); if(hband<S(26)) hband=S(26);
         auto subcard=[&](int top,int bot,const wchar_t* title,int icon){
             RECT cr={m.cardL,Y(top),m.cardR,Y(bot)};
             gpRoundRectBg(dc,cr,S(14),g_theme.surface,g_theme.border,g_theme.bg);
-            int icoW=S(20);
-            RECT hi={formR-icoW,cr.top+S(12),formR,cr.top+S(12)+icoW};
+            int icoW=(int)(S(20)*v.fitF+0.5); if(icoW<S(14)) icoW=S(14);
+            int icoTop=cr.top+(hband-icoW)/2;
+            RECT hi={formR-icoW,icoTop,formR,icoTop+icoW};
             drawIcon(dc,icon,hi,g_theme.accent,S(2));
-            SetTextColor(dc,g_theme.sectionInk); SelectObject(dc,g_fSection);
-            RECT ht={formL,cr.top+S(10),formR-icoW-S(8),cr.top+S(36)};
+            SetTextColor(dc,g_theme.sectionInk); SelectObject(dc,fSec);
+            RECT ht={formL,cr.top,formR-icoW-S(8),cr.top+hband};
             DrawTextW(dc,title,-1,&ht,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
-            // thin divider under the section title (12px padding below title)
+            // thin divider under the section title
             HPEN pn=CreatePen(PS_SOLID,1,g_theme.border);
             HGDIOBJ op=SelectObject(dc,pn);
-            int dy=cr.top+S(40);
+            int dy=cr.top+hband;
             MoveToEx(dc,formL,dy,NULL); LineTo(dc,formR,dy);
             SelectObject(dc,op); DeleteObject(pn);
         };
@@ -2968,16 +3060,21 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         //  so labels never blend into the card background. 5px sits between the
         //  label baseline and the control below it (the lbl band is 20px, the
         //  label text is 16px tall → ~4px breathing room).
+        //  The label band is v.lbl tall; the label text is drawn at the TOP of
+        //  the band and the control sits at (y). Because v.lbl is now guaranteed
+        //  ≥ label-font + gap (computeCenterV), the label can never be clipped or
+        //  covered by the control.
+        int lblTxtH=(int)(S(16)*v.fitF+0.5); if(lblTxtH<S(11)) lblTxtH=S(11);
         auto fieldLabel=[&](int x,int y,int w,const wchar_t* txt,bool req){
-            SelectObject(dc,g_fLabel);
-            RECT lr={x,Y(y),x+w,Y(y)+S(16)};
+            SelectObject(dc,fLbl);
+            RECT lr={x,Y(y)-v.lbl,x+w,Y(y)-v.lbl+lblTxtH};
             SetTextColor(dc,g_theme.labelInk);
             DrawTextW(dc,txt,-1,&lr,DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
             if(req){
                 SIZE sz; GetTextExtentPoint32W(dc,txt,(int)wcslen(txt),&sz);
                 int ax = x+w - sz.cx - S(8);
                 SetTextColor(dc,g_theme.danger);
-                RECT ar={ax-S(10),Y(y),ax,Y(y)+S(16)};
+                RECT ar={ax-S(10),lr.top,ax,lr.bottom};
                 DrawTextW(dc,L"*",-1,&ar,DT_RIGHT|DT_SINGLELINE|DT_NOPREFIX);
             }
         };
@@ -2985,15 +3082,15 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         // ============ CARD 1: اطلاعات بیمار (3-column grid) ============
         subcard(v.c1Top,v.c1Bot,L"اطلاعات بیمار",ICO_USER);
         // labels (col0=right, col2=left)
-        fieldLabel(colX(0),v.r1y[0]-v.lbl,cw,L"نام",true);
-        fieldLabel(colX(1),v.r1y[0]-v.lbl,cw,L"نام خانوادگی",true);
-        fieldLabel(colX(2),v.r1y[0]-v.lbl,cw,L"کد ملی",true);
-        fieldLabel(colX(0),v.r1y[1]-v.lbl,cw,L"نام پدر",false);
-        fieldLabel(colX(1),v.r1y[1]-v.lbl,cw,L"تاریخ تولد",false);
-        fieldLabel(colX(2),v.r1y[1]-v.lbl,cw,L"جنسیت",false);
-        fieldLabel(colX(0),v.r1y[2]-v.lbl,cw,L"شماره موبایل",true);
-        fieldLabel(colX(1),v.r1y[2]-v.lbl,cw,L"تلفن ثابت",false);
-        fieldLabel(colX(2),v.r1y[2]-v.lbl,cw,L"آدرس",false);
+        fieldLabel(colX(0),v.r1y[0],cw,L"نام",true);
+        fieldLabel(colX(1),v.r1y[0],cw,L"نام خانوادگی",true);
+        fieldLabel(colX(2),v.r1y[0],cw,L"کد ملی",true);
+        fieldLabel(colX(0),v.r1y[1],cw,L"نام پدر",false);
+        fieldLabel(colX(1),v.r1y[1],cw,L"تاریخ تولد",false);
+        fieldLabel(colX(2),v.r1y[1],cw,L"جنسیت",false);
+        fieldLabel(colX(0),v.r1y[2],cw,L"شماره موبایل",true);
+        fieldLabel(colX(1),v.r1y[2],cw,L"تلفن ثابت",false);
+        fieldLabel(colX(2),v.r1y[2],cw,L"آدرس",false);
 
         // ==== MIDDLE ROW: انجام دهنده | پزشک معالج | بیمه و نوبت (3 cards) ====
         {
@@ -3002,27 +3099,28 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             auto card3=[&](int L0,int R0,const wchar_t* title,int icon){
                 RECT cr={L0,Y(v.dpTop),R0,Y(v.dpBot)};
                 gpRoundRectBg(dc,cr,S(14),g_theme.surface,g_theme.border,g_theme.bg);
-                int icoW=S(18);
-                RECT hi={R0-in-icoW,cr.top+S(11),R0-in,cr.top+S(11)+icoW};
+                int icoW=(int)(S(18)*v.fitF+0.5); if(icoW<S(13)) icoW=S(13);
+                int icoTop=cr.top+(hband-icoW)/2;
+                RECT hi={R0-in-icoW,icoTop,R0-in,icoTop+icoW};
                 drawIcon(dc,icon,hi,g_theme.accent,S(2));
-                SetTextColor(dc,g_theme.sectionInk); SelectObject(dc,g_fSection);
-                RECT ht={L0+in,cr.top+S(9),R0-in-icoW-S(6),cr.top+S(33)};
+                SetTextColor(dc,g_theme.sectionInk); SelectObject(dc,fSec);
+                RECT ht={L0+in,cr.top,R0-in-icoW-S(6),cr.top+hband};
                 DrawTextW(dc,title,-1,&ht,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
                 // divider under the sub-card title
                 HPEN pn=CreatePen(PS_SOLID,1,g_theme.border);
                 HGDIOBJ op=SelectObject(dc,pn);
-                int dy=cr.top+S(36);
+                int dy=cr.top+hband;
                 MoveToEx(dc,L0+in,dy,NULL); LineTo(dc,R0-in,dy);
                 SelectObject(dc,op); DeleteObject(pn);
             };
             // — انجام دهنده (rightmost)
             card3(mc.perfL,mc.perfR,L"انجام دهنده",ICO_USER);
-            fieldLabel(mc.perfL+in,v.dpR1y-v.lbl,mc.perfR-mc.perfL-2*in,L"کد انجام دهنده",false);
-            fieldLabel(mc.perfL+in,v.dpR2y-v.lbl,mc.perfR-mc.perfL-2*in,L"نام انجام دهنده",false);
+            fieldLabel(mc.perfL+in,v.dpR1y,mc.perfR-mc.perfL-2*in,L"کد انجام دهنده",false);
+            fieldLabel(mc.perfL+in,v.dpR2y,mc.perfR-mc.perfL-2*in,L"نام انجام دهنده",false);
             // — پزشک معالج (middle) — 2 rows only (no duplicate percentage)
             card3(mc.docL,mc.docR,L"پزشک معالج",ICO_CROSS_MED);
-            fieldLabel(mc.docL+in,v.dpR1y-v.lbl,mc.docR-mc.docL-2*in,L"شماره نظام پزشکی",false);
-            fieldLabel(mc.docL+in,v.dpR2y-v.lbl,mc.docR-mc.docL-2*in,L"نام پزشک",false);
+            fieldLabel(mc.docL+in,v.dpR1y,mc.docR-mc.docL-2*in,L"شماره نظام پزشکی",false);
+            fieldLabel(mc.docL+in,v.dpR2y,mc.docR-mc.docL-2*in,L"نام پزشک",false);
             // — بیمه و نوبت (left, widest) — reference row layout:
             //   row1: بیمه تکمیلی | نوع بیمه پایه | نوع نوبت | نوع پذیرش  (RTL)
             //   row2: مبلغ خدمت | سهم بیمه | تخفیف | (سهم بیمه ٪ chip)   (RTL)
@@ -3031,18 +3129,18 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
               int gw=(inR-inL-3*cgap)/4;
               auto gx=[&](int c){ return inR-(c+1)*gw-c*cgap; };
               //  row1: 4 combos (no prices) — matches Management-driven design.
-              fieldLabel(gx(0),v.dpR1y-v.lbl,gw,L"نوع پذیرش",false);
-              fieldLabel(gx(1),v.dpR1y-v.lbl,gw,L"نوع نوبت",false);
-              fieldLabel(gx(2),v.dpR1y-v.lbl,gw,L"نوع بیمه",false);
-              fieldLabel(gx(3),v.dpR1y-v.lbl,gw,L"بیمه تکمیلی",false);
+              fieldLabel(gx(0),v.dpR1y,gw,L"نوع پذیرش",false);
+              fieldLabel(gx(1),v.dpR1y,gw,L"نوع نوبت",false);
+              fieldLabel(gx(2),v.dpR1y,gw,L"نوع بیمه",false);
+              fieldLabel(gx(3),v.dpR1y,gw,L"بیمه تکمیلی",false);
               //  row2 (RTL): col3 «درصد بیمه تکمیل ٪» | col2 «شیفت نوبت» |
               //  col1 «تاریخ نوبت» | col0 free. No price/discount/share fields.
-              fieldLabel(gx(3),v.dpR2y-v.lbl,gw,L"درصد بیمه تکمیل",false);
+              fieldLabel(gx(3),v.dpR2y,gw,L"درصد بیمه تکمیل",false);
               { RECT pu={gx(3)+gw-S(20),Y(v.dpR2y),gx(3)+gw,Y(v.dpR2y)+rh};
                 SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
                 DrawTextW(dc,L"٪",-1,&pu,DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX); }
-              fieldLabel(gx(2),v.dpR2y-v.lbl,gw,L"شیفت نوبت",false);
-              fieldLabel(gx(1),v.dpR2y-v.lbl,gw,L"تاریخ نوبت",false);
+              fieldLabel(gx(2),v.dpR2y,gw,L"شیفت نوبت",false);
+              fieldLabel(gx(1),v.dpR2y,gw,L"تاریخ نوبت",false);
             }
             // clear the stale preview hit-rects so clicks in that old area are inert
             SetRectEmpty(&s_psPRect); SetRectEmpty(&s_psSRect);
@@ -3059,9 +3157,21 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             RECT cr={bp.svL,Y(v.bTop),bp.svR,Y(v.bBot)};
             gpRoundRectBg(dc,cr,S(14),g_theme.surface,g_theme.border,g_theme.bg);
             // header row: «خدمات» title flush-right + (افزودن خدمت btn = control)
-            SetTextColor(dc,g_theme.sectionInk); SelectObject(dc,g_fSection);
+            SetTextColor(dc,g_theme.sectionInk); SelectObject(dc,fitFont(16,FW_BOLD,v.fitF));
             { RECT ht={svL,Y(v.svcToolY),svR,Y(v.svcToolY)+rh};
               DrawTextW(dc,L"خدمات",-1,&ht,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX); }
+            //  v1.31.0 collapse toggle: a small chevron chip just LEFT of the title.
+            //  ▾ = expanded (click to collapse), ▸ = collapsed (click to expand).
+            { int tsz=S(22), ty=Y(v.svcToolY)+(rh-tsz)/2;
+              SIZE tsz2; SelectObject(dc,fitFont(16,FW_BOLD,v.fitF));
+              GetTextExtentPoint32W(dc,L"خدمات",5,&tsz2);
+              int tx=svR-tsz2.cx-S(8)-tsz;
+              RECT tr={tx,ty,tx+tsz,ty+tsz};
+              s_svcToggleR=tr;
+              fillRoundRect(dc,tr,S(6),g_theme.surface2,g_theme.border);
+              SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.accent);
+              DrawTextW(dc,(t->svcCollapsed?L"▸":L"▾"),-1,&tr,
+                  DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX); }
             // table header strip — reference columns (RTL):
             // ردیف | نام خدمت | مبلغ (ریال) | تخفیف بیمه (ریال) | سهم بیمه (ریال) | عملیات
             RECT head={svL,Y(v.svcHeadY),svR,Y(v.svcHeadY)+S(28)};
@@ -3160,6 +3270,15 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
                   DrawTextW(dc,k==0?L"صندوق نرفته ها":L"صف پذیرش",-1,&tr,
                       DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
               }
+              //  v1.31.0 collapse toggle for the queue/unpaid list (far LEFT of
+              //  the tab row). ▾ expanded / ▸ collapsed.
+              int tsz=S(22), ty=Y(v.upTabY)+(th-tsz)/2;
+              RECT tgl={upL,ty,upL+tsz,ty+tsz};
+              s_upToggleR=tgl;
+              fillRoundRect(dc,tgl,S(6),g_theme.surface2,g_theme.border);
+              SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.accent);
+              DrawTextW(dc,(t->upCollapsed?L"▸":L"▾"),-1,&tgl,
+                  DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX);
             }
             // ---- toolbar captions (controls themselves are real windows) ----
             // ---- table header: بارکد/کد پرونده | نام بیمار | تاریخ | زمان |
@@ -3388,16 +3507,22 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             row(L"جمع کل",t->total,g_theme.text);
             row(L"تخفیف",0,g_theme.text);
             row(L"پرداختی",t->paid,g_theme.accent);
-            // highlight row «مانده قابل پرداخت» (soft blue chip)
-            { RECT hi={bl-S(4),ry,br+S(4),ry+S(26)};
-              fillRoundRect(dc,hi,S(8),
-                  blendColor(g_theme.accent,g_theme.surface,38),
-                  blendColor(g_theme.accent,g_theme.surface,70));
-              SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.accent);
-              RECT kr={bl+S(4),ry,br-S(4),ry+S(26)};
+            //  «مانده قابل پرداخت» — v1.31.0 (script item #11): NO blue chip
+            //  background. It is now a normal summary row on white, separated by
+            //  a subtle light-gray divider above it, with a soft light-gray fill
+            //  only (readable dark text). The prominent blue is reserved for the
+            //  «جمع مبلغ نهایی» total card below.
+            { HPEN dpn=CreatePen(PS_SOLID,1,g_theme.border);
+              HGDIOBJ dop=SelectObject(dc,dpn);
+              MoveToEx(dc,bl,ry+S(1),NULL); LineTo(dc,br,ry+S(1));
+              SelectObject(dc,dop); DeleteObject(dpn);
+              RECT hi={bl-S(4),ry+S(3),br+S(4),ry+S(26)};
+              fillRoundRect(dc,hi,S(6),g_theme.surface2,g_theme.surface2);
+              SelectObject(dc,g_fLabel); SetTextColor(dc,g_theme.text);
+              RECT kr={bl+S(4),ry+S(3),br-S(4),ry+S(26)};
               DrawTextW(dc,L"مانده قابل پرداخت",-1,&kr,
                   DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
-              SelectObject(dc,g_fUIB);
+              SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.text);
               std::wstring vs=toFaDigits(formatMoney(t->paid));
               DrawTextW(dc,vs.c_str(),-1,&kr,
                   DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX); }

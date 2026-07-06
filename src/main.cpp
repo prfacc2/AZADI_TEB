@@ -84,6 +84,31 @@ static void buildFonts(){
     g_fSection = mkFont(16, FW_BOLD);
 }
 
+// v1.31.0 RESPONSIVE-LABEL FIX — a tiny cache of fonts whose logical height is
+// -S(px)*f. When the reception layout shrinks by a fit-factor `f`, the painter
+// asks for a label/section font at the SAME factor so the glyphs shrink with
+// the band and can never be clipped or hidden behind the control below.
+#include <map>
+struct FitFontKey { int px; int weight; int q; bool operator<(const FitFontKey& o) const {
+    if(px!=o.px) return px<o.px; if(weight!=o.weight) return weight<o.weight; return q<o.q; } };
+HFONT fitFont(int px, int weight, double f){
+    if(f<=0.0) f=1.0;
+    if(f>1.0)  f=1.0;
+    // quantise the factor to 5% steps so the cache stays tiny (≤ a handful).
+    int q=(int)(f*20.0+0.5); if(q<10) q=10; if(q>20) q=20;
+    static std::map<FitFontKey,HFONT> cache;
+    FitFontKey k{px,weight,q};
+    auto it=cache.find(k);
+    if(it!=cache.end()) return it->second;
+    int h=(int)(S(px)*(q/20.0)+0.5); if(h<8) h=8;
+    HFONT fnt=CreateFontW(-h,0,0,0,weight,0,0,0,DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,
+        g_lowSpec?DEFAULT_QUALITY:CLEARTYPE_QUALITY,
+        DEFAULT_PITCH,L"Vazirmatn");
+    cache[k]=fnt;
+    return fnt;
+}
+
 // ------------------------------------------------------------- frame rects -
 //  v1.3.0 — taller header (LAYER 1) so the centered live clock + Jalali date
 //  fit comfortably; thinner bottom status bar (clock moved up to the header).

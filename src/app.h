@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.30.0"
+#define APP_VERSION_W   L"1.31.0"
 
 // ----------------------------------------------------------- logging policy -
 //  RELEASE 1.2.0 (Section A): all general user-behavior logging is gated behind
@@ -45,6 +45,14 @@ extern HFONT g_fUI, g_fUIB, g_fSmall, g_fTitle, g_fBig, g_fHuge, g_fMono;
 // tiny) and a stronger section-title font (16 bold). Used by the reception
 // admission form so labels never blend into the background.
 extern HFONT g_fLabel, g_fSection;
+// v1.31.0 RESPONSIVE-LABEL FIX: on tight screens the reception layout shrinks
+// its row heights / label bands by a single fit-factor. The label/section fonts
+// used to stay FIXED (S(13)/S(16)) while the band around them shrank — so labels
+// were clipped or covered by the controls sitting below them. These helpers
+// give the painter a font whose pixel height tracks the same fit-factor, so a
+// label always fits inside its (shrunken) band and is never covered.
+//   fitFont(px, weight, f)  → cached CreateFontW(-S(px)*f) keyed by (px,weight,f).
+HFONT fitFont(int px, int weight, double f);
 // §G (1.11.0): a TRUE fixed-pitch font for section / personnel CODES so digits
 // align in a clean column. Falls back Consolas → Courier New at build time.
 extern HFONT g_fCode;
