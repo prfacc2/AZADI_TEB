@@ -19,45 +19,10 @@
 
   <div id="app" class="app">
 
-    <!-- ======================= TOP HEADER BAR ======================= -->
-    <header class="topbar">
-      <div class="tb-right">
-        <div class="tb-logo">
-          <span class="tb-logo-badge">
-            <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 2a10 10 0 100 20 10 10 0 000-20zm1 11v4h-2v-4H7v-2h4V7h2v4h4v2h-4z"/></svg>
-          </span>
-          <div class="tb-logo-txt">
-            <div class="tb-name">آزادی طب</div>
-            <div class="tb-sub">دستیار پذیرش درمانگاه</div>
-          </div>
-        </div>
-      </div>
-      <div class="tb-center">
-        <div class="tb-clock" id="tbClock">۰۰:۰۰:۰۰</div>
-        <div class="tb-date" id="tbDate">—</div>
-      </div>
-      <div class="tb-left">
-        <button class="tb-btn tb-btn-primary" id="hdrAppt"><span class="i">
-          <svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M7 2v2H5a2 2 0 00-2 2v13a2 2 0 002 2h14a2 2 0 002-2V6a2 2 0 00-2-2h-2V2h-2v2H9V2H7zm12 7v10H5V9h14z"/></svg>
-        </span>نوبت‌دهی</button>
-        <button class="tb-btn tb-btn-primary" id="hdrNewAdm"><span class="i">
-          <svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M11 5v6H5v2h6v6h2v-6h6v-2h-6V5z"/></svg>
-        </span>پذیرش جدید</button>
-        <button class="tb-btn tb-btn-primary" id="hdrRegNew"><span class="i">
-          <svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
-        </span>ثبت جدید</button>
-        <span class="tb-gap"></span>
-        <button class="tb-btn tb-btn-ghost" id="hdrSettings" title="تنظیمات"><span class="i">
-          <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 000-2l2-1.6-2-3.4-2.4 1a7.3 7.3 0 00-1.7-1L14.9 3H9.1l-.4 2.4a7.3 7.3 0 00-1.7 1l-2.4-1-2 3.4L2.6 11a7.6 7.6 0 000 2l-2 1.6 2 3.4 2.4-1c.5.4 1.1.7 1.7 1l.4 2.4h5.8l.4-2.4c.6-.3 1.2-.6 1.7-1l2.4 1 2-3.4-2-1.6zM12 15.5A3.5 3.5 0 1112 8.5a3.5 3.5 0 010 7z"/></svg>
-        </span>تنظیمات</button>
-        <button class="tb-btn tb-btn-ghost" id="hdrPrint" title="چاپ"><span class="i">
-          <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M19 8H5a3 3 0 00-3 3v6h4v4h12v-4h4v-6a3 3 0 00-3-3zm-3 11H8v-5h8v5zm3-7a1 1 0 110-2 1 1 0 010 2zM18 3H6v4h12V3z"/></svg>
-        </span>چاپ</button>
-        <button class="tb-btn tb-btn-primary" id="hdrNew" title="جدید"><span class="i">
-          <svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M11 5v6H5v2h6v6h2v-6h6v-2h-6V5z"/></svg>
-        </span>جدید</button>
-      </div>
-    </header>
+    <!-- NOTE: The top header bar is intentionally REMOVED here. The native C++
+         application already renders its own header/toolbar around this embedded
+         view, so duplicating it inside the HTML wasted vertical space and pushed
+         content out of the frame. This page now starts directly at the body. -->
 
     <!-- ======================= BODY (3 columns) ======================= -->
     <div class="body">
@@ -84,10 +49,33 @@
             <div class="rx-box"><span class="rx-lbl">نسخه (الکترونیکی)</span><span class="rx-val" id="rxElec">۰</span></div>
             <div class="rx-box"><span class="rx-lbl">نسخه (سریالی)</span><span class="rx-val" id="rxSerial">۰</span></div>
           </div>
-          <div class="ps-row">
-            <div class="ps-box ps-p"><span class="ps-key">P</span><span class="ps-cap">پرداختی</span><span class="ps-val" id="psPVal">۰</span></div>
-            <div class="ps-box ps-s"><span class="ps-key">S</span><span class="ps-cap">صندوق</span><span class="ps-val" id="psSVal">۰</span></div>
+          <!-- Two SEPARATE lines (not one row). Only the P / S badge letter
+               carries the coloured background; the caption + count sit on a
+               clean surface. These are 24-hour PERSON COUNTS, not amounts. -->
+          <div class="ps-list">
+            <div class="ps-line">
+              <span class="ps-key ps-key-p">P</span>
+              <span class="ps-cap">پرداختی (۲۴ ساعت)</span>
+              <span class="ps-val" id="psPVal">۰</span>
+              <span class="ps-unit">نفر</span>
+            </div>
+            <div class="ps-line">
+              <span class="ps-key ps-key-s">S</span>
+              <span class="ps-cap">صندوق (۲۴ ساعت)</span>
+              <span class="ps-val" id="psSVal">۰</span>
+              <span class="ps-unit">نفر</span>
+            </div>
           </div>
+        </section>
+
+        <!-- ===== PRIMARY ACTIONS — on the RIGHT side panel, top & prominent ===== -->
+        <section class="card action-card">
+          <label class="chk chk-block"><input type="checkbox" id="noPay" /><span>عدم پرداخت فعلی</span></label>
+          <button class="btn btn-submit btn-block" id="btnSave">
+            <span class="i"><svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M17 3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V7l-4-4zm-5 16a3 3 0 110-6 3 3 0 010 6zm3-10H5V5h10v4z"/></svg></span>
+            ثبت پذیرش و صدور قبض</button>
+          <button class="btn btn-new-adm btn-block" id="btnNew">
+            <span class="i"><svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M11 5v6H5v2h6v6h2v-6h6v-2h-6V5z"/></svg></span>پذیرش جدید</button>
         </section>
 
         <!-- Quick search -->
@@ -378,16 +366,6 @@
             <span class="i"><svg viewBox="0 0 24 24" width="13" height="13"><path fill="currentColor" d="M18.3 5.7L12 12l6.3 6.3-1.4 1.4L10.6 13.4 4.3 19.7 2.9 18.3 9.2 12 2.9 5.7 4.3 4.3l6.3 6.3 6.3-6.3z"/></svg></span>انصراف</button>
         </div>
       </aside>
-    </div>
-
-    <!-- ======================= BOTTOM SUBMIT BAR ======================= -->
-    <div class="submit-bar">
-      <label class="chk chk-inline"><input type="checkbox" id="noPay" /><span>عدم پرداخت فعلی</span></label>
-      <button class="btn btn-new-adm" id="btnNew">
-        <span class="i"><svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M11 5v6H5v2h6v6h2v-6h6v-2h-6V5z"/></svg></span>پذیرش جدید</button>
-      <button class="btn btn-submit" id="btnSave">
-        <span class="i"><svg viewBox="0 0 24 24" width="17" height="17"><path fill="currentColor" d="M17 3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V7l-4-4zm-5 16a3 3 0 110-6 3 3 0 010 6zm3-10H5V5h10v4z"/></svg></span>
-        ثبت پذیرش و صدور قبض</button>
     </div>
   </div>
 
