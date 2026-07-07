@@ -1,282 +1,447 @@
 /* ============================================================================
    admission.css — Patient Admission embedded UI (AZADI_TEB)
    Light, white, soft-blue medical desktop theme. RTL, Vazirmatn.
-   ============================================================================ */
-:root{
-  --bg:#f4f7fb;
-  --panel:#ffffff;
-  --ink:#1f2a37;
-  --ink-soft:#5b6b7d;
-  --line:#e2e8f0;
-  --line-soft:#eef2f7;
-  --blue:#2f6fed;
-  --blue-dark:#2357c4;
-  --blue-soft:#eaf1fe;
-  --green:#12b76a;
-  --red:#e5484d;
-  --amber:#f79009;
-  --shadow:0 1px 2px rgba(16,24,40,.05), 0 1px 3px rgba(16,24,40,.08);
-  --radius:12px;
-  --radius-sm:8px;
-  --fs:14px;
-}
 
-/* Vazirmatn — bundled locally (served by the host) */
+   DUAL-ENGINE SAFE:
+     * Renders identically on the modern WebView2 (Chromium) engine AND on the
+       universal MSHTML / Trident (IE11) fallback that ships with every Windows.
+     * Therefore this file deliberately AVOIDS features Trident cannot handle:
+         - NO CSS custom properties  (var(--x))       → literal values inline
+         - NO flexbox / grid `gap`   (unsupported/buggy) → real margins instead
+         - NO `padding-inline-*` / `margin-inline-*`  → physical props (RTL)
+         - column layout via -ms-flexbox / -ms-flex     (IE prefixes provided)
+     * This is why earlier builds rendered as raw unstyled HTML on machines
+       without WebView2: Trident dropped every var()-based rule wholesale.
+   ============================================================================ */
+
+/* Vazirmatn — bundled locally (served by the host, 100% offline) */
 @font-face{
   font-family:'Vazirmatn';
   src:url('vazir.ttf') format('truetype');
-  font-weight:400 700;
-  font-display:swap;
+  font-weight:normal;
+  font-style:normal;
 }
 
-*{box-sizing:border-box;}
+*{box-sizing:border-box;-ms-box-sizing:border-box;}
 html,body{height:100%;margin:0;}
 body{
   font-family:'Vazirmatn','Segoe UI',Tahoma,sans-serif;
-  background:var(--bg);
-  color:var(--ink);
-  font-size:var(--fs);
+  background:#f4f7fb;
+  color:#1f2a37;
+  font-size:14px;
   line-height:1.6;
   -webkit-font-smoothing:antialiased;
   overflow:hidden;
 }
 
-/* ---- app grid: right | center | left ---- */
+/* ============================================================================
+   APP LAYOUT — right | center | left  (RTL)
+   Implemented with flexbox (works in Chromium + IE11 with -ms- prefixes).
+   Column spacing done with margins (NOT flex `gap`, which IE ignores).
+   ============================================================================ */
 .app{
-  display:grid;
-  grid-template-columns:300px 1fr 250px;
-  gap:12px;
-  padding:12px;
+  display:-ms-flexbox;
+  display:flex;
+  -ms-flex-direction:row;
+  flex-direction:row;
   height:100vh;
+  padding:12px;
   overflow:hidden;
 }
-.col{display:flex;flex-direction:column;gap:12px;min-height:0;overflow:hidden;}
-.col-center{overflow-y:auto;padding-inline-end:2px;}
-.col-right{overflow-y:auto;}
-.col-left{overflow-y:auto;}
+.col{
+  display:-ms-flexbox;
+  display:flex;
+  -ms-flex-direction:column;
+  flex-direction:column;
+  min-height:0;
+  height:100%;
+  overflow:hidden;
+}
+/* fixed side columns, fluid center. margins give the inter-column gutters. */
+.col-right { -ms-flex:0 0 300px; flex:0 0 300px; width:300px; overflow-y:auto; }
+.col-center{ -ms-flex:1 1 auto;  flex:1 1 auto;  overflow-y:auto; margin:0 12px; padding-left:2px; }
+.col-left  { -ms-flex:0 0 250px; flex:0 0 250px; width:250px; overflow-y:auto; }
 
-/* thin scrollbars */
-.col::-webkit-scrollbar,.tbl-wrap::-webkit-scrollbar,.mini-list::-webkit-scrollbar{width:8px;height:8px;}
-.col::-webkit-scrollbar-thumb,.tbl-wrap::-webkit-scrollbar-thumb,.mini-list::-webkit-scrollbar-thumb{background:#cdd7e3;border-radius:8px;}
+/* thin scrollbars (Chromium only; harmless in IE) */
+.col::-webkit-scrollbar,.tbl-wrap::-webkit-scrollbar,.mini-list::-webkit-scrollbar,
+.svc-suggest::-webkit-scrollbar{width:8px;height:8px;}
+.col::-webkit-scrollbar-thumb,.tbl-wrap::-webkit-scrollbar-thumb,
+.mini-list::-webkit-scrollbar-thumb,.svc-suggest::-webkit-scrollbar-thumb{background:#cdd7e3;border-radius:8px;}
 
-/* ---- cards ---- */
+/* ============================================================================
+   CARDS
+   ============================================================================ */
 .card{
-  background:var(--panel);
-  border:1px solid var(--line);
-  border-radius:var(--radius);
-  box-shadow:var(--shadow);
+  background:#ffffff;
+  border:1px solid #e2e8f0;
+  border-radius:12px;
+  box-shadow:0 1px 2px rgba(16,24,40,.05), 0 1px 3px rgba(16,24,40,.08);
   overflow:hidden;
+  -ms-flex:0 0 auto;
   flex:0 0 auto;
+  margin-bottom:12px;
 }
+.col > .card:last-child{margin-bottom:0;}
 .card-head{
-  display:flex;align-items:center;justify-content:space-between;
-  gap:8px;
+  display:-ms-flexbox;
+  display:flex;
+  -ms-flex-align:center;
+  align-items:center;
+  -ms-flex-pack:justify;
+  justify-content:space-between;
   padding:10px 14px;
-  border-bottom:1px solid var(--line-soft);
+  border-bottom:1px solid #eef2f7;
+  background:#f9fbfe;
+  background:-ms-linear-gradient(top,#fbfdff,#f7f9fc);
   background:linear-gradient(180deg,#fbfdff,#f7f9fc);
 }
-.card-title{font-weight:700;font-size:14px;color:var(--ink);}
+.card-title{font-weight:700;font-size:14px;color:#1f2a37;}
 .card-body{padding:14px;}
 .card-body.no-pad{padding:0;}
 
-/* ---- form fields ---- */
-.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px 14px;}
-.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px 14px;}
-.fld{display:flex;flex-direction:column;gap:5px;min-width:0;}
-.fld>span{font-size:12.5px;color:var(--ink-soft);font-weight:500;padding-inline-start:2px;}
-.fld-wide{grid-column:1/-1;}
+/* ============================================================================
+   FORM GRIDS — flexbox + wrap, spacing via padding on cells (IE-safe).
+   Each .fld gets side/bottom padding; the row uses negative margins so the
+   outer edges stay flush. This reproduces CSS-grid `gap` on Trident too.
+   ============================================================================ */
+.grid-2,.grid-3,.row-2{
+  display:-ms-flexbox;
+  display:flex;
+  -ms-flex-wrap:wrap;
+  flex-wrap:wrap;
+  margin:-7px;
+}
+.grid-2 > .fld,.row-2 > .card,.row-2 > *{width:50%;padding:7px;}
+.grid-3 > .fld{width:33.3333%;padding:7px;}
+.grid-3 > .fld.fld-wide{width:100%;}
+.grid-2 > .fld.fld-wide{width:100%;}
+
+/* the two-card row (admission + doctor) uses .card children directly */
+.row-2{margin:-6px;}
+.row-2 > .card{width:50%;padding:0;margin:6px;-ms-flex:1 1 0;flex:1 1 0;box-sizing:border-box;}
+/* neutralise the outer flex margins we added on the wrapper */
+.row-2{margin-left:-6px;margin-right:-6px;}
+
+.fld{
+  display:-ms-flexbox;
+  display:flex;
+  -ms-flex-direction:column;
+  flex-direction:column;
+  min-width:0;
+}
+.fld > span{
+  display:block;
+  font-size:12.5px;color:#5b6b7d;font-weight:500;
+  padding-right:2px;margin-bottom:5px;
+}
+
 .inp{
+  display:block;
   width:100%;
   height:38px;
   padding:0 11px;
-  border:1px solid var(--line);
-  border-radius:var(--radius-sm);
-  background:#fff;
-  color:var(--ink);
+  border:1px solid #e2e8f0;
+  border-radius:8px;
+  background:#ffffff;
+  color:#1f2a37;
   font-family:inherit;
   font-size:13.5px;
   text-align:right;
+  -webkit-transition:border-color .15s, box-shadow .15s;
   transition:border-color .15s, box-shadow .15s;
   outline:none;
 }
-.inp:focus{border-color:var(--blue);box-shadow:0 0 0 3px var(--blue-soft);}
-.inp-sm{height:32px;font-size:12.5px;width:200px;}
+.inp:focus{border-color:#2f6fed;box-shadow:0 0 0 3px #eaf1fe;}
+.inp-sm{height:32px;font-size:12.5px;width:210px;}
 select.inp{cursor:pointer;}
+textarea.inp{height:auto;padding:8px 11px;resize:vertical;}
 
-.row-2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+/* ============================================================================
+   CHECKBOXES
+   ============================================================================ */
+.chk{
+  display:-ms-inline-flexbox;
+  display:inline-flex;
+  -ms-flex-align:center;
+  align-items:center;
+  font-size:12.5px;color:#5b6b7d;cursor:pointer;
+}
+.chk input{width:15px;height:15px;margin:0 0 0 6px;}
+.chk > span{display:inline-block;}
+.chk-inline{margin-right:auto;}
 
-/* ---- checkboxes ---- */
-.chk{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink-soft);cursor:pointer;}
-.chk input{width:15px;height:15px;accent-color:var(--blue);}
-.chk-inline{margin-inline-start:auto;}
-
-/* ---- buttons ---- */
+/* ============================================================================
+   BUTTONS
+   ============================================================================ */
 .btn{
   border:1px solid transparent;
-  border-radius:var(--radius-sm);
+  border-radius:8px;
   padding:0 14px;height:36px;
   font-family:inherit;font-size:13px;font-weight:600;
   cursor:pointer;white-space:nowrap;
-  display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  display:-ms-inline-flexbox;
+  display:inline-flex;
+  -ms-flex-align:center;
+  align-items:center;
+  -ms-flex-pack:center;
+  justify-content:center;
+  line-height:1;
+  -webkit-transition:background .15s,border-color .15s,color .15s;
   transition:background .15s,border-color .15s,color .15s;
 }
-.btn-primary{background:var(--blue);color:#fff;}
-.btn-primary:hover{background:var(--blue-dark);}
-.btn-outline{background:#fff;border-color:var(--line);color:var(--ink);}
-.btn-outline:hover{border-color:var(--blue);color:var(--blue);}
-.btn-ghost{background:var(--blue-soft);color:var(--blue-dark);}
+.btn > .ico{margin-left:6px;font-size:1em;line-height:1;}
+.btn-primary{background:#2f6fed;color:#ffffff;}
+.btn-primary:hover{background:#2357c4;}
+.btn-outline{background:#ffffff;border-color:#e2e8f0;color:#1f2a37;}
+.btn-outline:hover{border-color:#2f6fed;color:#2f6fed;}
+.btn-ghost{background:#eaf1fe;color:#2357c4;}
 .btn-ghost:hover{background:#dbe7fd;}
-.btn-danger{background:#fff;border-color:#f3c0c2;color:var(--red);}
+.btn-danger{background:#ffffff;border-color:#f3c0c2;color:#e5484d;}
 .btn-danger:hover{background:#fdeeee;}
 .btn-lg{height:44px;font-size:14px;padding:0 22px;}
-.btn-block{width:100%;}
-.btn-icon{width:34px;height:32px;padding:0;background:#fff;border-color:var(--line);color:var(--ink-soft);font-size:12px;}
-.btn-icon:hover{border-color:var(--blue);color:var(--blue);}
+.btn-block{width:100%;margin-bottom:8px;}
+.print-body .btn-block:last-child{margin-bottom:0;}
+.btn-icon{width:34px;height:32px;padding:0;background:#ffffff;border-color:#e2e8f0;color:#5b6b7d;font-size:12px;}
+.btn-icon:hover{border-color:#2f6fed;color:#2f6fed;}
 
-/* ---- header tools ---- */
-.head-tools{display:flex;align-items:center;gap:8px;}
+/* ============================================================================
+   HEADER TOOLS / SEARCH WIDGETS
+   ============================================================================ */
+.head-tools{
+  display:-ms-flexbox;
+  display:flex;
+  -ms-flex-align:center;
+  align-items:center;
+}
+.head-tools > *{margin-right:8px;}
+.head-tools > *:first-child{margin-right:0;}
 
-/* ---- search widgets ---- */
-.search-wrap{display:flex;gap:8px;}
-.search-wrap .inp{flex:1;}
-.mini-list{margin-top:10px;max-height:150px;overflow-y:auto;border:1px solid var(--line-soft);border-radius:var(--radius-sm);background:#fcfdff;}
-.mini-list .row{padding:8px 10px;border-bottom:1px solid var(--line-soft);cursor:pointer;font-size:12.5px;display:flex;justify-content:space-between;gap:8px;}
+.search-wrap{
+  display:-ms-flexbox;
+  display:flex;
+}
+.search-wrap .inp{-ms-flex:1 1 auto;flex:1 1 auto;}
+.search-wrap .btn{margin-right:8px;-ms-flex:0 0 auto;flex:0 0 auto;}
+
+.mini-list{
+  margin-top:10px;max-height:150px;overflow-y:auto;
+  border:1px solid #eef2f7;border-radius:8px;background:#fcfdff;
+}
+.mini-list .row{
+  padding:8px 10px;border-bottom:1px solid #eef2f7;cursor:pointer;font-size:12.5px;
+  display:-ms-flexbox;display:flex;
+  -ms-flex-pack:justify;justify-content:space-between;
+}
 .mini-list .row:last-child{border-bottom:none;}
-.mini-list .row:hover{background:var(--blue-soft);}
+.mini-list .row:hover{background:#eaf1fe;}
 .mini-list .row .r-name{font-weight:600;}
-.mini-list .row .r-sub{color:var(--ink-soft);font-size:11.5px;}
+.mini-list .row .r-sub{color:#5b6b7d;font-size:11.5px;}
 .empty{padding:14px;text-align:center;color:#98a6b8;font-size:12px;}
 
-/* ---- profile ---- */
-.profile-body{display:flex;gap:12px;align-items:center;padding:14px;}
+/* ============================================================================
+   PROFILE CARD
+   ============================================================================ */
+.profile-body{
+  display:-ms-flexbox;display:flex;
+  -ms-flex-align:center;align-items:center;
+  padding:14px;
+}
 .avatar{
   width:56px;height:56px;border-radius:50%;
-  background:var(--blue-soft);color:var(--blue-dark);
-  display:flex;align-items:center;justify-content:center;
-  font-size:22px;font-weight:700;flex:0 0 auto;
+  background:#eaf1fe;color:#2357c4;
+  display:-ms-flexbox;display:flex;
+  -ms-flex-align:center;align-items:center;
+  -ms-flex-pack:center;justify-content:center;
+  font-size:22px;font-weight:700;-ms-flex:0 0 auto;flex:0 0 auto;
+  margin-left:12px;
 }
-.profile-meta{min-width:0;flex:1;}
+.profile-meta{min-width:0;-ms-flex:1 1 auto;flex:1 1 auto;}
 .pf-name{font-weight:700;font-size:14px;margin-bottom:4px;}
-.pf-sub{font-size:12px;color:var(--ink-soft);}
+.pf-sub{font-size:12px;color:#5b6b7d;margin-bottom:2px;}
 .pf-sub span{color:#9aa8b8;}
-.pf-sub b{color:var(--ink);font-weight:600;}
-.ps-row{display:flex;gap:10px;padding:0 14px 14px;}
+.pf-sub b{color:#1f2a37;font-weight:600;}
+.ps-row{
+  display:-ms-flexbox;display:flex;
+  padding:0 14px 14px;
+}
 .ps-box{
-  flex:1;display:flex;align-items:center;justify-content:space-between;
-  padding:8px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);
+  -ms-flex:1 1 0;flex:1 1 0;
+  display:-ms-flexbox;display:flex;
+  -ms-flex-align:center;align-items:center;
+  -ms-flex-pack:justify;justify-content:space-between;
+  padding:8px 12px;border:1px solid #e2e8f0;border-radius:8px;
   background:#fafcff;
 }
-.ps-key{font-weight:700;color:var(--blue-dark);}
+.ps-box + .ps-box{margin-right:10px;}
+.ps-key{font-weight:700;color:#2357c4;}
 .ps-val{font-weight:600;}
 
-/* ---- insurance ---- */
-.ins-body{display:flex;flex-direction:column;gap:10px;}
+/* ============================================================================
+   INSURANCE PANEL
+   ============================================================================ */
+.ins-body .fld{margin-bottom:10px;}
+.ins-body .fld:last-child{margin-bottom:0;}
 
-/* ---- tables ---- */
-.tbl-wrap{overflow:auto;max-height:150px;transition:max-height .2s;}
+/* ============================================================================
+   SERVICE / QUEUE TABLES
+   ============================================================================ */
+.tbl-wrap{
+  overflow:auto;max-height:150px;
+  -webkit-transition:max-height .2s;transition:max-height .2s;
+}
 .tbl-wrap.expanded{max-height:340px;}
 .tbl{width:100%;border-collapse:collapse;font-size:12.5px;}
 .tbl thead th{
-  position:sticky;top:0;background:#f5f8fc;color:var(--ink-soft);
+  position:-webkit-sticky;position:sticky;top:0;
+  background:#f5f8fc;color:#5b6b7d;
   font-weight:600;font-size:11.5px;padding:9px 10px;text-align:right;
-  border-bottom:1px solid var(--line);white-space:nowrap;
+  border-bottom:1px solid #e2e8f0;white-space:nowrap;
 }
-.tbl tbody td{padding:8px 10px;border-bottom:1px solid var(--line-soft);text-align:right;}
+.tbl tbody td{padding:8px 10px;border-bottom:1px solid #eef2f7;text-align:right;}
 .tbl tbody tr:hover{background:#f9fbfe;}
 .tbl .qty-inp{width:52px;height:28px;text-align:center;padding:0 4px;}
-.tbl .del-btn{background:none;border:none;color:var(--red);cursor:pointer;font-size:14px;padding:2px 6px;border-radius:6px;}
+.tbl .del-btn{background:none;border:none;color:#e5484d;cursor:pointer;font-size:14px;padding:2px 6px;border-radius:6px;}
 .tbl .del-btn:hover{background:#fdeeee;}
-.tbl .edit-btn{background:none;border:none;color:var(--blue);cursor:pointer;font-size:13px;padding:2px 6px;}
+.tbl .edit-btn{background:none;border:none;color:#2f6fed;cursor:pointer;font-size:13px;padding:2px 6px;}
 
 /* ---- service suggest dropdown ---- */
-.svc-suggest{display:none;border-top:1px solid var(--line-soft);max-height:180px;overflow:auto;background:#fcfdff;}
+.svc-suggest{display:none;border-top:1px solid #eef2f7;max-height:180px;overflow:auto;background:#fcfdff;}
 .svc-suggest.open{display:block;}
-.svc-suggest .s-row{padding:9px 14px;border-bottom:1px solid var(--line-soft);cursor:pointer;display:flex;justify-content:space-between;gap:10px;font-size:12.5px;}
-.svc-suggest .s-row:hover{background:var(--blue-soft);}
-.svc-suggest .s-code{color:var(--ink-soft);font-size:11.5px;}
-.svc-suggest .s-price{font-weight:600;color:var(--blue-dark);}
+.svc-suggest .s-row{
+  padding:9px 14px;border-bottom:1px solid #eef2f7;cursor:pointer;
+  display:-ms-flexbox;display:flex;
+  -ms-flex-pack:justify;justify-content:space-between;
+  font-size:12.5px;
+}
+.svc-suggest .s-row:hover{background:#eaf1fe;}
+.svc-suggest .s-code{color:#5b6b7d;font-size:11.5px;}
+.svc-suggest .s-price{font-weight:600;color:#2357c4;}
 
-/* ---- invoice ---- */
-.invoice-body{display:flex;flex-direction:column;gap:8px;}
-.inv-line{display:flex;justify-content:space-between;align-items:center;font-size:13px;padding:2px 0;}
-.inv-line span{color:var(--ink-soft);}
+/* ============================================================================
+   INVOICE (left panel)
+   ============================================================================ */
+.invoice-body{padding:14px;}
+.inv-line{
+  display:-ms-flexbox;display:flex;
+  -ms-flex-pack:justify;justify-content:space-between;
+  -ms-flex-align:center;align-items:center;
+  font-size:13px;padding:4px 0;
+}
+.inv-line span{color:#5b6b7d;}
 .inv-line b{font-weight:600;}
 .inv-line.total{
-  margin-top:6px;padding-top:12px;border-top:2px solid var(--line);
+  margin-top:8px;padding-top:12px;border-top:2px solid #e2e8f0;
   font-size:16px;
 }
-.inv-line.total span{color:var(--ink);font-weight:700;}
-.inv-line.total b{color:var(--blue-dark);font-weight:800;}
+.inv-line.total span{color:#1f2a37;font-weight:700;}
+.inv-line.total b{color:#2357c4;font-weight:800;}
 
 /* ---- print buttons ---- */
-.print-body{display:flex;flex-direction:column;gap:8px;}
+.print-body{padding:14px;}
 
-/* ---- action row ---- */
+/* ============================================================================
+   BOTTOM ACTION ROW
+   ============================================================================ */
 .action-row{
-  display:flex;align-items:center;gap:10px;
-  padding:12px 14px;background:var(--panel);
-  border:1px solid var(--line);border-radius:var(--radius);
-  box-shadow:var(--shadow);flex:0 0 auto;
-  position:sticky;bottom:0;
+  display:-ms-flexbox;display:flex;
+  -ms-flex-align:center;align-items:center;
+  padding:12px 14px;background:#ffffff;
+  border:1px solid #e2e8f0;border-radius:12px;
+  box-shadow:0 1px 2px rgba(16,24,40,.05), 0 1px 3px rgba(16,24,40,.08);
+  -ms-flex:0 0 auto;flex:0 0 auto;
+  position:-webkit-sticky;position:sticky;bottom:0;
+  margin-bottom:0;
 }
+.action-row > .btn{margin-left:10px;}
+.action-row > .chk-inline{margin-right:auto;margin-left:0;}
 
-/* ---- sync badge ---- */
+/* ============================================================================
+   SYNC BADGE
+   ============================================================================ */
 .status-card .card-body{padding:10px 12px;}
-.sync-badge{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink-soft);}
-.sync-badge .dot{width:9px;height:9px;border-radius:50%;background:var(--amber);box-shadow:0 0 0 3px rgba(247,144,9,.15);}
-.sync-badge.ok .dot{background:var(--green);box-shadow:0 0 0 3px rgba(18,183,106,.15);}
-.sync-badge.err .dot{background:var(--red);box-shadow:0 0 0 3px rgba(229,72,77,.15);}
-
-/* ---- toast ---- */
-.toast{
-  position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(20px);
-  background:#1f2a37;color:#fff;padding:10px 18px;border-radius:10px;
-  font-size:13px;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:99;
+.sync-badge{
+  display:-ms-flexbox;display:flex;
+  -ms-flex-align:center;align-items:center;
+  font-size:12px;color:#5b6b7d;
 }
-.toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+.sync-badge .dot{
+  width:9px;height:9px;border-radius:50%;background:#f79009;
+  box-shadow:0 0 0 3px rgba(247,144,9,.15);margin-left:8px;
+}
+.sync-badge.ok .dot{background:#12b76a;box-shadow:0 0 0 3px rgba(18,183,106,.15);}
+.sync-badge.err .dot{background:#e5484d;box-shadow:0 0 0 3px rgba(229,72,77,.15);}
+
+/* ============================================================================
+   TOAST
+   ============================================================================ */
+.toast{
+  position:fixed;bottom:20px;left:50%;
+  -webkit-transform:translateX(-50%) translateY(20px);
+  transform:translateX(-50%) translateY(20px);
+  background:#1f2a37;color:#fff;padding:10px 18px;border-radius:10px;
+  font-size:13px;opacity:0;pointer-events:none;
+  -webkit-transition:opacity .2s,-webkit-transform .2s;
+  transition:opacity .2s,transform .2s;z-index:99;
+}
+.toast.show{opacity:1;-webkit-transform:translateX(-50%) translateY(0);transform:translateX(-50%) translateY(0);}
 .toast.ok{background:#0f7a4e;}
 .toast.err{background:#b42318;}
 
-/* ---- right-click context menu (copy / cut / paste) ---- */
+/* ============================================================================
+   RIGHT-CLICK CONTEXT MENU (copy / cut / paste)
+   ============================================================================ */
 .ctx-menu{
   position:fixed;min-width:172px;background:#fff;border:1px solid #d7dde6;
   border-radius:10px;box-shadow:0 8px 28px rgba(16,32,64,.18);
-  padding:6px;z-index:9999;font-size:13px;user-select:none;
+  padding:6px;z-index:9999;font-size:13px;-ms-user-select:none;user-select:none;
 }
 .ctx-item{
-  display:flex;align-items:center;justify-content:space-between;gap:16px;
+  display:-ms-flexbox;display:flex;
+  -ms-flex-align:center;align-items:center;
+  -ms-flex-pack:justify;justify-content:space-between;
   padding:8px 12px;border-radius:7px;cursor:pointer;color:#1f2a37;white-space:nowrap;
 }
 .ctx-item:hover{background:#eef4ff;}
 .ctx-item.disabled{color:#aeb6c2;cursor:default;}
 .ctx-item.disabled:hover{background:transparent;}
 .ctx-label{font-weight:500;}
-.ctx-shortcut{color:#9aa4b2;font-size:11px;direction:ltr;}
+.ctx-shortcut{color:#9aa4b2;font-size:11px;direction:ltr;margin-right:16px;}
 .ctx-sep{height:1px;background:#eef1f5;margin:5px 6px;}
 
-/* ---- loading overlay ---- */
+/* ============================================================================
+   LOADING OVERLAY
+   ============================================================================ */
 .loader{
-  position:fixed;inset:0;z-index:10000;display:flex;align-items:center;
-  justify-content:center;background:#f4f7fb;
-  transition:opacity .35s ease;opacity:1;
+  position:fixed;top:0;left:0;right:0;bottom:0;z-index:10000;
+  display:-ms-flexbox;display:flex;
+  -ms-flex-align:center;align-items:center;
+  -ms-flex-pack:center;justify-content:center;
+  background:#f4f7fb;
+  -webkit-transition:opacity .35s ease;transition:opacity .35s ease;opacity:1;
 }
 .loader.hide{opacity:0;pointer-events:none;}
-.loader-box{display:flex;flex-direction:column;align-items:center;gap:18px;}
+.loader-box{
+  display:-ms-flexbox;display:flex;
+  -ms-flex-direction:column;flex-direction:column;
+  -ms-flex-align:center;align-items:center;
+}
 .loader-spin{
   width:52px;height:52px;border-radius:50%;
   border:5px solid #dbe5f5;border-top-color:#2f6fed;
+  -webkit-animation:az-spin .9s linear infinite;
   animation:az-spin .9s linear infinite;
+  margin-bottom:18px;
 }
+@-webkit-keyframes az-spin{to{-webkit-transform:rotate(360deg);}}
 @keyframes az-spin{to{transform:rotate(360deg);}}
 .loader-text{color:#2357c4;font-size:15px;font-weight:600;}
 
-/* ---- responsive: narrow (1366) ---- */
+/* ============================================================================
+   RESPONSIVE (Chromium honours; IE ignores gracefully → stays wide)
+   ============================================================================ */
 @media (max-width:1440px){
-  .app{grid-template-columns:270px 1fr 230px;gap:10px;padding:10px;}
-  .grid-3{grid-template-columns:1fr 1fr;}
-}
-@media (max-width:1200px){
-  .app{grid-template-columns:1fr;overflow-y:auto;}
-  .col{overflow:visible;}
-  .row-2,.grid-3{grid-template-columns:1fr 1fr;}
+  .col-right{-ms-flex:0 0 272px;flex:0 0 272px;width:272px;}
+  .col-left {-ms-flex:0 0 232px;flex:0 0 232px;width:232px;}
+  .col-center{margin:0 10px;}
+  .grid-3 > .fld{width:50%;}
 }
