@@ -126,3 +126,5 @@ static std::wstring normDigits(const std::wstring& in){
 #include "web_admission_api.inc"
 #include "web_admission_http.inc"
 #include "web_admission_host.inc"
+#include "web_admission_mshtml.inc"
+#include "web_admission_dispatch.inc"

@@ -173,7 +173,7 @@ static std::wstring adUserDataFolder(){
 // ============================================================================
 //  Public API
 // ============================================================================
-bool WebAdmission_Available(){
+static bool WV2_Available(){
     adLoadLoader();
     if(!pCreateEnv) return false;
     if(pGetVer){
@@ -186,7 +186,7 @@ bool WebAdmission_Available(){
     return true; // loader present but no version query — assume usable
 }
 
-HWND WebAdmission_CreateView(HWND parent){
+static HWND WV2_CreateView(HWND parent){
     if(!parent) return nullptr;
     adLoadLoader();
     if(!pCreateEnv) return nullptr;
@@ -244,14 +244,14 @@ HWND WebAdmission_CreateView(HWND parent){
     return host;
 }
 
-void WebAdmission_Resize(HWND view, int w, int h){
+static void WV2_Resize(HWND view, int w, int h){
     AdView* v=adViewFor(view); if(!v||!v->ctrl) return;
     MoveWindow(view,0,0,w,h,TRUE);
     RECT rc={0,0,w,h};
     v->ctrl->put_Bounds(rc);
 }
 
-void WebAdmission_PushEvent(const char* eventName, const std::string& jsonData){
+static void WV2_PushEvent(const char* eventName, const std::string& jsonData){
     // format: {"event":"name","data":<jsonData>}
     std::string msg="{\"event\":"+jstr(u82w(eventName))+",\"data\":"+
         (jsonData.empty()?std::string("{}"):jsonData)+"}";
@@ -265,13 +265,20 @@ void WebAdmission_PushEvent(const char* eventName, const std::string& jsonData){
     }
 }
 
-void WebAdmission_DestroyView(HWND view){
+static bool WV2_DestroyView(HWND view){
     AdView* v=nullptr;
     { std::lock_guard<std::mutex> lk(g_adViewsMx);
       auto it=g_adViews.find(view); if(it!=g_adViews.end()){ v=it->second; g_adViews.erase(it); } }
-    if(!v) return;
+    if(!v) return false;   // not a WebView2 view
     if(v->web){ v->web->remove_WebMessageReceived(v->msgTok); v->web->Release(); v->web=nullptr; }
     if(v->ctrl){ v->ctrl->Close(); v->ctrl->Release(); v->ctrl=nullptr; }
     if(IsWindow(view)) DestroyWindow(view);
     delete v;
+    return true;
+}
+
+// True if `view` is a live WebView2 host we own.
+static bool WV2_Owns(HWND view){
+    std::lock_guard<std::mutex> lk(g_adViewsMx);
+    return g_adViews.find(view)!=g_adViews.end();
 }
