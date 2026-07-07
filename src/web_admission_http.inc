@@ -17,6 +17,11 @@ static volatile LONG g_adStop=0;
 // embedded WebView2 path events are pushed directly via PostWebMessageAsJson.
 static std::vector<std::string> g_adEventQ;
 
+// diagnostics: how many times the loaded page has actually hit /api/init.
+// Used by the headless admission_probe to prove the embedded JS ran without a
+// syntax error (a broken script would never reach the bridge).
+static volatile LONG g_adInitHits=0;
+
 static void adLock(){ if(g_adCsInit) EnterCriticalSection(&g_adCs); }
 static void adUnlock(){ if(g_adCsInit) LeaveCriticalSection(&g_adCs); }
 
@@ -37,6 +42,7 @@ static bool adAssetForPath(const std::string& path, int& id, const char*& ctype)
     if(p=="/bridge.js"){ id=402; ctype="application/javascript; charset=utf-8"; return true; }
     if(p=="/admission.js"){ id=403; ctype="application/javascript; charset=utf-8"; return true; }
     if(p=="/vazir.ttf"){ id=404; ctype="font/ttf"; return true; }
+    if(p=="/contextmenu.js"){ id=405; ctype="application/javascript; charset=utf-8"; return true; }
     return false;
 }
 
@@ -86,6 +92,7 @@ static DWORD WINAPI adHttpThread(LPVOID){
                 o+="]}";
                 adReply(c,200,"application/json; charset=utf-8",o);
             } else {
+                if(verb=="init") InterlockedIncrement(&g_adInitHits);
                 std::string out=admissionApi(verb,bdy);
                 adReply(c,200,"application/json; charset=utf-8",out);
             }

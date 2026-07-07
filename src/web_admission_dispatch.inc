@@ -51,3 +51,10 @@ void WebAdmission_DestroyView(HWND view){
     if(WV2_DestroyView(view)) return;   // was a WebView2 view
     MshtmlAdmission_Destroy(view);      // else an MSHTML view
 }
+
+#ifdef AZ_DEBUG_BUILD
+// Headless diagnostics only: number of times the embedded page reached
+// /api/init. Proves the bundled ES5 JS parsed & ran (a syntax error would stop
+// the script before it ever called the bridge).
+long WebAdmission_DebugInitHits(){ return (long)g_adInitHits; }
+#endif

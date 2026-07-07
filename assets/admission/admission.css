@@ -237,6 +237,23 @@ select.inp{cursor:pointer;}
 .toast.ok{background:#0f7a4e;}
 .toast.err{background:#b42318;}
 
+/* ---- right-click context menu (copy / cut / paste) ---- */
+.ctx-menu{
+  position:fixed;min-width:172px;background:#fff;border:1px solid #d7dde6;
+  border-radius:10px;box-shadow:0 8px 28px rgba(16,32,64,.18);
+  padding:6px;z-index:9999;font-size:13px;user-select:none;
+}
+.ctx-item{
+  display:flex;align-items:center;justify-content:space-between;gap:16px;
+  padding:8px 12px;border-radius:7px;cursor:pointer;color:#1f2a37;white-space:nowrap;
+}
+.ctx-item:hover{background:#eef4ff;}
+.ctx-item.disabled{color:#aeb6c2;cursor:default;}
+.ctx-item.disabled:hover{background:transparent;}
+.ctx-label{font-weight:500;}
+.ctx-shortcut{color:#9aa4b2;font-size:11px;direction:ltr;}
+.ctx-sep{height:1px;background:#eef1f5;margin:5px 6px;}
+
 /* ---- responsive: narrow (1366) ---- */
 @media (max-width:1440px){
   .app{grid-template-columns:270px 1fr 230px;gap:10px;padding:10px;}

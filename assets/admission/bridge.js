@@ -1,122 +1,222 @@
 /* ============================================================================
    bridge.js — bidirectional C++ <-> JS IPC layer for the Admission UI.
 
+   IMPORTANT: written in ES5-only syntax (no arrow functions, no const/let, no
+   template literals, no Map/Set, no fetch, no spread/destructuring) so it parses
+   and runs correctly on BOTH engines:
+     (A) WebView2 (Chromium) — preferred, native postMessage transport.
+     (B) MSHTML / Trident    — universal fallback that ships with every Windows;
+                                it does NOT support ES2015+ syntax, which is why
+                                every earlier version threw "Syntax error".
+
    Two transports, auto-selected at runtime:
      (A) WebView2  — window.chrome.webview.postMessage / addEventListener
-                     (native, zero-latency, preferred).
-     (B) HTTP      — POST /api/<verb> to the loopback host (fallback / when the
-                     page is opened in a plain browser during development).
+     (B) HTTP      — XMLHttpRequest POST /api/<verb> to the loopback host,
+                     with /api/poll long-ish polling for C++ -> JS push events.
 
    Public API:
      Bridge.ready(cb)               -> called once the transport is up
-     Bridge.call(verb, payload)     -> returns a Promise<result-object>
+     Bridge.call(verb, payload)     -> returns a thenable ({then,catch})
      Bridge.on(event, handler)      -> subscribe to C++ -> JS push events
    Messages are structured JSON with request/response IDs (script requirement).
    ============================================================================ */
 (function (global) {
   'use strict';
 
-  const pending = new Map();   // id -> {resolve, reject}
-  const listeners = new Map(); // event -> [handlers]
-  let seq = 1;
-  let transport = null;        // 'webview' | 'http'
-  const readyCbs = [];
-  let isReady = false;
+  /* ---------------------------------------------------------------------- */
+  /*  Tiny Promise-like thenable (ES5). Enough for our request/response flow */
+  /*  without depending on a native Promise (MSHTML has none).               */
+  /* ---------------------------------------------------------------------- */
+  function Deferred() {
+    this._st = 0;            /* 0 pending, 1 resolved, 2 rejected */
+    this._val = null;
+    this._ok = [];
+    this._err = [];
+  }
+  Deferred.prototype.resolve = function (v) {
+    if (this._st !== 0) return;
+    this._st = 1; this._val = v;
+    var i, a = this._ok;
+    for (i = 0; i < a.length; i++) { this._safe(a[i], v); }
+    this._ok = []; this._err = [];
+  };
+  Deferred.prototype.reject = function (e) {
+    if (this._st !== 0) return;
+    this._st = 2; this._val = e;
+    var i, a = this._err;
+    for (i = 0; i < a.length; i++) { this._safe(a[i], e); }
+    this._ok = []; this._err = [];
+  };
+  Deferred.prototype._safe = function (fn, v) {
+    try { fn(v); } catch (ex) { if (global.console) console.error(ex); }
+  };
+  /* returns a thenable object */
+  Deferred.prototype.promise = function () {
+    var self = this;
+    var api = {
+      then: function (onOk, onErr) {
+        if (typeof onOk === 'function') {
+          if (self._st === 1) self._safe(onOk, self._val);
+          else if (self._st === 0) self._ok.push(onOk);
+        }
+        if (typeof onErr === 'function') {
+          if (self._st === 2) self._safe(onErr, self._val);
+          else if (self._st === 0) self._err.push(onErr);
+        }
+        return api;
+      },
+      'catch': function (onErr) { return api.then(null, onErr); }
+    };
+    return api;
+  };
+
+  /* ---------------------------------------------------------------------- */
+  /*  State                                                                  */
+  /* ---------------------------------------------------------------------- */
+  var pending = {};            /* id -> Deferred */
+  var listeners = {};          /* event -> [handlers] */
+  var seq = 1;
+  var transport = null;        /* 'webview' | 'http' */
+  var readyCbs = [];
+  var isReady = false;
 
   function fireReady() {
     if (isReady) return;
     isReady = true;
-    readyCbs.splice(0).forEach((cb) => { try { cb(); } catch (e) { console.error(e); } });
+    var i;
+    for (i = 0; i < readyCbs.length; i++) {
+      try { readyCbs[i](); } catch (e) { if (global.console) console.error(e); }
+    }
+    readyCbs = [];
   }
 
   function dispatchEvent(name, data) {
-    const hs = listeners.get(name);
-    if (hs) hs.forEach((h) => { try { h(data); } catch (e) { console.error(e); } });
+    var hs = listeners[name];
+    if (!hs) return;
+    var i;
+    for (i = 0; i < hs.length; i++) {
+      try { hs[i](data); } catch (e) { if (global.console) console.error(e); }
+    }
   }
 
-  // ---- handle an inbound message object (from either transport) ----
+  function parseJson(s) {
+    if (typeof s !== 'string') return s;
+    try { return JSON.parse(s); } catch (e) { return null; }
+  }
+
+  /* handle an inbound message object (from either transport) */
   function handleInbound(msg) {
     if (!msg || typeof msg !== 'object') return;
-    // response to a call
-    if (msg.id && pending.has(msg.id)) {
-      const p = pending.get(msg.id);
-      pending.delete(msg.id);
-      if (msg.error) p.reject(new Error(msg.error));
-      else p.resolve(msg.result != null ? msg.result : {});
+    if (msg.id && pending[msg.id]) {
+      var d = pending[msg.id];
+      delete pending[msg.id];
+      if (msg.error) d.reject(new Error(msg.error));
+      else d.resolve(msg.result != null ? msg.result : {});
       return;
     }
-    // C++ -> JS push event
     if (msg.event) dispatchEvent(msg.event, msg.data || {});
   }
 
-  // ---------------------------------------------------------------- WebView2
+  /* ---------------------------------------------------------------- WebView2 */
   function initWebView() {
-    const wv = global.chrome && global.chrome.webview;
+    var wv = global.chrome && global.chrome.webview;
     if (!wv) return false;
     transport = 'webview';
-    wv.addEventListener('message', (ev) => {
-      let d = ev.data;
-      if (typeof d === 'string') { try { d = JSON.parse(d); } catch (_) { return; } }
+    wv.addEventListener('message', function (ev) {
+      var d = ev.data;
+      if (typeof d === 'string') { d = parseJson(d); if (!d) return; }
       handleInbound(d);
     });
-    // tell the host we are ready to receive state
-    wv.postMessage(JSON.stringify({ verb: 'ready', id: 'ready' }));
+    try { wv.postMessage(JSON.stringify({ verb: 'ready', id: 'ready' })); } catch (e) {}
     fireReady();
     return true;
   }
 
   function callWebView(verb, payload) {
-    const id = 'r' + (seq++);
-    return new Promise((resolve, reject) => {
-      pending.set(id, { resolve, reject });
-      global.chrome.webview.postMessage(JSON.stringify({ verb, id, payload: payload || {} }));
-      setTimeout(() => {
-        if (pending.has(id)) { pending.delete(id); reject(new Error('timeout: ' + verb)); }
-      }, 15000);
-    });
+    var id = 'r' + (seq++);
+    var d = new Deferred();
+    pending[id] = d;
+    try {
+      global.chrome.webview.postMessage(
+        JSON.stringify({ verb: verb, id: id, payload: payload || {} }));
+    } catch (e) { delete pending[id]; d.reject(e); return d.promise(); }
+    setTimeout(function () {
+      if (pending[id]) { delete pending[id]; d.reject(new Error('timeout: ' + verb)); }
+    }, 15000);
+    return d.promise();
   }
 
-  // -------------------------------------------------------------------- HTTP
+  /* -------------------------------------------------------------------- HTTP */
+  /* Uses XMLHttpRequest (present in every engine incl. MSHTML). */
+  function xhrPost(url, body, onOk, onErr) {
+    var x;
+    try { x = new XMLHttpRequest(); }
+    catch (e) {
+      try { x = new global.ActiveXObject('Microsoft.XMLHTTP'); }
+      catch (e2) { if (onErr) onErr(new Error('no XHR')); return; }
+    }
+    try {
+      x.open('POST', url, true);
+      try { x.setRequestHeader('Content-Type', 'application/json'); } catch (e3) {}
+      x.onreadystatechange = function () {
+        if (x.readyState !== 4) return;
+        if (x.status >= 200 && x.status < 300) {
+          if (onOk) onOk(x.responseText);
+        } else {
+          if (onErr) onErr(new Error('HTTP ' + x.status));
+        }
+      };
+      x.send(body || '{}');
+    } catch (e4) { if (onErr) onErr(e4); }
+  }
+
   function initHttp() {
     transport = 'http';
-    // poll for pushed events (C++ -> JS) via /api/poll
     fireReady();
-    (function poll() {
-      fetch('/api/poll', { method: 'POST', body: '{}' })
-        .then((r) => r.ok ? r.json() : null)
-        .then((j) => { if (j && j.events) j.events.forEach((e) => handleInbound(e)); })
-        .catch(() => {})
-        .finally(() => setTimeout(poll, 1000));
-    })();
+    /* poll for pushed events (C++ -> JS) via /api/poll */
+    function poll() {
+      xhrPost('/api/poll', '{}',
+        function (txt) {
+          var j = parseJson(txt);
+          if (j && j.events) {
+            var i;
+            for (i = 0; i < j.events.length; i++) handleInbound(j.events[i]);
+          }
+          setTimeout(poll, 900);
+        },
+        function () { setTimeout(poll, 1500); });
+    }
+    poll();
     return true;
   }
 
   function callHttp(verb, payload) {
-    const id = 'r' + (seq++);
-    return fetch('/api/' + verb, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload || {})
-    })
-      .then((r) => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
-      .then((j) => { if (j && j.error) throw new Error(j.error); return j; });
+    var d = new Deferred();
+    xhrPost('/api/' + verb, JSON.stringify(payload || {}),
+      function (txt) {
+        var j = parseJson(txt);
+        if (j && j.error) { d.reject(new Error(j.error)); return; }
+        d.resolve(j != null ? j : {});
+      },
+      function (err) { d.reject(err); });
+    return d.promise();
   }
 
-  // ------------------------------------------------------------- public API
-  const Bridge = {
-    transport: () => transport,
-    ready(cb) { if (isReady) cb(); else readyCbs.push(cb); },
-    on(event, handler) {
-      if (!listeners.has(event)) listeners.set(event, []);
-      listeners.get(event).push(handler);
+  /* --------------------------------------------------------------- public API */
+  var Bridge = {
+    transport: function () { return transport; },
+    ready: function (cb) { if (isReady) cb(); else readyCbs.push(cb); },
+    on: function (event, handler) {
+      if (!listeners[event]) listeners[event] = [];
+      listeners[event].push(handler);
     },
-    call(verb, payload) {
+    call: function (verb, payload) {
       if (transport === 'webview') return callWebView(verb, payload);
       return callHttp(verb, payload);
     }
   };
 
-  // auto-init: prefer WebView2, fall back to HTTP
+  /* auto-init: prefer WebView2, fall back to HTTP (MSHTML uses this) */
   if (!initWebView()) initHttp();
 
   global.Bridge = Bridge;
