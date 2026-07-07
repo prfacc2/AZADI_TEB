@@ -1062,19 +1062,41 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
                     ok = idxOk && apiOk;
                 }
                 // Now verify the embedded VIEW (MSHTML/WebView2) actually
-                // creates & is a real child window over the frame.
-                bool viewOk=false;
+                // creates a real child window AND that the bundled JS runs end to
+                // end: we pump messages for up to ~10s and check that the page
+                // reached /api/init through the Bridge. A JS *syntax error* (the
+                // bug we are fixing) would stop the script before it ever calls
+                // the bridge, so a non-zero init-hit count proves the ES5 JS
+                // parsed and executed under the real engine.
+                long WebAdmission_DebugInitHits();
+                bool viewOk=false, jsOk=false;
                 if(WebAdmission_Available()){
                     HWND v = WebAdmission_CreateView(f);
                     viewOk = (v!=NULL && IsWindow(v));
                     logLine(std::wstring(L"PROBE createView ") + (viewOk?L"OK":L"FAIL"));
-                    if(v) { Sleep(600); WebAdmission_DestroyView(v); }
+                    if(v){
+                        DWORD t0=GetTickCount(); MSG pm;
+                        while(GetTickCount()-t0 < 12000){
+                            if(WebAdmission_DebugInitHits() > 0){ jsOk=true; break; }
+                            if(PeekMessageW(&pm,NULL,0,0,PM_REMOVE)){ TranslateMessage(&pm); DispatchMessageW(&pm); }
+                            else Sleep(15);
+                        }
+                        logLine(std::wstring(L"PROBE js-bridge init ") + (jsOk?L"OK":L"FAIL") +
+                                L" hits=" + std::to_wstring(WebAdmission_DebugInitHits()));
+                        WebAdmission_DestroyView(v);
+                    }
                 }
-                ok = ok && viewOk;
+                ok = ok && viewOk && jsOk;
                 logLine(ok ? L"AZ_ADMISSION_PROBE=OK" : L"AZ_ADMISSION_PROBE=FAIL");
                 // also drop a plain marker file so headless runners can read it
                 {
-                    std::wstring marker = ok ? L"AZ_ADMISSION_PROBE=OK\r\n" : L"AZ_ADMISSION_PROBE=FAIL\r\n";
+                    std::wstring marker;
+                    marker += std::wstring(L"host=") + (port>0?L"OK":L"FAIL") + L" port=" + std::to_wstring(port) + L"\r\n";
+                    marker += std::wstring(L"assets=") + (ok||true?L"":L"") ;
+                    marker += std::wstring(L"view=") + (viewOk?L"OK":L"FAIL") + L"\r\n";
+                    marker += std::wstring(L"jsBridge=") + (jsOk?L"OK":L"FAIL") +
+                              L" initHits=" + std::to_wstring(WebAdmission_DebugInitHits()) + L"\r\n";
+                    marker += ok ? L"AZ_ADMISSION_PROBE=OK\r\n" : L"AZ_ADMISSION_PROBE=FAIL\r\n";
                     writeFileUtf8(dataDir()+L"\\admission_probe.txt", marker, false);
                 }
                 gdipShutdown(); BackupLog_Shutdown();

@@ -203,6 +203,10 @@ static HWND MshtmlAdmission_CreateView(HWND parent){
     IWebBrowser2* wb=nullptr;
     if(SUCCEEDED(oleObj->QueryInterface(IID_IWebBrowser2,(void**)&wb)) && wb){
         v->wb=wb; site->wb=wb;
+        // Suppress any legacy script-error dialogs (the old "Script Error / Do you
+        // want to continue…" popups). With ES5-safe JS there should be none, but
+        // this guarantees a clean, dialog-free surface no matter what.
+        wb->put_Silent(VARIANT_TRUE);
         wb->put_Width(r2.right); wb->put_Height(r2.bottom);
         { std::lock_guard<std::mutex> lk(g_mshtmlMx); g_mshtmlViews[host]=v; }
         int port=WebAdmission_EnsureHost();
