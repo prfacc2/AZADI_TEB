@@ -457,8 +457,21 @@
     if (cur >= 0 && cur < arr.length) sel.selectedIndex = cur;
   }
 
+  /* ======================================================= loader */
+  var _loaderHidden = false;
+  function hideLoader() {
+    if (_loaderHidden) return;
+    _loaderHidden = true;
+    var el = $('loader');
+    if (!el) return;
+    if (el.className.indexOf('hide') < 0) el.className += ' hide';
+    setTimeout(function () { if (el && el.parentNode) el.style.display = 'none'; }, 420);
+  }
+  function loaderText(t) { var el = $('loaderText'); if (el) setText(el, t); }
+
   /* ======================================================= boot */
   function boot() {
+    loaderText('در حال همگام‌سازی با برنامه…');
     Bridge.call('init', {}).then(function (r) {
       if (r.insurances) { state.insurances = r.insurances; fillSelect($('insMain'), r.insurances); }
       if (r.supp) { state.supp = r.supp; fillSelect($('insSupp'), r.supp); }
@@ -466,10 +479,12 @@
       if (r.services) { state.services = r.services; }
       renderServices(); recompute();
       setSync('ok', 'همگام با برنامه');
+      hideLoader();
       toast('پذیرش بیمار آماده است', 'ok');
     }).catch(function (err) {
       setSync('err', 'قطع ارتباط');
       renderServices(); recompute();
+      hideLoader();
       if (window.console) console.error('init failed', err);
     });
   }
@@ -490,5 +505,7 @@
     wire();
     subscribeEvents();
     Bridge.ready(boot);
+    // Safety net: never leave the overlay stuck if the bridge is slow/absent.
+    setTimeout(hideLoader, 8000);
   });
 })();

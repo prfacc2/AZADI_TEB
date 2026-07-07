@@ -254,6 +254,22 @@ select.inp{cursor:pointer;}
 .ctx-shortcut{color:#9aa4b2;font-size:11px;direction:ltr;}
 .ctx-sep{height:1px;background:#eef1f5;margin:5px 6px;}
 
+/* ---- loading overlay ---- */
+.loader{
+  position:fixed;inset:0;z-index:10000;display:flex;align-items:center;
+  justify-content:center;background:#f4f7fb;
+  transition:opacity .35s ease;opacity:1;
+}
+.loader.hide{opacity:0;pointer-events:none;}
+.loader-box{display:flex;flex-direction:column;align-items:center;gap:18px;}
+.loader-spin{
+  width:52px;height:52px;border-radius:50%;
+  border:5px solid #dbe5f5;border-top-color:#2f6fed;
+  animation:az-spin .9s linear infinite;
+}
+@keyframes az-spin{to{transform:rotate(360deg);}}
+.loader-text{color:#2357c4;font-size:15px;font-weight:600;}
+
 /* ---- responsive: narrow (1366) ---- */
 @media (max-width:1440px){
   .app{grid-template-columns:270px 1fr 230px;gap:10px;padding:10px;}
