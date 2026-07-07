@@ -14,6 +14,7 @@
 // ============================================================================
 #include "app.h"
 #include "web_admission.h"
+#include "sections.h"
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <shlobj.h>
@@ -21,6 +22,8 @@
 #include <vector>
 #include <map>
 #include <mutex>
+#include <cmath>
+#include <cstdlib>
 
 #include "web_admission_webview2.inc"
 
