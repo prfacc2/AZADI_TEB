@@ -26,3 +26,4 @@ package.json
 package-lock.json
 test_designer.mjs
 designer_test.png
+build/AzadiTeb_probe.exe

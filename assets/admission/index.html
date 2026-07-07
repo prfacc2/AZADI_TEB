@@ -8,6 +8,16 @@
   <link rel="stylesheet" href="admission.css" />
 </head>
 <body>
+  <!-- Full-screen loading overlay: shown until the bridge connects and the
+       first data pull completes, then fades out. Guarantees the user never
+       sees a half-loaded / unstyled surface. -->
+  <div id="loader" class="loader">
+    <div class="loader-box">
+      <div class="loader-spin"></div>
+      <div class="loader-text" id="loaderText">در حال بارگذاری پذیرش بیمار…</div>
+    </div>
+  </div>
+
   <div id="app" class="app">
 
     <!-- ============================ RIGHT PANEL ============================ -->

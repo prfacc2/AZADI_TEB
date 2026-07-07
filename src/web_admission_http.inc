@@ -59,53 +59,74 @@ static void adReply(SOCKET s, int code, const char* ctype, const std::string& bo
     adSendAll(s,hdr,n); if(!body.empty()) adSendAll(s,body.data(),(int)body.size());
 }
 
+// Serve a single accepted connection. Runs on its own worker thread so that
+// MSHTML/WebView2 (which opens several parallel connections for the page +
+// css + js + font) never has an asset request stall behind another. This was
+// the reason the CSS/JS "did not load": a single blocking accept loop could
+// only satisfy one asset at a time, so parallel requests timed out and the
+// page rendered raw (unstyled, no script).
+static void adServeConn(SOCKET c){
+    std::string req; char buf[2048]; int got; size_t hdrEnd=std::string::npos;
+    while((got=recv(c,buf,sizeof(buf),0))>0){
+        req.append(buf,got); hdrEnd=req.find("\r\n\r\n");
+        if(hdrEnd!=std::string::npos) break;
+        if(req.size()>65536) break;
+    }
+    if(hdrEnd==std::string::npos){ closesocket(c); return; }
+    std::string method,path;
+    { size_t sp1=req.find(' '); size_t sp2=(sp1==std::string::npos)?std::string::npos:req.find(' ',sp1+1);
+      if(sp1!=std::string::npos&&sp2!=std::string::npos){ method=req.substr(0,sp1); path=req.substr(sp1+1,sp2-sp1-1);} }
+    size_t clen=0;
+    { size_t cp=req.find("Content-Length:"); if(cp==std::string::npos) cp=req.find("content-length:");
+      if(cp!=std::string::npos) clen=(size_t)atoi(req.c_str()+cp+15); }
+    std::string bdy=req.substr(hdrEnd+4);
+    while(bdy.size()<clen && (got=recv(c,buf,sizeof(buf),0))>0) bdy.append(buf,got);
+    if(bdy.size()>clen) bdy=bdy.substr(0,clen);
+
+    if(path.compare(0,5,"/api/")==0){
+        std::string verb=path.substr(5); size_t q=verb.find('?'); if(q!=std::string::npos) verb=verb.substr(0,q);
+        if(verb=="poll"){
+            std::string o="{\"events\":[";
+            adLock();
+            for(size_t i=0;i<g_adEventQ.size();++i){ if(i)o+=","; o+=g_adEventQ[i]; }
+            g_adEventQ.clear();
+            adUnlock();
+            o+="]}";
+            adReply(c,200,"application/json; charset=utf-8",o);
+        } else {
+            if(verb=="init") InterlockedIncrement(&g_adInitHits);
+            std::string out=admissionApi(verb,bdy);
+            adReply(c,200,"application/json; charset=utf-8",out);
+        }
+    } else {
+        int id; const char* ctype;
+        if(adAssetForPath(path,id,ctype)){
+            std::string data;
+            if(adLoadRes(id,data)) adReply(c,200,ctype,data);
+            else adReply(c,404,"text/plain","not found");
+        } else adReply(c,404,"text/plain","not found");
+    }
+    closesocket(c);
+}
+
+// Worker thread: owns one connection, serves it, then exits.
+static DWORD WINAPI adConnThread(LPVOID p){
+    SOCKET c=(SOCKET)(UINT_PTR)p;
+    adServeConn(c);
+    return 0;
+}
+
 static DWORD WINAPI adHttpThread(LPVOID){
     for(;;){
         sockaddr_in ca; int cl=sizeof(ca);
         SOCKET c=accept(g_adListen,(sockaddr*)&ca,&cl);
         if(c==INVALID_SOCKET){ if(InterlockedCompareExchange(&g_adStop,0,0)) break; Sleep(5); continue; }
-        std::string req; char buf[2048]; int got; size_t hdrEnd=std::string::npos;
-        while((got=recv(c,buf,sizeof(buf),0))>0){
-            req.append(buf,got); hdrEnd=req.find("\r\n\r\n");
-            if(hdrEnd!=std::string::npos) break;
-            if(req.size()>65536) break;
-        }
-        if(hdrEnd==std::string::npos){ closesocket(c); continue; }
-        std::string method,path;
-        { size_t sp1=req.find(' '); size_t sp2=(sp1==std::string::npos)?std::string::npos:req.find(' ',sp1+1);
-          if(sp1!=std::string::npos&&sp2!=std::string::npos){ method=req.substr(0,sp1); path=req.substr(sp1+1,sp2-sp1-1);} }
-        size_t clen=0;
-        { size_t cp=req.find("Content-Length:"); if(cp==std::string::npos) cp=req.find("content-length:");
-          if(cp!=std::string::npos) clen=(size_t)atoi(req.c_str()+cp+15); }
-        std::string bdy=req.substr(hdrEnd+4);
-        while(bdy.size()<clen && (got=recv(c,buf,sizeof(buf),0))>0) bdy.append(buf,got);
-        if(bdy.size()>clen) bdy=bdy.substr(0,clen);
-
-        if(path.compare(0,5,"/api/")==0){
-            std::string verb=path.substr(5); size_t q=verb.find('?'); if(q!=std::string::npos) verb=verb.substr(0,q);
-            if(verb=="poll"){
-                std::string o="{\"events\":[";
-                adLock();
-                for(size_t i=0;i<g_adEventQ.size();++i){ if(i)o+=","; o+=g_adEventQ[i]; }
-                g_adEventQ.clear();
-                adUnlock();
-                o+="]}";
-                adReply(c,200,"application/json; charset=utf-8",o);
-            } else {
-                if(verb=="init") InterlockedIncrement(&g_adInitHits);
-                std::string out=admissionApi(verb,bdy);
-                adReply(c,200,"application/json; charset=utf-8",out);
-            }
-        } else {
-            int id; const char* ctype;
-            if(adAssetForPath(path,id,ctype)){
-                std::string data;
-                if(adLoadRes(id,data)) adReply(c,200,ctype,data);
-                else adReply(c,404,"text/plain","not found");
-            } else adReply(c,404,"text/plain","not found");
-        }
-        closesocket(c);
-        if(InterlockedCompareExchange(&g_adStop,0,0)) break;
+        if(InterlockedCompareExchange(&g_adStop,0,0)){ closesocket(c); break; }
+        // Give each connection its own worker so parallel asset fetches
+        // (html/css/js/font) never serialize behind one another.
+        HANDLE th=CreateThread(NULL,0,adConnThread,(LPVOID)(UINT_PTR)c,0,NULL);
+        if(th) CloseHandle(th);
+        else { adServeConn(c); } // fallback: serve inline if thread spawn fails
     }
     return 0;
 }
