@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>پذیرش بیمار — آزادی طب</title>
+  <link rel="stylesheet" href="admission.css" />
+</head>
+<body>
+  <div id="app" class="app">
+
+    <!-- ============================ RIGHT PANEL ============================ -->
+    <!-- (RTL: this column sits on the right of the screen) -->
+    <aside class="col col-right" id="colRight">
+      <!-- Patient profile card -->
+      <section class="card profile-card">
+        <div class="card-head">
+          <span class="card-title">پروفایل بیمار</span>
+        </div>
+        <div class="profile-body">
+          <div class="avatar" id="pfAvatar">؟</div>
+          <div class="profile-meta">
+            <div class="pf-name" id="pfName">— بیماری انتخاب نشده —</div>
+            <div class="pf-sub"><span>کد ملی:</span> <b id="pfNid">—</b></div>
+            <div class="pf-sub"><span>جنسیت:</span> <b id="pfGender">—</b></div>
+            <div class="pf-sub"><span>تولد:</span> <b id="pfBirth">—</b></div>
+            <div class="pf-sub"><span>موبایل:</span> <b id="pfMobile">—</b></div>
+          </div>
+        </div>
+        <div class="ps-row">
+          <div class="ps-box" id="psP"><span class="ps-key">P</span><span class="ps-val" id="psPVal">۰</span></div>
+          <div class="ps-box" id="psS"><span class="ps-key">S</span><span class="ps-val" id="psSVal">۰</span></div>
+        </div>
+      </section>
+
+      <!-- Local patient search -->
+      <section class="card">
+        <div class="card-head"><span class="card-title">جستجوی بیمار محلی</span></div>
+        <div class="card-body">
+          <div class="search-wrap">
+            <input type="text" id="patSearch" class="inp" placeholder="نام، کد ملی یا موبایل…" />
+            <button class="btn btn-ghost" id="patSearchBtn">جستجو</button>
+          </div>
+          <div class="mini-list" id="patResults">
+            <div class="empty">نتیجه‌ای نیست</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Insurance panel -->
+      <section class="card">
+        <div class="card-head"><span class="card-title">بیمه</span></div>
+        <div class="card-body ins-body">
+          <label class="fld">
+            <span>بیمه پایه</span>
+            <select id="insMain" class="inp"></select>
+          </label>
+          <label class="fld">
+            <span>بیمه تکمیلی</span>
+            <select id="insSupp" class="inp"></select>
+          </label>
+          <label class="fld">
+            <span>درصد تکمیلی</span>
+            <input type="text" id="insSuppPct" class="inp" value="۰" />
+          </label>
+        </div>
+      </section>
+
+      <!-- Doctor search -->
+      <section class="card">
+        <div class="card-head"><span class="card-title">جستجوی پزشک</span></div>
+        <div class="card-body">
+          <div class="search-wrap">
+            <input type="text" id="docSearch" class="inp" placeholder="نام پزشک یا کد…" />
+            <button class="btn btn-ghost" id="docSearchBtn">جستجو</button>
+          </div>
+          <div class="mini-list" id="docResults"><div class="empty">نتیجه‌ای نیست</div></div>
+        </div>
+      </section>
+    </aside>
+
+    <!-- ============================ CENTER PANEL ============================ -->
+    <main class="col col-center" id="colCenter">
+      <!-- Patient information -->
+      <section class="card">
+        <div class="card-head">
+          <span class="card-title">اطلاعات بیمار</span>
+          <label class="chk"><input type="checkbox" id="hasIns" checked /><span>دارای بیمه</span></label>
+        </div>
+        <div class="card-body grid-3">
+          <label class="fld"><span>کد ملی</span>
+            <input type="text" id="nid" class="inp" inputmode="numeric" placeholder="۱۰ رقم — Enter برای استعلام" />
+          </label>
+          <label class="fld"><span>نام</span><input type="text" id="first" class="inp" /></label>
+          <label class="fld"><span>نام خانوادگی</span><input type="text" id="last" class="inp" /></label>
+          <label class="fld"><span>نام پدر</span><input type="text" id="father" class="inp" /></label>
+          <label class="fld"><span>تاریخ تولد</span><input type="text" id="birth" class="inp" placeholder="۱۳۷۰/۰۱/۰۱" /></label>
+          <label class="fld"><span>جنسیت</span>
+            <select id="gender" class="inp"><option>مرد</option><option>زن</option></select>
+          </label>
+          <label class="fld"><span>موبایل</span><input type="text" id="mobile" class="inp" inputmode="numeric" /></label>
+          <label class="fld"><span>تلفن</span><input type="text" id="phone" class="inp" inputmode="numeric" /></label>
+          <label class="fld fld-wide"><span>آدرس</span><input type="text" id="addr" class="inp" /></label>
+        </div>
+      </section>
+
+      <!-- Insurance / admission + doctor row -->
+      <div class="row-2">
+        <section class="card">
+          <div class="card-head"><span class="card-title">پذیرش / نوع مراجعه</span></div>
+          <div class="card-body grid-2">
+            <label class="fld"><span>نوع پذیرش</span>
+              <select id="ptype" class="inp"><option>عادی</option><option>سرپایی</option><option>بستری</option></select>
+            </label>
+            <label class="fld"><span>نوع نوبت</span>
+              <select id="ntype" class="inp"><option>عادی</option><option>اورژانس</option><option>پرسنلی</option></select>
+            </label>
+          </div>
+        </section>
+        <section class="card">
+          <div class="card-head"><span class="card-title">پزشک معالج / انجام‌دهنده</span></div>
+          <div class="card-body grid-2">
+            <label class="fld"><span>کد پزشک معالج</span><input type="text" id="doc2code" class="inp" /></label>
+            <label class="fld"><span>پزشک معالج</span><input type="text" id="doc2name" class="inp" /></label>
+            <label class="fld"><span>کد انجام‌دهنده</span><input type="text" id="perfcode" class="inp" /></label>
+            <label class="fld"><span>انجام‌دهنده</span><input type="text" id="perfname" class="inp" /></label>
+          </div>
+        </section>
+      </div>
+
+      <!-- Appointment -->
+      <section class="card">
+        <div class="card-head"><span class="card-title">نوبت</span></div>
+        <div class="card-body grid-3">
+          <label class="fld"><span>تاریخ نوبت</span><input type="text" id="apptDate" class="inp" placeholder="۱۴۰۳/۰۱/۰۱" /></label>
+          <label class="fld"><span>شیفت</span>
+            <select id="apptShift" class="inp"><option>صبح</option><option>عصر</option><option>شب</option></select>
+          </label>
+          <label class="fld"><span>تاریخ نسخه</span><input type="text" id="rxDate" class="inp" /></label>
+        </div>
+      </section>
+
+      <!-- Services -->
+      <section class="card svc-card">
+        <div class="card-head">
+          <span class="card-title">خدمات</span>
+          <div class="head-tools">
+            <input type="text" id="svcSearch" class="inp inp-sm" placeholder="جستجوی خدمت (کد یا نام)…" />
+            <button class="btn btn-primary" id="svcAddBtn">➕ افزودن خدمت</button>
+            <button class="btn btn-icon" id="svcToggle" title="باز/بسته">▾</button>
+          </div>
+        </div>
+        <div class="svc-suggest" id="svcSuggest"></div>
+        <div class="card-body no-pad">
+          <div class="tbl-wrap" id="svcTblWrap">
+            <table class="tbl">
+              <thead>
+                <tr>
+                  <th>کد</th><th>نام خدمت</th><th>تعداد</th><th>مبلغ واحد</th>
+                  <th>سهم بیمه</th><th>سهم بیمار</th><th></th>
+                </tr>
+              </thead>
+              <tbody id="svcBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Queue / pending -->
+      <section class="card queue-card">
+        <div class="card-head">
+          <span class="card-title">صف پذیرش / پرداخت‌های معلق</span>
+          <button class="btn btn-icon" id="queueToggle" title="باز/بسته">▾</button>
+        </div>
+        <div class="card-body no-pad">
+          <div class="tbl-wrap" id="queueWrap">
+            <table class="tbl">
+              <thead><tr><th>نام</th><th>کد ملی</th><th>وضعیت</th><th>مبلغ</th></tr></thead>
+              <tbody id="queueBody"><tr><td colspan="4" class="empty">موردی در صف نیست</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Bottom action row -->
+      <div class="action-row">
+        <button class="btn btn-primary btn-lg" id="btnSave">💾 ثبت پذیرش و صدور قبض</button>
+        <button class="btn btn-danger" id="btnClear">🗑 پاک کردن</button>
+        <button class="btn btn-outline" id="btnNew">✚ پذیرش جدید</button>
+        <label class="chk chk-inline"><input type="checkbox" id="noPay" /><span>عدم پرداخت فعلی</span></label>
+      </div>
+    </main>
+
+    <!-- ============================ LEFT PANEL ============================ -->
+    <aside class="col col-left" id="colLeft">
+      <section class="card invoice-card">
+        <div class="card-head"><span class="card-title">صورت‌حساب</span></div>
+        <div class="card-body invoice-body">
+          <div class="inv-line"><span>جمع کل</span><b id="invTotal">۰</b></div>
+          <div class="inv-line"><span>سهم بیمه</span><b id="invIns">۰</b></div>
+          <div class="inv-line"><span>تخفیف</span><b id="invDisc">۰</b></div>
+          <div class="inv-line total"><span>قابل پرداخت</span><b id="invPayable">۰</b></div>
+        </div>
+      </section>
+      <section class="card">
+        <div class="card-head"><span class="card-title">چاپ</span></div>
+        <div class="card-body print-body">
+          <button class="btn btn-outline btn-block" id="prtReceipt">🧾 چاپ قبض</button>
+          <button class="btn btn-outline btn-block" id="prtIns">🛡 چاپ بیمه</button>
+          <button class="btn btn-outline btn-block" id="prtRx">💊 چاپ نسخه</button>
+          <button class="btn btn-outline btn-block" id="prtLast">🖨 چاپ آخرین</button>
+        </div>
+      </section>
+      <section class="card status-card">
+        <div class="card-body">
+          <div class="sync-badge" id="syncBadge"><span class="dot"></span><span id="syncText">در حال اتصال…</span></div>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <script src="bridge.js"></script>
+  <script src="admission.js"></script>
+</body>
+</html>
