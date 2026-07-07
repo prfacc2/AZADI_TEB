@@ -7,6 +7,7 @@
 // ============================================================================
 #include "app.h"
 #include "sections.h"   // §1.19.0: resolve operator dept → Section id for print routing
+#include "web_admission.h" // v1.33.0: embedded WebView2 «پذیرش بیمار» surface (native fallback)
 //  v1.17.0: the HTML/CSS/JS (MSHTML) presentation host was retired — the
 //  reception/appointment UI is now 100% native C++. `webhost.h` is no longer
 //  included and the webhost_*.{cpp,inc} sources are no longer compiled. The
@@ -2085,14 +2086,20 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         // Portal-message and empty tabs are pure painted pages with no form
         // controls — they own no edit boxes, combos or buttons.
         if(t->kind!=TK_RECEPTION) return 0;
-        //  v1.17.0: HTML/CSS/JS (MSHTML) presentation layer RETIRED. The
-        //  reception form below is now the ONLY renderer — pure native C++
-        //  (Win32 edit boxes / combos / owner-drawn cards in WM_PAINT). The
-        //  layout is tuned to match the reference design pixel-for-pixel, the
-        //  insurance lists come straight from billing.cpp, billing recalculates
-        //  natively, and printing goes through the real GDI printer path. No
-        //  browser control is ever created.
+        //  v1.33.0: PREFERRED renderer — «پذیرش بیمار» is rendered by an
+        //  embedded WebView2 (Chromium) surface loaded from the in-app loopback
+        //  host: the modern HTML/CSS/JS admission UI, fully two-way synced with
+        //  C++ through the structured IPC bridge (see web_admission.*). When the
+        //  WebView2 runtime is present we create that view and RETURN — skipping
+        //  the native controls entirely. If the runtime is missing we fall
+        //  through to the proven native GDI reception form below, so the app
+        //  keeps working on every Windows (7→11+) offline. The page never opens
+        //  in an external browser.
         t->web = NULL;
+        if(WebAdmission_Available()){
+            HWND wv = WebAdmission_CreateView(h);
+            if(wv){ t->web = wv; return 0; }   // embedded UI owns the whole tab
+        }
         // v1.25.0: ES_RIGHT so every textbox is right-aligned (راست‌چین) by
         // default — Persian RTL data entry. Fields with enableAutoDir still flip
         // alignment live based on typed content (Latin vs Persian).
@@ -3594,10 +3601,10 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         EndPaint(h,&ps);
         return 0; }
     case WM_DESTROY:
-        // §3 deterministic teardown: tear the hybrid HTML host down before the
-        // page window goes away (its own WM_DESTROY also runs teardown, but we
-        // null our handle here so no stale reference can be reused).
-        if(t && t->web){ HWND w0=t->web; t->web=0; DestroyWindow(w0); }
+        // v1.33.0 deterministic teardown: release the embedded WebView2 host
+        // (controller + core WebView) before the page window goes away. Null our
+        // handle first so no stale reference can be reused.
+        if(t && t->web){ HWND w0=t->web; t->web=0; WebAdmission_DestroyView(w0); }
         return 0;
     }
     return DefWindowProcW(h,m,w,l);
