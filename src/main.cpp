@@ -5,7 +5,12 @@
 // ============================================================================
 #include "app.h"
 #include "backup_log.h"
+#include "web_admission.h"
 #include <stdio.h>
+#ifdef AZ_DEBUG_BUILD
+#include <winsock2.h>   // headless admission_probe self-connect (debug only)
+#include <ws2tcpip.h>
+#endif
 
 HINSTANCE g_hInst = NULL;
 HWND      g_hFrame = NULL;
@@ -956,6 +961,12 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
     gdipStartup();                   // v1.3.0: GDI+ rendering layer
     seedDefaultDepts();              // v1.4.1: ensure «پذیرش» category exists
 
+    // v1.33.0: start the embedded Patient-Admission loopback host EAGERLY at
+    // launch (instead of lazily on first tab open). Makes the HTML surface come
+    // up instantly when «پذیرش بیمار» is clicked and guarantees the /api bridge
+    // is already listening. Cheap: one loopback socket + a single accept thread.
+    WebAdmission_EnsureHost();
+
     // responsive scale: based on monitor size + DPI
     HDC sdc=GetDC(NULL);
     int dpi = GetDeviceCaps(sdc,LOGPIXELSY);
@@ -1014,6 +1025,61 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
                                                switchScreen(SC_MANAGE);
                                                openBackupManager(f); }
             else if(!wcscmp(dbg,L"shift")){    int sh=0; showShiftDialog(f,sh); }
+            // §D.6: headless verification that the EMBEDDED admission page host
+            // actually serves the HTML/CSS/JS bundle + /api bridge. Starts the
+            // loopback host, then self-connects over 127.0.0.1 to GET
+            // /index.html and POST /api/init, logging the results and an
+            // AZ_ADMISSION_PROBE=OK/FAIL marker, then exits. Lets us confirm the
+            // HTML surface loads without needing a full GUI/WebBrowser render.
+            else if(!wcscmp(dbg,L"admission_probe")){
+                int port = WebAdmission_EnsureHost();
+                logLine(L"PROBE admission: host port = " + std::to_wstring(port));
+                bool ok = false;
+                if(port>0){
+                    auto httpGet=[&](const std::string& reqLine, const std::string& body)->std::string{
+                        SOCKET s=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);
+                        if(s==INVALID_SOCKET) return "";
+                        sockaddr_in a={}; a.sin_family=AF_INET;
+                        a.sin_addr.s_addr=htonl(INADDR_LOOPBACK); a.sin_port=htons((u_short)port);
+                        if(connect(s,(sockaddr*)&a,sizeof(a))!=0){ closesocket(s); return ""; }
+                        std::string req=reqLine;
+                        req+="Host: 127.0.0.1\r\nConnection: close\r\n";
+                        if(!body.empty()){ char cl[64]; sprintf(cl,"Content-Length: %d\r\n",(int)body.size()); req+=cl; }
+                        req+="\r\n"; req+=body;
+                        send(s,req.data(),(int)req.size(),0);
+                        std::string resp; char buf[2048]; int n;
+                        while((n=recv(s,buf,sizeof(buf),0))>0) resp.append(buf,n);
+                        closesocket(s); return resp;
+                    };
+                    std::string idx=httpGet("GET /index.html HTTP/1.1\r\n","");
+                    std::string api=httpGet("POST /api/init HTTP/1.1\r\n","{}");
+                    bool idxOk = idx.find("200")!=std::string::npos &&
+                                 (idx.find("<html")!=std::string::npos || idx.find("<!DOCTYPE")!=std::string::npos ||
+                                  idx.find("admission")!=std::string::npos);
+                    bool apiOk = api.find("200")!=std::string::npos && api.find("{")!=std::string::npos;
+                    logLine(L"PROBE index.html len=" + std::to_wstring(idx.size()) + (idxOk?L" OK":L" FAIL"));
+                    logLine(L"PROBE api/init  len=" + std::to_wstring(api.size()) + (apiOk?L" OK":L" FAIL"));
+                    ok = idxOk && apiOk;
+                }
+                // Now verify the embedded VIEW (MSHTML/WebView2) actually
+                // creates & is a real child window over the frame.
+                bool viewOk=false;
+                if(WebAdmission_Available()){
+                    HWND v = WebAdmission_CreateView(f);
+                    viewOk = (v!=NULL && IsWindow(v));
+                    logLine(std::wstring(L"PROBE createView ") + (viewOk?L"OK":L"FAIL"));
+                    if(v) { Sleep(600); WebAdmission_DestroyView(v); }
+                }
+                ok = ok && viewOk;
+                logLine(ok ? L"AZ_ADMISSION_PROBE=OK" : L"AZ_ADMISSION_PROBE=FAIL");
+                // also drop a plain marker file so headless runners can read it
+                {
+                    std::wstring marker = ok ? L"AZ_ADMISSION_PROBE=OK\r\n" : L"AZ_ADMISSION_PROBE=FAIL\r\n";
+                    writeFileUtf8(dataDir()+L"\\admission_probe.txt", marker, false);
+                }
+                gdipShutdown(); BackupLog_Shutdown();
+                return ok ? 0 : 2;
+            }
             // §D.5: headless smoke test for the print-designer open/close path.
             // Exercises the section-picker + designer launch without blocking on
             // user input, then exits 0 (path is reachable) or a non-zero code if
