@@ -157,8 +157,8 @@
           <span class="card-title">خدمات</span>
           <div class="head-tools">
             <input type="text" id="svcSearch" class="inp inp-sm" placeholder="جستجوی خدمت (کد یا نام)…" />
-            <button class="btn btn-primary" id="svcAddBtn">➕ افزودن خدمت</button>
-            <button class="btn btn-icon" id="svcToggle" title="باز/بسته">▾</button>
+            <button class="btn btn-primary" id="svcAddBtn"><span class="ico">+</span>افزودن خدمت</button>
+            <button class="btn btn-icon" id="svcToggle" title="باز/بسته">&#9662;</button>
           </div>
         </div>
         <div class="svc-suggest" id="svcSuggest"></div>
@@ -181,7 +181,7 @@
       <section class="card queue-card">
         <div class="card-head">
           <span class="card-title">صف پذیرش / پرداخت‌های معلق</span>
-          <button class="btn btn-icon" id="queueToggle" title="باز/بسته">▾</button>
+          <button class="btn btn-icon" id="queueToggle" title="باز/بسته">&#9662;</button>
         </div>
         <div class="card-body no-pad">
           <div class="tbl-wrap" id="queueWrap">
@@ -195,9 +195,9 @@
 
       <!-- Bottom action row -->
       <div class="action-row">
-        <button class="btn btn-primary btn-lg" id="btnSave">💾 ثبت پذیرش و صدور قبض</button>
-        <button class="btn btn-danger" id="btnClear">🗑 پاک کردن</button>
-        <button class="btn btn-outline" id="btnNew">✚ پذیرش جدید</button>
+        <button class="btn btn-primary btn-lg" id="btnSave"><span class="ico">&#128190;</span>ثبت پذیرش و صدور قبض</button>
+        <button class="btn btn-danger" id="btnClear"><span class="ico">&#128465;</span>پاک کردن</button>
+        <button class="btn btn-outline" id="btnNew"><span class="ico">+</span>پذیرش جدید</button>
         <label class="chk chk-inline"><input type="checkbox" id="noPay" /><span>عدم پرداخت فعلی</span></label>
       </div>
     </main>
@@ -216,10 +216,10 @@
       <section class="card">
         <div class="card-head"><span class="card-title">چاپ</span></div>
         <div class="card-body print-body">
-          <button class="btn btn-outline btn-block" id="prtReceipt">🧾 چاپ قبض</button>
-          <button class="btn btn-outline btn-block" id="prtIns">🛡 چاپ بیمه</button>
-          <button class="btn btn-outline btn-block" id="prtRx">💊 چاپ نسخه</button>
-          <button class="btn btn-outline btn-block" id="prtLast">🖨 چاپ آخرین</button>
+          <button class="btn btn-outline btn-block" id="prtReceipt">چاپ قبض</button>
+          <button class="btn btn-outline btn-block" id="prtIns">چاپ بیمه</button>
+          <button class="btn btn-outline btn-block" id="prtRx">چاپ نسخه</button>
+          <button class="btn btn-outline btn-block" id="prtLast">چاپ آخرین قبض</button>
         </div>
       </section>
       <section class="card status-card">
