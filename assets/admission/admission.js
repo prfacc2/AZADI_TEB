@@ -431,22 +431,46 @@
   }
 
   /* ==========================================================================
-     NAVIGATION — Enter moves to next data-nav field; Tab handled natively.
+     NAVIGATION — Enter moves to the NEXT field (in real visual/DOM order).
+     Tab handled natively. We build the ordered list from every visible,
+     enabled form control on the page (not only [data-nav]) so pressing Enter
+     ALWAYS advances — the operator never has to reach for the mouse.
      ========================================================================== */
+  function isVisible(el) {
+    if (!el) return false;
+    if (el.disabled) return false;
+    if (el.type === 'hidden') return false;
+    /* offsetParent is null for display:none elements (fast IE-safe check) */
+    if (el.offsetParent === null && el.offsetWidth === 0 && el.offsetHeight === 0) return false;
+    return true;
+  }
   function navFields() {
-    var all = document.querySelectorAll('[data-nav]');
-    var arr = [], i;
-    for (i = 0; i < all.length; i++) arr.push(all[i]);
+    /* All text inputs + selects that participate in data entry, in DOM order.
+       We deliberately EXCLUDE the auxiliary search boxes (quick-search, service
+       search, queue search, doctor search) so Enter inside the main patient/
+       admission form never jumps into a side search box. */
+    var all = document.querySelectorAll(
+      '#colCenter input.inp, #colCenter select.inp, ' +
+      '#colRight .ins-body input.inp, #colRight .ins-body select.inp');
+    var arr = [], i, el;
+    for (i = 0; i < all.length; i++) {
+      el = all[i];
+      if (el.className && el.className.indexOf('qty-inp') >= 0) continue; /* table qty handled separately */
+      if (!isVisible(el)) continue;
+      arr.push(el);
+    }
     return arr;
   }
   function focusNext(cur) {
     var arr = navFields(), i, idx = -1;
     for (i = 0; i < arr.length; i++) if (arr[i] === cur) { idx = i; break; }
-    if (idx >= 0 && idx + 1 < arr.length) {
-      var n = arr[idx + 1];
-      n.focus();
-      if (n.select && n.type !== 'select-one') { try { n.select(); } catch (e) {} }
-    }
+    var n = null;
+    if (idx >= 0 && idx + 1 < arr.length) n = arr[idx + 1];
+    else if (idx < 0 && arr.length) n = arr[0];
+    if (!n) return;
+    try { n.focus(); } catch (e) {}
+    /* select the whole value so typing cleanly replaces it (text inputs only) */
+    if (n.select && n.tagName === 'INPUT') { try { n.select(); } catch (e2) {} }
   }
 
   /* ==========================================================================
@@ -495,19 +519,39 @@
      WIRING
      ========================================================================== */
   function wire() {
-    /* --- Enter-to-next on every data-nav field; National-ID triggers lookup --- */
-    var fields = navFields(), i;
-    for (i = 0; i < fields.length; i++) {
+    /* --- Enter-to-next on EVERY main form field; National-ID triggers lookup.
+       We attach at the container level (event delegation) so dynamically shown
+       fields and re-queried lists are all covered without re-wiring. --- */
+    function handleFormKeydown(e) {
+      e = e || window.event;
+      var key = e.keyCode || e.which;
+      var el = e.target || e.srcElement;
+      if (!el || !el.className || el.className.indexOf('inp') < 0) return;
+      if (el.className.indexOf('qty-inp') >= 0) return;
+
+      /* Ctrl+A / Cmd+A → select the whole value inside this field */
+      if ((e.ctrlKey || e.metaKey) && key === 65 && el.tagName === 'INPUT') {
+        try { el.select(); } catch (er) {}
+        if (e.preventDefault) e.preventDefault();
+        return;
+      }
+      if (key !== 13) return;   /* only Enter advances */
+      if (e.preventDefault) e.preventDefault(); else e.returnValue = false;
+      if (el.id === 'nid') { lookupNid(el); return; }
+      focusNext(el);
+    }
+    on($('colCenter'), 'keydown', handleFormKeydown);
+    on($('colRight'), 'keydown', handleFormKeydown);
+
+    /* Select-all on focus for the main patient fields, so an operator can just
+       start typing to replace whatever is there. Delegated via focusin where
+       supported; falls back to per-field wiring on older engines. */
+    var focusEls = navFields(), fi;
+    for (fi = 0; fi < focusEls.length; fi++) {
       (function (el) {
-        on(el, 'keydown', function (e) {
-          e = e || window.event;
-          var key = e.keyCode || e.which;
-          if (key !== 13) return;   /* Enter */
-          if (e.preventDefault) e.preventDefault(); else e.returnValue = false;
-          if (el.id === 'nid') { lookupNid(el); return; }
-          focusNext(el);
-        });
-      })(fields[i]);
+        if (el.tagName !== 'INPUT') return;
+        on(el, 'focus', function () { try { el.select(); } catch (e) {} });
+      })(focusEls[fi]);
     }
 
     /* national id via the quick-search box too */
@@ -520,8 +564,8 @@
     on($('qsFile'), 'keydown', function (e) { e = e || window.event; if ((e.keyCode || e.which) === 13) { if (e.preventDefault) e.preventDefault(); doPatFileSearch(); } });
 
     /* birth-date + appt-date behaviours */
-    var dates = document.querySelectorAll('[data-date]');
-    for (i = 0; i < dates.length; i++) wireDateField(dates[i]);
+    var dates = document.querySelectorAll('[data-date]'), di;
+    for (di = 0; di < dates.length; di++) wireDateField(dates[di]);
 
     /* doctor search */
     on($('docSearchBtn'), 'click', doDocSearch);
