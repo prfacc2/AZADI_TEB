@@ -25,15 +25,21 @@
 html,body{height:100%;margin:0;padding:0;}
 body{
   font-family:'Vazirmatn','Segoe UI',Tahoma,sans-serif;
-  /* Slightly deeper page tint so white cards stand out clearly against it */
-  background:#e7eef7;
-  color:#0f1b2d;                 /* darker base text → sharper reading */
-  font-size:14px;                /* was 13px — everything is now bigger/clearer */
+  /* Soft blue-grey gradient page so the white cards read as distinct panels
+     instead of one flat white sheet. */
+  background:#dde7f4;
+  background:-webkit-linear-gradient(top,#e9f0fa 0%,#d6e2f2 100%);
+  background:linear-gradient(180deg,#e9f0fa 0%,#d6e2f2 100%);
+  color:#0d1a2e;                 /* darker base text → sharper reading */
+  font-size:14px;
   line-height:1.55;
-  -webkit-font-smoothing:antialiased;
-  text-rendering:optimizeLegibility;
+  /* CRISP text — antialiased/optimizeLegibility made glyphs look soft/blurry
+     on the embedded engines, so use the sharp defaults instead. */
+  -webkit-font-smoothing:auto;
+  -moz-osx-font-smoothing:auto;
+  text-rendering:optimizeSpeed;
   overflow:hidden;
-  font-weight:500;
+  font-weight:600;               /* heavier stems render sharper & clearer */
 }
 b{font-weight:800;}
 svg{display:inline-block;vertical-align:middle;}
@@ -157,22 +163,25 @@ svg{display:inline-block;vertical-align:middle;}
   background:#ffffff;
   /* Stronger, cooler border so cards separate clearly from the page + from
      each other (was a barely-visible near-white). */
-  border:1px solid #c4d2e3;
-  border-radius:11px;
-  box-shadow:0 2px 6px rgba(16,32,64,.08);
+  border:1px solid #bcccdf;
+  border-radius:12px;
+  /* deeper, layered shadow → cards clearly float above the tinted page */
+  box-shadow:0 1px 2px rgba(13,26,46,.06),0 6px 16px rgba(13,26,46,.09);
   overflow:hidden;
   -ms-flex:0 0 auto;flex:0 0 auto;
-  margin-bottom:12px;
+  margin-bottom:13px;
 }
 .col > .card:last-child{margin-bottom:0;}
 .card-head{
   display:-ms-flexbox;display:flex;
   -ms-flex-align:center;align-items:center;
   -ms-flex-pack:justify;justify-content:space-between;
-  padding:10px 14px;
-  border-bottom:2px solid #dce6f2;
-  /* tinted header strip so section titles read as headers, not body text */
-  background:#eef4fb;
+  padding:11px 15px;
+  border-bottom:1px solid #d6e2f0;
+  /* soft blue gradient header strip so section titles clearly read as headers */
+  background:-webkit-linear-gradient(top,#f4f8fe 0%,#e6eef9 100%);
+  background:linear-gradient(180deg,#f4f8fe 0%,#e6eef9 100%);
+  -webkit-box-shadow:inset 0 3px 0 #2e6bd6;box-shadow:inset 0 3px 0 #2e6bd6;
 }
 .card-title{
   font-weight:800;font-size:14px;color:#0f2547;
@@ -375,8 +384,8 @@ select.inp{cursor:pointer;background:#f9fbfe;}
   font-weight:800;font-size:15px;color:#ffffff;
   margin-left:9px;-ms-flex:0 0 auto;flex:0 0 auto;
 }
-.ps-key-p{background:#f0a800;}   /* پرداختی — amber badge only */
-.ps-key-s{background:#16a34a;}   /* صندوق   — green badge only */
+.ps-key-p{background:#16a34a;}   /* پرداختی — GREEN badge only */
+.ps-key-s{background:#f0a800;}   /* صندوق   — YELLOW badge only */
 .ps-cap{-ms-flex:1 1 auto;flex:1 1 auto;font-size:12.5px;color:#33465f;font-weight:700;}
 .ps-val{font-weight:800;font-size:17px;color:#0f2547;margin-left:5px;}
 .ps-unit{font-size:11.5px;color:#6a7c92;font-weight:600;}
@@ -491,18 +500,29 @@ select.inp{cursor:pointer;background:#f9fbfe;}
 .svc-foot,.queue-foot{
   display:-ms-flexbox;display:flex;
   -ms-flex-align:center;align-items:center;
-  border-top:2px solid #cfdcec;background:#eef4fb;
-  padding:9px 13px;
+  -ms-flex-pack:justify;justify-content:space-between;
+  border-top:2px solid #c3d3e8;
+  background:-webkit-linear-gradient(top,#f3f8ff 0%,#e6eefa 100%);
+  background:linear-gradient(180deg,#f3f8ff 0%,#e6eefa 100%);
+  padding:10px 16px;
 }
+/* four EQUAL-width columns, each fully centred, spread across the whole line;
+   جمع خدمات sits on the far right (first in RTL DOM), جمع سهم بیمار on the far
+   left (last in DOM) — with wide even gaps so big numbers never collide/mix. */
 .sf-cell{
-  -ms-flex:1 1 0;flex:1 1 0;text-align:center;min-width:0;
-  display:-ms-flexbox;display:flex;-ms-flex-direction:column;flex-direction:column;
-  padding:0 4px;
+  -ms-flex:1 1 0;flex:1 1 0;
+  -ms-flex-preferred-size:0;
+  text-align:center;min-width:0;
+  display:-ms-flexbox;display:flex;
+  -ms-flex-direction:column;flex-direction:column;
+  -ms-flex-align:center;align-items:center;
+  -ms-flex-pack:center;justify-content:center;
+  padding:0 6px;
 }
-.sf-cell + .sf-cell{border-right:1px solid #d3deec;}
-.sf-cell span{font-size:11.5px;color:#5a6b80;margin-bottom:3px;font-weight:600;white-space:nowrap;}
-/* numbers can grow large → allow wrap instead of clipping/overlapping */
-.sf-cell b{font-size:14px;color:#0f2547;font-weight:800;word-break:break-all;line-height:1.25;}
+.sf-cell + .sf-cell{border-right:1px solid #cfdcee;}
+.sf-cell span{font-size:11.5px;color:#54687f;margin-bottom:4px;font-weight:700;white-space:nowrap;text-align:center;}
+/* numbers can grow large → keep them on one line, centred, never wrapping/mixing */
+.sf-cell b{font-size:15px;color:#0d2144;font-weight:800;line-height:1.2;white-space:nowrap;text-align:center;}
 
 .queue-foot{-ms-flex-pack:justify;justify-content:space-between;}
 .q-count{font-size:13px;color:#41546c;font-weight:600;}

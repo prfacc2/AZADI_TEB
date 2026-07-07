@@ -519,39 +519,48 @@
      WIRING
      ========================================================================== */
   function wire() {
-    /* --- Enter-to-next on EVERY main form field; National-ID triggers lookup.
-       We attach at the container level (event delegation) so dynamically shown
-       fields and re-queried lists are all covered without re-wiring. --- */
-    function handleFormKeydown(e) {
-      e = e || window.event;
-      var key = e.keyCode || e.which;
-      var el = e.target || e.srcElement;
-      if (!el || !el.className || el.className.indexOf('inp') < 0) return;
-      if (el.className.indexOf('qty-inp') >= 0) return;
+    /* --- Enter-to-next + Ctrl+A on EVERY main form field; National-ID triggers
+       lookup.  Event delegation proved unreliable on the embedded WebView2 /
+       MSHTML engines, so we wire a DIRECT keydown handler onto each field. This
+       is the engine-reliable path. --- */
+    function fieldKeydown(el) {
+      return function (e) {
+        e = e || window.event;
+        var key = e.keyCode || e.which;
 
-      /* Ctrl+A / Cmd+A → select the whole value inside this field */
-      if ((e.ctrlKey || e.metaKey) && key === 65 && el.tagName === 'INPUT') {
-        try { el.select(); } catch (er) {}
-        if (e.preventDefault) e.preventDefault();
-        return;
-      }
-      if (key !== 13) return;   /* only Enter advances */
-      if (e.preventDefault) e.preventDefault(); else e.returnValue = false;
-      if (el.id === 'nid') { lookupNid(el); return; }
-      focusNext(el);
+        /* Ctrl+A / Cmd+A → select the whole value inside this field */
+        if ((e.ctrlKey || e.metaKey) && (key === 65 || key === 97) && el.tagName === 'INPUT') {
+          try { el.select(); } catch (er) {}
+          if (e.preventDefault) e.preventDefault(); else e.returnValue = false;
+          if (e.stopPropagation) e.stopPropagation();
+          return false;
+        }
+        /* Enter (13) advances to the next field; NID looks up the patient.
+           Tab (9) is intentionally left to the browser's native handling. */
+        if (key === 13) {
+          if (e.preventDefault) e.preventDefault(); else e.returnValue = false;
+          if (el.id === 'nid') { lookupNid(el); return false; }
+          focusNext(el);
+          return false;
+        }
+      };
     }
-    on($('colCenter'), 'keydown', handleFormKeydown);
-    on($('colRight'), 'keydown', handleFormKeydown);
-
-    /* Select-all on focus for the main patient fields, so an operator can just
-       start typing to replace whatever is there. Delegated via focusin where
-       supported; falls back to per-field wiring on older engines. */
-    var focusEls = navFields(), fi;
-    for (fi = 0; fi < focusEls.length; fi++) {
+    function selectOnFocus(el) {
+      return function () { if (el.tagName === 'INPUT') { try { el.select(); } catch (e) {} } };
+    }
+    /* Attach directly to EVERY form field (inputs + selects) — query the raw DOM
+       (not navFields(), which filters by visibility) so fields that start hidden
+       and appear later are still wired for Enter/Ctrl+A. */
+    var _navEls = document.querySelectorAll(
+      '#colCenter input.inp, #colCenter select.inp, ' +
+      '#colRight .ins-body input.inp, #colRight .ins-body select.inp'), _ni, _el;
+    for (_ni = 0; _ni < _navEls.length; _ni++) {
+      _el = _navEls[_ni];
+      if (_el.className && _el.className.indexOf('qty-inp') >= 0) continue;
       (function (el) {
-        if (el.tagName !== 'INPUT') return;
-        on(el, 'focus', function () { try { el.select(); } catch (e) {} });
-      })(focusEls[fi]);
+        on(el, 'keydown', fieldKeydown(el));
+        if (el.tagName === 'INPUT') on(el, 'focus', selectOnFocus(el));
+      })(_el);
     }
 
     /* national id via the quick-search box too */
