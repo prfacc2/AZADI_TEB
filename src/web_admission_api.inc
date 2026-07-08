@@ -7,22 +7,36 @@
 //  identities or bill amounts.
 // ============================================================================
 
-// ---- serialize a PatientRow / CitizenInfo to JSON --------------------------
-static std::string patientJson(const std::wstring& nid, const std::wstring& first,
-        const std::wstring& last, const std::wstring& father, const std::wstring& gender,
-        const std::wstring& birth, const std::wstring& mobile, const std::vector<int>& ins){
+// ---- serialize a PatientRow to JSON (v1.40.0 struct-based, authoritative) ---
+//  The struct overload is the single source of truth for the wire format; the
+//  legacy positional overload below delegates to it so the two never diverge.
+static std::string patientJson(const PatientRow& p){
     std::string o="{";
-    o+="\"nid\":"+jstr(nid)+",";
-    o+="\"first\":"+jstr(first)+",";
-    o+="\"last\":"+jstr(last)+",";
-    o+="\"father\":"+jstr(father)+",";
-    o+="\"gender\":"+jstr(gender)+",";
-    o+="\"birth\":"+jstr(birth)+",";
-    o+="\"mobile\":"+jstr(mobile)+",";
+    o+="\"nid\":"    +jstr(p.nid)    +",";
+    o+="\"first\":"  +jstr(p.first)  +",";
+    o+="\"last\":"   +jstr(p.last)   +",";
+    o+="\"father\":" +jstr(p.father) +",";
+    o+="\"gender\":" +jstr(p.gender) +",";
+    o+="\"birth\":"  +jstr(p.birth)  +",";
+    o+="\"mobile\":" +jstr(p.mobile) +",";
+    o+="\"phone\":"  +jstr(p.landline)+",";   // v1.40.0 — تلفن ثابت
+    o+="\"addr\":"   +jstr(p.address) +",";   // v1.40.0 — آدرس
+    o+="\"suppIdx\":"+jnum(p.suppIdx) +",";   // v1.40.0 — SUPP_INSURANCES[] index
     o+="\"insurances\":[";
-    for(size_t i=0;i<ins.size();++i){ if(i)o+=","; o+=jnum(ins[i]); }
+    for(size_t i=0;i<p.insurances.size();++i){ if(i)o+=","; o+=jnum(p.insurances[i]); }
     o+="]}";
     return o;
+}
+// ---- legacy positional overload — delegates to the struct one --------------
+static std::string patientJson(const std::wstring& nid, const std::wstring& first,
+        const std::wstring& last, const std::wstring& father, const std::wstring& gender,
+        const std::wstring& birth, const std::wstring& mobile, const std::vector<int>& ins,
+        const std::wstring& landline=L"", const std::wstring& address=L"", int suppIdx=-1){
+    PatientRow p;
+    p.nid=nid; p.first=first; p.last=last; p.father=father; p.gender=gender;
+    p.birth=birth; p.mobile=mobile; p.landline=landline; p.address=address;
+    p.insurances=ins; p.suppIdx=suppIdx;
+    return patientJson(p);
 }
 
 static std::string serviceJson(const ServiceDef& s){
@@ -298,6 +312,7 @@ static std::string admissionApi(const std::string& verb, const std::string& body
     }
 
     // ---- patient.lookup: national-id -> full record (local store first) ----
+    //  v1.40.0: build a PatientRow so landline/address/suppIdx round-trip too.
     if(verb=="patient.lookup"){
         std::string nidU; jsonGetString(body,"nid",nidU);
         std::wstring nid=normDigits(u82w(nidU));
@@ -305,14 +320,17 @@ static std::string admissionApi(const std::string& verb, const std::string& body
         auto all=loadAllPatients();
         for(const auto& p:all){
             if(normDigits(p.nid)==nid){
-                return "{\"found\":true,\"patient\":"+
-                    patientJson(p.nid,p.first,p.last,p.father,p.gender,p.birth,p.mobile,p.insurances)+"}";
+                return "{\"found\":true,\"patient\":"+patientJson(p)+"}";
             }
         }
         CitizenInfo c=lookupCitizen(nid);
         if(c.found){
-            return "{\"found\":true,\"patient\":"+
-                patientJson(nid,c.firstName,c.lastName,c.fatherName,c.gender,c.birthDate,c.mobile,c.insurances)+"}";
+            PatientRow p;
+            p.nid=nid; p.first=c.firstName; p.last=c.lastName; p.father=c.fatherName;
+            p.gender=c.gender; p.birth=c.birthDate; p.mobile=c.mobile;
+            p.landline=c.landline; p.address=c.address;   // v1.40.0
+            p.insurances=c.insurances; p.suppIdx=c.suppIdx;
+            return "{\"found\":true,\"patient\":"+patientJson(p)+"}";
         }
         return "{\"found\":false}";
     }
@@ -332,7 +350,7 @@ static std::string admissionApi(const std::string& verb, const std::string& body
                        normDigits(p.mobile).find(qd)!=std::wstring::npos;
             if(!hit) continue;
             if(n++) o+=",";
-            o+=patientJson(p.nid,p.first,p.last,p.father,p.gender,p.birth,p.mobile,p.insurances);
+            o+=patientJson(p);   // v1.40.0: struct overload → carries phone/addr/suppIdx
             if(n>=50) break;
         }
         o+="]}"; return o;
@@ -452,30 +470,48 @@ static std::string admissionApi(const std::string& verb, const std::string& body
 
         int q=saveReception(r);   // assigns queue no + persists CSV
 
-        // remember this operator-confirmed identity (never fabricated)
+        // remember this operator-confirmed identity (never fabricated).
+        // v1.40.0: also persist landline «تلفن ثابت», address «آدرس» and the
+        // supplementary-insurance index so the same code recalls every field.
         std::vector<int> ins;
         if(r.insIdx>0 && r.insIdx<N_INSURANCES) ins.push_back(r.insIdx);
         rememberPatient(r.nationalId,r.firstName,r.lastName,r.fatherName,
-            r.gender,r.birthDate,r.mobile,ins);
+            r.gender,r.birthDate,r.mobile,
+            r.landline,r.address,   // v1.40.0
+            ins,r.suppIdx);         // v1.40.0
         saveLastReceipt(r);
 
         // PRINT per the Management «دیزاین چاپ» template, same priority order
         // reception.cpp uses: 1) new print-design bound to the operator SECTION
         //                     2) legacy per-section designed receipt (idx 0)
         //                     3) classic GDI receipt
+        // v1.40.0 (B5): track WHICH path actually printed and report it to JS so
+        // the operator is warned when the classic fallback template was used.
         HWND owner = g_hFrame;
-        int sid=adResolveSectionId();
+        int  sid=adResolveSectionId();
         bool done=false;
-        if(sid>0) done=printPrintDesign(r,sid,owner);
-        if(!done) done=printDesignedReceipt(r,0,owner);
-        if(!done) printReceipt(r,2,owner);
+        std::wstring printMode=L"none";
+        if(sid>0){
+            done=printPrintDesign(r,sid,owner);
+            if(done) printMode=L"print-design section="+std::to_wstring(sid);
+        }
+        if(!done){
+            done=printDesignedReceipt(r,0,owner);
+            if(done) printMode=L"designed-receipt idx=0";
+        }
+        if(!done){
+            printReceipt(r,2,owner);
+            printMode=L"classic-gdi";
+        }
         kickCashDrawer();
 
-        logLine(L"admission saved+printed (web): "+r.nationalId);
+        logLine(L"admission printed via: "+printMode+L"  nid="+r.nationalId);
         if(g_hFrame) PostMessageW(g_hFrame,WM_APP_DESIGN_PUSHED,0,0);
 
         std::string o="{\"ok\":true,\"queueNo\":"+jnum(q)+
-            ",\"ps\":{\"P\":"+jnum(r.paid)+",\"S\":"+jnum(r.patientShare-r.paid)+"}}";
+            ",\"printMode\":"+jstr(printMode)+
+            ",\"ps\":{\"P\":"+jnum(r.paid)+
+            ",\"S\":"+jnum(r.patientShare-r.paid)+"}}";
         return o;
     }
 

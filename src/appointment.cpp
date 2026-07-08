@@ -269,7 +269,7 @@ static void submitAppointment(ApptUI* u){
         std::wstring gender = gi==1?L"زن":L"مرد";
         wchar_t fb[128]; GetWindowTextW(u->pFather,fb,128);
         rememberPatient(a.nationalId,a.firstName,a.lastName,trim(fb),
-            gender,L"",a.mobile,std::vector<int>());
+            gender,L"",a.mobile,L"",L"",std::vector<int>(),-1);
     }
     wchar_t mb[200];
     swprintf(mb,200,L"نوبت با شماره %d برای %s %s ثبت شد.",

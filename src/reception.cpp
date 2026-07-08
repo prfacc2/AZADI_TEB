@@ -2553,8 +2553,11 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 {
                     std::vector<int> ins;
                     if(r.insIdx>0 && r.insIdx<N_INSURANCES) ins.push_back(r.insIdx);
+                    // v1.40.0: forward the freshly entered landline/address and
+                    // supplementary-insurance index so the store recalls them too.
                     rememberPatient(r.nationalId,r.firstName,r.lastName,
-                        r.fatherName,r.gender,r.birthDate,r.mobile,ins);
+                        r.fatherName,r.gender,r.birthDate,r.mobile,
+                        r.landline,r.address,ins,r.suppIdx);
                 }
                 wchar_t mb[160];
                 swprintf(mb,160,L"پذیرش با شماره نوبت %d ثبت شد — %s %s",
