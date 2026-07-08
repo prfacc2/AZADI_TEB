@@ -285,7 +285,12 @@ static void mgServicesSave(HWND h){
         if(ok){ s_mg->msg=L"خدمت «"+s.name+L"» اضافه شد."; s_mg->msgCol=g_theme.success; }
     }
     if(!ok){ s_mg->msg=err; s_mg->msgCol=g_theme.danger; }
-    else    mgServicesClearForm();
+    else {
+        mgServicesClearForm();
+        // LIVE SYNC: push the fresh catalog to any open embedded Admission view
+        // so the change is reflected immediately, without a page reload.
+        WebAdmission_NotifyCatalogChanged();
+    }
     mgServicesReload();
     InvalidateRect(h,NULL,TRUE);
 }
@@ -303,6 +308,8 @@ static void mgServicesDelete(HWND h){
     removeService(s.code);
     s_mg->msg=L"خدمت حذف شد."; s_mg->msgCol=g_theme.success;
     mgServicesClearForm();
+    // LIVE SYNC: reflect the deletion in any open embedded Admission view.
+    WebAdmission_NotifyCatalogChanged();
     mgServicesReload();
     InvalidateRect(h,NULL,TRUE);
 }
@@ -1893,8 +1900,13 @@ static void npDoSave(HWND h){
     std::vector<int> ins;
     int ii=(int)SendMessageW(s_nps->cIns,CB_GETCURSEL,0,0);
     if(ii>0 && ii<N_INSURANCES) ins.push_back(ii);
-    // persist into the SAME store reception reads (national-ID dedup inside)
-    rememberPatient(id, fn, ln, trim(father), gender, trim(birth), trim(mobile), ins);
+    // v1.40.0: supplementary-insurance index (0 == none/first entry → store -1)
+    int si=(int)SendMessageW(s_nps->cSupp,CB_GETCURSEL,0,0);
+    if(si<=0 || si>=N_SUPP) si=-1;
+    // persist into the SAME store reception reads (national-ID dedup inside).
+    // v1.40.0: forward landline «تلفن ثابت», address «آدرس» and supp index.
+    rememberPatient(id, fn, ln, trim(father), gender, trim(birth), trim(mobile),
+        trim(land), trim(addr), ins, si);
     if(s_mg){ s_mg->msg=L"بیمار «"+fn+L" "+ln+L"» با کد ملی "+toFaDigits(id)+L" ثبت شد.";
         s_mg->msgCol=g_theme.success; }
     // force the patients list to reload so the new row appears
@@ -3375,12 +3387,13 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         ListView_SetExtendedListViewStyle(s_mg->ptList,
             LVS_EX_FULLROWSELECT|LVS_EX_DOUBLEBUFFER|LVS_EX_GRIDLINES);
         SendMessageW(s_mg->ptList,WM_SETFONT,(WPARAM)g_fUI,TRUE);
-        {   // RTL report columns (rightmost first): #, name, nid, mobile, gender, ...
+        {   // RTL report columns (rightmost first): #, name, nid, mobile,
+            // v1.40.0 landline, gender, birth.
             struct { const wchar_t* t; int w; } cols[]={
-                {L"#",S(44)},{L"نام و نام خانوادگی",S(220)},{L"کد ملی",S(130)},
-                {L"تلفن همراه",S(140)},{L"جنسیت",S(80)},{L"تاریخ تولد",S(120)} };
+                {L"#",S(44)},{L"نام و نام خانوادگی",S(210)},{L"کد ملی",S(125)},
+                {L"تلفن همراه",S(130)},{L"تلفن ثابت",S(120)},{L"جنسیت",S(70)},{L"تاریخ تولد",S(115)} };
             LVCOLUMNW lc={0}; lc.mask=LVCF_TEXT|LVCF_WIDTH|LVCF_FMT; lc.fmt=LVCFMT_RIGHT;
-            for(int i=0;i<6;i++){ lc.pszText=(LPWSTR)cols[i].t; lc.cx=cols[i].w;
+            for(int i=0;i<7;i++){ lc.pszText=(LPWSTR)cols[i].t; lc.cx=cols[i].w;
                 ListView_InsertColumn(s_mg->ptList,i,&lc); }
         }
         // ---- services page controls (v1.28.0) ----
@@ -3496,8 +3509,9 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
                         case 1: wcsncpy(cell,(p.first+L" "+p.last).c_str(),255); break;
                         case 2: wcsncpy(cell,toFaDigits(p.nid).c_str(),255); break;
                         case 3: wcsncpy(cell,toFaDigits(p.mobile).c_str(),255); break;
-                        case 4: wcsncpy(cell,mgGenderText(p.gender),255); break;
-                        case 5: wcsncpy(cell,toFaDigits(p.birth).c_str(),255); break;
+                        case 4: wcsncpy(cell,toFaDigits(p.landline).c_str(),255); break; // v1.40.0
+                        case 5: wcsncpy(cell,mgGenderText(p.gender),255); break;
+                        case 6: wcsncpy(cell,toFaDigits(p.birth).c_str(),255); break;
                         default: cell[0]=0; break;
                     }
                     cell[255]=0; di->item.pszText=cell;

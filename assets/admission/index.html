@@ -4,7 +4,13 @@
   <meta charset="utf-8" />
   <meta http-equiv="X-UA-Compatible" content="IE=edge" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- v1.40.0: declare this page's identity to the shared shell runtime
+       (common.js). Drives the X-Az-Page request header + verb namespacing. -->
+  <meta name="az-page" content="admission" />
   <title>پذیرش بیمار — آزادی طب</title>
+  <!-- SHARED shell stylesheet FIRST (RTL/Vazirmatn/themes/toasts), then the
+       page-specific admission sheet so the page can still override anything. -->
+  <link rel="stylesheet" href="common.css" />
   <link rel="stylesheet" href="admission.css" />
 </head>
 <body>
@@ -370,6 +376,11 @@
   </div>
 
   <div id="toast" class="toast"></div>
+  <!-- v1.40.0: SHARED shell runtime FIRST — defines AzBoot/AzBridge/AzUi/AzNav/
+       AzPerf. bridge.js still owns the admission page's `Bridge` transport
+       (kept for full backwards-compatibility); the Az* namespaces remain
+       available for shell features (toasts, client.log/metrics, navigation). -->
+  <script src="common.js"></script>
   <script src="bridge.js"></script>
   <script src="contextmenu.js"></script>
   <script src="admission.js"></script>

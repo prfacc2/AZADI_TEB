@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- az-page declares this page's identity to the shell runtime (common.js);
+       it also drives the X-Az-Page request header + verb namespacing. -->
+  <meta name="az-page" content="ping">
+  <title>آزمون اتصال — آزادی طب</title>
+  <!-- SHARED shell stylesheet FIRST, then the page-specific sheet. -->
+  <link rel="stylesheet" href="/common.css">
+  <link rel="stylesheet" href="/ping.css">
+</head>
+<body>
+  <div class="ping-wrap">
+    <div class="az-card ping-card">
+      <h1 class="ping-title">آزمون اتصال پوستهٔ چندصفحه‌ای</h1>
+      <p class="az-muted ping-sub">
+        این صفحهٔ نمونه ثابت می‌کند که سامانهٔ صفحات تعبیه‌شده (رجیستری صفحات،
+        استخر نخ‌ها و پل ارتباطی مشترک) به‌درستی کار می‌کند.
+      </p>
+
+      <div class="ping-grid">
+        <div class="ping-item">
+          <div class="ping-k">وضعیت پل</div>
+          <div class="ping-v" id="bridgeState">در حال اتصال…</div>
+        </div>
+        <div class="ping-item">
+          <div class="ping-k">حالت انتقال</div>
+          <div class="ping-v" id="transport">—</div>
+        </div>
+        <div class="ping-item">
+          <div class="ping-k">پاسخ سرور</div>
+          <div class="ping-v" id="serverReply">—</div>
+        </div>
+        <div class="ping-item">
+          <div class="ping-k">نسخهٔ برنامه</div>
+          <div class="ping-v" id="appVer">—</div>
+        </div>
+        <div class="ping-item">
+          <div class="ping-k">هستهٔ فعال کارگر</div>
+          <div class="ping-v" id="workers">—</div>
+        </div>
+        <div class="ping-item">
+          <div class="ping-k">زمان رفت‌وبرگشت</div>
+          <div class="ping-v" id="rtt">—</div>
+        </div>
+      </div>
+
+      <div class="ping-actions">
+        <button type="button" class="az-btn" id="btnPing">ارسال Ping</button>
+        <button type="button" class="az-btn ghost" id="btnTheme">تغییر پوسته</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SHARED shell runtime FIRST (defines AzBridge/AzUi/AzNav/AzBoot/AzPerf),
+       then the page-specific script. -->
+  <script src="/common.js"></script>
+  <script src="/ping.js"></script>
+</body>
+</html>

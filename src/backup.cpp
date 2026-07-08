@@ -344,7 +344,7 @@ static long long importForeignPatients(const std::wstring& path, ForeignFmt fmt,
                         std::wstring first=name, last;
                         size_t sp=name.find_last_of(L' ');
                         if(sp!=std::wstring::npos){ first=trim(name.substr(0,sp)); last=trim(name.substr(sp+1)); }
-                        rememberPatient(nid,first,last,L"",L"",L"",L"",std::vector<int>());
+                        rememberPatient(nid,first,last,L"",L"",L"",L"",L"",L"",std::vector<int>(),-1);
                         done.push_back(nid); imported++;
                     }
                 }

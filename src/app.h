@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.32.0"
+#define APP_VERSION_W   L"1.40.0"
 
 // ----------------------------------------------------------- logging policy -
 //  RELEASE 1.2.0 (Section A): all general user-behavior logging is gated behind
@@ -109,6 +109,11 @@ void broadcastThemeChange();            // invalidate everything
 #define WM_APP_THEME_CHANGED (WM_APP+12) // a settings panel changed the theme
 #define WM_APP_LAYOUT_REDO   (WM_APP+13) // AzLayoutGuard requests a relayout
 #define WM_APP_DESIGN_PUSHED (WM_APP+14) // a print design was pushed to sections
+// v1.40.0 (multi-page shell): the embedded-web worker pool marshals a callable
+// back onto the UI thread by PostMessage(g_hFrame, WM_APP_UI_TASK, 0, task).
+// The frame proc runs it and frees it. See src/web_thread_pool.{h,cpp} +
+// RunOnUiThread(). WM_APP+15 keeps clear of the 1.4.0 message block above.
+#define WM_APP_UI_TASK       (WM_APP+15) // run a marshalled callable on the UI thread
 
 // ------------------------------------------------------------- flat button -
 enum IconId {
@@ -628,7 +633,10 @@ struct CitizenInfo {
     bool        lookupTried;    // an online lookup was attempted
     bool        lookupFailed;   // the online lookup failed/was unavailable
     std::wstring firstName, lastName, fatherName, gender, birthDate, mobile;
+    std::wstring landline;   // v1.40.0 — تلفن ثابت (persisted in the local store)
+    std::wstring address;    // v1.40.0 — آدرس (persisted in the local store)
     std::vector<int> insurances;   // INSURANCES[] indices VERIFIED for this person
+    int         suppIdx = -1;      // v1.40.0 — index into SUPP_INSURANCES[] (-1 = none)
     CitizenInfo():found(false),source(CS_NONE),idValid(false),
         lookupTried(false),lookupFailed(false){}
 };
@@ -636,18 +644,30 @@ bool         validNationalId(const std::wstring& id);
 CitizenInfo  lookupCitizen(const std::wstring& nationalId);
 //  Persist a verified/manually-confirmed patient locally so the SAME national
 //  code recalls the SAME real identity next time (no fabrication, no randomness).
+//  v1.40.0: the signature grew two trailing text columns (landline «تلفن ثابت»
+//  and address «آدرس») plus a supplementary-insurance index, so the reception
+//  national-ID auto-fill can recall EVERY field the operator entered before.
+//  The two new text parameters and `suppIdx` default so pre-1.40 call sites
+//  keep compiling, but every in-tree caller has been updated to pass them.
 void         rememberPatient(const std::wstring& nationalId,
                  const std::wstring& firstName, const std::wstring& lastName,
                  const std::wstring& fatherName, const std::wstring& gender,
                  const std::wstring& birthDate, const std::wstring& mobile,
-                 const std::vector<int>& insurances);
+                 const std::wstring& landline,        // v1.40.0 — تلفن ثابت
+                 const std::wstring& address,         // v1.40.0 — آدرس
+                 const std::vector<int>& insurances,
+                 int suppIdx = -1);                   // v1.40.0 — SUPP_INSURANCES[] index
 
 //  v1.10.0: a flat, read-only view of one row in the local patient store, used
-//  by the admin «بیماران» (patients) tab. Mirrors the data\patients.dat schema:
-//      nid | first | last | father | gender | birth | mobile | insCsv
+//  by the admin «بیماران» (patients) tab. Mirrors the data\patients.dat schema.
+//  v1.40.0: schema grew to 11 columns —
+//      nid|first|last|father|gender|birth|mobile|insCsv|landline|address|suppIdx
 struct PatientRow {
     std::wstring nid, first, last, father, gender, birth, mobile;
+    std::wstring landline;   // v1.40.0 — تلفن ثابت
+    std::wstring address;    // v1.40.0 — آدرس
     std::vector<int> insurances;
+    int          suppIdx = -1;   // v1.40.0 — index into SUPP_INSURANCES[]
 };
 //  Load every patient stored locally (newest first — same order the store is
 //  written: appended records last, so we reverse to show newest on top).

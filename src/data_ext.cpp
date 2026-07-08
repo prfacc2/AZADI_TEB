@@ -73,8 +73,26 @@ static std::wstring insToCsv(const std::vector<int>& v){
     return s;
 }
 
+//  v1.40.0: format one store row using the NEW 11-column schema. Empty trailing
+//  columns are still written (so the field count is stable) — the reader below
+//  tolerates any legacy count (7/8/9/10/11) so nothing is ever lost.
+static std::wstring patientRowLine(const std::wstring& nationalId,
+        const std::wstring& firstName, const std::wstring& lastName,
+        const std::wstring& fatherName, const std::wstring& gender,
+        const std::wstring& birthDate, const std::wstring& mobile,
+        const std::wstring& landline, const std::wstring& address,
+        const std::vector<int>& insurances, int suppIdx){
+    wchar_t sb[16]; swprintf(sb,16,L"%d",suppIdx);
+    return dx_esc(nationalId)+L"|"+dx_esc(firstName)+L"|"+dx_esc(lastName)
+        + L"|"+dx_esc(fatherName)+L"|"+dx_esc(gender)+L"|"+dx_esc(birthDate)
+        + L"|"+dx_esc(mobile)+L"|"+insToCsv(insurances)
+        + L"|"+dx_esc(landline)+L"|"+dx_esc(address)+L"|"+sb;
+}
+
 //  Look the national code up in the local patient store. Returns CS_LOCAL on
 //  hit; CS_NONE otherwise. Never invents anything.
+//  v1.40.0: also recalls landline «تلفن ثابت», address «آدرس» and the
+//  supplementary-insurance index, tolerating 7/8/9/10/11-column legacy lines.
 static bool lookupLocalPatient(const std::wstring& nationalId, CitizenInfo& c){
     std::wstring all=readFileUtf8(patientsPath());
     size_t pos=0;
@@ -88,6 +106,9 @@ static bool lookupLocalPatient(const std::wstring& nationalId, CitizenInfo& c){
         c.firstName=f[1]; c.lastName=f[2]; c.fatherName=f[3];
         c.gender=f[4]; c.birthDate=f[5]; c.mobile=f[6];
         if(f.size()>=8) parseInsCsv(f[7],c.insurances);
+        if(f.size()>=9)  c.landline=f[8];             // v1.40.0
+        if(f.size()>=10) c.address=f[9];              // v1.40.0
+        if(f.size()>=11){ std::wstring si=trim(f[10]); c.suppIdx = si.empty()? -1 : _wtoi(si.c_str()); }
         c.found=true; c.source=CS_LOCAL;
         return true;
     }
@@ -98,10 +119,12 @@ void rememberPatient(const std::wstring& nationalId,
         const std::wstring& firstName, const std::wstring& lastName,
         const std::wstring& fatherName, const std::wstring& gender,
         const std::wstring& birthDate, const std::wstring& mobile,
-        const std::vector<int>& insurances){
+        const std::wstring& landline, const std::wstring& address,
+        const std::vector<int>& insurances, int suppIdx){
     if(nationalId.empty()) return;
     if(trim(firstName).empty() && trim(lastName).empty()) return;  // nothing real
-    // load all, replace existing record for this nid, otherwise append
+    // load all, MIGRATE every kept legacy line to the NEW schema on the fly,
+    // replace the existing record for this nid, otherwise append.
     std::wstring all=readFileUtf8(patientsPath());
     std::vector<std::wstring> kept;
     size_t pos=0;
@@ -110,19 +133,25 @@ void rememberPatient(const std::wstring& nationalId,
         std::wstring line=trim(all.substr(pos,e-pos)); pos=e+1;
         if(line.empty()) continue;
         auto f=dx_split(line,L'|');
-        if(f.size()>=1 && trim(f[0])==nationalId) continue;   // drop old copy
-        kept.push_back(line);
+        if(f.size()>=1 && trim(f[0])==nationalId) continue;   // drop old copy of THIS nid
+        if(f.size()<7){ kept.push_back(line); continue; }     // too short to migrate — keep verbatim
+        // rewrite the kept row in the NEW 11-column schema (migrate-on-read/write)
+        std::vector<int> ins; if(f.size()>=8) parseInsCsv(f[7],ins);
+        std::wstring land = (f.size()>=9)? f[8] : L"";
+        std::wstring addr = (f.size()>=10)? f[9] : L"";
+        int si = -1; if(f.size()>=11){ std::wstring s=trim(f[10]); if(!s.empty()) si=_wtoi(s.c_str()); }
+        kept.push_back(patientRowLine(trim(f[0]),f[1],f[2],f[3],f[4],f[5],f[6],land,addr,ins,si));
     }
-    std::wstring row = dx_esc(nationalId)+L"|"+dx_esc(firstName)+L"|"+dx_esc(lastName)
-        + L"|"+dx_esc(fatherName)+L"|"+dx_esc(gender)+L"|"+dx_esc(birthDate)
-        + L"|"+dx_esc(mobile)+L"|"+insToCsv(insurances);
-    kept.push_back(row);
+    kept.push_back(patientRowLine(nationalId,firstName,lastName,fatherName,gender,
+        birthDate,mobile,landline,address,insurances,suppIdx));
     std::wstring out; for(auto& l:kept) out+=l+L"\r\n";
     writeFileUtf8(patientsPath(),out,false);
 }
 
 //  v1.10.0: enumerate every locally-stored patient. Newest record is written
 //  last by rememberPatient(), so we reverse to present newest first.
+//  v1.40.0: parse the new landline/address/suppIdx columns, tolerating any
+//  legacy field count (7..11) so old stores load without dropping any row.
 std::vector<PatientRow> loadAllPatients(){
     std::vector<PatientRow> out;
     std::wstring all=readFileUtf8(patientsPath());
@@ -137,6 +166,9 @@ std::vector<PatientRow> loadAllPatients(){
         r.nid=trim(f[0]); r.first=f[1]; r.last=f[2]; r.father=f[3];
         r.gender=f[4]; r.birth=f[5]; r.mobile=f[6];
         if(f.size()>=8) parseInsCsv(f[7],r.insurances);
+        if(f.size()>=9)  r.landline=f[8];             // v1.40.0
+        if(f.size()>=10) r.address=f[9];              // v1.40.0
+        if(f.size()>=11){ std::wstring si=trim(f[10]); r.suppIdx = si.empty()? -1 : _wtoi(si.c_str()); }
         out.push_back(std::move(r));
     }
     std::reverse(out.begin(),out.end());   // newest first
