@@ -35,5 +35,12 @@ void WebAdmission_Resize(HWND view, int w, int h);
 // Push a C++ -> JS event with a JSON payload (e.g. "patient.load").
 void WebAdmission_PushEvent(const char* eventName, const std::string& jsonData);
 
+// LIVE SYNC from Management: call this whenever the service catalog or the
+// insurance tables change (add / edit / delete). It pushes a fresh catalog +
+// insurance snapshot to every open embedded Admission view so the operator sees
+// the change immediately, with NO page reload. Safe to call even when no view
+// is open (it becomes a no-op). Defined in web_admission.cpp.
+void WebAdmission_NotifyCatalogChanged();
+
 // Destroy the embedded view + release its WebView2 resources.
 void WebAdmission_DestroyView(HWND view);

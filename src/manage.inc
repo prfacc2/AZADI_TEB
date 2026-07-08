@@ -285,7 +285,12 @@ static void mgServicesSave(HWND h){
         if(ok){ s_mg->msg=L"خدمت «"+s.name+L"» اضافه شد."; s_mg->msgCol=g_theme.success; }
     }
     if(!ok){ s_mg->msg=err; s_mg->msgCol=g_theme.danger; }
-    else    mgServicesClearForm();
+    else {
+        mgServicesClearForm();
+        // LIVE SYNC: push the fresh catalog to any open embedded Admission view
+        // so the change is reflected immediately, without a page reload.
+        WebAdmission_NotifyCatalogChanged();
+    }
     mgServicesReload();
     InvalidateRect(h,NULL,TRUE);
 }
@@ -303,6 +308,8 @@ static void mgServicesDelete(HWND h){
     removeService(s.code);
     s_mg->msg=L"خدمت حذف شد."; s_mg->msgCol=g_theme.success;
     mgServicesClearForm();
+    // LIVE SYNC: reflect the deletion in any open embedded Admission view.
+    WebAdmission_NotifyCatalogChanged();
     mgServicesReload();
     InvalidateRect(h,NULL,TRUE);
 }

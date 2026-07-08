@@ -128,10 +128,19 @@ svg{display:inline-block;vertical-align:middle;}
 .col-center{ -ms-flex:1 1 auto; flex:1 1 auto; margin:0 12px; }
 .col-left  { -ms-flex:0 0 250px;flex:0 0 250px;width:250px; }
 
-/* Thin scrollbars everywhere (Chromium/WebView2). The default was too wide and
-   ate horizontal room; 6px keeps them subtle but usable. Firefox honours the
-   scrollbar-* props; IE ignores all of this gracefully. */
+/* Thin scrollbars everywhere.
+   · Chromium/WebView2 → ::-webkit-scrollbar (6px).
+   · Firefox           → scrollbar-width/-color.
+   · MSHTML/Trident    → the proprietary scrollbar-*-color set below tints the
+     (fixed-width) IE scrollbar so it at least reads subtle instead of a loud
+     3-D grey; width can't be reduced there, but the colour blends it in. */
 *{scrollbar-width:thin;scrollbar-color:#9fb2c9 transparent;}
+html{
+  scrollbar-face-color:#9fb2c9;scrollbar-track-color:#eef2f8;
+  scrollbar-arrow-color:#9fb2c9;scrollbar-shadow-color:#eef2f8;
+  scrollbar-highlight-color:#eef2f8;scrollbar-3dlight-color:#eef2f8;
+  scrollbar-darkshadow-color:#eef2f8;
+}
 .col::-webkit-scrollbar,.tbl-wrap::-webkit-scrollbar,.mini-list::-webkit-scrollbar,
 .svc-suggest::-webkit-scrollbar,.card-body::-webkit-scrollbar{width:6px;height:6px;}
 .col::-webkit-scrollbar-track,.tbl-wrap::-webkit-scrollbar-track,
@@ -431,13 +440,31 @@ select.inp{cursor:pointer;background:#f9fbfe;}
 /* ============================================================================
    SERVICES + QUEUE TABLES
    ============================================================================ */
-.svc-search-wrap{width:230px;}
-.q-search-wrap{width:280px;}
+.svc-search-wrap{width:214px;}
+.q-search-wrap{width:270px;}
 .svc-search-wrap .inp,.q-search-wrap .inp{padding-left:30px;}
+
+/* «افزودن خدمت» — guarantee the full caption is always visible: slightly wider,
+   a touch smaller font, and it never shrinks below its content. */
+#svcAddBtn{
+  -ms-flex:0 0 auto;flex:0 0 auto;
+  min-width:118px;
+  padding:0 14px;font-size:12.5px;
+  white-space:nowrap;
+}
+#svcAddBtn .i{margin-left:5px;}
+
+/* Services & queue blocks get a slightly stronger frame so they read as their
+   own distinct region within the centre column (item 3 / item 4). */
+.svc-card,.queue-card{border-color:#a9bdd6;}
+.svc-card > .card-head,.queue-card > .card-head{
+  -webkit-box-shadow:inset 0 3px 0 #1f5fd6;box-shadow:inset 0 3px 0 #1f5fd6;
+}
 
 .tbl-wrap{
   overflow:auto;max-height:150px;
-  border:1px solid #cdd9e8;
+  /* clearer, visible frame around the list body */
+  border:1px solid #b7c9e0;border-top:none;
   -webkit-transition:max-height .2s;transition:max-height .2s;
 }
 .tbl-wrap.collapsed{max-height:128px;}

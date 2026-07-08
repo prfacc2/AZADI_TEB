@@ -46,6 +46,37 @@ void WebAdmission_PushEvent(const char* eventName, const std::string& jsonData){
     WV2_PushEvent(eventName,jsonData);
 }
 
+// ---- LIVE SERVICE / INSURANCE SYNC from Management -------------------------
+//  When the Management «مدیریت خدمات» page adds / edits / deletes a service (or
+//  the insurance tables change), we push the fresh catalog + insurance snapshot
+//  to every open embedded Admission view. The JS side re-renders any open
+//  service-suggestion list and refreshes the insurance selectors WITHOUT a
+//  page reload — the admission surface reflects Management edits immediately.
+void WebAdmission_NotifyCatalogChanged(){
+    // Only build/push when at least one embedded view is alive (cheap guard).
+    {
+        std::lock_guard<std::mutex> lk(g_adViewsMx);
+        if(g_adViews.empty()) return;
+    }
+    // Full active service catalog (Management is the single source of truth).
+    std::string cat="{\"services\":[";
+    {
+        auto svcs=loadServices();
+        int n=0;
+        for(const auto& s:svcs){
+            if(s.status==0) continue;      // only sellable services
+            if(n++) cat+=",";
+            cat+=serviceJson(s);
+        }
+    }
+    cat+="]}";
+    WV2_PushEvent("catalog.update",cat);
+
+    // Insurance selectors (base + supplementary) may also change in Management.
+    std::string ins="{\"main\":"+insurancesJson()+",\"supp\":"+suppInsurancesJson()+"}";
+    WV2_PushEvent("insurance.update",ins);
+}
+
 void WebAdmission_DestroyView(HWND view){
     if(!view) return;
     if(WV2_DestroyView(view)) return;   // was a WebView2 view

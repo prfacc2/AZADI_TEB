@@ -594,18 +594,44 @@
     }
     on($('svcSearch'), 'input', svcSearch);
     on($('svcSearch'), 'keyup', svcSearch);
+    /* Enter confirms the current service selection. To avoid ever adding a
+       STALE match (the 180ms debounce may not have fired yet), we always ask
+       C++ for the freshest match for the exact query and add the first hit —
+       so Enter reflects the live Management catalog, not a cached suggestion. */
     on($('svcSearch'), 'keydown', function (e) {
       e = e || window.event;
-      if ((e.keyCode || e.which) === 13 && state.catalog.length) {
-        if (e.preventDefault) e.preventDefault();
-        addServiceRow(state.catalog[0]);
-        renderSvcSuggest([]); $('svcSearch').value = '';
-        toast('خدمت افزوده شد', 'ok');
-      }
+      if ((e.keyCode || e.which) !== 13) return;
+      if (e.preventDefault) e.preventDefault();
+      var q = $('svcSearch') ? trimStr($('svcSearch').value) : '';
+      if (!q) return;
+      Bridge.call('service.search', { q: q }).then(function (r) {
+        var rows = r.rows || r.services || [];
+        state.catalog = rows;
+        if (rows.length) {
+          addServiceRow(rows[0]);
+          renderSvcSuggest([]); $('svcSearch').value = '';
+          toast('خدمت «' + (rows[0].name || '') + '» افزوده شد', 'ok');
+        } else {
+          renderSvcSuggest([]);
+          toast('خدمتی با این عبارت یافت نشد', 'err');
+        }
+      });
     });
+    /* افزودن خدمت button: if the query resolves to exactly one service, add it
+       directly; otherwise show the suggestion list to pick from. */
     on($('svcAddBtn'), 'click', function () {
       var q = $('svcSearch') ? trimStr($('svcSearch').value) : '';
-      Bridge.call('service.search', { q: q }).then(function (r) { renderSvcSuggest(r.rows || r.services || []); });
+      Bridge.call('service.search', { q: q }).then(function (r) {
+        var rows = r.rows || r.services || [];
+        state.catalog = rows;
+        if (q && rows.length === 1) {
+          addServiceRow(rows[0]);
+          renderSvcSuggest([]); $('svcSearch').value = '';
+          toast('خدمت «' + (rows[0].name || '') + '» افزوده شد', 'ok');
+        } else {
+          renderSvcSuggest(rows);
+        }
+      });
     });
 
     /* insurance changes → recompute (never blanks patient fields) */
@@ -810,6 +836,37 @@
       if (d.main) { state.insurances = d.main; fillSelect($('insMain'), d.main); }
       if (d.supp) { state.supp = d.supp; fillSelect($('insSupp'), d.supp); }
       recompute();
+    });
+    /* LIVE service catalog sync from Management (add / edit / delete a service).
+       We keep the freshest catalog and, if the suggestion dropdown is currently
+       open, re-run the active search so the operator sees the change instantly —
+       with NO page reload. Prices of already-added rows are refreshed too, so an
+       admission in progress reflects a Management price edit immediately. */
+    Bridge.on('catalog.update', function (d) {
+      var rows = (d && (d.services || d.rows)) || [];
+      state.fullCatalog = rows;
+      /* refresh prices of rows already in the current admission */
+      if (state.services.length) {
+        var i, j, changed = false;
+        for (i = 0; i < state.services.length; i++) {
+          for (j = 0; j < rows.length; j++) {
+            if (rows[j].code && rows[j].code === state.services[i].code) {
+              var np = Number(rows[j].price) || 0;
+              if (state.services[i].price !== np) { state.services[i].price = np; changed = true; }
+              if (rows[j].name) state.services[i].name = rows[j].name;
+              break;
+            }
+          }
+        }
+        if (changed) { renderServices(); recompute(); }
+      }
+      /* if the suggestion list is open, re-run the current query live */
+      var sug = $('svcSuggest');
+      if (sug && /open/.test(sug.className)) {
+        var q = $('svcSearch') ? trimStr($('svcSearch').value) : '';
+        if (q) Bridge.call('service.search', { q: q }).then(function (r) { renderSvcSuggest(r.rows || r.services || []); });
+      }
+      toast('فهرست خدمات به‌روزرسانی شد', 'ok');
     });
   }
 
