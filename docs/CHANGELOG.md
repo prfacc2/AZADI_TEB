@@ -5,6 +5,81 @@
 
 ---
 
+## 1.40.0 — 2026-07-08
+
+> **رفعِ شش باگِ صفحهٔ پذیرشِ امبد (B1–B6) + پایه‌گذاریِ «پوستهٔ چندصفحه‌ایِ وبِ
+> تعبیه‌شده».** این نسخه دو دستاورد دارد: (۱) رفعِ ریشه‌ایِ شش ایرادِ تعاملی/داده‌ایِ
+> صفحهٔ پذیرش، و (۲) یک زیرساختِ چندصفحه‌ای تا صفحاتِ HTML/JS بعدی (نه فقط پذیرش) از
+> همان میزبانِ لوپ‌بک، با دارایی‌ها و پلِ ارتباطیِ مشترک، سرو شوند. هیچ منطقِ نیتیوِ
+> پذیرشِ GDI (`reception.cpp`) دست نخورد، هیچ وابستگیِ زمانِ‌اجرا اضافه نشد و همهٔ
+> رشته‌های رابط فارسی و RTL/وزیرمتن دست‌نخورده ماند. تکْ‌اکسِ استاتیکِ PE32 (۳۲‌بیتی)
+> از `./build.sh` با `-Werror` سبز است.
+
+### Fixed — باگ‌های صفحهٔ پذیرش (B1–B6)
+- **B1 — ناوبریِ Enter/Tab:** جایگزینیِ ناوبریِ مبتنی‌بر CSS-query با یک ترتیبِ
+  صریحِ سخت‌کدشده (`NAV_ORDER`) به‌همراهِ `focusNext`/`focusPrev`، مدیریتِ
+  MSHTML-امنِ `<select>` (keydown + keyup محافظت‌شده با پرچمِ `__navHandled`)،
+  **بدونِ wrap-around** و انتخابِ همهٔ متن با Ctrl+A.
+  (`assets/admission/admission.js`, `assets/shell/common.js` → `AzNav`)
+- **B2 — استعلامِ کدِ ملی، آدرس/تلفنِ‌ثابت/بیمهٔ مکمل را پر نمی‌کرد:** توسعهٔ
+  `PatientRow`/`CitizenInfo` و امضایِ `rememberPatient`، اسکیمایِ ۱۱‌ستونهٔ
+  `patients.dat` (سازگارِ عقب‌رو با ۷/۸/۹/۱۰/۱۱ ستون + مهاجرتِ هنگامِ نوشتن)،
+  به‌روزرسانیِ `patientJson`/`patient.lookup`/`admission.save`/`fillPatient` و
+  مودال + ListViewِ `manage.inc`.
+  (`src/app.h`, `src/data_ext.cpp`, `src/web_admission_api.inc`, `src/manage.inc`،
+  و همهٔ فراخوان‌گاه‌ها: `appointment.cpp`/`backup.cpp`/`reception.cpp`)
+- **B3 — `hasIns` بیمهٔ مکمل را خودکار انتخاب نمی‌کرد / بی‌ثبات بود:** فقط وقتی
+  `insurances[0]>0` باشد `hasIns` **روشن** می‌شود و هرگز به‌صورتِ خودکار خاموش
+  نمی‌شود. (`assets/admission/admission.js`)
+- **B4 — کندیِ تعدادِ خدمت + مسابقهٔ Enter در جستجو:** افزودنِ
+  `oninput`/`onkeyup` به فیلدِ تعداد، بازگشتِ Enter از تعداد به جستجو، و
+  حذفِ تکرارِ درخواستِ در حالِ اجرا (`_svcSearchInFlight`).
+  (`assets/admission/admission.js`)
+- **B5 — طرحِ چاپ اعمال نمی‌شد:** `admission.save` اکنون `printMode` را برمی‌گرداند
+  و JS هنگامِ افتادن به چاپِ کلاسیکِ GDI یک toastِ هشدار (`.toast.warn`) نشان
+  می‌دهد. (`src/web_admission_api.inc`, `assets/admission/admission.js`,
+  `assets/admission/admission.css`)
+- **B6 — پس از «پذیرشِ جدید»، `hasIns` ناسازگار بود:** `clearForm` مقدارِ
+  `insMain.selectedIndex=0` و `hasIns=false` را تنظیم می‌کند (تأییدشده با
+  `billing.cpp`: ایندکسِ صفر = «آزاد» با درصدِ ۰). (`assets/admission/admission.js`)
+
+### Added — پوستهٔ چندصفحه‌ایِ وبِ تعبیه‌شده
+- **`assets/shell/`** — دارایی‌های مشترک: `common.css` (RTL فارسی، وزیرمتن،
+  پوسته‌های روشن/تیره، میزبانِ toast)، `common.js` (رانتایمِ مشترک) و `vazir.ttf`.
+- **رانتایمِ مشترک (ES5)** با پنج فضای‌نام روی `window`:
+  - `AzBoot` — شناسهٔ صفحه (`<meta name="az-page">`)، پوسته و دروازهٔ `ready`
+  - `AzBridge` — تنها لایهٔ IPCِ C++↔JS (WebView2 postMessage یا XHR `/api`)،
+    سرآیندِ `X-Az-Page`، namespacing فعل، حذفِ تکرارِ درخواستِ همزمان، و
+    uplink های `client.log`/`client.metrics`
+  - `AzUi` — toast مشترک + کمک‌های DOM
+  - `AzNav` — ناوبریِ Enter/Tabِ قابلِ‌استفاده‌مجدد روی یک ترتیبِ صریح (بدونِ wrap)
+  - `AzPerf` — شمارنده‌های سبکِ کارایی که به `client.metrics` فرستاده می‌شوند
+- **`src/web_pages.{h,cpp}`** — رجیستریِ صفحات: نگاشتِ «مسیرِ URL → RCDATA» و
+  «فعلِ `/api` → هندلر»، به‌همراهِ فعل‌های داخلیِ `ping`/`client.log`/`client.metrics`.
+- **`src/web_thread_pool.{h,cpp}`** — استخرِ نخِ کارگرِ کران‌دار (۲ روی سخت‌افزارِ
+  کم‌توان / ۴ پیش‌فرض / سقفِ ۸) که اتصال‌های پذیرفته‌شده را سرو می‌کند، و
+  `RunOnUiThread` برای مارشالِ یک callable به نخِ رابط (`WM_APP_UI_TASK`).
+- **`src/web_ping_api.cpp` + `assets/pages/ping/`** — صفحهٔ نمونهٔ «آزمونِ اتصال»
+  که کلِّ خطِّ لوله (رجیستری + استخرِ نخ + پل + فعلِ `/api/ping`) را سرتاسر ثابت
+  می‌کند.
+- **`src/web_admission_http.inc`** — دیسپچِ عمومی: ابتدا سوییچِ قدیمیِ پذیرش
+  (400..405)، سپس رجیستری (پوسته 500..502 و ping 600..602)؛ فعل‌ها ابتدا از
+  رجیستری و در صورتِ نبود از `admissionApi`. سخت‌سازیِ شبکه: **فقط لوپ‌بک**
+  (رد کردنِ هر همتای غیرِ 127.0.0.0/8)، `SO_REUSEADDR`، و timeoutهای
+  ارسال/دریافت (۸ ثانیه).
+
+### Changed — نسخه و منابع
+- ارتقای نسخه به **1.40.0** در `src/app.h`، `src/app.rc`
+  (`FILEVERSION`/`PRODUCTVERSION 1,40,0,0` + رشته‌ها) و `update/version.txt`.
+- **`src/app.rc`**: افزودنِ RCDATA 500/501/502 (پوسته) و 600/601/602 (ping) —
+  بلوکِ 400..405ِ پذیرش بازشماری **نشد**.
+- **`build.sh`**: افزودنِ `web_pages.cpp`، `web_thread_pool.cpp` و
+  `web_ping_api.cpp` به فهرستِ منابع.
+- **`assets/admission/index.html`**: افزودنِ `<meta name="az-page">` و
+  `common.css`/`common.js` (پیش از ورقهٔ پذیرش و `bridge.js`).
+
+---
+
 ## 1.39.0 — 2026-07-08
 
 > **همگام‌سازیِ زندهٔ خدمات از «مدیریت» + پولیشِ تعاملی/تصویریِ صفحهٔ «پذیرش

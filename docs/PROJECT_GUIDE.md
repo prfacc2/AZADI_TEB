@@ -41,7 +41,12 @@
 | `src/reception.cpp` | فضای کاری پذیرش: نوار ابزار (**پذیرش جدید** = `ID_RC_NEWPAT` که `resetForm` در همان تب را صدا می‌زند؛ **تب جدید**؛ ماشین حساب)، **نوار تب مرورگری** (رسم دستی: باز/بستن/**جدا کردن به پنجره مستقل** `AzDetached`)، **فرم کارت‌محور بخش‌بندی‌شده** (`rcMetrics`/`rcVMetrics`/`tabPageLayout`/`WM_PAINT` — کارت مشخصات + بخش‌های آیکون‌دار + قاب دور هر فیلد)، ناوبری Enter و Tab به علاوهٔ ماسک تاریخ روی `eBirth`، **کارت صدور قبض** با محاسبهٔ **خودکار** (`recalc` که `defaultServicePrice` را با گارد `autoPrice` پر می‌کند) و چیپ سبز «پرداختی»، دکمه‌های چاپ |
 | `src/webhost.{h,cpp}` + `webhost_host.inc` / `webhost_run.inc` / `webhost_bridge.inc` / `webhost_assets.inc` | **میزبان هایبرید HTML/CSS/JS (§3، نسخه 1.13.0)**: میزبانی کنترل سیستمیِ `WebBrowser`/`MSHTML` (Trident) بدون ATL — `IOleClientSite`/`IOleInPlaceSite`/`IOleInPlaceFrame`/`IDocHostUIHandler` + sink رویدادهای `DWebBrowserEvents2` + پل `IDispatch` به‌صورت `window.external`. پل **هم‌زمان** است: `window.external.call(verb, jsonArgs)` → پاسخ JSON؛ و C++→JS با `window.azReceive`. هنگام باز شدن، **لودر وسط‌چین با نوار پیشرفت** نمایش داده می‌شود تا وضعیت نیتیو/متادیتای بخش‌ها/پیکربندی فرم همگام شود، سپس UI رندر می‌شود. تمام اعتبارسنجی/محاسبه تعرفه/ذخیره‌سازی **سمت C++** (`WebHostBridge_Call`: `lookup`/`bill`/`saveReception`/`print`/`printLast`/`apptList`/`apptNext`/`saveAppointment`/`cancelAppointment`/`setTheme`/...) انجام می‌شود؛ JS هرگز نتیجه را جعل نمی‌کند. اگر کنترل در دسترس نباشد یا خطا بدهد، به فرم نیتیو کلاسیک **fallback قطعی** می‌شود و علت در `logs\webhost_errors.log` ثبت می‌گردد |
 | `src/update.cpp` | **آپدیت از راه دور**: WinINet → دانلود `version.txt` (خط۱=نسخه، خط۲=URL exe) → مقایسه نسخه → دانلود `AzadiTeb_new.exe` → `update.bat` جایگزینی پس از خروج |
-| `src/app.rc` | فونت‌های تعبیه‌شده (ID 101/102)، منیفست، VERSIONINFO |
+| `src/web_pages.{h,cpp}` | **رجیستریِ صفحاتِ پوستهٔ چندصفحه‌ای (v1.40.0)**: نگاشتِ «مسیرِ URL → شناسهٔ RCDATA + Content-Type» و «فعلِ `/api` → هندلر `std::function<std::string(body,page)>`». فعل‌های داخلی: `ping`, `client.log`, `client.metrics`. با `WebPages_RegisterBuiltins()` هنگامِ بوت پر می‌شود (پیش از شروعِ میزبان). محافظت‌شده با CRITICAL_SECTION |
+| `src/web_thread_pool.{h,cpp}` | **استخرِ نخِ کارگرِ کران‌دار (v1.40.0)**: `WebPool_Init(serveFn)` تعدادِ نخ را از `g_lowSpec` انتخاب می‌کند (۲ کم‌توان / ۴ پیش‌فرض / سقفِ ۸)؛ سوکت‌های پذیرفته‌شده در صف قرار می‌گیرند و کارگرها آن‌ها را سرو می‌کنند (EVENT + CRITICAL_SECTION). `RunOnUiThread(fn)` یک callable را با `PostMessage(g_hFrame, WM_APP_UI_TASK, …)` به نخِ رابط مارشال می‌کند (برای هر چیزِ وابسته به HWND/GDI/WebView2)؛ `WebUiTask_Run` در `frameProc` آن را اجرا و آزاد می‌کند |
+| `src/web_ping_api.cpp` | **هندلرِ `/api/ping` (v1.40.0)**: پیامِ کاربر را echo می‌کند و نسخهٔ برنامه + تعدادِ کارگرِ زندهٔ استخر را برمی‌گرداند؛ به‌عنوانِ قالبِ ساده برای APIهای صفحاتِ آینده |
+| `assets/shell/` | **دارایی‌های مشترکِ پوسته (v1.40.0)**: `common.css` (RTL فارسی، وزیرمتن، پوسته‌های روشن/تیره، میزبانِ toast)، `common.js` (رانتایمِ ES5 با `AzBoot`/`AzBridge`/`AzUi`/`AzNav`/`AzPerf` — پلِ واحدِ IPC، سرآیندِ `X-Az-Page`، حذفِ تکرارِ درخواست، `client.log`/`client.metrics`)، `vazir.ttf` |
+| `assets/pages/ping/` | **صفحهٔ نمونهٔ «آزمونِ اتصال» (v1.40.0)**: `index.html`/`ping.css`/`ping.js` — ثابت می‌کند کلِّ خطِّ لولهٔ چندصفحه‌ای (رجیستری + استخرِ نخ + پل + فعلِ `ping`) سالم است |
+| `src/app.rc` | فونت‌های تعبیه‌شده (ID 101/102)، منیفست، VERSIONINFO. **RCDATA پذیرش 400..405 (دست‌نخورده)**، **پوسته 500/501/502**، **ping 600/601/602** |
 | `src/app.manifest` | ComCtl32 v6، سازگاری Win7→11، DPI-aware، asInvoker |
 
 ## 3. جریان‌های اصلی برنامه (Flows)
@@ -89,3 +94,80 @@ RTL به‌صورت **دستی** پیاده شده و **`WS_EX_LAYOUTRTL` است
 - همین امضاها را نگه دارید و پیاده‌سازی را به REST/SQL تغییر دهید (مثلاً `datasource.cpp` جدید).
 - WinINet از قبل لینک شده (`update.cpp` نمونه GET دارد).
 - ساختار `ReceptionRecord` معادل یک ردیف جدول پذیرش سرور طراحی شده.
+
+## 6. پوستهٔ چندصفحه‌ایِ وبِ تعبیه‌شده (Multi-page embedded-web shell — v1.40.0)
+
+از نسخهٔ ۱.۴۰.۰، صفحهٔ پذیرش دیگر تنها «صفحهٔ HTML/JSِ تعبیه‌شده» نیست؛ یک
+**زیرساختِ چندصفحه‌ای** اضافه شده تا صفحاتِ بعدی هم از همان میزبانِ لوپ‌بک، با
+دارایی‌ها و پلِ ارتباطیِ مشترک، سرو شوند. این بخش، معماری و نقاطِ توسعه را شرح می‌دهد.
+
+### معماری کلی
+```
+┌────────────── نخِ رابط (UI thread / g_hFrame) ──────────────┐
+│  frameProc  ──►  WM_APP_UI_TASK  ──►  WebUiTask_Run(fn)       │
+└──────────────────────────▲──────────────────────────────────┘
+                           │ RunOnUiThread(fn)  (PostMessage)
+┌──────────────────────────┴──────────────────────────────────┐
+│  استخرِ نخِ کارگر (web_thread_pool):                          │
+│    accept()  ──►  WebPool_Submit(socket)  ──►  workerN        │
+│                                              │ adServeConn    │
+│                                              ▼                │
+│  دیسپچِ HTTP (web_admission_http.inc):                        │
+│    /…            → 1) سوییچِ پذیرش 400..405                    │
+│                    2) WebPages_ResolveAsset (500.. / 600..)   │
+│    /api/<verb>   → 1) WebPages_DispatchVerb                    │
+│                    2) admissionApi (پشتیبانِ عقب‌رو)           │
+└──────────────────────────────────────────────────────────────┘
+                           ▲ XHR /api  یا  WebView2 postMessage
+┌──────────────────────────┴──────────────────────────────────┐
+│  رانتایمِ مشترک (assets/shell/common.js):                     │
+│    AzBoot · AzBridge · AzUi · AzNav · AzPerf                  │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### قواعدِ شمارهٔ منابع (RCDATA) — تغییر ندهید
+| بازه | مالک |
+|---|---|
+| 400..405 | صفحهٔ **پذیرش** (index/css/bridge/js/vazir/contextmenu) — **بازشماری نشود** |
+| 500/501/502 | **پوستهٔ مشترک**: `common.css` / `common.js` / `vazir.ttf` |
+| 600/601/602 | صفحهٔ نمونهٔ **ping**: `index.html` / `ping.css` / `ping.js` |
+
+### افزودنِ یک صفحهٔ جدید (نسخهٔ کوتاه)
+۱. سه دارایی بسازید: `assets/pages/<name>/index.html`, `<name>.css`, `<name>.js`.
+   در `<head>` حتماً `<meta name="az-page" content="<name>">` و ترتیبِ
+   `common.css` → `<name>.css` و `common.js` → `<name>.js` را رعایت کنید.
+۲. در `src/app.rc` سه RCDATA با شناسه‌های آزادِ بعدی (مثلاً 610/611/612) اضافه کنید.
+۳. در `WebPages_RegisterBuiltins()` (فایل `src/web_pages.cpp`) مسیرها را ثبت کنید:
+   `WebPages_RegisterAsset("<name>", "/<name>.css", 611, nullptr);` …
+۴. اگر صفحه API می‌خواهد، یک فایلِ `src/web_<name>_api.cpp` با یک تابعِ
+   `std::string Handle(body,page)` بنویسید، آن را در `web_pages.h` اعلام و در
+   `WebPages_RegisterBuiltins()` با `WebPages_RegisterVerb("<verb>", &Handle)` ثبت کنید،
+   و منبع را به `build.sh` بیفزایید.
+۵. از داخلِ هندلرها، هر کاری که به HWND/GDI/WebView2 دست می‌زند را **حتماً** با
+   `RunOnUiThread([...]{ … })` به نخِ رابط ببرید.
+
+### رانتایمِ مشترکِ سمتِ JS (ES5-only)
+- **`AzBoot`** — `page()` (از `<meta az-page>`)، `ready(cb)` (پس از برپا شدنِ پل)،
+  `applyTheme(dark)`.
+- **`AzBridge`** — تنها لایهٔ IPC. `call(verb,payload)` یک thenable با **حذفِ
+  تکرارِ درخواستِ همزمان** برمی‌گرداند؛ هر درخواستِ HTTP سرآیندِ `X-Az-Page` دارد؛
+  `on(event,cb)` برای رویدادهای C++→JS؛ `log(level,msg,extra)` و
+  `metrics(name,value,extra)` به `logs\client.log` و `logs\client.metrics` می‌روند.
+- **`AzUi`** — `toast(text,kind)` با kindهای `ok`/`err`/`warn`/`info`؛ `$`, `esc`.
+- **`AzNav`** — `bind(NAV_ORDER, {onEnter})`: ناوبریِ Enter/Tabِ صریح، **بدونِ
+  wrap-around**، مدیریتِ MSHTML-امنِ `<select>`، Ctrl+A انتخابِ همهٔ متنِ INPUT.
+- **`AzPerf`** — `since()`, `mark(name,ms)` (به `client.metrics`).
+- سازگاریِ عقب‌رو: اگر `Bridge` از قبل تعریف نشده باشد، `AzBridge` روی
+  `window.Bridge` هم منتشر می‌شود؛ صفحهٔ پذیرش هنوز از `bridge.js`ِ اختصاصیِ خود
+  به‌عنوانِ `Bridge` استفاده می‌کند.
+
+### سخت‌سازیِ شبکه (میزبانِ لوپ‌بک)
+- **فقط لوپ‌بک**: علاوه‌بر `bind` به `INADDR_LOOPBACK`، هر همتای غیرِ `127.0.0.0/8`
+  در `accept` رد می‌شود.
+- **`SO_REUSEADDR`** روی سوکتِ گوش‌دهنده (اتصالِ سریعِ دوباره پس از کرش).
+- **timeoutها**: `SO_RCVTIMEO`/`SO_SNDTIMEO` = ۸ ثانیه روی هر اتصال، تا همتای کند
+  هرگز یک کارگر را برای همیشه اشغال نکند.
+
+### ثوابت (constants)
+- `WM_APP_UI_TASK = WM_APP+15` (app.h) — پیامِ مارشالِ نخِ رابط.
+- تعدادِ کارگر: `g_lowSpec ? 2 : 4`، سقفِ ۸ (`web_thread_pool.cpp:chooseWorkerCount`).
