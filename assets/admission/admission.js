@@ -217,6 +217,19 @@
     var qtys = body.getElementsByClassName('qty-inp');
     for (i = 0; i < qtys.length; i++) {
       qtys[i].onchange = onQtyChange;
+      /* B4: reflect qty edits instantly (not only on blur/change) */
+      qtys[i].oninput = onQtyChange;
+      qtys[i].onkeyup = onQtyChange;
+      qtys[i].onkeydown = function (e) {
+        e = e || window.event;
+        var k = e.keyCode || e.which;
+        if (k === 13) {                       /* Enter in qty → back to search */
+          if (e.preventDefault) e.preventDefault(); else e.returnValue = false;
+          var s = $('svcSearch');
+          if (s) { s.focus(); if (s.select) try { s.select(); } catch (er) {} }
+          return false;
+        }
+      };
       qtys[i].ondblclick = function () { this.focus(); this.select(); };
     }
     var dels = body.getElementsByClassName('act-del');
@@ -264,21 +277,31 @@
     setIf('father', p.father || '');
     setIf('birth', toFa(p.birth || ''));
     setIf('mobile', toFa(p.mobile || ''));
-    setIf('phone', toFa(p.phone || ''));
-    setIf('addr', p.addr || '');
+    setIf('phone', toFa(p.phone || ''));   /* B2: تلفن ثابت now really arrives */
+    setIf('addr', p.addr || '');           /* B2: آدرس now really arrives */
     if (p.gender && $('gender')) $('gender').value = p.gender;
 
     var full = trimStr((p.first || '') + ' ' + (p.last || ''));
     setText($('pfName'), full || 'بیمار جدید');
     setText($('pfFile'), toFa(p.file || p.nid || '----'));
 
-    /* auto-select the verified insurance (index into INSURANCES[]) */
+    /* B2: auto-select the supplementary insurance when we recall one */
+    if (p.suppIdx != null && p.suppIdx >= 0 && $('insSupp') &&
+        p.suppIdx < state.supp.length) {
+      $('insSupp').selectedIndex = p.suppIdx;
+    }
+
+    /* auto-select the verified base insurance (index into INSURANCES[]) */
     if (p.insurances && p.insurances.length && $('insMain')) {
       var idx = p.insurances[0];
       if (idx >= 0 && idx < state.insurances.length) {
         $('insMain').selectedIndex = idx;
-        if ($('hasIns')) $('hasIns').checked = idx > 0;
       }
+    }
+    /* B3: only ever turn hasIns ON when we have POSITIVE insurance data;
+       NEVER auto-uncheck it — the operator drives that. */
+    if (p.insurances && p.insurances.length > 0 && $('hasIns')) {
+      if (p.insurances[0] > 0) $('hasIns').checked = true;
     }
     recompute();
   }
@@ -431,11 +454,21 @@
   }
 
   /* ==========================================================================
-     NAVIGATION — Enter moves to the NEXT field (in real visual/DOM order).
-     Tab handled natively. We build the ordered list from every visible,
-     enabled form control on the page (not only [data-nav]) so pressing Enter
-     ALWAYS advances — the operator never has to reach for the mouse.
+     NAVIGATION (B1) — Enter / Tab advance through an EXPLICIT hard-coded id
+     order that matches the secretary's real visual/logical workflow, NOT the
+     raw DOM order (wrappers rearrange cells under RTL, so DOM order is wrong).
+     Auxiliary search boxes and the table qty cells are deliberately NOT here —
+     they keep their own dedicated Enter handlers.
      ========================================================================== */
+  var NAV_ORDER = [
+    'nid', 'first', 'last', 'father',
+    'birth', 'gender', 'mobile', 'phone', 'addr',
+    'insMain', 'ptype', 'ntype', 'insSuppPct',
+    'apptDate', 'apptShift',
+    'doc2code', 'doc2name', 'perfcode', 'perfname',
+    'insBooklet', 'insValid', 'rxDate', 'insSupp'
+  ];
+
   function isVisible(el) {
     if (!el) return false;
     if (el.disabled) return false;
@@ -444,33 +477,60 @@
     if (el.offsetParent === null && el.offsetWidth === 0 && el.offsetHeight === 0) return false;
     return true;
   }
-  function navFields() {
-    /* All text inputs + selects that participate in data entry, in DOM order.
-       We deliberately EXCLUDE the auxiliary search boxes (quick-search, service
-       search, queue search, doctor search) so Enter inside the main patient/
-       admission form never jumps into a side search box. */
-    var all = document.querySelectorAll(
-      '#colCenter input.inp, #colCenter select.inp, ' +
-      '#colRight .ins-body input.inp, #colRight .ins-body select.inp');
+
+  /* Map NAV_ORDER ids to live, visible + enabled DOM elements (in order). */
+  function navElements() {
     var arr = [], i, el;
-    for (i = 0; i < all.length; i++) {
-      el = all[i];
-      if (el.className && el.className.indexOf('qty-inp') >= 0) continue; /* table qty handled separately */
+    for (i = 0; i < NAV_ORDER.length; i++) {
+      el = $(NAV_ORDER[i]);
+      if (!el) continue;
       if (!isVisible(el)) continue;
       arr.push(el);
     }
     return arr;
   }
-  function focusNext(cur) {
-    var arr = navFields(), i, idx = -1;
-    for (i = 0; i < arr.length; i++) if (arr[i] === cur) { idx = i; break; }
-    var n = null;
-    if (idx >= 0 && idx + 1 < arr.length) n = arr[idx + 1];
-    else if (idx < 0 && arr.length) n = arr[0];
+
+  /* Index of `cur` inside NAV_ORDER (not DOM order). -1 when not a nav field. */
+  function navIndexOf(cur) {
+    if (!cur || !cur.id) return -1;
+    var i;
+    for (i = 0; i < NAV_ORDER.length; i++) if (NAV_ORDER[i] === cur.id) return i;
+    return -1;
+  }
+
+  function focusEl(n) {
     if (!n) return;
     try { n.focus(); } catch (e) {}
-    /* select the whole value so typing cleanly replaces it (text inputs only) */
     if (n.select && n.tagName === 'INPUT') { try { n.select(); } catch (e2) {} }
+  }
+
+  /* Advance to the next live nav element AFTER `cur` (no wrap-around). */
+  function focusNext(cur) {
+    var arr = navElements();
+    var oi = navIndexOf(cur), i, ci = -1;
+    for (i = 0; i < arr.length; i++) if (arr[i] === cur) { ci = i; break; }
+    if (ci >= 0) { if (ci + 1 < arr.length) focusEl(arr[ci + 1]); return; }
+    /* cur not currently visible in the live list — fall back to NAV_ORDER pos */
+    if (oi >= 0) {
+      for (i = oi + 1; i < NAV_ORDER.length; i++) {
+        var el = $(NAV_ORDER[i]); if (el && isVisible(el)) { focusEl(el); return; }
+      }
+      return;
+    }
+    if (arr.length) focusEl(arr[0]);
+  }
+
+  /* Go back to the previous live nav element BEFORE `cur` (no wrap-around). */
+  function focusPrev(cur) {
+    var arr = navElements();
+    var oi = navIndexOf(cur), i, ci = -1;
+    for (i = 0; i < arr.length; i++) if (arr[i] === cur) { ci = i; break; }
+    if (ci >= 0) { if (ci - 1 >= 0) focusEl(arr[ci - 1]); return; }
+    if (oi >= 0) {
+      for (i = oi - 1; i >= 0; i--) {
+        var el = $(NAV_ORDER[i]); if (el && isVisible(el)) { focusEl(el); return; }
+      }
+    }
   }
 
   /* ==========================================================================
@@ -519,28 +579,43 @@
      WIRING
      ========================================================================== */
   function wire() {
-    /* --- Enter-to-next + Ctrl+A on EVERY main form field; National-ID triggers
-       lookup.  Event delegation proved unreliable on the embedded WebView2 /
-       MSHTML engines, so we wire a DIRECT keydown handler onto each field. This
-       is the engine-reliable path. --- */
+    /* --- B1: canonical Enter/Tab/Shift+Tab/Ctrl+A handler wired by id over
+       NAV_ORDER (NOT a CSS selector). Direct per-element binding is the
+       engine-reliable path (event delegation is unreliable on WebView2/MSHTML).
+       On <select>, Enter must advance focus and NEVER open the dropdown. --- */
     function fieldKeydown(el) {
       return function (e) {
         e = e || window.event;
         var key = e.keyCode || e.which;
 
-        /* Ctrl+A / Cmd+A → select the whole value inside this field */
-        if ((e.ctrlKey || e.metaKey) && (key === 65 || key === 97) && el.tagName === 'INPUT') {
-          try { el.select(); } catch (er) {}
+        /* Ctrl+A / Cmd+A → select the entire value inside an INPUT */
+        if ((e.ctrlKey || e.metaKey) && (key === 65 || key === 97)) {
+          if (el.tagName === 'INPUT') {
+            try { el.select(); } catch (er) {}
+            if (e.preventDefault) e.preventDefault(); else e.returnValue = false;
+            if (e.stopPropagation) e.stopPropagation();
+            return false;
+          }
+        }
+
+        /* Enter (13) → advance; nid triggers lookup FIRST then advances.
+           Tab (9) with no Shift → advance (normalise across engines). */
+        if (key === 13 || (key === 9 && !e.shiftKey)) {
           if (e.preventDefault) e.preventDefault(); else e.returnValue = false;
           if (e.stopPropagation) e.stopPropagation();
+          if (el.id === 'nid' && key === 13) {
+            lookupNid(el);  /* lookupNid calls focusNext(el) on completion */
+            return false;
+          }
+          focusNext(el);
           return false;
         }
-        /* Enter (13) advances to the next field; NID looks up the patient.
-           Tab (9) is intentionally left to the browser's native handling. */
-        if (key === 13) {
+
+        /* Shift+Tab → go back */
+        if (key === 9 && e.shiftKey) {
           if (e.preventDefault) e.preventDefault(); else e.returnValue = false;
-          if (el.id === 'nid') { lookupNid(el); return false; }
-          focusNext(el);
+          if (e.stopPropagation) e.stopPropagation();
+          focusPrev(el);
           return false;
         }
       };
@@ -548,18 +623,29 @@
     function selectOnFocus(el) {
       return function () { if (el.tagName === 'INPUT') { try { el.select(); } catch (e) {} } };
     }
-    /* Attach directly to EVERY form field (inputs + selects) — query the raw DOM
-       (not navFields(), which filters by visibility) so fields that start hidden
-       and appear later are still wired for Enter/Ctrl+A. */
-    var _navEls = document.querySelectorAll(
-      '#colCenter input.inp, #colCenter select.inp, ' +
-      '#colRight .ins-body input.inp, #colRight .ins-body select.inp'), _ni, _el;
-    for (_ni = 0; _ni < _navEls.length; _ni++) {
-      _el = _navEls[_ni];
-      if (_el.className && _el.className.indexOf('qty-inp') >= 0) continue;
+    /* Bind by id iteration over NAV_ORDER (once, after DOM is ready). */
+    var _ni, _el;
+    for (_ni = 0; _ni < NAV_ORDER.length; _ni++) {
+      _el = $(NAV_ORDER[_ni]);
+      if (!_el) continue;
       (function (el) {
         on(el, 'keydown', fieldKeydown(el));
         if (el.tagName === 'INPUT') on(el, 'focus', selectOnFocus(el));
+        /* <select>: also attach keypress + a guarded keyup so Enter advances
+           reliably on MSHTML (where preventDefault on keydown is unreliable and
+           the dropdown may open before the handler runs). Space still opens. */
+        if (el.tagName === 'SELECT') {
+          on(el, 'keypress', fieldKeydown(el));
+          on(el, 'keyup', function (e) {
+            e = e || window.event;
+            var k = e.keyCode || e.which;
+            if (k === 13 && el.__navHandled !== true) {
+              el.__navHandled = true;
+              focusNext(el);
+              setTimeout(function () { el.__navHandled = false; }, 100);
+            }
+          });
+        }
       })(_el);
     }
 
@@ -598,13 +684,17 @@
        STALE match (the 180ms debounce may not have fired yet), we always ask
        C++ for the freshest match for the exact query and add the first hit —
        so Enter reflects the live Management catalog, not a cached suggestion. */
+    var _svcSearchInFlight = false;   /* B4: debounce Enter re-entry */
     on($('svcSearch'), 'keydown', function (e) {
       e = e || window.event;
       if ((e.keyCode || e.which) !== 13) return;
       if (e.preventDefault) e.preventDefault();
+      if (_svcSearchInFlight) return;   /* a service.search is already running */
       var q = $('svcSearch') ? trimStr($('svcSearch').value) : '';
       if (!q) return;
+      _svcSearchInFlight = true;
       Bridge.call('service.search', { q: q }).then(function (r) {
+        _svcSearchInFlight = false;
         var rows = r.rows || r.services || [];
         state.catalog = rows;
         if (rows.length) {
@@ -615,7 +705,7 @@
           renderSvcSuggest([]);
           toast('خدمتی با این عبارت یافت نشد', 'err');
         }
-      });
+      })['catch'](function () { _svcSearchInFlight = false; });
     });
     /* افزودن خدمت button: if the query resolves to exactly one service, add it
        directly; otherwise show the suggestion list to pick from. */
@@ -751,6 +841,13 @@
     Bridge.call('admission.save', rec).then(function (r) {
       if (r && r.ok) {
         toast('پذیرش ثبت و قبض چاپ شد' + (r.queueNo ? ' — نوبت ' + toFa(r.queueNo) : ''), 'ok');
+        /* B5: warn when the classic-GDI fallback template was used because no
+           print-design is bound to the operator's section. */
+        if (r.printMode && String(r.printMode).indexOf('classic-') === 0) {
+          setTimeout(function () {
+            toast('هیچ دیزاین چاپی به بخش شما متصل نیست — قالب پیش‌فرض استفاده شد', 'warn');
+          }, 700);
+        }
         if (r.ps) updatePS(r.ps);
         refreshQueue();
       } else {

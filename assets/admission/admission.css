@@ -657,6 +657,9 @@ select.inp{cursor:pointer;background:#f9fbfe;}
 .toast.show{opacity:1;-webkit-transform:translateX(-50%) translateY(0);transform:translateX(-50%) translateY(0);}
 .toast.ok{background:#0f7a4e;}
 .toast.err{background:#b42318;}
+/* B5: warn style — soft yellow with dark text (classic-print fallback notice) */
+.toast.warn{background:#f5c518;color:#3a2f00;}
+.toast.info{background:#1d4ed8;}
 
 /* ============================================================================
    RIGHT-CLICK CONTEXT MENU
