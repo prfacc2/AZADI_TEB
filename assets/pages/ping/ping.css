@@ -1,0 +1,38 @@
+/* ============================================================================
+   ping.css — page-specific styles for the «آزمون اتصال» demo page (v1.40.0).
+   Loaded AFTER /common.css so it only adds layout on top of the shared shell
+   primitives (.az-card / .az-btn / .az-muted / theme surfaces). DUAL-ENGINE
+   SAFE — no var(), no grid gap, no logical props; flexbox is -ms- prefixed.
+   ============================================================================ */
+.ping-wrap{
+  min-height:100vh;
+  display:-ms-flexbox;display:flex;
+  -ms-flex-pack:center;justify-content:center;
+  -ms-flex-align:center;align-items:center;
+  padding:24px;
+}
+.ping-card{width:100%;max-width:640px;}
+.ping-title{margin:0 0 6px 0;font-size:22px;font-weight:800;}
+.ping-sub{margin:0 0 18px 0;font-size:13.5px;line-height:1.7;}
+
+/* two-column responsive-ish grid built with float (Trident-safe). */
+.ping-grid{overflow:hidden;margin:0 -6px 14px -6px;}
+.ping-item{
+  float:right;width:50%;padding:0 6px 12px 6px;
+}
+.ping-k{font-size:12.5px;color:#5b6b82;font-weight:700;margin-bottom:2px;}
+html.theme-dark .ping-k{color:#93a4bd;}
+.ping-v{
+  font-size:15px;font-weight:800;
+  background:#f2f6fc;border:1px solid #dbe4f0;border-radius:8px;
+  padding:8px 12px;min-height:20px;
+}
+html.theme-dark .ping-v{background:#101c2f;border-color:#28374f;}
+
+.ping-actions{margin-top:6px;}
+.ping-actions .az-btn{margin-left:8px;}
+
+/* narrow window: stack the cards */
+@media (max-width:520px){
+  .ping-item{float:none;width:100%;}
+}

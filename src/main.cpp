@@ -6,6 +6,7 @@
 #include "app.h"
 #include "backup_log.h"
 #include "web_admission.h"
+#include "web_thread_pool.h"   // v1.40.0: WM_APP_UI_TASK marshalling (RunOnUiThread)
 #include <stdio.h>
 #ifdef AZ_DEBUG_BUILD
 #include <winsock2.h>   // headless admission_probe self-connect (debug only)
@@ -421,6 +422,12 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         setFlatButtonBg(s_bAppt,     g_theme.headerTop);
         setFlatButtonBg(s_bNewTab,   g_theme.headerTop);
         InvalidateRect(h,NULL,TRUE);
+        return 0;
+    case WM_APP_UI_TASK:
+        // v1.40.0: a web worker-pool thread marshalled a callable back onto the
+        // GUI thread (RunOnUiThread) — run it here (owner of every HWND / GDI /
+        // WebView2 object) and free it. lParam is the heap task pointer.
+        WebUiTask_Run(l);
         return 0;
     case WM_TIMER:
         if(w==TIMER_CLOCK){

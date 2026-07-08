@@ -65,6 +65,25 @@ static void adReply(SOCKET s, int code, const char* ctype, const std::string& bo
 // the reason the CSS/JS "did not load": a single blocking accept loop could
 // only satisfy one asset at a time, so parallel requests timed out and the
 // page rendered raw (unstyled, no script).
+// Case-insensitive scan for an HTTP header value (returns "" when absent).
+static std::string adHeaderValue(const std::string& req, const char* name){
+    std::string lower=req; for(size_t i=0;i<lower.size();++i) lower[i]=(char)tolower((unsigned char)lower[i]);
+    std::string key=name; for(size_t i=0;i<key.size();++i) key[i]=(char)tolower((unsigned char)key[i]);
+    size_t p=lower.find("\n"+key+":"); size_t base;
+    if(p!=std::string::npos) base=p+1+key.size()+1;
+    else { // header may be the very first line (no preceding \n) — rare
+        if(lower.compare(0,key.size()+1,key+":")==0) base=key.size()+1; else return "";
+    }
+    // value spans from `base` in the ORIGINAL request to end-of-line.
+    size_t eol=req.find("\r\n",base); if(eol==std::string::npos) eol=req.find('\n',base);
+    if(eol==std::string::npos) eol=req.size();
+    std::string v=req.substr(base,eol-base);
+    // trim surrounding whitespace.
+    size_t a=v.find_first_not_of(" \t"); size_t b=v.find_last_not_of(" \t\r");
+    if(a==std::string::npos) return "";
+    return v.substr(a,b-a+1);
+}
+
 static void adServeConn(SOCKET c){
     std::string req; char buf[2048]; int got; size_t hdrEnd=std::string::npos;
     while((got=recv(c,buf,sizeof(buf),0))>0){
@@ -83,6 +102,10 @@ static void adServeConn(SOCKET c){
     while(bdy.size()<clen && (got=recv(c,buf,sizeof(buf),0))>0) bdy.append(buf,got);
     if(bdy.size()>clen) bdy=bdy.substr(0,clen);
 
+    // v1.40.0: the shell stamps every /api request with the calling page id so
+    // the server can namespace verbs + correlate client.log / client.metrics.
+    std::string azPage=adHeaderValue(req,"X-Az-Page");
+
     if(path.compare(0,5,"/api/")==0){
         std::string verb=path.substr(5); size_t q=verb.find('?'); if(q!=std::string::npos) verb=verb.substr(0,q);
         if(verb=="poll"){
@@ -95,12 +118,24 @@ static void adServeConn(SOCKET c){
             adReply(c,200,"application/json; charset=utf-8",o);
         } else {
             if(verb=="init") InterlockedIncrement(&g_adInitHits);
-            std::string out=admissionApi(verb,bdy);
+            // v1.40.0: try the generic multi-page verb registry FIRST (ping,
+            // client.log, client.metrics + any future page verb). Fall back to
+            // the legacy admission handler so every existing verb keeps working.
+            std::string out;
+            if(!WebPages_DispatchVerb(verb,bdy,azPage,out))
+                out=admissionApi(verb,bdy);
             adReply(c,200,"application/json; charset=utf-8",out);
         }
     } else {
+        // Asset resolution order:
+        //   1) legacy admission bundle (hard-coded 400..405 switch) — unchanged
+        //   2) generic multi-page registry (shell 500.. + ping 600.. + future)
         int id; const char* ctype;
         if(adAssetForPath(path,id,ctype)){
+            std::string data;
+            if(adLoadRes(id,data)) adReply(c,200,ctype,data);
+            else adReply(c,404,"text/plain","not found");
+        } else if(WebPages_ResolveAsset(path,id,ctype)){
             std::string data;
             if(adLoadRes(id,data)) adReply(c,200,ctype,data);
             else adReply(c,404,"text/plain","not found");
@@ -122,8 +157,21 @@ static DWORD WINAPI adHttpThread(LPVOID){
         SOCKET c=accept(g_adListen,(sockaddr*)&ca,&cl);
         if(c==INVALID_SOCKET){ if(InterlockedCompareExchange(&g_adStop,0,0)) break; Sleep(5); continue; }
         if(InterlockedCompareExchange(&g_adStop,0,0)){ closesocket(c); break; }
-        // Give each connection its own worker so parallel asset fetches
-        // (html/css/js/font) never serialize behind one another.
+        // v1.40.0 LOOPBACK-ONLY ENFORCEMENT: even though we bind to
+        // INADDR_LOOPBACK, defensively reject any peer that is not 127.0.0.0/8
+        // so the /api bridge (which drives the real data layer) can NEVER be
+        // reached from another host, regardless of future bind changes.
+        if(ca.sin_family!=AF_INET || (ntohl(ca.sin_addr.s_addr)>>24)!=127){
+            closesocket(c); continue;
+        }
+        // v1.40.0 TIMEOUTS: a stuck/slow peer must never pin a worker forever.
+        DWORD tv=8000; // 8s recv/send timeout
+        setsockopt(c,SOL_SOCKET,SO_RCVTIMEO,(const char*)&tv,sizeof(tv));
+        setsockopt(c,SOL_SOCKET,SO_SNDTIMEO,(const char*)&tv,sizeof(tv));
+        // v1.40.0: hand the connection to the bounded worker pool (2 low-power /
+        // 4 default / cap 8). Falls back to a per-connection thread (and finally
+        // to inline serving) so behaviour is never worse than before.
+        if(WebPool_Submit(c)) continue;
         HANDLE th=CreateThread(NULL,0,adConnThread,(LPVOID)(UINT_PTR)c,0,NULL);
         if(th) CloseHandle(th);
         else { adServeConn(c); } // fallback: serve inline if thread spawn fails
@@ -138,8 +186,18 @@ int WebAdmission_EnsureHost(){
     if(!g_adCsInit){ InitializeCriticalSection(&g_adCs); g_adCsInit=true; }
     WSADATA wsa; static bool wsaUp=false;
     if(!wsaUp){ if(WSAStartup(MAKEWORD(2,2),&wsa)!=0) return 0; wsaUp=true; }
+
+    // v1.40.0: populate the multi-page registry (shell + ping assets, ping /
+    // client.log / client.metrics verbs) BEFORE the host starts accepting, and
+    // bring up the bounded worker pool that serves accepted connections.
+    WebPages_RegisterBuiltins();
+    WebPool_Init([](SOCKET c){ adServeConn(c); });
+
     SOCKET s=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);
     if(s==INVALID_SOCKET) return 0;
+    // v1.40.0: SO_REUSEADDR so a quick relaunch after a crash can re-bind the
+    // ephemeral loopback port without waiting out TIME_WAIT.
+    { BOOL yes=TRUE; setsockopt(s,SOL_SOCKET,SO_REUSEADDR,(const char*)&yes,sizeof(yes)); }
     sockaddr_in a={}; a.sin_family=AF_INET;
     a.sin_addr.s_addr=htonl(INADDR_LOOPBACK); a.sin_port=0;
     if(bind(s,(sockaddr*)&a,sizeof(a))!=0){ closesocket(s); return 0; }

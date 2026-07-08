@@ -40,11 +40,28 @@
 404 RCDATA "../assets/admission/vazir.ttf"
 405 RCDATA "../assets/admission/contextmenu.js"
 
+// v1.40.0: shared multi-page embedded-web SHELL assets — one common stylesheet
+// (RTL Persian + Vazirmatn + themes), one common runtime (AzBridge/AzUi/AzNav/
+// AzBoot/AzPerf helpers) and the embedded Vazirmatn font every page pulls in.
+// Served by the generic WebPages_* dispatcher (src/web_pages.cpp). Ids 500..502
+// are RESERVED for the shell and MUST NOT collide with the admission (400..405)
+// or ping (600..602) blocks.
+500 RCDATA "../assets/shell/common.css"
+501 RCDATA "../assets/shell/common.js"
+502 RCDATA "../assets/shell/vazir.ttf"
+
+// v1.40.0: demo «ping» page proving the multi-page shell end-to-end — a page
+// registered in the WebPages_* registry, served through the thread pool, with a
+// dedicated /api verb (ping) handled by src/web_ping_api.cpp. Ids 600..602.
+600 RCDATA "../assets/pages/ping/index.html"
+601 RCDATA "../assets/pages/ping/ping.css"
+602 RCDATA "../assets/pages/ping/ping.js"
+
 1 24 "app.manifest"
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,39,0,0
- PRODUCTVERSION 1,39,0,0
+ FILEVERSION 1,40,0,0
+ PRODUCTVERSION 1,40,0,0
  FILEFLAGSMASK 0x3fL
  FILEFLAGS 0x0L
  FILEOS 0x40004L
@@ -57,11 +74,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "Azadi-Teb"
             VALUE "FileDescription", "Azadi-Teb Clinic Reception & Management System"
-            VALUE "FileVersion", "1.39.0.0"
+            VALUE "FileVersion", "1.40.0.0"
             VALUE "InternalName", "AzadiTeb"
             VALUE "OriginalFilename", "AzadiTeb.exe"
             VALUE "ProductName", "Azadi-Teb"
-            VALUE "ProductVersion", "1.39.0"
+            VALUE "ProductVersion", "1.40.0"
         END
     END
     BLOCK "VarFileInfo"

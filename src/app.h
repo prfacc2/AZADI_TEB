@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.39.0"
+#define APP_VERSION_W   L"1.40.0"
 
 // ----------------------------------------------------------- logging policy -
 //  RELEASE 1.2.0 (Section A): all general user-behavior logging is gated behind
@@ -109,6 +109,11 @@ void broadcastThemeChange();            // invalidate everything
 #define WM_APP_THEME_CHANGED (WM_APP+12) // a settings panel changed the theme
 #define WM_APP_LAYOUT_REDO   (WM_APP+13) // AzLayoutGuard requests a relayout
 #define WM_APP_DESIGN_PUSHED (WM_APP+14) // a print design was pushed to sections
+// v1.40.0 (multi-page shell): the embedded-web worker pool marshals a callable
+// back onto the UI thread by PostMessage(g_hFrame, WM_APP_UI_TASK, 0, task).
+// The frame proc runs it and frees it. See src/web_thread_pool.{h,cpp} +
+// RunOnUiThread(). WM_APP+15 keeps clear of the 1.4.0 message block above.
+#define WM_APP_UI_TASK       (WM_APP+15) // run a marshalled callable on the UI thread
 
 // ------------------------------------------------------------- flat button -
 enum IconId {
