@@ -44,3 +44,15 @@ void WebAdmission_NotifyCatalogChanged();
 
 // Destroy the embedded view + release its WebView2 resources.
 void WebAdmission_DestroyView(HWND view);
+
+// Route a pending message (typically WM_KEYDOWN) through the embedded browser
+// control BEFORE the main pump calls TranslateMessage/DispatchMessage. This is
+// REQUIRED so Tab / Enter / Ctrl+A / arrow keys reach the hosted HTML page:
+//   * MSHTML  → IOleInPlaceActiveObject::TranslateAccelerator (+ the site's
+//               IDocHostUIHandler::TranslateAccelerator returning S_FALSE).
+//   * WebView2→ handled internally via add_AcceleratorKeyPressed; this returns
+//               false so the message continues normally.
+// Returns true iff the browser control consumed the message (caller must then
+// skip TranslateMessage/DispatchMessage). Only views whose host HWND is an
+// ancestor of msg->hwnd are consulted, so unrelated windows are untouched.
+bool WebAdmission_TranslateAccel(MSG* msg);

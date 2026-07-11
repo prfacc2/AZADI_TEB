@@ -18,8 +18,18 @@ struct ICoreWebView2WebMessageReceivedEventArgs;
 struct ICoreWebView2WebMessageReceivedEventHandler;
 struct ICoreWebView2NavigationCompletedEventArgs;
 struct ICoreWebView2NavigationCompletedEventHandler;
+struct ICoreWebView2AcceleratorKeyPressedEventArgs;
+struct ICoreWebView2AcceleratorKeyPressedEventHandler;
 
 typedef struct EventRegistrationToken { __int64 value; } EventRegistrationToken;
+
+// KeyEventKind values (public ABI). Only KeyDown/SystemKeyDown carry the key.
+enum COREWEBVIEW2_KEY_EVENT_KIND {
+  COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN = 0,
+  COREWEBVIEW2_KEY_EVENT_KIND_KEY_UP = 1,
+  COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN = 2,
+  COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_UP = 3
+};
 
 // ---- IIDs (from WebView2.h, stable public ABI) -----------------------------
 static const IID IID_ICoreWebView2Environment_ =
@@ -34,6 +44,8 @@ static const IID IID_ICoreWebView2WebMessageReceivedEventHandler_ =
   {0x57213f19,0x00e6,0x49fa,{0x8e,0x07,0x89,0x8e,0xa0,0x1e,0xcb,0xd2}};
 static const IID IID_ICoreWebView2NavigationCompletedEventHandler_ =
   {0xd33a35bf,0x1c49,0x4f98,{0x93,0xab,0x00,0x6e,0x05,0x33,0xfe,0x1c}};
+static const IID IID_ICoreWebView2AcceleratorKeyPressedEventHandler_ =
+  {0x9f760f8a,0xfb79,0x42be,{0x99,0x90,0x7b,0x56,0x90,0x0f,0xa9,0xc7}};
 
 // ============================================================================
 //  Interface vtable declarations (only the methods we call).
@@ -134,6 +146,25 @@ struct ICoreWebView2NavigationCompletedEventArgs : public IUnknown {
 struct ICoreWebView2NavigationCompletedEventHandler : public IUnknown {
   virtual HRESULT STDMETHODCALLTYPE Invoke(
       ICoreWebView2* sender, ICoreWebView2NavigationCompletedEventArgs* args) = 0;
+};
+
+// AcceleratorKeyPressed: fired for keys like Tab/Enter/Ctrl+A/arrows that the
+// WebView would otherwise let bubble to the host. We keep Handled=FALSE for the
+// navigation/edit keys so the WebView processes them internally (which fires the
+// page's keydown listeners).
+struct ICoreWebView2AcceleratorKeyPressedEventArgs : public IUnknown {
+  virtual HRESULT STDMETHODCALLTYPE get_KeyEventKind(int*) = 0;
+  virtual HRESULT STDMETHODCALLTYPE get_VirtualKey(UINT*) = 0;
+  virtual HRESULT STDMETHODCALLTYPE get_KeyEventLParam(int*) = 0;
+  virtual HRESULT STDMETHODCALLTYPE get_PhysicalKeyStatus(void*) = 0;
+  virtual HRESULT STDMETHODCALLTYPE get_Handled(BOOL*) = 0;
+  virtual HRESULT STDMETHODCALLTYPE put_Handled(BOOL) = 0;
+};
+
+struct ICoreWebView2AcceleratorKeyPressedEventHandler : public IUnknown {
+  virtual HRESULT STDMETHODCALLTYPE Invoke(
+      ICoreWebView2Controller* sender,
+      ICoreWebView2AcceleratorKeyPressedEventArgs* args) = 0;
 };
 
 // Completed handlers for env + controller creation
