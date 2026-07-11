@@ -1109,6 +1109,99 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
                 gdipShutdown(); BackupLog_Shutdown();
                 return ok ? 0 : 2;
             }
+            // §D.7: headless smoke test for the KEYBOARD routing fix. Opens the
+            // embedded admission view, waits for the bundled JS to boot, focuses
+            // #nid, types a known-existing national ID, then synthesizes an
+            // Enter keystroke via keybd_event. Because Enter now travels through
+            // WebAdmission_TranslateAccel → the hosted control → the page's
+            // keydown listener → Bridge.call('patient.lookup'), the C++ store
+            // records the looked-up nid. We verify via WebAdmission_DebugInitHits
+            // (JS ran) and WebAdmission_DebugLastFilledNid (Enter routed + lookup
+            // fired + auto-fill flow reached the store). Driven by
+            // `--smoke-admission-keys` (AZ_DEBUG_SCREEN=admission_keys).
+            else if(!wcscmp(dbg,L"admission_keys")){
+                long WebAdmission_DebugInitHits();
+                std::string WebAdmission_DebugLastFilledNid();
+                // small local UTF-8 <-> wide helpers (web_admission's are static)
+                auto w2u8_dbg=[](const std::wstring& w)->std::string{
+                    if(w.empty()) return "";
+                    int n=WideCharToMultiByte(CP_UTF8,0,w.c_str(),(int)w.size(),NULL,0,NULL,NULL);
+                    std::string s(n,0); WideCharToMultiByte(CP_UTF8,0,w.c_str(),(int)w.size(),&s[0],n,NULL,NULL);
+                    return s;
+                };
+                auto u82w_dbg=[](const std::string& s)->std::wstring{
+                    if(s.empty()) return L"";
+                    int n=MultiByteToWideChar(CP_UTF8,0,s.c_str(),(int)s.size(),NULL,0);
+                    std::wstring w(n,0); MultiByteToWideChar(CP_UTF8,0,s.c_str(),(int)s.size(),&w[0],n);
+                    return w;
+                };
+                // Seed a known patient so the lookup has something to find.
+                std::wstring knownNid=L"1234567890";
+                {
+                    // Pull the first existing patient's nid if the store is
+                    // non-empty; otherwise fall back to the seeded constant.
+                    auto pats=loadAllPatients();
+                    if(!pats.empty() && !pats[0].nid.empty()) knownNid=pats[0].nid;
+                }
+                logLine(L"SMOKE admission_keys: using nid=" + knownNid);
+                bool viewOk=false, jsOk=false, keyOk=false;
+                if(WebAdmission_Available()){
+                    HWND v=WebAdmission_CreateView(f);
+                    viewOk=(v!=NULL && IsWindow(v));
+                    logLine(std::wstring(L"SMOKE createView ")+(viewOk?L"OK":L"FAIL"));
+                    if(v){
+                        // 1) pump until the page's JS booted (reached /api/init)
+                        DWORD t0=GetTickCount(); MSG pm;
+                        while(GetTickCount()-t0<12000){
+                            if(WebAdmission_DebugInitHits()>0){ jsOk=true; break; }
+                            if(PeekMessageW(&pm,NULL,0,0,PM_REMOVE)){
+                                if(!WebAdmission_TranslateAccel(&pm)){ TranslateMessage(&pm); DispatchMessageW(&pm); }
+                            } else Sleep(15);
+                        }
+                        logLine(std::wstring(L"SMOKE js-bridge ")+(jsOk?L"OK":L"FAIL"));
+                        // 2) focus the host, type the nid, press Enter. We drive
+                        //    focus + fill through the bridge push so the field is
+                        //    populated deterministically, then synthesize Enter.
+                        SetForegroundWindow(f); SetFocus(v);
+                        WebAdmission_PushEvent("debug.focusNid",
+                            std::string("{\"nid\":\"")+w2u8_dbg(knownNid)+"\"}");
+                        // give the page a moment to apply the focus/fill push
+                        DWORD t1=GetTickCount();
+                        while(GetTickCount()-t1<600){
+                            if(PeekMessageW(&pm,NULL,0,0,PM_REMOVE)){
+                                if(!WebAdmission_TranslateAccel(&pm)){ TranslateMessage(&pm); DispatchMessageW(&pm); }
+                            } else Sleep(10);
+                        }
+                        keybd_event(VK_RETURN,0,0,0);
+                        keybd_event(VK_RETURN,0,KEYEVENTF_KEYUP,0);
+                        // 3) wait up to 1500 ms and verify the store saw the nid
+                        DWORD t2=GetTickCount();
+                        std::string want=w2u8_dbg(knownNid);
+                        while(GetTickCount()-t2<1500){
+                            std::string got=WebAdmission_DebugLastFilledNid();
+                            if(!got.empty() && got==want){ keyOk=true; break; }
+                            if(PeekMessageW(&pm,NULL,0,0,PM_REMOVE)){
+                                if(!WebAdmission_TranslateAccel(&pm)){ TranslateMessage(&pm); DispatchMessageW(&pm); }
+                            } else Sleep(15);
+                        }
+                        logLine(std::wstring(L"SMOKE enter->lookup ")+(keyOk?L"OK":L"FAIL")+
+                                L" lastNid=" + u82w_dbg(WebAdmission_DebugLastFilledNid()));
+                        WebAdmission_DestroyView(v);
+                    }
+                }
+                bool ok = viewOk && jsOk && keyOk;
+                logLine(ok?L"AZ_ADMISSION_KEYS=OK":L"AZ_ADMISSION_KEYS=FAIL");
+                {
+                    std::wstring marker;
+                    marker += std::wstring(L"view=")+(viewOk?L"OK":L"FAIL")+L"\r\n";
+                    marker += std::wstring(L"jsBridge=")+(jsOk?L"OK":L"FAIL")+L"\r\n";
+                    marker += std::wstring(L"enterLookup=")+(keyOk?L"OK":L"FAIL")+L"\r\n";
+                    marker += ok?L"AZ_ADMISSION_KEYS=OK\r\n":L"AZ_ADMISSION_KEYS=FAIL\r\n";
+                    writeFileUtf8(dataDir()+L"\\admission_keys.txt", marker, false);
+                }
+                gdipShutdown(); BackupLog_Shutdown();
+                return ok?0:2;
+            }
             // §D.5: headless smoke test for the print-designer open/close path.
             // Exercises the section-picker + designer launch without blocking on
             // user input, then exits 0 (path is reachable) or a non-zero code if
@@ -1149,6 +1242,16 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
                 }
             }
         }
+
+        // Give the embedded admission browser (MSHTML/WebView2) a chance to eat
+        // accelerator keys (Tab / Enter / Ctrl+A / arrows, …). These MUST pass
+        // through TranslateAccelerator BEFORE TranslateMessage — otherwise the
+        // hosted control never sees the keystroke and the page's JS keydown
+        // listener never fires (the root cause of the broken navigation).
+        if(WebAdmission_TranslateAccel(&msg)){
+            continue;   // message consumed by the browser control
+        }
+
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }

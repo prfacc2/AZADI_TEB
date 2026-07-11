@@ -320,6 +320,7 @@ static std::string admissionApi(const std::string& verb, const std::string& body
         auto all=loadAllPatients();
         for(const auto& p:all){
             if(normDigits(p.nid)==nid){
+                { std::lock_guard<std::mutex> lk(g_adLastNidMx); g_adLastFilledNid=w2u8(nid); }
                 return "{\"found\":true,\"patient\":"+patientJson(p)+"}";
             }
         }
@@ -330,6 +331,7 @@ static std::string admissionApi(const std::string& verb, const std::string& body
             p.gender=c.gender; p.birth=c.birthDate; p.mobile=c.mobile;
             p.landline=c.landline; p.address=c.address;   // v1.40.0
             p.insurances=c.insurances; p.suppIdx=c.suppIdx;
+            { std::lock_guard<std::mutex> lk(g_adLastNidMx); g_adLastFilledNid=w2u8(nid); }
             return "{\"found\":true,\"patient\":"+patientJson(p)+"}";
         }
         return "{\"found\":false}";

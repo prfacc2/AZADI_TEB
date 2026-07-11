@@ -17,10 +17,20 @@
 #include <exdisp.h>
 #include <exdispid.h>
 #include <mshtml.h>
+#include <mshtmhst.h>   // IDocHostUIHandler — needed so Tab/Enter/Ctrl+A reach the page
 #include <docobj.h>
 #include <ocidl.h>
 
 namespace {
+
+// ICustomDoc's IID/interface is not always exported by MinGW's import libs, so
+// declare both here (MinGW-friendly). ICustomDoc::SetUIHandler lets us register
+// our IDocHostUIHandler on the document so MSHTML consults it for accelerators.
+static const IID IID_ICustomDoc_local =
+  {0x3050f3f0,0x98b5,0x11cf,{0xbb,0x82,0x00,0xaa,0x00,0xbd,0xce,0x0b}};
+struct ICustomDocLocal : public IUnknown {
+    virtual HRESULT STDMETHODCALLTYPE SetUIHandler(IDocHostUIHandler* pUIHandler) = 0;
+};
 
 // ---- put the process into the highest browser-emulation mode (per-user) ----
 static void mshtmlSetBrowserEmulation(){
@@ -40,7 +50,8 @@ static void mshtmlSetBrowserEmulation(){
 //  Minimal OLE client site so the WebBrowser control can be hosted in-place.
 // ============================================================================
 struct MshtmlHost : public IOleClientSite, public IOleInPlaceSite,
-                    public IOleInPlaceFrame, public IStorage {
+                    public IOleInPlaceFrame, public IStorage,
+                    public IDocHostUIHandler {
     LONG rc=1;
     HWND hwnd=nullptr;             // container child window
     IOleObject* oleObj=nullptr;
@@ -56,6 +67,7 @@ struct MshtmlHost : public IOleClientSite, public IOleInPlaceSite,
         else if(IsEqualIID(riid,IID_IOleInPlaceSite)) *ppv=static_cast<IOleInPlaceSite*>(this);
         else if(IsEqualIID(riid,IID_IOleInPlaceFrame)) *ppv=static_cast<IOleInPlaceFrame*>(this);
         else if(IsEqualIID(riid,IID_IStorage)) *ppv=static_cast<IStorage*>(this);
+        else if(IsEqualIID(riid,IID_IDocHostUIHandler)) *ppv=static_cast<IDocHostUIHandler*>(this);
         else { *ppv=nullptr; return E_NOINTERFACE; }
         AddRef(); return S_OK;
     }
@@ -124,6 +136,54 @@ struct MshtmlHost : public IOleClientSite, public IOleInPlaceSite,
     HRESULT STDMETHODCALLTYPE SetClass(REFCLSID) override { return S_OK; }
     HRESULT STDMETHODCALLTYPE SetStateBits(DWORD,DWORD) override { return S_OK; }
     HRESULT STDMETHODCALLTYPE Stat(STATSTG*,DWORD) override { return E_NOTIMPL; }
+
+    // ---- IDocHostUIHandler --------------------------------------------------
+    //  The whole reason this interface exists here: MSHTML asks the host site
+    //  whether it wants to consume an accelerator BEFORE routing the key into
+    //  the document. Returning S_FALSE from TranslateAccelerator tells MSHTML
+    //  "the container did NOT handle it — please dispatch it inside the page",
+    //  which is exactly what makes Tab / Enter / Ctrl+A / arrows reach the JS
+    //  keydown listeners on each admission field. Without this, the embedded
+    //  WebBrowser control never fires keydown at all.
+    HRESULT STDMETHODCALLTYPE ShowContextMenu(DWORD,POINT*,IUnknown*,IDispatch*) override {
+        return S_OK;   // suppress default IE menu; the page ships contextmenu.js
+    }
+    HRESULT STDMETHODCALLTYPE GetHostInfo(DOCHOSTUIINFO* pInfo) override {
+        if(pInfo){
+            pInfo->cbSize=sizeof(DOCHOSTUIINFO);
+            pInfo->dwFlags=DOCHOSTUIFLAG_NO3DBORDER|DOCHOSTUIFLAG_THEME;
+            pInfo->dwDoubleClick=DOCHOSTUIDBLCLK_DEFAULT;
+        }
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE ShowUI(DWORD,IOleInPlaceActiveObject*,IOleCommandTarget*,
+            IOleInPlaceFrame*,IOleInPlaceUIWindow*) override { return S_OK; }
+    HRESULT STDMETHODCALLTYPE HideUI() override { return S_OK; }
+    HRESULT STDMETHODCALLTYPE UpdateUI() override { return S_OK; }
+    // NOTE: EnableModeless(BOOL) is shared with IOleInPlaceFrame — the single
+    // implementation above (in the IOleInPlaceFrame section) satisfies both, so
+    // it must NOT be re-declared here.
+    HRESULT STDMETHODCALLTYPE OnDocWindowActivate(BOOL) override { return S_OK; }
+    HRESULT STDMETHODCALLTYPE OnFrameWindowActivate(BOOL) override { return S_OK; }
+    HRESULT STDMETHODCALLTYPE ResizeBorder(LPCRECT,IOleInPlaceUIWindow*,BOOL) override { return S_OK; }
+    HRESULT STDMETHODCALLTYPE TranslateAccelerator(LPMSG,const GUID*,DWORD) override {
+        return S_FALSE;   // <-- key line: let the document handle the keystroke
+    }
+    HRESULT STDMETHODCALLTYPE GetOptionKeyPath(LPOLESTR* pchKey,DWORD) override {
+        if(pchKey) *pchKey=NULL; return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE GetDropTarget(IDropTarget*,IDropTarget** ppDropTarget) override {
+        if(ppDropTarget) *ppDropTarget=NULL; return E_NOTIMPL;
+    }
+    HRESULT STDMETHODCALLTYPE GetExternal(IDispatch** ppDispatch) override {
+        if(ppDispatch) *ppDispatch=NULL; return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE TranslateUrl(DWORD,LPWSTR,LPWSTR* ppchURLOut) override {
+        if(ppchURLOut) *ppchURLOut=NULL; return E_NOTIMPL;
+    }
+    HRESULT STDMETHODCALLTYPE FilterDataObject(IDataObject*,IDataObject** ppDORet) override {
+        if(ppDORet) *ppDORet=NULL; return E_NOTIMPL;
+    }
 };
 
 // per-mshtml-view record
@@ -132,6 +192,7 @@ struct MshtmlView {
     MshtmlHost* site=nullptr;
     IWebBrowser2* wb=nullptr;
     IOleObject* oleObj=nullptr;
+    IOleInPlaceActiveObject* ipao=nullptr;   // for TranslateAccelerator routing
 };
 static std::map<HWND,MshtmlView*> g_mshtmlViews;
 static std::mutex g_mshtmlMx;
@@ -196,9 +257,27 @@ static HWND MshtmlAdmission_CreateView(HWND parent){
     v->oleObj=oleObj; site->oleObj=oleObj;
     oleObj->SetClientSite(site);
 
+    // Register our IDocHostUIHandler on the control so MSHTML consults it for
+    // TranslateAccelerator (this is what routes Tab/Enter/Ctrl+A into the page).
+    {
+        ICustomDocLocal* cd=nullptr;
+        if(SUCCEEDED(oleObj->QueryInterface(IID_ICustomDoc_local,(void**)&cd)) && cd){
+            cd->SetUIHandler(static_cast<IDocHostUIHandler*>(site));
+            cd->Release();
+        }
+    }
+
     // in-place activate
     RECT r2; GetClientRect(host,&r2);
     hr=oleObj->DoVerb(OLEIVERB_INPLACEACTIVATE,NULL,site,0,host,&r2);
+
+    // Grab the in-place active object so the message pump can call
+    // IOleInPlaceActiveObject::TranslateAccelerator on every WM_KEYDOWN.
+    if(SUCCEEDED(hr)){
+        IOleInPlaceActiveObject* ipao=nullptr;
+        if(SUCCEEDED(oleObj->QueryInterface(IID_IOleInPlaceActiveObject,(void**)&ipao)) && ipao)
+            v->ipao=ipao;
+    }
 
     IWebBrowser2* wb=nullptr;
     if(SUCCEEDED(oleObj->QueryInterface(IID_IWebBrowser2,(void**)&wb)) && wb){
@@ -209,6 +288,9 @@ static HWND MshtmlAdmission_CreateView(HWND parent){
         wb->put_Silent(VARIANT_TRUE);
         wb->put_Width(r2.right); wb->put_Height(r2.bottom);
         { std::lock_guard<std::mutex> lk(g_mshtmlMx); g_mshtmlViews[host]=v; }
+        // Give the WebBrowser control keyboard focus so it owns the tab-stop
+        // chain the moment the admission tab becomes visible.
+        SetFocus(host);
         int port=WebAdmission_EnsureHost();
         wchar_t url[96]; swprintf(url,96,L"http://127.0.0.1:%d/index.html",port);
         VARIANT ve; VariantInit(&ve);
@@ -231,6 +313,7 @@ static void MshtmlAdmission_Destroy(HWND host){
     { std::lock_guard<std::mutex> lk(g_mshtmlMx);
       auto it=g_mshtmlViews.find(host); if(it!=g_mshtmlViews.end()){ v=it->second; g_mshtmlViews.erase(it); } }
     if(!v) return;
+    if(v->ipao){ v->ipao->Release(); v->ipao=nullptr; }
     if(v->wb){ v->wb->Stop(); v->wb->Release(); v->wb=nullptr; }
     if(v->oleObj){ v->oleObj->Close(OLECLOSE_NOSAVE); v->oleObj->SetClientSite(NULL); v->oleObj->Release(); v->oleObj=nullptr; }
     if(v->site) v->site->Release();
@@ -240,3 +323,35 @@ static void MshtmlAdmission_Destroy(HWND host){
 
 // True — the MSHTML WebBrowser control is present on every Windows (and Wine).
 static bool MshtmlAdmission_Available(){ return true; }
+
+// ---------------------------------------------------------------------------
+//  Route a WM_KEYDOWN (or any) message through the embedded WebBrowser control
+//  BEFORE the main pump calls TranslateMessage/DispatchMessage. We only forward
+//  the message to the view whose host HWND is an ancestor of pMsg->hwnd, so we
+//  never blindly eat keystrokes destined for other windows. Returns true iff a
+//  view consumed the message (TranslateAccelerator returned S_OK).
+// ---------------------------------------------------------------------------
+static bool MshtmlAdmission_TranslateAccel(MSG* pMsg){
+    if(!pMsg) return false;
+    IOleInPlaceActiveObject* ipao=nullptr;
+    {
+        std::lock_guard<std::mutex> lk(g_mshtmlMx);
+        for(std::map<HWND,MshtmlView*>::iterator it=g_mshtmlViews.begin();
+            it!=g_mshtmlViews.end(); ++it){
+            MshtmlView* v=it->second;
+            if(!v || !v->ipao || !v->host) continue;
+            // is the target window inside this view's host subtree?
+            HWND w=pMsg->hwnd;
+            bool inside=false;
+            while(w){
+                if(w==v->host){ inside=true; break; }
+                w=GetParent(w);
+            }
+            if(inside){ ipao=v->ipao; ipao->AddRef(); break; }
+        }
+    }
+    if(!ipao) return false;
+    HRESULT hr=ipao->TranslateAccelerator(pMsg);
+    ipao->Release();
+    return hr==S_OK;
+}

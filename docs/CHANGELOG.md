@@ -5,6 +5,78 @@
 
 ---
 
+## 1.41.0 — 2026-07-11
+
+> **رفعِ ریشه‌ایِ خرابیِ کیبورد (Enter / Tab / Shift+Tab / Ctrl+A) در صفحهٔ
+> «پذیرش بیمار»ِ امبد.** این ایراد یک باگِ **C++** بود، نه جاوااسکریپت: پیام‌هایِ
+> `WM_KEYDOWN` مربوط به Tab / Enter / Ctrl+A / کلیدهایِ جهت هرگز به کنترلِ مرورگرِ
+> میزبان‌شده مسیریابی نمی‌شدند، پس رویدادِ `keydown` در سندِ HTML اصلاً شلیک نمی‌شد.
+> سه قطعهٔ گمشده تأمین شد و مشکل به‌طورِ کامل حل شد.
+
+**ریشهٔ مشکل (فارسی):** کنترلِ WebBrowser (Trident/MSHTML) و — به‌شکلی ملایم‌تر —
+WebView2 وقتی داخلِ یک HWNDِ بیگانه امبد می‌شوند، برایِ دریافتِ کلیدهایِ شتاب‌دهنده
+(Tab/Enter/…) باید از مسیرِ `IOleInPlaceActiveObject::TranslateAccelerator` +
+`IDocHostUIHandler::TranslateAccelerator` (برایِ MSHTML) و رویدادِ
+`add_AcceleratorKeyPressed` (برایِ WebView2) عبور کنند. این سه مورد پیاده نشده بود؛
+هیچ مقدار جاوااسکریپت نمی‌تواند پیام‌هایی را که اصلاً به کنترل تحویل نشده‌اند بسازد.
+
+**Root cause (English):** The embedded WebBrowser (Trident/MSHTML) — and, more
+mildly, WebView2 — do not receive accelerator keys (Tab/Enter/Ctrl+A/arrows) when
+hosted inside a foreign parent HWND unless the container routes messages through
+`IOleInPlaceActiveObject::TranslateAccelerator` **plus** an
+`IDocHostUIHandler::TranslateAccelerator` that returns `S_FALSE` (MSHTML), and
+subscribes to `add_AcceleratorKeyPressed` leaving `Handled=FALSE` (WebView2).
+These three pieces were missing, so the page's `keydown` listeners never fired.
+No amount of JavaScript can synthesize Win32 messages that were never delivered.
+
+### Fixed — مسیریابیِ کلیدهایِ کیبورد به سطحِ HTMLِ امبد
+- **MSHTML:** به `MshtmlHost` رابطِ `IDocHostUIHandler` اضافه شد؛
+  `TranslateAccelerator` مقدارِ `S_FALSE` برمی‌گرداند تا Tab/Enter/Ctrl+A به سندِ
+  صفحه برسند. `GetHostInfo` (بدونِ حاشیهٔ سه‌بعدی + تم)، `ShowContextMenu` (سرکوبِ
+  منویِ پیش‌فرضِ IE)، و بقیهٔ متدها به‌صورتِ استاب. `IDocHostUIHandler` با
+  `ICustomDoc::SetUIHandler` روی سند ثبت می‌شود؛ `IOleInPlaceActiveObject` گرفته و
+  در `MshtmlView::ipao` نگه داشته و در Destroy آزاد می‌شود. کمک‌تابعِ جدید
+  `MshtmlAdmission_TranslateAccel(MSG*)` فقط برایِ نمایی که HWNDِ میزبانش جدِ
+  `msg->hwnd` است، `ipao->TranslateAccelerator` را صدا می‌زند.
+  (`src/web_admission_mshtml.inc`)
+- **WebView2:** رابط‌هایِ `ICoreWebView2AcceleratorKeyPressedEventArgs` و
+  `...EventHandler` به‌صورتِ inline اعلام شد؛ پس از `get_CoreWebView2` با
+  `add_AcceleratorKeyPressed` مشترک می‌شویم و برایِ Tab/Enter/جهت/Home/End/Esc و
+  Ctrl+A مقدارِ `put_Handled(FALSE)` را می‌گذاریم تا WebView خودش پردازش کند.
+  (`src/web_admission_webview2.inc`, `src/web_admission_host.inc`)
+- **حلقهٔ پیامِ اصلی:** پیش از `TranslateMessage`/`DispatchMessage`، تابعِ
+  عمومیِ جدیدِ `WebAdmission_TranslateAccel(&msg)` صدا زده می‌شود تا کنترلِ مرورگرِ
+  امبد فرصتِ بلعیدنِ کلیدهایِ شتاب‌دهنده را داشته باشد.
+  (`src/main.cpp`, `src/web_admission.h`, `src/web_admission_dispatch.inc`)
+- **JS (کمربند و شلوارک):** `focusEl` علاوه بر `n.select()` از
+  `setSelectionRange(0, len)` هم استفاده می‌کند (چون روی برخی بیلدهایِ MSHTML
+  `select()` بی‌صدا شکست می‌خورد). `NAV_ORDER`/`lookupNid`/`fillPatient`/فراخوان‌هایِ
+  Bridge **دست‌نخورده** ماند. (`assets/admission/admission.js`)
+- **تستِ دود (Smoke):** تحتِ `AZ_DEBUG_BUILD` با `AZ_DEBUG_SCREEN=admission_keys`
+  (`--smoke-admission-keys`) نمایِ پذیرش باز می‌شود، `#nid` با یک کدِ ملیِ موجود
+  فوکوس/پر می‌شود، سپس با `keybd_event(VK_RETURN,…)` کلیدِ Enter شبیه‌سازی و پس از
+  ۱۵۰۰ms با `WebAdmission_DebugInitHits()` و گتِرِ جدیدِ
+  `WebAdmission_DebugLastFilledNid()` صحتِ پُرشدنِ فیلدها راستی‌آزمایی می‌شود.
+  (`src/main.cpp`, `src/web_admission_dispatch.inc`, `src/web_admission_api.inc`)
+
+### Fixed (English summary)
+- MSHTML: `MshtmlHost` now implements `IDocHostUIHandler`; `TranslateAccelerator`
+  returns `S_FALSE`, registered via `ICustomDoc::SetUIHandler`; the site's
+  `IOleInPlaceActiveObject` is cached and driven by a new
+  `MshtmlAdmission_TranslateAccel(MSG*)` helper (ancestor-scoped).
+- WebView2: subscribes to `add_AcceleratorKeyPressed` and leaves Tab/Enter/
+  arrows/Home/End/Esc/Ctrl+A unhandled so the WebView processes them internally.
+- `main.cpp` message pump calls `WebAdmission_TranslateAccel(&msg)` before
+  `TranslateMessage`/`DispatchMessage`.
+- `admission.js`: `focusEl` adds a `setSelectionRange` fallback. NAV_ORDER,
+  lookupNid, fillPatient and every Bridge call are untouched.
+- New `--smoke-admission-keys` debug test proves Enter-on-#nid routes into the
+  page → `patient.lookup` → C++ store.
+
+**Build:** `./build.sh` سبز (PE32 استاتیکِ ۳۲‌بیتی، بدونِ اخطارِ جدید).
+
+---
+
 ## 1.40.0 — 2026-07-08
 
 > **رفعِ شش باگِ صفحهٔ پذیرشِ امبد (B1–B6) + پایه‌گذاریِ «پوستهٔ چندصفحه‌ایِ وبِ

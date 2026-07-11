@@ -501,7 +501,15 @@
   function focusEl(n) {
     if (!n) return;
     try { n.focus(); } catch (e) {}
-    if (n.select && n.tagName === 'INPUT') { try { n.select(); } catch (e2) {} }
+    if (n.tagName === 'INPUT') {
+      /* n.select() works on Chromium/WebView2; on some MSHTML builds it fails
+         silently, so fall back to an explicit selection range. */
+      var selected = false;
+      if (n.select) { try { n.select(); selected = true; } catch (e2) { selected = false; } }
+      if (n.setSelectionRange) {
+        try { n.setSelectionRange(0, (n.value || '').length); } catch (e3) {}
+      }
+    }
   }
 
   /* Advance to the next live nav element AFTER `cur` (no wrap-around). */
@@ -933,6 +941,16 @@
       if (d.main) { state.insurances = d.main; fillSelect($('insMain'), d.main); }
       if (d.supp) { state.supp = d.supp; fillSelect($('insSupp'), d.supp); }
       recompute();
+    });
+    /* Debug-only: lets the headless --smoke-admission-keys test place a value in
+       #nid and focus it, so the synthesized Enter keystroke exercises the real
+       keydown → lookupNid path end-to-end. No effect in normal operation. */
+    Bridge.on('debug.focusNid', function (d) {
+      var el = $('nid');
+      if (!el) return;
+      if (d && d.nid != null) el.value = '' + d.nid;
+      try { el.focus(); } catch (e) {}
+      if (el.setSelectionRange) { try { el.setSelectionRange(0, (el.value || '').length); } catch (e2) {} }
     });
     /* LIVE service catalog sync from Management (add / edit / delete a service).
        We keep the freshest catalog and, if the suggestion dropdown is currently

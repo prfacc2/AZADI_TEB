@@ -161,6 +161,33 @@ RTL به‌صورت **دستی** پیاده شده و **`WS_EX_LAYOUTRTL` است
   `window.Bridge` هم منتشر می‌شود؛ صفحهٔ پذیرش هنوز از `bridge.js`ِ اختصاصیِ خود
   به‌عنوانِ `Bridge` استفاده می‌کند.
 
+### مدیریتِ کیبورد در سطوحِ وبِ تعبیه‌شده (Keyboard handling in embedded surfaces — v1.41.0)
+> **هشدار به توسعه‌دهندگانِ آینده — این را دوباره خراب نکنید.**
+>
+> کنترل‌هایِ مرورگرِ امبد (MSHTML/WebBrowser و WebView2) وقتی داخلِ یک HWNDِ بیگانه
+> میزبانی می‌شوند، **کلیدهایِ شتاب‌دهنده (Tab / Enter / Ctrl+A / کلیدهایِ جهت / F-keys)
+> را به‌صورتِ خودکار دریافت نمی‌کنند**. اگر این کلیدها مسیریابی نشوند، رویدادِ
+> `keydown` در سندِ HTML **اصلاً شلیک نمی‌شود** و ناوبریِ فیلدها می‌شکند. هیچ مقدار
+> جاوااسکریپت این را حل نمی‌کند، چون پیامِ Win32 هرگز به کنترل تحویل نشده است.
+>
+> سه قطعهٔ الزامی (هر سه باید باقی بمانند):
+> 1. **حلقهٔ پیام** (`src/main.cpp`): پیش از `TranslateMessage`/`DispatchMessage`
+>    باید `WebAdmission_TranslateAccel(&msg)` صدا زده شود؛ اگر `true` برگرداند، پیام
+>    مصرف شده و باید `continue` شود.
+> 2. **MSHTML** (`src/web_admission_mshtml.inc`): سایتِ میزبان باید
+>    `IDocHostUIHandler` را پیاده کند و `TranslateAccelerator` مقدارِ **`S_FALSE`**
+>    برگرداند (یعنی «کانتینر مصرف نکرد، خودت داخلِ سند توزیع کن»). این handler با
+>    `ICustomDoc::SetUIHandler` ثبت می‌شود، و `IOleInPlaceActiveObject` گرفته و
+>    ذخیره می‌شود تا حلقهٔ پیام `ipao->TranslateAccelerator(msg)` را صدا بزند
+>    (تنها برایِ نمایی که HWNDِ میزبانش جدِ `msg->hwnd` است).
+> 3. **WebView2** (`src/web_admission_webview2.inc` + `web_admission_host.inc`): با
+>    `add_AcceleratorKeyPressed` مشترک شوید و برایِ Tab/Enter/جهت/Home/End/Esc/Ctrl+A
+>    مقدارِ `put_Handled(FALSE)` بگذارید تا WebView خودش پردازش کند. (WebView2 نیازی
+>    به `TranslateAccelerator` در حلقهٔ پیام ندارد؛ `WV2_TranslateAccel` همیشه `false`.)
+>
+> مرجع مایکروسافت: `IOleInPlaceActiveObject::TranslateAccelerator` و
+> `IDocHostUIHandler::TranslateAccelerator`.
+
 ### سخت‌سازیِ شبکه (میزبانِ لوپ‌بک)
 - **فقط لوپ‌بک**: علاوه‌بر `bind` به `INADDR_LOOPBACK`، هر همتای غیرِ `127.0.0.0/8`
   در `accept` رد می‌شود.

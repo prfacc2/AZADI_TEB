@@ -128,6 +128,13 @@ static std::wstring normDigits(const std::wstring& in){
     return o;
 }
 
+// diagnostics: national-id of the most recent SUCCESSFUL patient.lookup. Used by
+// the --smoke-admission-keys test to prove that pressing Enter on #nid actually
+// routed a keydown into the page → Bridge.call('patient.lookup') → C++ store.
+// Declared here (before the .inc includes) so both api.inc and dispatch.inc see it.
+static std::mutex g_adLastNidMx;
+static std::string g_adLastFilledNid;
+
 #include "web_admission_api.inc"
 #include "web_admission_http.inc"
 #include "web_admission_host.inc"

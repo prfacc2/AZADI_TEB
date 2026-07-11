@@ -83,9 +83,29 @@ void WebAdmission_DestroyView(HWND view){
     MshtmlAdmission_Destroy(view);      // else an MSHTML view
 }
 
+// Give the embedded admission browser a chance to consume accelerator keys
+// (Tab / Enter / Ctrl+A / arrows) before the standard TranslateMessage path.
+// WebView2 uses add_AcceleratorKeyPressed (WV2_TranslateAccel is a no-op that
+// returns false); MSHTML needs IOleInPlaceActiveObject::TranslateAccelerator.
+bool WebAdmission_TranslateAccel(MSG* msg){
+    if(!msg) return false;
+    if(WV2_TranslateAccel(msg)) return true;             // (always false today)
+    if(MshtmlAdmission_TranslateAccel(msg)) return true; // MSHTML consumed it
+    return false;
+}
+
 #ifdef AZ_DEBUG_BUILD
 // Headless diagnostics only: number of times the embedded page reached
 // /api/init. Proves the bundled ES5 JS parsed & ran (a syntax error would stop
 // the script before it ever called the bridge).
 long WebAdmission_DebugInitHits(){ return (long)g_adInitHits; }
+
+// Headless diagnostics only: national-id of the most recent SUCCESSFUL
+// patient.lookup. Empty until an Enter-on-#nid (or quick-search) actually
+// reached the C++ store. Used by --smoke-admission-keys to prove the Enter key
+// was routed into the page and triggered the lookup + auto-fill flow.
+std::string WebAdmission_DebugLastFilledNid(){
+    std::lock_guard<std::mutex> lk(g_adLastNidMx);
+    return g_adLastFilledNid;
+}
 #endif

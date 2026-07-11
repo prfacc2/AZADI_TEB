@@ -21,6 +21,7 @@ struct AdView {
     ICoreWebView2Controller* ctrl=nullptr;
     ICoreWebView2* web=nullptr;
     EventRegistrationToken msgTok{0};
+    EventRegistrationToken accelTok{0};
 };
 static std::map<HWND,AdView*> g_adViews;
 static std::mutex g_adViewsMx;
@@ -90,6 +91,42 @@ struct MsgHandler : public ICoreWebView2WebMessageReceivedEventHandler {
     }
 };
 
+// AcceleratorKeyPressed handler → let the WebView handle nav/edit keys itself
+// (Tab / Enter / Ctrl+A / arrows / Home / End / Esc) so the page keydown
+// listeners fire. Everything else keeps WebView2's default behaviour.
+struct AccelHandler : public ICoreWebView2AcceleratorKeyPressedEventHandler {
+    LONG rc=1;
+    AccelHandler(){}
+    virtual ~AccelHandler(){}
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override {
+        if(!ppv) return E_POINTER;
+        if(IsEqualIID(riid,IID_IUnknown)||
+           IsEqualIID(riid,IID_ICoreWebView2AcceleratorKeyPressedEventHandler_)){
+            *ppv=this; InterlockedIncrement(&rc); return S_OK; }
+        *ppv=nullptr; return E_NOINTERFACE;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&rc); }
+    ULONG STDMETHODCALLTYPE Release() override { LONG r=InterlockedDecrement(&rc); if(!r) delete this; return r; }
+    HRESULT STDMETHODCALLTYPE Invoke(ICoreWebView2Controller*,
+            ICoreWebView2AcceleratorKeyPressedEventArgs* args) override {
+        if(!args) return S_OK;
+        int kind=0; UINT vk=0;
+        args->get_KeyEventKind(&kind);
+        args->get_VirtualKey(&vk);
+        bool isDown = (kind==COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN ||
+                       kind==COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN);
+        if(isDown){
+            bool ctrl=(GetKeyState(VK_CONTROL)&0x8000)!=0;
+            if(vk==VK_TAB || vk==VK_RETURN || vk==VK_LEFT || vk==VK_RIGHT ||
+               vk==VK_UP  || vk==VK_DOWN   || vk==VK_HOME || vk==VK_END  ||
+               vk==VK_ESCAPE || (ctrl && vk=='A')){
+                args->put_Handled(FALSE);   // WebView processes it → JS keydown fires
+            }
+        }
+        return S_OK;
+    }
+};
+
 // Controller-created handler.
 struct CtrlHandler : public ICoreWebView2CreateCoreWebView2ControllerCompletedHandler {
     LONG rc=1; HWND host; volatile LONG* done; HRESULT* outHr;
@@ -111,6 +148,13 @@ struct CtrlHandler : public ICoreWebView2CreateCoreWebView2ControllerCompletedHa
             if(v){
                 ctrl->AddRef(); v->ctrl=ctrl;
                 ctrl->get_CoreWebView2(&v->web);
+                // subscribe to accelerator keys so Tab/Enter/Ctrl+A/arrows are
+                // handled by the WebView (and thus reach the page's keydown).
+                {
+                    AccelHandler* ah=new AccelHandler();
+                    ctrl->add_AcceleratorKeyPressed(ah, &v->accelTok);
+                    ah->Release();
+                }
                 if(v->web){
                     // wire JS -> C++
                     MsgHandler* mh=new MsgHandler(host);
@@ -271,7 +315,7 @@ static bool WV2_DestroyView(HWND view){
       auto it=g_adViews.find(view); if(it!=g_adViews.end()){ v=it->second; g_adViews.erase(it); } }
     if(!v) return false;   // not a WebView2 view
     if(v->web){ v->web->remove_WebMessageReceived(v->msgTok); v->web->Release(); v->web=nullptr; }
-    if(v->ctrl){ v->ctrl->Close(); v->ctrl->Release(); v->ctrl=nullptr; }
+    if(v->ctrl){ v->ctrl->remove_AcceleratorKeyPressed(v->accelTok); v->ctrl->Close(); v->ctrl->Release(); v->ctrl=nullptr; }
     if(IsWindow(view)) DestroyWindow(view);
     delete v;
     return true;
@@ -282,3 +326,8 @@ static bool WV2_Owns(HWND view){
     std::lock_guard<std::mutex> lk(g_adViewsMx);
     return g_adViews.find(view)!=g_adViews.end();
 }
+
+// WebView2 does NOT need TranslateAccelerator in the main pump — the
+// add_AcceleratorKeyPressed subscription is sufficient. This exists only so the
+// dispatch layer can treat both engines uniformly.
+static bool WV2_TranslateAccel(MSG*){ return false; }
