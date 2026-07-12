@@ -387,6 +387,148 @@
   }
 
   /* ==========================================================================
+     SERVICE PICKER — mini popup (modal). v1.42.0
+     A polished code+name picker. Debounced live search over the Management
+     catalog (uses the C++ cached loadServices, so thousands of services stay
+     fast). Add by clicking a row, by pressing Enter, or by typing a code.
+     ========================================================================== */
+  var _svcMdlTimer = null;
+  var _svcMdlRows = [];
+  var _svcMdlSel = -1;      /* keyboard-highlighted row index */
+  var _svcMdlBusy = false;
+
+  function openSvcModal(seed) {
+    var m = $('svcModal'); if (!m) return;
+    m.className = 'svc-modal open';
+    m.setAttribute('aria-hidden', 'false');
+    var q = $('svcMdlQuery'), c = $('svcMdlCode');
+    if (c) c.value = '';
+    if (q) { q.value = seed || ''; }
+    _svcMdlSel = -1;
+    renderSvcModal([], seed ? 'در حال جستجو…' : 'برای جستجو تایپ کنید…');
+    /* focus the query box; if a code-like seed, focus code box instead */
+    setTimeout(function () {
+      var t = q;
+      if (seed && /^[0-9۰-۹A-Za-z]+$/.test(seed) && c) { c.value = seed; t = c; }
+      if (t) { t.focus(); if (t.select) try { t.select(); } catch (e) {} }
+      if (seed) svcModalSearch(seed);
+    }, 30);
+  }
+  function closeSvcModal() {
+    var m = $('svcModal'); if (!m) return;
+    m.className = 'svc-modal';
+    m.setAttribute('aria-hidden', 'true');
+    if (_svcMdlTimer) { clearTimeout(_svcMdlTimer); _svcMdlTimer = null; }
+    var s = $('svcSearch'); if (s) { s.value = ''; try { s.focus(); } catch (e) {} }
+  }
+  function svcModalOpen() { return $('svcModal') && /open/.test($('svcModal').className); }
+
+  function renderSvcModal(rows, emptyMsg) {
+    _svcMdlRows = rows || [];
+    var body = $('svcMdlBody');
+    var hint = $('svcMdlHint');
+    if (!body) return;
+    if (!_svcMdlRows.length) {
+      body.innerHTML = '<tr><td colspan="5" class="empty">' +
+        esc(emptyMsg || 'نتیجه‌ای نیست') + '</td></tr>';
+      if (hint) setText(hint, emptyMsg || 'نتیجه‌ای نیست');
+      return;
+    }
+    var html = '', i, s, lim = Math.min(_svcMdlRows.length, 200);
+    for (i = 0; i < lim; i++) {
+      s = _svcMdlRows[i];
+      var cat = trimStr((s.category || '') + (s.dept ? ' / ' + s.dept : ''));
+      html +=
+        '<tr data-i="' + i + '"' + (i === _svcMdlSel ? ' class="sel"' : '') + '>' +
+        '<td class="c-code">' + toFa(s.code || '—') + '</td>' +
+        '<td class="c-name">' + esc(s.name || '') + '</td>' +
+        '<td class="c-cat">' + esc(cat || '—') + '</td>' +
+        '<td class="c-price">' + money(s.price) + '</td>' +
+        '<td class="c-act"><button class="svc-mdl-add" data-add="' + i + '">افزودن</button></td>' +
+        '</tr>';
+    }
+    body.innerHTML = html;
+    if (hint) setText(hint, 'تعداد نتایج: ' + toFa(_svcMdlRows.length));
+
+    /* row click (anywhere) selects+highlights; the button adds */
+    var trs = body.getElementsByTagName('tr'), k;
+    for (k = 0; k < trs.length; k++) {
+      trs[k].onclick = function (e) {
+        e = e || window.event; var tgt = e.target || e.srcElement;
+        var idx;
+        if (tgt.getAttribute && tgt.getAttribute('data-add') != null) {
+          idx = +tgt.getAttribute('data-add');
+          svcModalAdd(idx);
+          return;
+        }
+        var tr = tgt; while (tr && tr.getAttribute && tr.getAttribute('data-i') == null) tr = tr.parentNode;
+        if (tr && tr.getAttribute) { _svcMdlSel = +tr.getAttribute('data-i'); highlightSvcModal(); }
+      };
+      trs[k].ondblclick = function (e) {
+        e = e || window.event; var tgt = e.target || e.srcElement;
+        var tr = tgt; while (tr && tr.getAttribute && tr.getAttribute('data-i') == null) tr = tr.parentNode;
+        if (tr && tr.getAttribute) svcModalAdd(+tr.getAttribute('data-i'));
+      };
+    }
+  }
+  function highlightSvcModal() {
+    var body = $('svcMdlBody'); if (!body) return;
+    var trs = body.getElementsByTagName('tr'), k;
+    for (k = 0; k < trs.length; k++) {
+      var idx = trs[k].getAttribute && trs[k].getAttribute('data-i');
+      trs[k].className = (idx != null && +idx === _svcMdlSel) ? 'sel' : '';
+    }
+    /* keep the highlighted row in view */
+    if (_svcMdlSel >= 0 && trs[_svcMdlSel] && trs[_svcMdlSel].scrollIntoView) {
+      try { trs[_svcMdlSel].scrollIntoView({ block: 'nearest' }); } catch (e) {}
+    }
+  }
+  function svcModalAdd(idx) {
+    var s = _svcMdlRows[idx];
+    if (!s) return;
+    addServiceRow(s);
+    toast('خدمت «' + (s.name || '') + '» افزوده شد', 'ok');
+    /* keep the modal open for rapid multi-add; clear the query for the next */
+    var q = $('svcMdlQuery');
+    if (q) { q.value = ''; try { q.focus(); } catch (e) {} }
+    renderSvcModal([], 'برای افزودن خدمتِ بعدی جستجو کنید…');
+  }
+  function svcModalSearch(q) {
+    q = trimStr(q == null ? ($('svcMdlQuery') ? $('svcMdlQuery').value : '') : q);
+    if (_svcMdlTimer) clearTimeout(_svcMdlTimer);
+    if (!q) { renderSvcModal([], 'برای جستجو تایپ کنید…'); return; }
+    renderSvcModal(_svcMdlRows, 'در حال جستجو…');
+    _svcMdlTimer = setTimeout(function () {
+      if (_svcMdlBusy) return;
+      _svcMdlBusy = true;
+      Bridge.call('service.search', { q: q }).then(function (r) {
+        _svcMdlBusy = false;
+        var rows = r.rows || r.services || [];
+        _svcMdlSel = rows.length ? 0 : -1;
+        renderSvcModal(rows, 'نتیجه‌ای یافت نشد');
+        highlightSvcModal();
+      })['catch'](function () { _svcMdlBusy = false; });
+    }, 160);
+  }
+  function svcModalAddByCode() {
+    var c = $('svcMdlCode'); if (!c) return;
+    var code = trimStr(toEn(c.value));
+    if (!code) { toast('کد خدمت را وارد کنید', 'err'); return; }
+    Bridge.call('service.resolve', { code: code }).then(function (r) {
+      if (r && r.found && r.service) {
+        addServiceRow(r.service);
+        toast('خدمت «' + (r.service.name || '') + '» افزوده شد', 'ok');
+        c.value = ''; try { c.focus(); } catch (e) {}
+      } else {
+        /* fall back to a search so a partial code still helps */
+        var q = $('svcMdlQuery'); if (q) { q.value = code; }
+        svcModalSearch(code);
+        toast('خدمتی با این کد یافت نشد؛ نتایج جستجو نمایش داده شد', 'err');
+      }
+    });
+  }
+
+  /* ==========================================================================
      QUEUE — صندوق نرفته‌ها
      ========================================================================== */
   function renderQueue(rows) {
@@ -715,21 +857,42 @@
         }
       })['catch'](function () { _svcSearchInFlight = false; });
     });
-    /* افزودن خدمت button: if the query resolves to exactly one service, add it
-       directly; otherwise show the suggestion list to pick from. */
+    /* افزودن خدمت button now opens the polished mini-picker modal (v1.42.0),
+       seeded with whatever is already in the inline search box. */
     on($('svcAddBtn'), 'click', function () {
       var q = $('svcSearch') ? trimStr($('svcSearch').value) : '';
-      Bridge.call('service.search', { q: q }).then(function (r) {
-        var rows = r.rows || r.services || [];
-        state.catalog = rows;
-        if (q && rows.length === 1) {
-          addServiceRow(rows[0]);
-          renderSvcSuggest([]); $('svcSearch').value = '';
-          toast('خدمت «' + (rows[0].name || '') + '» افزوده شد', 'ok');
-        } else {
-          renderSvcSuggest(rows);
-        }
-      });
+      renderSvcSuggest([]);
+      openSvcModal(q);
+    });
+
+    /* ---- service-picker modal wiring (v1.42.0) ---- */
+    on($('svcModalClose'), 'click', closeSvcModal);
+    on($('svcModalBackdrop'), 'click', closeSvcModal);
+    on($('svcMdlDone'), 'click', closeSvcModal);
+    on($('svcMdlCodeAdd'), 'click', svcModalAddByCode);
+    on($('svcMdlQuery'), 'input', function () { svcModalSearch(); });
+    on($('svcMdlQuery'), 'keyup', function () { svcModalSearch(); });
+    on($('svcMdlCode'), 'keydown', function (e) {
+      e = e || window.event; if ((e.keyCode || e.which) === 13) {
+        if (e.preventDefault) e.preventDefault(); svcModalAddByCode();
+      }
+    });
+    on($('svcMdlQuery'), 'keydown', function (e) {
+      e = e || window.event; var k = e.keyCode || e.which;
+      if (k === 40) {            /* ArrowDown */
+        if (e.preventDefault) e.preventDefault();
+        if (_svcMdlSel < _svcMdlRows.length - 1) _svcMdlSel++; highlightSvcModal();
+      } else if (k === 38) {     /* ArrowUp */
+        if (e.preventDefault) e.preventDefault();
+        if (_svcMdlSel > 0) _svcMdlSel--; highlightSvcModal();
+      } else if (k === 13) {     /* Enter → add highlighted */
+        if (e.preventDefault) e.preventDefault();
+        if (_svcMdlSel >= 0) svcModalAdd(_svcMdlSel);
+      }
+    });
+    /* Esc closes the modal from anywhere inside it */
+    on($('svcModal'), 'keydown', function (e) {
+      e = e || window.event; if ((e.keyCode || e.which) === 27) { closeSvcModal(); }
     });
 
     /* insurance changes → recompute (never blanks patient fields) */

@@ -188,9 +188,16 @@ static void mgServicesFilter(){
             s_mg->svView.push_back(i);
     }
     if(s_mg->svList){
-        ListView_SetItemCountEx(s_mg->svList,(int)s_mg->svView.size(),
-            LVSICF_NOINVALIDATEALL|LVSICF_NOSCROLL);
-        InvalidateRect(s_mg->svList,NULL,FALSE);
+        // v1.42.0: LVS_OWNERDATA lists sometimes keep stale/blank rows after a
+        // reload because SetItemCountEx with NOINVALIDATEALL suppresses the
+        // repaint. Force a full item-count refresh + explicit RedrawItems so the
+        // «مدیریت خدمات» table never shows an empty («هیچی») body when data is
+        // present.
+        int cnt=(int)s_mg->svView.size();
+        ListView_SetItemCountEx(s_mg->svList,cnt,LVSICF_NOSCROLL);
+        if(cnt>0) ListView_RedrawItems(s_mg->svList,0,cnt-1);
+        InvalidateRect(s_mg->svList,NULL,TRUE);
+        UpdateWindow(s_mg->svList);
     }
 }
 //  (Re)populate the department combo for the services form from the live
