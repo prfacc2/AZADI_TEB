@@ -375,6 +375,56 @@
     </div>
   </div>
 
+  <!-- ================================================================== -->
+  <!-- v1.42.0: Service-picker mini popup (modal). Polished code+name       -->
+  <!-- search with a live results grid. Opens via «افزودن خدمت» / the       -->
+  <!-- service search box; adds the chosen service(s) to the invoice.       -->
+  <!-- ================================================================== -->
+  <div id="svcModal" class="svc-modal" aria-hidden="true">
+    <div class="svc-modal-backdrop" id="svcModalBackdrop"></div>
+    <div class="svc-modal-panel" role="dialog" aria-modal="true" aria-labelledby="svcModalTitle">
+      <div class="svc-modal-head">
+        <div class="svc-modal-title" id="svcModalTitle">
+          <span class="i"><svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M11 5v6H5v2h6v6h2v-6h6v-2h-6V5z"/></svg></span>
+          انتخاب خدمت
+        </div>
+        <button class="svc-modal-x" id="svcModalClose" title="بستن">&#10005;</button>
+      </div>
+      <div class="svc-modal-search">
+        <div class="svc-modal-field">
+          <label>کد خدمت</label>
+          <input type="text" id="svcMdlCode" class="inp inp-sm" placeholder="کد را وارد کنید…" autocomplete="off" />
+        </div>
+        <div class="svc-modal-field grow">
+          <label>جستجوی نام / کد</label>
+          <input type="text" id="svcMdlQuery" class="inp inp-sm" placeholder="نام یا کد خدمت…" autocomplete="off" />
+        </div>
+        <button class="btn btn-primary btn-sm" id="svcMdlCodeAdd" title="افزودن با کد">
+          <span class="i"><svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M11 5v6H5v2h6v6h2v-6h6v-2h-6V5z"/></svg></span>افزودن با کد</button>
+      </div>
+      <div class="svc-modal-body">
+        <table class="tbl svc-modal-tbl">
+          <thead>
+            <tr>
+              <th class="c-code">کد</th>
+              <th class="c-name">نام خدمت</th>
+              <th class="c-cat">گروه / بخش</th>
+              <th class="c-price">مبلغ (ریال)</th>
+              <th class="c-act">افزودن</th>
+            </tr>
+          </thead>
+          <tbody id="svcMdlBody">
+            <tr><td colspan="5" class="empty">برای جستجو تایپ کنید…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="svc-modal-foot">
+        <div class="svc-modal-hint" id="svcMdlHint">نتیجه‌ای نیست</div>
+        <button class="btn btn-outline btn-sm" id="svcMdlDone">پایان</button>
+      </div>
+    </div>
+  </div>
+
   <div id="toast" class="toast"></div>
   <!-- v1.40.0: SHARED shell runtime FIRST — defines AzBoot/AzBridge/AzUi/AzNav/
        AzPerf. bridge.js still owns the admission page's `Bridge` transport

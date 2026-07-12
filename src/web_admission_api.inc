@@ -487,31 +487,42 @@ static std::string admissionApi(const std::string& verb, const std::string& body
         // reception.cpp uses: 1) new print-design bound to the operator SECTION
         //                     2) legacy per-section designed receipt (idx 0)
         //                     3) classic GDI receipt
-        // v1.40.0 (B5): track WHICH path actually printed and report it to JS so
-        // the operator is warned when the classic fallback template was used.
-        HWND owner = g_hFrame;
+        //
+        // CRITICAL (v1.41.0 freeze fix): printing opens a printer DC and MAY
+        // show a modal PrintDlgW. This handler runs SYNCHRONOUSLY inside the
+        // WebView2 WebMessageReceived callback (UI thread) or on an HTTP worker
+        // thread. Doing GDI/modal work there deadlocks the WebView (the classic
+        // "everything is frozen, no button responds" symptom) or touches HWNDs
+        // from a worker thread. So we DEFER the print + cash-drawer to the GUI
+        // thread via RunOnUiThread (async PostMessage) and reply to JS instantly.
         int  sid=adResolveSectionId();
-        bool done=false;
-        std::wstring printMode=L"none";
-        if(sid>0){
-            done=printPrintDesign(r,sid,owner);
-            if(done) printMode=L"print-design section="+std::to_wstring(sid);
+        {
+            ReceptionRecord rCopy=r;      // capture by value for the deferred task
+            RunOnUiThread([rCopy,sid](){
+                HWND owner=g_hFrame;
+                bool done=false;
+                std::wstring printMode=L"none";
+                if(sid>0){
+                    done=printPrintDesign(rCopy,sid,owner);
+                    if(done) printMode=L"print-design section="+std::to_wstring(sid);
+                }
+                if(!done){
+                    done=printDesignedReceipt(rCopy,0,owner);
+                    if(done) printMode=L"designed-receipt idx=0";
+                }
+                if(!done){
+                    printReceipt(rCopy,2,owner);
+                    printMode=L"classic-gdi";
+                }
+                kickCashDrawer();
+                logLine(L"admission printed via: "+printMode+L"  nid="+rCopy.nationalId);
+                if(g_hFrame) PostMessageW(g_hFrame,WM_APP_DESIGN_PUSHED,0,0);
+            });
         }
-        if(!done){
-            done=printDesignedReceipt(r,0,owner);
-            if(done) printMode=L"designed-receipt idx=0";
-        }
-        if(!done){
-            printReceipt(r,2,owner);
-            printMode=L"classic-gdi";
-        }
-        kickCashDrawer();
 
-        logLine(L"admission printed via: "+printMode+L"  nid="+r.nationalId);
-        if(g_hFrame) PostMessageW(g_hFrame,WM_APP_DESIGN_PUSHED,0,0);
-
+        // Reply immediately — the UI stays responsive; printing happens next.
         std::string o="{\"ok\":true,\"queueNo\":"+jnum(q)+
-            ",\"printMode\":"+jstr(printMode)+
+            ",\"printMode\":"+jstr(L"deferred")+
             ",\"ps\":{\"P\":"+jnum(r.paid)+
             ",\"S\":"+jnum(r.patientShare-r.paid)+"}}";
         return o;
@@ -524,26 +535,44 @@ static std::string admissionApi(const std::string& verb, const std::string& body
     }
 
     // ---- print.* : route to the real GDI print pipeline --------------------
+    //
+    // CRITICAL (v1.42.0 freeze fix): identical rationale to admission.save.
+    // printLastReceipt / printReceipt / printPrintDesign open a printer DC and
+    // MAY show a modal PrintDlgW. This handler runs SYNCHRONOUSLY inside the
+    // WebView2 WebMessageReceived callback (UI thread) or on an HTTP worker
+    // thread — doing GDI/modal work there deadlocks the WebView (frozen UI) or
+    // touches HWNDs off-thread. So we DEFER every print variant to the GUI
+    // thread via RunOnUiThread and reply to JS instantly.
     if(verb.rfind("print.",0)==0){
-        HWND owner=g_hFrame;
-        if(verb=="print.last"){
-            printLastReceipt(owner);
-            return "{\"ok\":true}";
+        std::string v=verb;
+        if(v=="print.last"){
+            RunOnUiThread([](){
+                printLastReceipt(g_hFrame);
+                logLine(L"admission print (web): print.last");
+            });
+            return "{\"ok\":true,\"printMode\":\"deferred\"}";
         }
         ReceptionRecord r;
         bool have=false;
         if(!body.empty() && body!="{}"){ r=adBuildRecord(body); have=(r.total>0)||!r.nationalId.empty(); }
         if(!have) loadLastReceipt(r);
-        if(verb=="print.insurance"){ printReceipt(r,0,owner); }
-        else if(verb=="print.rx"){   printReceipt(r,1,owner); }
-        else if(verb=="print.receipt"){
-            int sid=adResolveSectionId(); bool done=false;
-            if(sid>0) done=printPrintDesign(r,sid,owner);
-            if(!done) done=printDesignedReceipt(r,0,owner);
-            if(!done) printReceipt(r,2,owner);
+        int sid=adResolveSectionId();
+        {
+            ReceptionRecord rCopy=r;   // capture by value for the deferred task
+            RunOnUiThread([rCopy,sid,v](){
+                HWND owner=g_hFrame;
+                if(v=="print.insurance"){ printReceipt(rCopy,0,owner); }
+                else if(v=="print.rx"){   printReceipt(rCopy,1,owner); }
+                else if(v=="print.receipt"){
+                    bool done=false;
+                    if(sid>0) done=printPrintDesign(rCopy,sid,owner);
+                    if(!done) done=printDesignedReceipt(rCopy,0,owner);
+                    if(!done) printReceipt(rCopy,2,owner);
+                }
+                logLine(L"admission print (web): "+u82w(v));
+            });
         }
-        logLine(L"admission print (web): "+u82w(verb));
-        return "{\"ok\":true}";
+        return "{\"ok\":true,\"printMode\":\"deferred\"}";
     }
 
     if(verb=="rx.electronic"){
