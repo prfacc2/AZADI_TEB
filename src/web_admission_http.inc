@@ -123,7 +123,7 @@ static void adServeConn(SOCKET c){
             // the legacy admission handler so every existing verb keeps working.
             std::string out;
             if(!WebPages_DispatchVerb(verb,bdy,azPage,out))
-                out=admissionApi(verb,bdy);
+                out=admissionApiSafe(verb,bdy);   // v1.43.0: exception-hardened
             adReply(c,200,"application/json; charset=utf-8",out);
         }
     } else {

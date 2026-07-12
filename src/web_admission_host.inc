@@ -83,7 +83,7 @@ struct MsgHandler : public ICoreWebView2WebMessageReceivedEventHandler {
         jsonGetString(body,"verb",verb);
         jsonGetString(body,"id",id);
         std::string payload; if(!jsonGetRaw(body,"payload",payload)) payload="{}";
-        std::string result=admissionApi(verb,payload);
+        std::string result=admissionApiSafe(verb,payload);   // v1.43.0: exception-hardened
         // reply: {"id":"<id>","result":<result>}
         std::string reply="{\"id\":"+jstr(u82w(id))+",\"result\":"+result+"}";
         if(sender) sender->PostWebMessageAsJson(u82w(reply).c_str());

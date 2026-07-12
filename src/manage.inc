@@ -27,8 +27,12 @@
 // panel — index 1, right after the dashboard (RTL: visually first after it).
 // It was previously only reachable from the hidden-admin panel, which was the
 // wrong surface. The hidden-admin patients tab is removed (see admin.cpp).
+// v1.43.0: «مدیریت بیمه‌ها» (insurance management) added as PG_INSURANCE. It is
+// appended at the END (index 10) so the existing hard-coded page numbers stay
+// stable; the nav rail simply renders it as an extra item.
 enum { PG_DASH=0, PG_PATIENTS=1, PG_SECTS=2, PG_SERVICES=3, PG_EMPS=4, PG_MSG=5,
-       PG_REQS=6, PG_SAVED=7, PG_BACKUP=8, PG_PRINTCFG=9, PG_COUNT=10 };
+       PG_REQS=6, PG_SAVED=7, PG_BACKUP=8, PG_PRINTCFG=9, PG_INSURANCE=10,
+       PG_COUNT=11 };
 
 // control ids
 enum {
@@ -61,6 +65,17 @@ enum {
     MG_SV_CLEAR,           // فرم جدید (پاک کردن)
     MG_SV_SEARCH,          // جستجو
     MG_SV_LIST,            // جدول خدمات (ListView)
+    // ---- v1.43.0: مدیریت بیمه‌ها (Insurance Management) page ----
+    MG_IN_NAME=2740,       // نام بیمه
+    MG_IN_PCT,             // درصد پوشش (0..100)
+    MG_IN_TYPE,            // نوع (combo: پایه / تکمیلی)
+    MG_IN_STATUS,          // وضعیت (combo: فعال / غیرفعال)
+    MG_IN_SAVE,            // ذخیره / افزودن
+    MG_IN_EDIT,            // ویرایش (بارگذاری ردیف انتخابی)
+    MG_IN_DELETE,          // حذف
+    MG_IN_CLEAR,           // فرم جدید
+    MG_IN_SEARCH,          // جستجو
+    MG_IN_LIST,            // جدول بیمه‌ها (ListView)
 };
 
 struct EmpRow {
@@ -111,6 +126,15 @@ struct ManageState {
     std::wstring            svQuery;    // last search text
     std::wstring            svEditCode; // code currently loaded in the form ("" = new)
     bool                    svLoaded=false;
+    // ---- insurance page (v1.43.0) ----
+    HWND inName=nullptr, inPct=nullptr, inType=nullptr, inStatus=nullptr,
+         inSave=nullptr, inEdit=nullptr, inDelete=nullptr, inClear=nullptr,
+         inSearch=nullptr, inList=nullptr;
+    std::vector<InsuranceRow> inAll;    // all rows (loaded from store)
+    std::vector<int>          inView;   // filtered indices into inAll
+    std::wstring              inQuery;  // last search text
+    int                       inEditIdx=-1; // index in inAll being edited (-1 = new)
+    bool                      inLoaded=false;
 };
 // background patient loader → UI thread marshal (no HWND access off-thread)
 #define WM_MG_PATIENTS_READY (WM_APP+74)
@@ -331,6 +355,135 @@ static void mgServicesEditSelected(HWND h){
     mgServicesLoadForm(s_mg->svAll[s_mg->svView[sel]]);
     InvalidateRect(h,NULL,TRUE);
     SetFocus(s_mg->svName);
+}
+
+// =============================================== INSURANCE PAGE (v1.43.0) ====
+//  In-memory model, filter, and form <-> record helpers for «مدیریت بیمه‌ها».
+//  Each row defines an insurer's coverage percentage + type (پایه/تکمیلی). The
+//  admission billing reads these percentages from the same store (insurance.cpp)
+//  so any change here is applied to admission discounts immediately.
+static void mgInsFilter(){
+    if(!s_mg) return;
+    std::wstring q=uikit::NormalizeFa(trim(s_mg->inQuery));
+    s_mg->inView.clear();
+    s_mg->inView.reserve(s_mg->inAll.size());
+    for(int i=0;i<(int)s_mg->inAll.size();++i){
+        const InsuranceRow& r=s_mg->inAll[i];
+        if(q.empty()){ s_mg->inView.push_back(i); continue; }
+        std::wstring name=uikit::NormalizeFa(r.name);
+        std::wstring typ =uikit::NormalizeFa(r.supp?L"تکمیلی":L"پایه");
+        if(name.find(q)!=std::wstring::npos || typ.find(q)!=std::wstring::npos)
+            s_mg->inView.push_back(i);
+    }
+    if(s_mg->inList){
+        int cnt=(int)s_mg->inView.size();
+        ListView_SetItemCountEx(s_mg->inList,cnt,LVSICF_NOSCROLL);
+        if(cnt>0) ListView_RedrawItems(s_mg->inList,0,cnt-1);
+        InvalidateRect(s_mg->inList,NULL,TRUE);
+        UpdateWindow(s_mg->inList);
+    }
+}
+static void mgInsReload(){
+    if(!s_mg) return;
+    insuranceStoreInvalidate();
+    s_mg->inAll=loadInsuranceRows();
+    s_mg->inLoaded=true;
+    mgInsFilter();
+}
+static void mgInsClearForm(){
+    if(!s_mg) return;
+    SetWindowTextW(s_mg->inName,L"");
+    SetWindowTextW(s_mg->inPct, L"");
+    if(s_mg->inType)   SendMessageW(s_mg->inType,CB_SETCURSEL,0,0);   // پایه
+    if(s_mg->inStatus) SendMessageW(s_mg->inStatus,CB_SETCURSEL,0,0); // فعال
+    s_mg->inEditIdx=-1;
+}
+static void mgInsLoadForm(int idx){
+    if(!s_mg || idx<0 || idx>=(int)s_mg->inAll.size()) return;
+    const InsuranceRow& r=s_mg->inAll[idx];
+    SetWindowTextW(s_mg->inName,r.name.c_str());
+    { wchar_t pb[16]; swprintf(pb,16,L"%d",r.pct); SetWindowTextW(s_mg->inPct,pb); }
+    if(s_mg->inType)   SendMessageW(s_mg->inType,  CB_SETCURSEL,r.supp?1:0,0);
+    if(s_mg->inStatus) SendMessageW(s_mg->inStatus,CB_SETCURSEL,r.status?0:1,0);
+    s_mg->inEditIdx=idx;
+}
+static InsuranceRow mgInsReadForm(){
+    InsuranceRow r;
+    if(!s_mg) return r;
+    wchar_t b[256]={0};
+    GetWindowTextW(s_mg->inName,b,256); r.name=trim(b);
+    wchar_t pb[32]={0}; GetWindowTextW(s_mg->inPct,pb,32);
+    { std::wstring en; for(wchar_t c:std::wstring(pb)){ // fold Persian digits
+          if(c>=0x06F0 && c<=0x06F9) en+=(wchar_t)(L'0'+(c-0x06F0));
+          else if(c>=L'0'&&c<=L'9') en+=c; }
+      int p=_wtoi(en.c_str()); if(p<0)p=0; if(p>100)p=100; r.pct=p; }
+    r.supp   = (SendMessageW(s_mg->inType,  CB_GETCURSEL,0,0)==1)?1:0;
+    r.status = (SendMessageW(s_mg->inStatus,CB_GETCURSEL,0,0)==1)?0:1;
+    return r;
+}
+static void mgInsSave(HWND h){
+    if(!s_mg) return;
+    InsuranceRow nr=mgInsReadForm();
+    if(nr.name.empty()){
+        s_mg->msg=L"نام بیمه را وارد کنید."; s_mg->msgCol=g_theme.danger;
+        InvalidateRect(h,NULL,TRUE); return;
+    }
+    // work on a fresh copy of the whole store so edits are atomic
+    std::vector<InsuranceRow> all=loadInsuranceRows();
+    if(s_mg->inEditIdx>=0 && s_mg->inEditIdx<(int)all.size()){
+        nr.extra=all[s_mg->inEditIdx].extra;       // preserve forward-compat cols
+        all[s_mg->inEditIdx]=nr;
+        s_mg->msg=L"بیمهٔ «"+nr.name+L"» ویرایش شد."; s_mg->msgCol=g_theme.success;
+    } else {
+        // reject duplicate (same name + same type)
+        for(auto& r:all){
+            if(uikit::NormalizeFa(r.name)==uikit::NormalizeFa(nr.name) && r.supp==nr.supp){
+                s_mg->msg=L"بیمه‌ای با همین نام و نوع از قبل وجود دارد.";
+                s_mg->msgCol=g_theme.danger; InvalidateRect(h,NULL,TRUE); return;
+            }
+        }
+        all.push_back(nr);
+        s_mg->msg=L"بیمهٔ «"+nr.name+L"» اضافه شد."; s_mg->msgCol=g_theme.success;
+    }
+    saveInsuranceRows(all);
+    mgInsClearForm();
+    // LIVE SYNC: push the fresh insurer list + percentages to any open Admission
+    // view so its dropdowns and discount math update without a reload.
+    WebAdmission_NotifyCatalogChanged();
+    mgInsReload();
+    InvalidateRect(h,NULL,TRUE);
+}
+static void mgInsDelete(HWND h){
+    if(!s_mg || !s_mg->inList) return;
+    int sel=ListView_GetNextItem(s_mg->inList,-1,LVNI_SELECTED);
+    if(sel<0 || sel>=(int)s_mg->inView.size()){
+        s_mg->msg=L"ابتدا یک بیمه را از جدول انتخاب کنید."; s_mg->msgCol=g_theme.danger;
+        InvalidateRect(h,NULL,TRUE); return;
+    }
+    int idx=s_mg->inView[sel];
+    if(idx<0 || idx>=(int)s_mg->inAll.size()) return;
+    std::wstring nm=s_mg->inAll[idx].name;
+    std::wstring q=L"حذف بیمهٔ «"+nm+L"»؟";
+    if(MessageBoxW(h,q.c_str(),L"تأیید حذف",MB_YESNO|MB_ICONWARNING)!=IDYES) return;
+    std::vector<InsuranceRow> all=loadInsuranceRows();
+    if(idx<(int)all.size()) all.erase(all.begin()+idx);
+    saveInsuranceRows(all);
+    s_mg->msg=L"بیمه حذف شد."; s_mg->msgCol=g_theme.success;
+    mgInsClearForm();
+    WebAdmission_NotifyCatalogChanged();
+    mgInsReload();
+    InvalidateRect(h,NULL,TRUE);
+}
+static void mgInsEditSelected(HWND h){
+    if(!s_mg || !s_mg->inList) return;
+    int sel=ListView_GetNextItem(s_mg->inList,-1,LVNI_SELECTED);
+    if(sel<0 || sel>=(int)s_mg->inView.size()){
+        s_mg->msg=L"ابتدا یک بیمه را از جدول انتخاب کنید."; s_mg->msgCol=g_theme.danger;
+        InvalidateRect(h,NULL,TRUE); return;
+    }
+    mgInsLoadForm(s_mg->inView[sel]);
+    InvalidateRect(h,NULL,TRUE);
+    SetFocus(s_mg->inName);
 }
 
 // ---- data refresh ----------------------------------------------------------
@@ -2490,11 +2643,11 @@ static int  mgHeadH(){ return S(64); }      // content header height
 static const wchar_t* MG_NAV_LABELS[PG_COUNT] = {
     L"داشبورد", L"بیماران", L"بخش‌ها", L"مدیریت خدمات", L"کارمندان",
     L"پیام به کارمندان", L"درخواست‌ها", L"پیام‌های ذخیره‌شده",
-    L"پشتیبان‌گیری", L"تنظیمات چاپ"
+    L"پشتیبان‌گیری", L"تنظیمات چاپ", L"مدیریت بیمه‌ها"
 };
 static int MG_NAV_ICONS[PG_COUNT] = {
     ICO_TAB, ICO_ID, ICO_SHIELD, ICO_PLUS, ICO_USER, ICO_BELL, ICO_GEAR,
-    ICO_SAVE, ICO_REFRESH, ICO_GEAR
+    ICO_SAVE, ICO_REFRESH, ICO_GEAR, ICO_SHIELD
 };
 //  content area to the LEFT of the RTL nav rail (rail is on the RIGHT)
 static RECT mgContentRect(HWND h){
@@ -2572,7 +2725,9 @@ static void mgLayout(HWND h){
         s_mg->ptSearch,s_mg->ptList,s_mg->ptAdd,
         s_mg->svCode,s_mg->svName,s_mg->svCat,s_mg->svDept,s_mg->svPrice,
         s_mg->svIns,s_mg->svStatus,s_mg->svDesc,s_mg->svSave,s_mg->svEdit,
-        s_mg->svDelete,s_mg->svClear,s_mg->svSearch,s_mg->svList};
+        s_mg->svDelete,s_mg->svClear,s_mg->svSearch,s_mg->svList,
+        s_mg->inName,s_mg->inPct,s_mg->inType,s_mg->inStatus,s_mg->inSave,
+        s_mg->inEdit,s_mg->inDelete,s_mg->inClear,s_mg->inSearch,s_mg->inList};
     for(HWND w:all) if(w) ShowWindow(w,SW_HIDE);
 
     if(s_mg->page==PG_PATIENTS){
@@ -2698,6 +2853,42 @@ static void mgLayout(HWND h){
             s_mg->svSave,s_mg->svEdit,s_mg->svDelete,s_mg->svClear,
             s_mg->svSearch,s_mg->svList};
         for(HWND w:show) if(w) ShowWindow(w,SW_SHOW);
+    } else if(s_mg->page==PG_INSURANCE){
+        // ---- insurance form (top) + insurers table (fills the rest) ----
+        //  A white form card (painted in mgPaintInsurance) holds the inputs:
+        //  row1: نام بیمه | درصد پوشش    row2: نوع | وضعیت.
+        int lh=S(20), fgap=S(14);
+        int formL=a.left+S(12), formR=rEdge, formW=formR-formL;
+        int cgap=S(12);
+        int colW=(formW-cgap)/2;                 // 2 columns
+        auto cx=[&](int c){ return formR-(c+1)*colW-c*cgap; };  // RTL col left edge
+        int y=top+S(28);                          // room for the card title
+        // row1: نام بیمه | درصد پوشش
+        int r1c=y+lh;
+        MoveWindow(s_mg->inName, cx(0), r1c, colW, fh, TRUE);
+        MoveWindow(s_mg->inPct,  cx(1), r1c, colW, fh, TRUE);
+        // row2: نوع | وضعیت
+        int r2l=r1c+fh+fgap;
+        int r2c=r2l+lh;
+        MoveWindow(s_mg->inType,   cx(0), r2c, colW, S(160), TRUE);
+        MoveWindow(s_mg->inStatus, cx(1), r2c, colW, S(120), TRUE);
+        // action buttons row
+        int by=r2c+fh+fgap+S(4);
+        int bw=S(120), bgap=S(10), bx=formR;
+        MoveWindow(s_mg->inSave,   bx-bw, by, bw, S(40), TRUE); bx-=bw+bgap;
+        MoveWindow(s_mg->inEdit,   bx-bw, by, bw, S(40), TRUE); bx-=bw+bgap;
+        MoveWindow(s_mg->inDelete, bx-bw, by, bw, S(40), TRUE); bx-=bw+bgap;
+        MoveWindow(s_mg->inClear,  bx-bw, by, bw, S(40), TRUE);
+        // search box (left) below the form card
+        int listTop=by+S(40)+S(16);
+        int srchW=S(320);
+        MoveWindow(s_mg->inSearch, formL, listTop, srchW, fh, TRUE);
+        int ly=listTop+fh+S(10);
+        MoveWindow(s_mg->inList, formL, ly, formW, a.bottom-ly-S(8), TRUE);
+        HWND show[]={s_mg->inName,s_mg->inPct,s_mg->inType,s_mg->inStatus,
+            s_mg->inSave,s_mg->inEdit,s_mg->inDelete,s_mg->inClear,
+            s_mg->inSearch,s_mg->inList};
+        for(HWND w:show) if(w) ShowWindow(w,SW_SHOW);
     }
 }
 
@@ -2734,6 +2925,7 @@ static const wchar_t* mgCardTitle(int page){
         case PG_PATIENTS: return L"مدیریت بیماران";
         case PG_SECTS: return L"مدیریت بخش‌ها";
         case PG_SERVICES: return L"مدیریت خدمات";
+        case PG_INSURANCE: return L"مدیریت بیمه‌ها";
         case PG_EMPS:  return L"فهرست کارمندان";
         case PG_MSG:   return L"پیام به کارمندان";
         case PG_REQS:  return L"درخواست‌های تغییر";
@@ -3221,6 +3413,58 @@ static void mgPaintServices(HDC dc, HWND h){
     }
 }
 
+// ---- «مدیریت بیمه‌ها» page body: form card labels + hint + status message --
+static void mgPaintInsurance(HDC dc, HWND h){
+    if(!s_mg) return;
+    RECT a=mgContentRect(h);
+    int rEdge=a.right-S(12), fh=S(34);
+    int top=a.top+mgHeadH()+S(12);
+    int lh=S(20), fgap=S(14);
+    int formL=a.left+S(12), formR=rEdge, formW=formR-formL;
+    int cgap=S(12);
+    int colW=(formW-cgap)/2;
+    auto cx=[&](int c){ return formR-(c+1)*colW-c*cgap; };
+    int y=top+S(28);
+    int r1c=y+lh;
+    int r2l=r1c+fh+fgap, r2c=r2l+lh;
+    int by=r2c+fh+fgap+S(4);
+    int cardBot=by+S(40)+S(10);
+    // ---- form card background ----
+    RECT card={formL-S(4),top-S(2),formR+S(4),cardBot};
+    gpRoundRectBg(dc,card,S(12),g_theme.surface,g_theme.border,g_theme.bg);
+    // card title
+    SelectObject(dc,g_fSection); SetTextColor(dc,g_theme.sectionInk);
+    { RECT tr={formL,top+S(2),formR,top+S(26)};
+      DrawTextW(dc,L"مشخصات بیمه",-1,&tr,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX); }
+    auto lbl=[&](int x,int ly,int w,const wchar_t* txt){
+        SelectObject(dc,g_fLabel); SetTextColor(dc,g_theme.labelInk);
+        RECT lr={x,ly,x+w,ly+S(16)};
+        DrawTextW(dc,txt,-1,&lr,DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+    };
+    lbl(cx(0),r1c-lh,colW,L"نام بیمه");
+    lbl(cx(1),r1c-lh,colW,L"درصد پوشش (۰ تا ۱۰۰)");
+    lbl(cx(0),r2c-lh,colW,L"نوع بیمه (پایه / تکمیلی)");
+    lbl(cx(1),r2c-lh,colW,L"وضعیت");
+    // helper note under the card explaining the effect on billing
+    SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
+    { RECT nr={formL,cardBot+S(2),formR,cardBot+S(22)};
+      DrawTextW(dc,L"درصد پوشش هر بیمه در پذیرش برای محاسبهٔ تخفیف بیمه اعمال می‌شود.",
+        -1,&nr,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX); }
+    // ---- status message (below the note) ----
+    if(!s_mg->msg.empty()){
+        SelectObject(dc,g_fSmall); SetTextColor(dc,s_mg->msgCol);
+        RECT mr={formL,cardBot+S(24),formR,cardBot+S(44)};
+        DrawTextW(dc,s_mg->msg.c_str(),-1,&mr,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+    }
+    // ---- empty-state hint for the table ----
+    if(s_mg->inView.empty()){
+        SelectObject(dc,g_fUI); SetTextColor(dc,g_theme.textDim);
+        RECT er={formL,by+S(40)+S(80),formR,by+S(40)+S(120)};
+        DrawTextW(dc,L"هنوز بیمه‌ای ثبت نشده است — فرم بالا را پر کنید و «ذخیره» را بزنید.",
+            -1,&er,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+    }
+}
+
 // ---- the dashboard shell: nav rail (right) + content card (left) -----------
 static void mgPaintShell(HDC dc, HWND h){
     RECT rc; GetClientRect(h,&rc);
@@ -3272,6 +3516,7 @@ static void mgPaintShell(HDC dc, HWND h){
             case PG_PATIENTS: mgPaintPatients(dc,h); break;
             case PG_SECTS: mgPaintSects(dc,h); break;
             case PG_SERVICES: mgPaintServices(dc,h); break;
+            case PG_INSURANCE: mgPaintInsurance(dc,h); break;
             case PG_EMPS:  mgPaintEmps(dc,h);  break;
             case PG_MSG:   mgPaintMsg(dc,h);   break;
             case PG_REQS:  mgPaintReqs(dc,h);  break;
@@ -3338,6 +3583,7 @@ static void mgGoPage(HWND h, int page){
     else if(page==PG_MSG){ mgLoadEmps(); }   // v1.22.0: show employee list
     else if(page==PG_PATIENTS){ mgPatientsLoadAsync(h); }
     else if(page==PG_SERVICES){ mgServicesClearForm(); mgServicesReload(); }
+    else if(page==PG_INSURANCE){ mgInsClearForm(); mgInsReload(); }
     mgLayout(h);
     InvalidateRect(h,NULL,TRUE);
 }
@@ -3449,6 +3695,46 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
           for(int i=0;i<3;i++) SendMessageW(s_mg->svIns,CB_ADDSTRING,0,(LPARAM)it[i]);
           SendMessageW(s_mg->svIns,CB_SETCURSEL,0,0); }
 
+        // ---- insurance-management page controls (v1.43.0) ----
+        s_mg->inName  =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)MG_IN_NAME,g_hInst,0);
+        s_mg->inPct   =CreateWindowExW(0,L"EDIT",L"",es|ES_NUMBER,0,0,10,10,h,(HMENU)MG_IN_PCT,g_hInst,0);
+        s_mg->inType  =createThemedCombo(h,MG_IN_TYPE);
+        s_mg->inStatus=createThemedCombo(h,MG_IN_STATUS);
+        s_mg->inSave  =createFlatButton(h,MG_IN_SAVE,  L"ذخیره",  ICO_SAVE, BS_PRIMARY,0,0,10,10);
+        s_mg->inEdit  =createFlatButton(h,MG_IN_EDIT,  L"ویرایش", ICO_GEAR, BS_OUTLINE,0,0,10,10);
+        s_mg->inDelete=createFlatButton(h,MG_IN_DELETE,L"حذف",    ICO_TRASH,BS_DANGER, 0,0,10,10);
+        s_mg->inClear =createFlatButton(h,MG_IN_CLEAR, L"فرم جدید",ICO_PLUS, BS_OUTLINE,0,0,10,10);
+        s_mg->inSearch=CreateWindowExW(0,L"EDIT",L"",
+            WS_CHILD|WS_TABSTOP|ES_AUTOHSCROLL,0,0,10,10,h,(HMENU)MG_IN_SEARCH,g_hInst,0);
+        s_mg->inList  =CreateWindowExW(WS_EX_CLIENTEDGE,WC_LISTVIEWW,L"",
+            WS_CHILD|WS_TABSTOP|LVS_OWNERDATA|LVS_REPORT|LVS_SHOWSELALWAYS|LVS_SINGLESEL,
+            0,0,10,10,h,(HMENU)MG_IN_LIST,g_hInst,0);
+        ListView_SetExtendedListViewStyle(s_mg->inList,
+            LVS_EX_FULLROWSELECT|LVS_EX_DOUBLEBUFFER|LVS_EX_GRIDLINES);
+        SendMessageW(s_mg->inList,WM_SETFONT,(WPARAM)g_fUI,TRUE);
+        {   // RTL columns: نام بیمه | نوع | درصد پوشش | وضعیت
+            struct { const wchar_t* t; int w; } cols[]={
+                {L"نام بیمه",S(260)},{L"نوع",S(120)},
+                {L"درصد پوشش",S(120)},{L"وضعیت",S(100)} };
+            LVCOLUMNW lc={0}; lc.mask=LVCF_TEXT|LVCF_WIDTH|LVCF_FMT; lc.fmt=LVCFMT_RIGHT;
+            for(int i=0;i<4;i++){ lc.pszText=(LPWSTR)cols[i].t; lc.cx=cols[i].w;
+                ListView_InsertColumn(s_mg->inList,i,&lc); }
+        }
+        SendMessageW(s_mg->inSearch,WM_SETFONT,(WPARAM)g_fUI,TRUE);
+        { HWND ie[]={s_mg->inName,s_mg->inPct};
+          for(HWND e:ie){ SendMessageW(e,WM_SETFONT,(WPARAM)g_fUI,TRUE); enableEnterNavigation(e); }
+          HWND ic[]={s_mg->inType,s_mg->inStatus};
+          for(HWND c:ic) SendMessageW(c,WM_SETFONT,(WPARAM)g_fUI,TRUE);
+        }
+        // type combo: پایه (index 0) / تکمیلی (index 1)
+        SendMessageW(s_mg->inType,CB_ADDSTRING,0,(LPARAM)L"پایه");
+        SendMessageW(s_mg->inType,CB_ADDSTRING,0,(LPARAM)L"تکمیلی");
+        SendMessageW(s_mg->inType,CB_SETCURSEL,0,0);
+        // status combo: فعال / غیرفعال
+        SendMessageW(s_mg->inStatus,CB_ADDSTRING,0,(LPARAM)L"فعال");
+        SendMessageW(s_mg->inStatus,CB_ADDSTRING,0,(LPARAM)L"غیرفعال");
+        SendMessageW(s_mg->inStatus,CB_SETCURSEL,0,0);
+
         SendMessageW(s_mg->eNote,WM_SETFONT,(WPARAM)g_fUI,TRUE);
         HWND eds[3]={s_mg->eName,s_mg->eMgr,s_mg->eId};
         for(HWND e:eds){ SendMessageW(e,WM_SETFONT,(WPARAM)g_fUI,TRUE); enableEnterNavigation(e); }
@@ -3549,6 +3835,28 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             }
             if(nh->code==NM_DBLCLK){ mgServicesEditSelected(h); return 0; }
         }
+        // ---- insurance table (v1.43.0) ----
+        if(nh && nh->hwndFrom==s_mg->inList){
+            if(nh->code==LVN_GETDISPINFOW){
+                NMLVDISPINFOW* di=(NMLVDISPINFOW*)l;
+                int vi=di->item.iItem;
+                if(vi>=0 && vi<(int)s_mg->inView.size() && (di->item.mask & LVIF_TEXT)){
+                    const InsuranceRow& r=s_mg->inAll[s_mg->inView[vi]];
+                    static wchar_t cell[256];
+                    switch(di->item.iSubItem){
+                        case 0: wcsncpy(cell,r.name.c_str(),255); break;
+                        case 1: wcsncpy(cell,r.supp?L"تکمیلی":L"پایه",255); break;
+                        case 2: { std::wstring p=std::to_wstring(r.pct)+L"٪";
+                                  wcsncpy(cell,toFaDigits(p).c_str(),255); } break;
+                        case 3: wcsncpy(cell,r.status?L"فعال":L"غیرفعال",255); break;
+                        default: cell[0]=0; break;
+                    }
+                    cell[255]=0; di->item.pszText=cell;
+                }
+                return 0;
+            }
+            if(nh->code==NM_DBLCLK){ mgInsEditSelected(h); return 0; }
+        }
         break; }
     case WM_COMMAND:{
         if(!s_mg) return 0;
@@ -3562,11 +3870,21 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             s_mg->svQuery=b; mgServicesFilter();
             return 0;
         }
+        if(id==MG_IN_SEARCH && HIWORD(w)==EN_CHANGE){
+            wchar_t b[256]={0}; GetWindowTextW(s_mg->inSearch,b,256);
+            s_mg->inQuery=b; mgInsFilter();
+            return 0;
+        }
         switch(id){
             case MG_SV_SAVE:   mgServicesSave(h); return 0;
             case MG_SV_EDIT:   mgServicesEditSelected(h); return 0;
             case MG_SV_DELETE: mgServicesDelete(h); return 0;
             case MG_SV_CLEAR:  mgServicesClearForm(); s_mg->msg.clear();
+                               InvalidateRect(h,NULL,TRUE); return 0;
+            case MG_IN_SAVE:   mgInsSave(h); return 0;
+            case MG_IN_EDIT:   mgInsEditSelected(h); return 0;
+            case MG_IN_DELETE: mgInsDelete(h); return 0;
+            case MG_IN_CLEAR:  mgInsClearForm(); s_mg->msg.clear();
                                InvalidateRect(h,NULL,TRUE); return 0;
         }
         if(id==MG_CB_DEPT && HIWORD(w)==CBN_SELCHANGE){

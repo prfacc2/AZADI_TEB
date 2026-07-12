@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.42.0"
+#define APP_VERSION_W   L"1.43.0"
 
 // ----------------------------------------------------------- logging policy -
 //  RELEASE 1.2.0 (Section A): all general user-behavior logging is gated behind
@@ -293,6 +293,30 @@ std::wstring hashPassword(const std::wstring& p);
 struct InsuranceDef { const wchar_t* name; int pct; };
 extern const InsuranceDef INSURANCES[];     extern const int N_INSURANCES;
 extern const InsuranceDef SUPP_INSURANCES[];extern const int N_SUPP;
+
+// v1.43.0 — EDITABLE insurance store («مدیریت بیمه‌ها»). Percentages, names and
+// the base/supplementary split are now data-driven (data\insurances.dat) so the
+// clinic can define exactly how much share each insurer covers. On first run the
+// store is seeded from the built-in INSURANCES/SUPP_INSURANCES tables above, so
+// behaviour is identical until the operator edits it. The admission billing and
+// selectors read these dynamic rows (indices stay aligned with the JSON sent to
+// the web UI).
+struct InsuranceRow {
+    std::wstring name;   // نام بیمه
+    int          pct = 0;// درصد سهم سازمان (۰..۱۰۰)
+    int          supp = 0;// 0 = پایه ، 1 = مکمل (تکمیلی)
+    int          status = 1;// 1 = فعال ، 0 = غیرفعال
+    std::wstring extra;  // forward-compat: unknown future columns round-trip here
+};
+std::vector<InsuranceRow> loadInsuranceRows();          // all rows (cached)
+void                      saveInsuranceRows(const std::vector<InsuranceRow>& v);
+std::vector<InsuranceRow> insBaseList();                // supp==0 && status==1 (+ ensures index 0 = آزاد)
+std::vector<InsuranceRow> insSuppList();                // supp==1 && status==1 (+ ensures index 0 = ندارد)
+int  insBasePctAt(int idx);                             // safe pct by base-list index
+int  insSuppPctAt(int idx);                             // safe pct by supp-list index
+std::wstring insBaseNameAt(int idx);
+std::wstring insSuppNameAt(int idx);
+void insuranceStoreInvalidate();                        // drop the cache (after save)
 
 // -------------------------------------------------------------- tariffs ----
 //  Default service tariffs (Rial) so the program computes the bill itself.

@@ -35,7 +35,12 @@ static void poolLock()   { EnterCriticalSection(&g_cs); }
 static void poolUnlock() { LeaveCriticalSection(&g_cs); }
 
 static int chooseWorkerCount() {
-    int n = g_lowSpec ? 2 : 4;
+    // v1.43.0 FREEZE HARDENING: the MSHTML fallback opens several parallel
+    // connections (page + css + js + font) AND polls /api/poll every ~900ms.
+    // With only 2 workers those could momentarily saturate the pool and make
+    // the page feel stuck. Raise the low-power floor to 4 (default 6, cap 8) so
+    // an /api call, a poll, and asset loads can always be served concurrently.
+    int n = g_lowSpec ? 4 : 6;
     if (n > 8) n = 8;      // hard cap (spec)
     if (n < 1) n = 1;
     return n;

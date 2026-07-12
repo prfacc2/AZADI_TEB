@@ -771,3 +771,207 @@ select.inp{cursor:pointer;background:#f9fbfe;}
 .svc-modal-foot{display:flex;align-items:center;justify-content:space-between;
   padding:10px 16px;border-top:1px solid #e5ebf3;background:#fafcff;}
 .svc-modal-hint{font-size:12px;color:#5c6f88;font-weight:600;}
+
+/* ============================================================================
+   DARK THEME (v1.43.0)
+   ----------------------------------------------------------------------------
+   Activated by <body class="theme-dark"> (set from admission.js when the native
+   shell reports/toggles dark mode). The page CSS above uses literal hex colors
+   (no CSS variables — for MSHTML compatibility), so the dark theme is expressed
+   as a cohesive set of scoped overrides. Goals:
+     · deep near-black surfaces with layered depth (matches the native palette)
+     · light, high-contrast text everywhere (no dark-on-dark clash)
+     · switching light⇄dark repeatedly leaves NO stale colors behind
+   Kept MSHTML-safe: no var(), no gap, physical props only.
+   ============================================================================ */
+body.theme-dark{
+  background:#05070b;
+  background:-webkit-linear-gradient(top,#0a0d13 0%,#04060a 100%);
+  background:linear-gradient(180deg,#0a0d13 0%,#04060a 100%);
+  color:#eef3f9;
+}
+body.theme-dark b{color:#f4f8ff;}
+
+/* ---- topbar ---- */
+body.theme-dark .topbar{
+  background:#0c1017;border-bottom:1px solid #232c3a;
+  box-shadow:0 1px 4px rgba(0,0,0,.5);
+}
+body.theme-dark .tb-name{color:#ff6b8a;}
+body.theme-dark .tb-sub{color:#9fb2c9;}
+body.theme-dark .tb-clock{color:#eef3f9;}
+body.theme-dark .tb-date{color:#9fb2c9;}
+body.theme-dark .tb-logo-badge{background:#2f6fed;color:#fff;}
+body.theme-dark .tb-btn,
+body.theme-dark .tb-btn-ghost{
+  background:#161c26;color:#dbe6f3;border:1px solid #2a3444;
+}
+body.theme-dark .tb-btn-ghost:hover,
+body.theme-dark .tb-btn:hover{background:#1f2836;}
+body.theme-dark .tb-btn-primary{background:#2f6fed;color:#fff;border:1px solid #2f6fed;}
+body.theme-dark .tb-btn-primary:hover{background:#3f7ff8;}
+
+/* ---- generic surfaces ---- */
+body.theme-dark .card,
+body.theme-dark .profile-card,
+body.theme-dark .total-card,
+body.theme-dark .action-card,
+body.theme-dark .rx-box,
+body.theme-dark .loader-box,
+body.theme-dark .svc-modal-panel{
+  background:#141821;
+  border:1px solid #262f3d;
+  box-shadow:0 2px 10px rgba(0,0,0,.45);
+  color:#eef3f9;
+}
+body.theme-dark .card-head{background:#10141c;border-bottom:1px solid #262f3d;}
+body.theme-dark .card-title,
+body.theme-dark .inv-gtitle,
+body.theme-dark .tc-lbl,
+body.theme-dark .ps-cap{color:#eef3f9;}
+body.theme-dark .ct-ico,
+body.theme-dark .tc-ico{color:#56aaff;}
+
+/* ---- labels & field text ---- */
+body.theme-dark .fld > span,
+body.theme-dark .rx-lbl,
+body.theme-dark .ps-key,
+body.theme-dark .chk,
+body.theme-dark .chk-block{color:#c3d0e0;}
+body.theme-dark .req{color:#ff6b8a;}
+
+/* ---- inputs / selects ---- */
+body.theme-dark .inp,
+body.theme-dark .inp-sm,
+body.theme-dark .inp-mini,
+body.theme-dark select.inp,
+body.theme-dark .svc-modal-search input{
+  background:#1a2029;
+  color:#f2f6fb;
+  border:1px solid #303b4c;
+}
+body.theme-dark .inp::-webkit-input-placeholder,
+body.theme-dark .inp-sm::-webkit-input-placeholder{color:#7286a0;}
+body.theme-dark .inp:focus,
+body.theme-dark .inp-sm:focus,
+body.theme-dark select.inp:focus{
+  border-color:#3f8bff;
+  box-shadow:0 0 0 3px rgba(56,140,255,.20);
+}
+body.theme-dark .inp option,
+body.theme-dark select.inp option{background:#141821;color:#f2f6fb;}
+body.theme-dark .in-ico{color:#7f94ad;}
+body.theme-dark .with-ico,
+body.theme-dark .with-suffix{background:transparent;}
+
+/* ---- buttons ---- */
+body.theme-dark .btn,
+body.theme-dark .btn-ghost,
+body.theme-dark .btn-icon,
+body.theme-dark .btn-icon-only,
+body.theme-dark .btn-sm{
+  background:#1b222d;color:#dbe6f3;border:1px solid #2c3646;
+}
+body.theme-dark .btn-ghost:hover,
+body.theme-dark .btn:hover,
+body.theme-dark .btn-icon:hover{background:#232c39;}
+body.theme-dark .btn-primary,
+body.theme-dark .btn-submit,
+body.theme-dark .btn-new-adm{background:#2f6fed;color:#fff;border:1px solid #2f6fed;}
+body.theme-dark .btn-primary:hover,
+body.theme-dark .btn-submit:hover,
+body.theme-dark .btn-new-adm:hover{background:#3f7ff8;}
+body.theme-dark .btn-outline{background:transparent;color:#7fb4ff;border:1px solid #35507e;}
+body.theme-dark .btn-outline:hover{background:#16233a;}
+body.theme-dark .btn-danger{background:#e0455f;color:#fff;border:1px solid #e0455f;}
+body.theme-dark .btn-erx{background:#144d33;color:#8ff0c0;border:1px solid #1c6b47;}
+body.theme-dark .link-btn{color:#7fb4ff;}
+
+/* ---- profile / search / meta ---- */
+body.theme-dark .avatar{background:#1c2431;color:#7fb4ff;}
+body.theme-dark .pf-name{color:#f2f6fb;}
+body.theme-dark .pf-file{color:#9fb2c9;}
+body.theme-dark .profile-meta,
+body.theme-dark .ps-unit{color:#9fb2c9;}
+body.theme-dark .search-wrap,
+body.theme-dark .svc-search-wrap,
+body.theme-dark .q-search-wrap{background:#1a2029;border:1px solid #303b4c;}
+
+/* ---- tabs ---- */
+body.theme-dark .tabs{border-bottom:1px solid #262f3d;}
+body.theme-dark .tab{color:#9fb2c9;}
+body.theme-dark .tab.active{color:#7fb4ff;border-bottom-color:#3f8bff;}
+
+/* ---- tables ---- */
+body.theme-dark .tbl thead th,
+body.theme-dark .svc-tbl thead th,
+body.theme-dark .q-tbl thead th,
+body.theme-dark .svc-modal-tbl thead th{
+  background:#10151d;color:#a9bad0;border-bottom:1px solid #2a3444;
+}
+body.theme-dark .tbl tbody td,
+body.theme-dark .svc-tbl tbody td,
+body.theme-dark .q-tbl tbody td,
+body.theme-dark .svc-modal-tbl tbody td{
+  color:#e4ecf6;border-bottom:1px solid #232c3a;
+}
+body.theme-dark .tbl tbody tr:hover,
+body.theme-dark .svc-tbl tbody tr:hover,
+body.theme-dark .svc-modal-tbl tbody tr:hover{background:#1a2230;}
+body.theme-dark .svc-modal-tbl tbody tr.sel{background:#1e2c46;}
+body.theme-dark .svc-modal-tbl .c-code{color:#9db4d4;}
+body.theme-dark .svc-modal-tbl .c-cat{color:#8298b3;}
+body.theme-dark .c-price,
+body.theme-dark .s-price{color:#57d99a;}
+body.theme-dark .empty,
+body.theme-dark td.empty{color:#7286a0;}
+
+/* ---- suggestion dropdowns ---- */
+body.theme-dark .svc-suggest,
+body.theme-dark .mini-list{background:#141821;border:1px solid #2a3444;}
+body.theme-dark .svc-suggest .s-row{border-bottom:1px solid #232c3a;color:#e4ecf6;}
+body.theme-dark .svc-suggest .s-row:hover{background:#1a2230;}
+body.theme-dark .s-code{color:#8fa6c4;}
+
+/* ---- invoice / totals ---- */
+body.theme-dark .invoice-body,
+body.theme-dark .inv-group{background:#141821;}
+body.theme-dark .inv-line{color:#c3d0e0;border-bottom:1px solid #232c3a;}
+body.theme-dark .inv-line span:last-child{color:#f2f6fb;}
+body.theme-dark .inv-remain{color:#57d99a;}
+body.theme-dark .tc-val{color:#57d99a;}
+body.theme-dark .total-card{background:#0f1a14;border:1px solid #1c6b47;}
+
+/* ---- ps chips ---- */
+body.theme-dark .ps-key-p{background:#124d31;color:#8ff0c0;}
+body.theme-dark .ps-key-s{background:#4a3a12;color:#f3d58a;}
+body.theme-dark .ps-val{color:#f2f6fb;}
+
+/* ---- rx box ---- */
+body.theme-dark .rx-val{color:#f2f6fb;}
+
+/* ---- context menu ---- */
+body.theme-dark .ctx-menu{background:#141821;border:1px solid #2a3444;box-shadow:0 8px 26px rgba(0,0,0,.6);}
+body.theme-dark .ctx-item{color:#e4ecf6;}
+body.theme-dark .ctx-item:hover{background:#1e2c46;}
+body.theme-dark .ctx-shortcut{color:#8298b3;}
+body.theme-dark .ctx-sep{background:#2a3444;}
+
+/* ---- sync badge / toast ---- */
+body.theme-dark .sync-badge{color:#9fb2c9;}
+body.theme-dark .toast{background:#10151d;color:#eef3f9;border:1px solid #2a3444;}
+
+/* ---- submit bar / footer ---- */
+body.theme-dark .foot-actions{background:#0c1017;border-top:1px solid #232c3a;}
+
+/* ---- modal scrim ---- */
+body.theme-dark .svc-modal{background:rgba(0,0,0,.62);}
+body.theme-dark .svc-modal-head{background:#10151d;border-bottom:1px solid #262f3d;}
+body.theme-dark .svc-modal-title{color:#f2f6fb;}
+body.theme-dark .svc-modal-foot{background:#10151d;border-top:1px solid #262f3d;}
+body.theme-dark .svc-modal-hint{color:#9fb2c9;}
+body.theme-dark .svc-modal-x{color:#9fb2c9;}
+
+/* ---- loader ---- */
+body.theme-dark .loader{background:#04060a;}
+body.theme-dark .loader-text{color:#c3d0e0;}

@@ -7,6 +7,10 @@
 //  identities or bill amounts.
 // ============================================================================
 
+// v1.43.0 forward decl (defined in web_admission_dispatch.inc): pushes the
+// fresh insurance selectors to every open embedded admission view after an edit.
+void WebAdmission_NotifyCatalogChanged();
+
 // ---- serialize a PatientRow to JSON (v1.40.0 struct-based, authoritative) ---
 //  The struct overload is the single source of truth for the wire format; the
 //  legacy positional overload below delegates to it so the two never diverge.
@@ -52,19 +56,25 @@ static std::string serviceJson(const ServiceDef& s){
 }
 
 // ---- insurance lists (base + supplementary) --------------------------------
+// v1.43.0: the selectors + billing now read the EDITABLE insurance store
+// («مدیریت بیمه‌ها», data\insurances.dat) instead of the hardcoded arrays, so
+// clinic-defined coverage percentages drive the discount. Index order here is
+// exactly what the web UI's <select> uses, so JS indices stay aligned with C++.
 static std::string insurancesJson(){
+    auto v=insBaseList();
     std::string o="[";
-    for(int i=0;i<N_INSURANCES;i++){
+    for(size_t i=0;i<v.size();i++){
         if(i)o+=",";
-        o+="{\"name\":"+jstr(INSURANCES[i].name)+",\"pct\":"+jnum(INSURANCES[i].pct)+"}";
+        o+="{\"name\":"+jstr(v[i].name)+",\"pct\":"+jnum(v[i].pct)+"}";
     }
     o+="]"; return o;
 }
 static std::string suppInsurancesJson(){
+    auto v=insSuppList();
     std::string o="[";
-    for(int i=0;i<N_SUPP;i++){
+    for(size_t i=0;i<v.size();i++){
         if(i)o+=",";
-        o+="{\"name\":"+jstr(SUPP_INSURANCES[i].name)+",\"pct\":"+jnum(SUPP_INSURANCES[i].pct)+"}";
+        o+="{\"name\":"+jstr(v[i].name)+",\"pct\":"+jnum(v[i].pct)+"}";
     }
     o+="]"; return o;
 }
@@ -227,8 +237,9 @@ static AdBill adComputeBill(const std::string& body){
     if(jsonGetNumber(body,"insMain",d)) b.insIdx=(int)d;
     if(jsonGetNumber(body,"insSupp",d)) b.suppIdx=(int)d;
     if(jsonGetNumber(body,"insSuppPct",d)) b.suppPct=(int)d;
-    if(b.insIdx>=0 && b.insIdx<N_INSURANCES && hasIns) b.basePct=INSURANCES[b.insIdx].pct;
-    if(b.suppPct<=0 && b.suppIdx>=0 && b.suppIdx<N_SUPP) b.suppPct=SUPP_INSURANCES[b.suppIdx].pct;
+    // v1.43.0: coverage percentages come from the EDITABLE insurance store.
+    if(hasIns && b.insIdx>=0) b.basePct=insBasePctAt(b.insIdx);
+    if(b.suppPct<=0 && b.suppIdx>=0) b.suppPct=insSuppPctAt(b.suppIdx);
     if(!hasIns){ b.basePct=0; }
 
     // walk the services array
@@ -281,8 +292,9 @@ static ReceptionRecord adBuildRecord(const std::string& body){
     r.apptTime=adNowTime();
     r.userName=g_session.user.username;
     r.insIdx=b.insIdx; r.suppIdx=b.suppIdx;
-    if(r.insIdx>=0 && r.insIdx<N_INSURANCES) r.insurance=INSURANCES[r.insIdx].name;
-    if(r.suppIdx>=0 && r.suppIdx<N_SUPP) r.suppInsurance=SUPP_INSURANCES[r.suppIdx].name;
+    // v1.43.0: names come from the editable insurance store (index-aligned).
+    if(r.insIdx>=0) r.insurance=insBaseNameAt(r.insIdx);
+    if(r.suppIdx>=0) r.suppInsurance=insSuppNameAt(r.suppIdx);
     r.total=b.gross; r.discount=b.disc; r.orgShare=b.org+b.supp;
     r.mainShare=b.org; r.patientShare=b.pat; r.finalTotal=b.gross;
     r.paid=b.paid;
@@ -295,15 +307,62 @@ static ReceptionRecord adBuildRecord(const std::string& body){
 static std::string admissionApi(const std::string& verb, const std::string& body){
     // ---- init: send everything the page needs to render ----
     if(verb=="init"||verb=="ready"){
+        extern bool g_dark;   // theme.cpp — current palette (dark/light)
         std::string o="{";
         o+="\"ok\":true,";
         o+="\"insurances\":"+insurancesJson()+",";
         o+="\"supp\":"+suppInsurancesJson()+",";
         o+="\"date\":"+jstr(adTodayJalali())+",";
         o+="\"time\":"+jstr(adNowTime())+",";
+        // v1.43.0: hand the current theme to the web UI so it opens already in
+        // sync with the native shell (dark ⇄ light) — no flash of the wrong theme.
+        o+="\"theme\":"+std::string(g_dark?"\"dark\"":"\"light\"")+",";
         o+="\"ps\":{\"P\":0,\"S\":0}";
         o+="}";
         return o;
+    }
+
+    // ---- theme.get: current palette (used by JS on demand) -----------------
+    if(verb=="theme.get"){
+        extern bool g_dark;
+        return std::string("{\"theme\":")+(g_dark?"\"dark\"":"\"light\"")+"}";
+    }
+
+    // ---- insurance.list: full editable store («مدیریت بیمه‌ها») -------------
+    if(verb=="insurance.list"){
+        auto all=loadInsuranceRows();
+        std::string o="{\"rows\":[";
+        for(size_t i=0;i<all.size();i++){
+            if(i)o+=",";
+            o+="{\"name\":"+jstr(all[i].name)+",\"pct\":"+jnum(all[i].pct)+
+               ",\"supp\":"+jnum(all[i].supp)+",\"status\":"+jnum(all[i].status)+"}";
+        }
+        o+="]}"; return o;
+    }
+    // ---- insurance.save: replace the whole store with the posted rows ------
+    if(verb=="insurance.save"){
+        std::string arr; if(!jsonGetRaw(body,"rows",arr)) arr="[]";
+        std::vector<InsuranceRow> rows;
+        size_t p=0;
+        while(p<arr.size()){
+            size_t o=arr.find('{',p); if(o==std::string::npos) break;
+            int depth=0; bool inStr=false; size_t q=o;
+            for(;q<arr.size();++q){ char c=arr[q];
+                if(inStr){ if(c=='\\'){q++;continue;} if(c=='"') inStr=false; continue; }
+                if(c=='"'){ inStr=true; continue; }
+                if(c=='{') depth++; else if(c=='}'){ depth--; if(depth==0){ q++; break; } } }
+            std::string obj=arr.substr(o,q-o); p=q;
+            InsuranceRow r; std::string s; double d;
+            if(jsonGetString(obj,"name",s)) r.name=u82w(s);
+            if(r.name.empty()) continue;
+            if(jsonGetNumber(obj,"pct",d)) r.pct=(int)d;
+            if(jsonGetNumber(obj,"supp",d)) r.supp=((int)d)?1:0;
+            if(jsonGetNumber(obj,"status",d)) r.status=((int)d)?1:0; else r.status=1;
+            rows.push_back(r);
+        }
+        saveInsuranceRows(rows);
+        WebAdmission_NotifyCatalogChanged();   // push fresh selectors to open views
+        return "{\"ok\":true}";
     }
 
     // ---- clock poll (JS ticks locally; this keeps Jalali date fresh) ----
@@ -581,4 +640,27 @@ static std::string admissionApi(const std::string& verb, const std::string& body
     }
 
     return "{\"ok\":false,\"err\":\"verb ناشناخته\"}";
+}
+
+// ============================================================================
+//  admissionApiSafe (v1.43.0 FREEZE HARDENING)
+//  ----------------------------------------------------------------------------
+//  Every /api call — whether served on an HTTP worker thread (MSHTML) or
+//  synchronously inside the WebView2 WebMessageReceived callback (UI thread) —
+//  goes through this wrapper. It guarantees the handler can NEVER take down the
+//  transport with an unhandled C++ exception (which would silently kill the
+//  worker / re-enter the WebView message pump and manifest as the "everything
+//  is frozen" symptom the user reported). A thrown handler now returns a clean
+//  JSON error instead, so the UI always gets a reply and stays responsive.
+// ============================================================================
+static std::string admissionApiSafe(const std::string& verb, const std::string& body){
+    try {
+        return admissionApi(verb,body);
+    } catch(const std::exception& ex){
+        logLine(L"admissionApi exception: "+u82w(std::string(ex.what()))+L" verb="+u82w(verb));
+        return "{\"ok\":false,\"err\":\"خطای داخلی سرور\"}";
+    } catch(...){
+        logLine(L"admissionApi unknown exception verb="+u82w(verb));
+        return "{\"ok\":false,\"err\":\"خطای ناشناخته سرور\"}";
+    }
 }
