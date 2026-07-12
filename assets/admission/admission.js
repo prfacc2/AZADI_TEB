@@ -94,6 +94,30 @@
   }
 
   /* ==========================================================================
+     THEME (v1.43.0) — keep the embedded page in perfect sync with the native
+     shell. C++ sends the current theme in init and pushes a "theme" event on
+     every toggle. We set data-theme on <html> + a .theme-dark class on <body>
+     so CSS can restyle everything (text stays light on dark, no clash), and
+     switching back and forth never leaves stale colors behind.
+     ========================================================================== */
+  var _curTheme = 'light';
+  function applyTheme(name) {
+    name = (name === 'dark') ? 'dark' : 'light';
+    _curTheme = name;
+    var html = document.documentElement;
+    var body = document.body;
+    if (html) {
+      html.setAttribute('data-theme', name);
+      html.className = (html.className || '').replace(/\btheme-(dark|light)\b/g, '');
+      html.className = trimStr(html.className + ' theme-' + name);
+    }
+    if (body) {
+      body.className = (body.className || '').replace(/\btheme-(dark|light)\b/g, '');
+      body.className = trimStr(body.className + ' theme-' + name);
+    }
+  }
+
+  /* ==========================================================================
      BILLING — computed entirely here from Management-defined prices.
      Base insurance pct is the organisation share of the covered amount;
      supplementary insurance pct then covers a share of the patient remainder.
@@ -170,7 +194,56 @@
 
     /* total card */
     setText($('tcVal'), money(sumPat));
+
+    /* v1.43.0: C++ is the authoritative calculator. We show the instant local
+       result above (so the UI is snappy on weak machines), then ask C++ to
+       recompute and reconcile the display if it differs. This is debounced and
+       fully async — it NEVER blocks the UI (fixes both the "wrong price" and any
+       risk of a compute-related freeze). */
+    scheduleServerBill(paid);
+
     return { gross: sumGross, disc: sumDisc, org: sumOrg, supp: sumSupp, pat: sumPat, paid: paid };
+  }
+
+  /* Debounced authoritative recompute on the C++ side. */
+  var _billTimer = null, _billBusy = false;
+  function scheduleServerBill(localPaid) {
+    if (!state.ready) return;                 /* skip during boot */
+    if (!state.services.length) return;       /* nothing to reconcile */
+    if (_billTimer) clearTimeout(_billTimer);
+    _billTimer = setTimeout(function () {
+      if (_billBusy) return;
+      _billBusy = true;
+      var payload = {
+        hasIns: hasIns(),
+        insMain: $('insMain') ? $('insMain').selectedIndex : -1,
+        insSupp: $('insSupp') ? $('insSupp').selectedIndex : -1,
+        insSuppPct: parseInt(toEn($('insSuppPct') ? $('insSuppPct').value : '0'), 10) || 0,
+        noPay: $('noPay') ? $('noPay').checked : false,
+        services: state.services
+      };
+      Bridge.call('bill.compute', payload).then(function (b) {
+        _billBusy = false;
+        if (!b) return;
+        /* reconcile only the money read-outs with the C++ authoritative values */
+        setText($('sfTotal'), money(b.gross));
+        setText($('sfDisc'), money(b.disc));
+        setText($('sfIns'), money((b.org || 0) + (b.supp || 0)));
+        setText($('sfPat'), money(b.pat));
+        setText($('invMainTotal'), money(b.gross));
+        setText($('invMainOrg'), money(b.org));
+        setText($('invMainPat'), money((b.gross || 0) - (b.disc || 0) - (b.org || 0)));
+        setText($('invSuppTotal'), money((b.gross || 0) - (b.disc || 0) - (b.org || 0)));
+        setText($('invSuppShare'), money(b.supp));
+        setText($('invSuppPat'), money(b.pat));
+        setText($('invFinTotal'), money(b.gross));
+        setText($('invFinDisc'), money(b.disc));
+        var paid = b.paid != null ? b.paid : b.pat;
+        setText($('invFinPaid'), money(paid));
+        setText($('invRemain'), money((b.pat || 0) - paid));
+        setText($('tcVal'), money(b.pat));
+      })['catch'](function () { _billBusy = false; });
+    }, 120);
   }
 
   /* ==========================================================================
@@ -261,6 +334,32 @@
   /* ==========================================================================
      PATIENT — fill without disturbing anything the operator is typing.
      ========================================================================== */
+  /* B1 FIX: normalise any gender representation → the exact <select> option
+     TEXT ("مرد" / "زن"), then select that option by index. Returns true when a
+     match was applied. */
+  function setGender(raw) {
+    var sel = $('gender');
+    if (!sel || raw == null) return false;
+    var g = trimStr(String(raw))
+      .replace(/[\u200c\u200e\u200f\u202a-\u202e]/g, '') /* strip ZWNJ/LRM/RLM */
+      .toLowerCase();
+    if (!g) return false;
+    var female = (g === 'زن' || g === 'مونث' || g === 'مؤنث' || g === 'خانم' ||
+      g === 'female' || g === 'f' || g === 'w' || g === '2' || g === '۲');
+    var male = (g === 'مرد' || g === 'مذکر' || g === 'آقا' || g === 'اقا' ||
+      g === 'male' || g === 'm' || g === '1' || g === '۱');
+    var target = female ? 'زن' : (male ? 'مرد' : null);
+    if (!target) return false;
+    var i;
+    for (i = 0; i < sel.options.length; i++) {
+      var t = trimStr(sel.options[i].text || sel.options[i].value || '');
+      if (t === target) { sel.selectedIndex = i; return true; }
+    }
+    /* fallback: index 0 = مرد, 1 = زن (matches the static HTML order) */
+    sel.selectedIndex = female ? 1 : 0;
+    return true;
+  }
+
   function fillPatient(p, opts) {
     if (!p) return;
     opts = opts || {};
@@ -276,10 +375,17 @@
     setIf('last', p.last || '');
     setIf('father', p.father || '');
     setIf('birth', toFa(p.birth || ''));
-    setIf('mobile', toFa(p.mobile || ''));
-    setIf('phone', toFa(p.phone || ''));   /* B2: تلفن ثابت now really arrives */
-    setIf('addr', p.addr || '');           /* B2: آدرس now really arrives */
-    if (p.gender && $('gender')) $('gender').value = p.gender;
+    /* B1 FIX: mobile/phone can arrive as English/Persian/Arabic digits — always
+       normalise to English first, then re-render as Persian, so the value is
+       clean and never blank because of a stray direction mark. */
+    setIf('mobile', toFa(trimStr(toEn(p.mobile || ''))));
+    setIf('phone', toFa(trimStr(toEn(p.phone || p.landline || ''))));
+    setIf('addr', p.addr || p.address || '');
+    /* B1 FIX: robust gender auto-select. The stored value may be "مرد"/"زن",
+       "male"/"female", "m"/"f", "1"/"2", or carry a whitespace / RLM. Match it
+       against the <select> option TEXT (options have no explicit value=) so the
+       right option is chosen every time. Never touches other fields. */
+    setGender(p.gender);
 
     var full = trimStr((p.first || '') + ' ' + (p.last || ''));
     setText($('pfName'), full || 'بیمار جدید');
@@ -1090,6 +1196,8 @@
      C++ → JS events
      ========================================================================== */
   function subscribeEvents() {
+    /* v1.43.0: live theme sync (dark ⇄ light) pushed from the native shell */
+    Bridge.on('theme', function (d) { applyTheme(d && d.theme); });
     Bridge.on('patient.load', function (d) { fillPatient(d); });
     Bridge.on('services.update', function (d) {
       if (d.rows) { state.services = d.rows; renderServices(); recompute(); }
@@ -1179,6 +1287,7 @@
       if (r.supp) { state.supp = r.supp; fillSelect($('insSupp'), r.supp); }
       if (r.date) setText($('tbDate'), toFa(r.date));
       if (r.time) setText($('tbClock'), toFa(r.time));
+      if (r.theme) applyTheme(r.theme);   /* v1.43.0: open already in the right theme */
       if (r.patient) fillPatient(r.patient);
       if (r.services) { state.services = r.services; }
       if (r.ps) updatePS(r.ps);
