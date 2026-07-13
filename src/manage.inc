@@ -2252,7 +2252,12 @@ static bool pcParseTable(const std::wstring& jsonW, PcTable& t){
         if(p<s.size()&&s[p]=='"')++p; return true; };
     auto rdNum=[&]()->double{ ws(); size_t st=p; while(p<s.size()&&(isdigit((unsigned char)s[p])||s[p]=='-'||s[p]=='+'||s[p]=='.'||s[p]=='e'||s[p]=='E'))++p; return atof(s.substr(st,p-st).c_str()); };
     ws(); if(p>=s.size()||s[p]!='{') return false; ++p;
-    while(true){ ws(); if(p<s.size()&&s[p]=='}'){++p;break;} if(p>=s.size())break;
+    // v1.44.0 §7: iteration cap + forward-progress guard (matches printer.cpp).
+    int pcGuard=0; size_t pcLastP=(size_t)-1;
+    while(true){
+        if(++pcGuard>20000) break;
+        if(p==pcLastP) break; pcLastP=p;
+        ws(); if(p<s.size()&&s[p]=='}'){++p;break;} if(p>=s.size())break;
         std::string key; if(!rdStr(key))break; ws(); if(p<s.size()&&s[p]==':')++p;
         if(key=="cols") t.cols=(int)rdNum();
         else if(key=="rows") t.rows=(int)rdNum();

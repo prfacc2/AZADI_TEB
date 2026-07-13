@@ -241,6 +241,8 @@ void         writeSchemaVersion();   // §I: stamp data\.schema_version (informa
 void         logLine(const std::wstring& s);
 // §J: record a flow breadcrumb (last 32 are dumped into the crash report).
 void         Breadcrumb(const wchar_t* what);
+// v1.44.0: structured, abnormal-events-ONLY client log (logs\client.log).
+#include "client_log.h"
 std::wstring formatMoney(long long v);                   // 1,234,567
 long long    parseMoney(const std::wstring& s);
 std::wstring trim(const std::wstring& s);
@@ -328,6 +330,15 @@ long long applyApptTariff(long long base, int apptType);
 long long defaultServicePrice(int patientType, int apptType);
 
 // -------------------------------------------------------------- reception --
+// v1.44.0 §4.3: one service line-item, used to render the "services" table
+// subtype in the print designer (one printed row per line). Runtime-only —
+// NOT persisted to the CSV, so existing reception storage is unaffected.
+struct ReceptionLine {
+    std::wstring code, name;
+    int          qty;
+    long long    price, discount, insShare, patShare;
+    ReceptionLine():qty(1),price(0),discount(0),insShare(0),patShare(0){}
+};
 struct ReceptionRecord {
     std::wstring firstName, lastName, nationalId, fatherName, birthDate,
                  gender, mobile, landline, address, patientType,
@@ -336,9 +347,11 @@ struct ReceptionRecord {
     long long total, mainShare, patientShare, baseDiff, orgShare,
               finalTotal, discount, paid;
     int queueNo, insIdx, suppIdx;
+    int basePct, suppPct;                 // v1.44.0: coverage % (for {{ins.*.pct}})
+    std::vector<ReceptionLine> services;  // v1.44.0: per-line items (print only)
     ReceptionRecord():total(0),mainShare(0),patientShare(0),baseDiff(0),
         orgShare(0),finalTotal(0),discount(0),paid(0),queueNo(0),
-        insIdx(0),suppIdx(0){}
+        insIdx(0),suppIdx(0),basePct(0),suppPct(0){}
 };
 int  saveReception(ReceptionRecord& r);          // assigns queue no, persists CSV
 int  countTodayReceptions();
@@ -489,6 +502,7 @@ struct ServiceDef {
     ServiceDef():price(0),status(1){}
 };
 std::vector<ServiceDef> loadServices();
+std::vector<ServiceDef> snapshotServices();   // v1.44.0 §2.4: full copy under lock
 bool  addService(const ServiceDef& s, std::wstring& err);   // insert (code must be unique)
 bool  updateService(const ServiceDef& s, std::wstring& err);// edit by code
 bool  removeService(const std::wstring& code);

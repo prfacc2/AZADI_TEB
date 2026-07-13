@@ -5,6 +5,72 @@
 
 ---
 
+## 1.44.0 — 2026-07-13
+
+> **رفعِ ریشه‌ایِ قفل‌شدنِ پذیرشِ وب هنگامِ افزودنِ خدمت + لاگِ ساختاریافتهٔ
+> رویدادهایِ غیرعادی + بازطراحیِ حرفه‌ایِ «طراحِ چاپ» با المانِ جدولِ کامل و
+> ۱۴ توکنِ تازه و پیش‌نمایشِ زنده + ۳۰ قالبِ پذیرش با تضمینِ کامپایلی + جریانِ
+> چاپِ باکیفیت با آنتی‌آلیاسِ DPI-scaled + سخت‌سازیِ عمومیِ برنامه (VEH، دیده‌بانِ
+> نخِ UI، WM_ENDSESSION، گاردهایِ حلقهٔ پارسر).**
+
+**۱-۲) رفعِ قفل‌شدنِ پذیرش هنگامِ افزودنِ خدمت — JS/C++**
+- `_billBusy` دیگر قفلِ دائمی نمی‌سازد: افزودنِ watchdog + شمارندهٔ توالی (seq) +
+  `setTimeout(0)` برای آزادسازیِ حلقهٔ رویداد. — `assets/admission/admission.js`.
+- `callHttp` با تایم‌اوتِ ۱۵ ثانیه‌ای در برابرِ بلاک‌شدنِ نامحدود. —
+  `assets/admission/bridge.js`.
+- `admissionApiSafe` اکنون با لفافهٔ VEH + `setjmp/longjmp` استثناهایِ ساختاری را
+  (که در GCC/DWARF فاقدِ `__try/__except` است) مهار می‌کند و به‌جایِ کشتنِ نخ،
+  JSONِ خطا برمی‌گرداند. — `src/web_admission_api.inc`.
+- `bill.compute` پارسر: سقفِ تکرار + تضمینِ پیشرویِ رو‌به‌جلو (forward-progress)
+  در برابرِ حلقهٔ بی‌نهایت. — `src/web_admission_api.inc`, `src/manage.inc`,
+  `src/printer.cpp`.
+- بازآراییِ کشِ خدمات با `snapshotServices()` برایِ رفعِ re-entrancy. —
+  `src/services.cpp`, `src/app.h`.
+- رفعِ سرریزِ cast در پذیرشِ بومی (۶۴-بیتی) + بررسیِ `WM_PAINT`. —
+  `src/reception.cpp`.
+- تایم‌اوتِ سوکتِ loopback (۳۰۰۰ms) + ثبتِ هشدارِ `WSAETIMEDOUT`. —
+  `src/web_admission_http.inc`.
+
+**۳) لاگِ ساختاریافتهٔ رویدادهایِ غیرعادی — C++/JS**
+- افزودنِ `src/client_log.cpp`/`.h`: نوشتنِ JSON-per-line در `logs\client.log`
+  فقط هنگامِ رویدادهایِ غیرعادی (warn/error/crash)؛ نویزِ «page loaded» حذف شد.
+  نوشتنِ هم‌زمان-امن با `FILE_SHARE_READ|WRITE` و retry پس از `Sleep(3)` روی
+  `ERROR_SHARING_VIOLATION`؛ اتصالِ crash-handler. — `src/client_log.cpp`,
+  `src/client_log.h`, `src/handlers.cpp`, `assets/shell/common.js`.
+
+**۴) طراحِ چاپ — HTML/JS/C++**
+- ۱۴ نوعِ توکنِ جدید (`{{svc.price}}`, `{{ins.base.pct}}` و…). —
+  `assets/designer/fields.js`, `src/printer.cpp`.
+- المانِ حرفه‌ایِ TABLE با بازرس (rows/cols/header/stripe/border/headerBg/
+  padding/colAlign/زیرنوعِ خدمات‌درمقابلِ‌ثابت) + سریال‌سازی با `tables`. —
+  `assets/designer/designer.js`, `designer.css`, `index.html`, `src/printer.cpp`.
+- پیش‌نمایشِ زنده (`btnPreview` + `PREVIEW_SAMPLE` + `resolvePreview` +
+  `.preview-mode`). — `assets/designer/designer.js`, `designer.css`, `index.html`.
+
+**۵) ۳۰ قالبِ پذیرش — C++/JS**
+- دقیقاً ۳۰ ورودیِ `RECEPTION_TEMPLATES[]` با
+  `static_assert(count==30)` (تضمینِ کامپایلی) + گالریِ شبکه‌ای با فیلترِ
+  «بخش = پذیرش». — `src/print_designer_templates.inc`,
+  `assets/designer/templates.js`.
+
+**۶) جریانِ چاپِ باکیفیت — C++**
+- پس از «ثبت پذیرش و صدور قبض»: محاسبه + ذخیره + چاپ با آنتی‌آلیاسِ GDI/GDI+
+  و DPI-scaled؛ `pdSetHighQuality` (GM_ADVANCED + HALFTONE)، خطوطِ آنتی‌آلیاس با
+  `gpLine`، و پایدارسازیِ چاپگرِ انتخابی با `pdPersistPickedPrinter`. —
+  `src/printer.cpp`, `src/gdiplus.cpp`.
+
+**۷) سخت‌سازیِ عمومی — C++**
+- `WM_ENDSESSION`، `AddVectoredExceptionHandler`، دیده‌بانِ نخِ UI (۵ ثانیه با
+  `SendMessageTimeout`/`SMTO_ABORTIFHUNG`)، و گاردهایِ حلقه. — `src/main.cpp`,
+  `src/handlers.cpp`.
+
+**۸) ساخت/انتشار**
+- افزودنِ `src/client_log.cpp` به `SRCS` در `build.sh`؛ ساختِ موفقِ EXEِ
+  ۳۲-بیتیِ استاتیکِ معتبر (PE32، >۵۰۰KB) با
+  `i686-w64-mingw32-g++`. — `build.sh`.
+
+---
+
 ## 1.43.0 — 2026-07-12
 
 > **رفعِ عدم‌تکمیلِ خودکارِ اطلاعاتِ بیمار (جنسیت/موبایل) + سخت‌سازیِ ضدِ قفل‌شدنِ

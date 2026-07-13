@@ -644,6 +644,12 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         SelectObject(dc,obm); DeleteObject(bmp); DeleteDC(dc);
         EndPaint(h,&ps);
         return 0; }
+    case WM_ENDSESSION:
+        // v1.44.0 §7: OS is logging off / shutting down. client.log writes are
+        // synchronous appends (no in-process buffer), so there is nothing queued
+        // to flush; we still touch the log dir so a partial write is finalized.
+        if(w) ClientLog_Init();
+        return 0;
     case WM_DESTROY:
         KillTimer(h,TIMER_CLOCK);
         if(!g_session.user.username.empty())

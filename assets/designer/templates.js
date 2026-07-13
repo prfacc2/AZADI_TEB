@@ -1,7 +1,8 @@
 /* ===========================================================================
-   templates.js — Azadi-Teb ready-made professional print templates (v1.20.0)
-   60 templates total, grouped:
-     • reception   (20) — admission slips / receipts / bills
+   templates.js — Azadi-Teb ready-made professional print templates (v1.44.0)
+   grouped gallery (filter «بخش = پذیرش» etc.):
+     • reception   (30+) — admission slips / receipts / bills (incl. v1.44
+                    services-table subtype + billing/insurance tokens)
      • appointment (20) — queue / appointment cards
      • lab         (20) — laboratory & radiology request/report headers
    Each template is mm-based (paper coordinates) so it reflows correctly when
@@ -791,6 +792,74 @@
       items.push(L(x, y, cw / 2, 5, "مهر و امضای مسئول فنی", { pt: 8, align: 0, dir: 0, textColor: "#777" }));
       items.push(F(x + cw / 2, y, cw / 2, 5, "{issued}", { pt: 8, align: 2, dir: 0, textColor: "#777" }));
       push("lab", "★ آزمایشگاه حرفه‌ای (جدول نتایج)", "A5", 0, items);
+    })();
+  })();
+
+  /* ====================================================================== *
+   *  v1.44.0 §5 — new premium reception templates that showcase the
+   *  professional TABLE element (services subtype + zebra + header bg) and the
+   *  new billing/insurance tokens ({{svc.row.*}}, {{bill.*}}, {{ins.*}}).
+   * ====================================================================== */
+  (function () {
+    // services table model (repeating body row) — matches the C++ pdParseTable shape.
+    function svcTableJson() {
+      return JSON.stringify({
+        cols: 5, rows: 2, header: true, kind: "services", stripe: true,
+        headerBg: "#eef2fb", padding: 6, border: { w: 1, color: "#2b5f9e" },
+        widths: [1, 4, 1, 2, 2], colAlign: ["center", "right", "center", "left", "left"],
+        cells: [["ردیف", "شرح خدمت", "تعداد", "سهم بیمه", "سهم بیمار"],
+                ["{{svc.row.idx}}", "{{svc.row.name}}", "{{svc.row.qty}}", "{{svc.row.insShare}}", "{{svc.row.patShare}}"]]
+      });
+    }
+    function billTableJson() {
+      return JSON.stringify({
+        cols: 2, rows: 6, header: false, kind: "static", stripe: true,
+        headerBg: "#eef2fb", padding: 5, border: { w: 1, color: "#2b5f9e" },
+        widths: [3, 2], colAlign: ["right", "left"],
+        cells: [["جمع کل", "{{bill.gross}}"], ["تخفیف", "{{bill.disc}}"],
+                ["بیمهٔ پایه ({{ins.base.pct}})", "{{bill.org}}"],
+                ["بیمهٔ تکمیلی ({{ins.supp.pct}})", "{{bill.supp}}"],
+                ["سهم بیمار", "{{bill.pat}}"], ["تاریخ", "{{appt.date}}"]]
+      });
+    }
+    // T-A: full professional bill A5 with services table + insurance summary.
+    (function () {
+      var W = 148, H = 210, x = 9, cw = W - 18, items = [], y = 8;
+      items.push(FR(W, H));
+      items.push(BAND(x, y, cw, 20, "#1f4e8c", { corner: 2 }));
+      items.push(L(x + 2, y + 2.5, cw - 4, 8, "درمانگاه آزادی طب", { pt: 14, bold: true, align: 1, dir: 2, textColor: "#fff" }));
+      items.push(L(x + 2, y + 11, cw - 4, 5, "صورتحساب پذیرش", { pt: 8, align: 1, dir: 2, textColor: "#dbe7fb" }));
+      y += 23;
+      items.push(F(x, y, cw / 2, 6, "{{patient.fullname}}", { prefix: "بیمار: ", bold: true, pt: 10, align: 0, dir: 0 }));
+      items.push(F(x + cw / 2, y, cw / 2, 6, "{{appt.no}}", { prefix: "شماره نوبت: ", pt: 10, align: 2, dir: 1 })); y += 8;
+      items.push(L(x, y, cw, 5, "بیمهٔ پایه: {{ins.base.name}} ({{ins.base.pct}}) — تکمیلی: {{ins.supp.name}} ({{ins.supp.pct}})", { pt: 8, align: 0, dir: 0, textColor: "#555" })); y += 7;
+      items.push(TABLE(x, y, cw, 44, 5, 2, { borderColor: "#2b5f9e", text: svcTableJson() })); y += 47;
+      items.push(TABLE(x, y, cw, 40, 2, 6, { borderColor: "#2b5f9e", text: billTableJson() }));
+      push("reception", "★ صورتحساب حرفه‌ای (جدول خدمات + بیمه)", "A5", 0, items);
+    })();
+    // T-B: thermal 80mm bill with services table.
+    (function () {
+      var W = 80, H = 200, x = 4, cw = W - 8, items = [], y = 5;
+      items.push(L(x, y, cw, 7, "درمانگاه آزادی طب", { pt: 13, bold: true, align: 1, dir: 2, textColor: "#000" })); y += 8;
+      items.push(HL(x, y, cw, { borderColor: "#000", borderWidth: 0.4 })); y += 2;
+      items.push(F(x, y, cw, 5, "{{patient.fullname}}", { prefix: "بیمار: ", bold: true, pt: 9, align: 0, dir: 0 })); y += 6;
+      items.push(TABLE(x, y, cw, 40, 5, 2, { borderColor: "#000", text: svcTableJson() })); y += 43;
+      items.push(F(x, y, cw, 6, "{{bill.pat}}", { prefix: "قابل پرداخت: ", bold: true, pt: 11, align: 0, dir: 0 }));
+      push("reception", "★ رسید حرارتی ۸ سانت (جدول خدمات)", "R80", 0, items);
+    })();
+    // T-C: A4 detailed invoice with large services table.
+    (function () {
+      var W = 210, H = 297, x = 14, cw = W - 28, items = [], y = 12;
+      items.push(FR(W, H));
+      items.push(BAND(x, y, cw, 22, "#0e6655", { corner: 2 }));
+      items.push(L(x + 2, y + 3, cw - 4, 9, "درمانگاه آزادی طب", { pt: 18, bold: true, align: 1, dir: 2, textColor: "#fff" }));
+      items.push(L(x + 2, y + 13, cw - 4, 6, "صورتحساب تفصیلی خدمات", { pt: 10, align: 1, dir: 2, textColor: "#cdeae3" }));
+      y += 26;
+      items.push(F(x, y, cw / 2, 7, "{{patient.fullname}}", { prefix: "بیمار: ", bold: true, pt: 12, align: 0, dir: 0 }));
+      items.push(F(x + cw / 2, y, cw / 2, 7, "{{patient.nid}}", { prefix: "کد ملی: ", pt: 12, align: 2, dir: 1 })); y += 10;
+      items.push(TABLE(x, y, cw, 120, 5, 2, { borderColor: "#0e6655", text: svcTableJson() })); y += 124;
+      items.push(TABLE(x, y, cw, 48, 2, 6, { borderColor: "#0e6655", text: billTableJson() }));
+      push("reception", "★ صورتحساب تفصیلی A4 (جدول بزرگ)", "A4", 0, items);
     })();
   })();
 
