@@ -564,9 +564,15 @@ static void computeCenterV(const RecH& m, CenterV& v, const TabPage* t, int H){
     //  rows + footer). Everything above them is the "fixed" region we may shrink.
     auto plan=[&](double f)->int{
         auto SF=[&](int px){ int r=(int)(S(px)*f+0.5); return r<1?1:r; };
-        const int rh   = SF(40);   // control height (textbox == combobox)
-        const int lbl  = SF(22);   // label band (13-14px label + 6-8px gap)
-        const int rgap = SF(12);   // gap between grid rows
+        //  v1.47.0 UI FIX — restore the clean HTML admission look. The 40px
+        //  control height made the native single-line EDITs read as "double
+        //  height" (text pinned to the top, empty space below) and the 22px
+        //  label band let the caption touch the box top. Use a standard 32px
+        //  control height and a taller 26px label band with a real gap so the
+        //  caption sits clearly ABOVE the box, matching the HTML reference.
+        const int rh   = SF(32);   // control height (textbox == combobox)
+        const int lbl  = SF(26);   // label band (13-14px label + 10-12px gap)
+        const int rgap = SF(16);   // gap between grid rows
         const int hdr1 = SF(38);   // patient-card header band (title + divider)
         const int hdr3 = SF(38);   // 3-card header band
         const int gap  = SF(RC_GAP);
