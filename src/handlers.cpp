@@ -232,6 +232,25 @@ static void crashCore(DWORD code, void* addr, CONTEXT* c){
     }
     rawWrite(path, body);
 
+    // v1.44.0: also emit ONE structured "crash" line to logs\client.log with the
+    // top 8 stack-frame RVAs so the abnormal-events log correlates with the full
+    // crash dump written above. Best-effort; never re-enters the crash path.
+    {
+        void* frames[8]={0};
+        USHORT nf = CaptureStackBackTrace(0, 8, frames, NULL);
+        std::wstring rvas=L"[";
+        HMODULE hExe=GetModuleHandleW(NULL);
+        for(USHORT i=0;i<nf;i++){
+            if(i) rvas+=L",";
+            unsigned long long rva=(unsigned long long)((BYTE*)frames[i]-(BYTE*)hExe);
+            wchar_t b[32]; swprintf(b,32,L"%llu",rva); rvas+=b;
+        }
+        rvas+=L"]";
+        wchar_t codeHex[16]; swprintf(codeHex,16,L"0x%08X",(unsigned)code);
+        std::wstring extra=L"{\"code\":\""+std::wstring(codeHex)+L"\",\"frames\":"+rvas+L"}";
+        ClientLog_Crash(L"main", L"process crash", extra);
+    }
+
     // §J: NO auto-restart. We inform the user (Persian) that a report was saved,
     // then exit cleanly — never relaunch the process (the work order forbids it,
     // because an immediate relaunch can crash-loop on a corrupt state).
@@ -258,14 +277,68 @@ static void onSignal(int sig){
 static void onTerminate(){
     crashCore(0xE06D7363, NULL, NULL);  // unhandled C++ exception
 }
+// v1.44.0 §7: first-chance Vectored Exception Handler. It ONLY logs the FIRST
+// occurrence of a genuine fault code (AV / stack overflow / illegal instruction /
+// int-divide-by-zero) to logs\client.log at level "crash", then returns
+// EXCEPTION_CONTINUE_SEARCH so the normal SetUnhandledExceptionFilter chain
+// (crashFilter → full dump) still runs. A one-shot guard prevents log spam from
+// benign first-chance C++/SEH exceptions that are handled downstream.
+static volatile LONG s_vehLogged = 0;
+static LONG CALLBACK vehLogFilter(EXCEPTION_POINTERS* ep){
+    if(!ep || !ep->ExceptionRecord) return EXCEPTION_CONTINUE_SEARCH;
+    DWORD code = ep->ExceptionRecord->ExceptionCode;
+    bool fatal =
+        code==EXCEPTION_ACCESS_VIOLATION ||
+        code==EXCEPTION_STACK_OVERFLOW ||
+        code==EXCEPTION_ILLEGAL_INSTRUCTION ||
+        code==EXCEPTION_INT_DIVIDE_BY_ZERO ||
+        code==EXCEPTION_ARRAY_BOUNDS_EXCEEDED;
+    if(fatal && InterlockedExchange(&s_vehLogged,1)==0){
+        wchar_t codeHex[16]; swprintf(codeHex,16,L"0x%08X",(unsigned)code);
+        wchar_t addr[32]; swprintf(addr,32,L"%p",ep->ExceptionRecord->ExceptionAddress);
+        std::wstring extra=L"{\"code\":\""+std::wstring(codeHex)+L"\",\"addr\":\""+std::wstring(addr)+L"\"}";
+        ClientLog_Crash(L"main", L"first-chance fault", extra);
+    }
+    return EXCEPTION_CONTINUE_SEARCH;   // never swallow — let the dump chain run
+}
+
+// v1.44.0 §7: UI-thread watchdog. Every 5s it pings g_hFrame with WM_NULL and
+// SMTO_ABORTIFHUNG (2s). If it returns 0 twice in a row it writes ONE warn line
+// and resets the counter. It NEVER kills the app — logging only.
+static DWORD WINAPI uiWatchdogThread(LPVOID){
+    int misses=0;
+    for(;;){
+        Sleep(5000);
+        HWND h=g_hFrame;
+        if(!h || !IsWindow(h)){ misses=0; continue; }
+        DWORD_PTR r=0;
+        LRESULT ok=SendMessageTimeoutW(h, WM_NULL, 0, 0,
+            SMTO_ABORTIFHUNG, 2000, &r);
+        if(ok==0){
+            if(++misses>=2){
+                ClientLog_Warn(L"main", L"UI thread unresponsive", L"{}");
+                misses=0;   // avoid a flood; re-arm for the next 2-miss window
+            }
+        } else {
+            misses=0;
+        }
+    }
+    return 0;
+}
+
 void installCrashHandler(){
+    ClientLog_Init();                       // v1.44.0: ensure logs\ exists early
     SetUnhandledExceptionFilter(crashFilter);
+    AddVectoredExceptionHandler(1, vehLogFilter);   // v1.44.0 §7 (first-chance)
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
     signal(SIGABRT, onSignal);
     signal(SIGSEGV, onSignal);
     signal(SIGILL,  onSignal);
     signal(SIGFPE,  onSignal);
     std::set_terminate(onTerminate);
+    // spawn the UI-thread watchdog (detached; logs only, never kills).
+    HANDLE wt=CreateThread(NULL,0,uiWatchdogThread,NULL,0,NULL);
+    if(wt) CloseHandle(wt);
 }
 
 // ============================================================== SPEED ======

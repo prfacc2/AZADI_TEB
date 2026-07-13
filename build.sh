@@ -33,6 +33,7 @@ SRCS="src/main.cpp src/util.cpp src/handlers.cpp src/theme.cpp src/users.cpp \
       src/backup_log_viewer.cpp src/backup_mtf.cpp src/saved_messages.cpp \
       src/setup_splash.cpp src/web_designer.cpp src/services.cpp \
       src/insurance.cpp \
+      src/client_log.cpp \
       src/web_admission.cpp \
       src/web_pages.cpp src/web_thread_pool.cpp src/web_ping_api.cpp"
 

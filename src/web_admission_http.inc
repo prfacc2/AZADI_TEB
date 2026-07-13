@@ -91,7 +91,14 @@ static void adServeConn(SOCKET c){
         if(hdrEnd!=std::string::npos) break;
         if(req.size()>65536) break;
     }
-    if(hdrEnd==std::string::npos){ closesocket(c); return; }
+    // v1.44.0 §2.6: a dead/slow peer that never completes the request headers
+    // trips the recv timeout (got<0, WSAETIMEDOUT). Log ONE warn line and drop
+    // the socket so a wedged peer can never pin a worker forever.
+    if(hdrEnd==std::string::npos){
+        if(got<0 && WSAGetLastError()==WSAETIMEDOUT)
+            ClientLog_Warn(L"admission", L"loopback recv timeout", L"{}");
+        closesocket(c); return;
+    }
     std::string method,path;
     { size_t sp1=req.find(' '); size_t sp2=(sp1==std::string::npos)?std::string::npos:req.find(' ',sp1+1);
       if(sp1!=std::string::npos&&sp2!=std::string::npos){ method=req.substr(0,sp1); path=req.substr(sp1+1,sp2-sp1-1);} }
@@ -164,8 +171,10 @@ static DWORD WINAPI adHttpThread(LPVOID){
         if(ca.sin_family!=AF_INET || (ntohl(ca.sin_addr.s_addr)>>24)!=127){
             closesocket(c); continue;
         }
-        // v1.40.0 TIMEOUTS: a stuck/slow peer must never pin a worker forever.
-        DWORD tv=8000; // 8s recv/send timeout
+        // v1.44.0 §2.6 TIMEOUTS: a stuck/slow peer must never pin a worker
+        // forever. 3s recv/send timeout on the accepted socket; on a timeout the
+        // worker logs ONE warn line (see adServeConn) and drops the connection.
+        DWORD tv=3000; // 3s recv/send timeout
         setsockopt(c,SOL_SOCKET,SO_RCVTIMEO,(const char*)&tv,sizeof(tv));
         setsockopt(c,SOL_SOCKET,SO_SNDTIMEO,(const char*)&tv,sizeof(tv));
         // v1.40.0: hand the connection to the bounded worker pool (2 low-power /

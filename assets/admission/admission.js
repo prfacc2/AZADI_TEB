@@ -205,44 +205,90 @@
     return { gross: sumGross, disc: sumDisc, org: sumOrg, supp: sumSupp, pat: sumPat, paid: paid };
   }
 
-  /* Debounced authoritative recompute on the C++ side. */
-  var _billTimer = null, _billBusy = false;
+  /* --------------------------------------------------------------------------
+     v1.44.0 FREEZE FIX (§2.1):
+       · Structured client log ONLY on abnormal events (timeout / thrown).
+       · Every request carries a monotonically increasing _billSeq id.
+       · A hard 1500 ms watchdog force-clears _billBusy if the reply never
+         arrives (transport drop / SEH kill / infinite loop) so the UI can
+         never wedge on a permanently-stuck lock.
+       · Late replies whose seq != current seq are ignored (stale reconcile
+         must not overwrite fresh numbers).
+       · The whole body is wrapped in try/catch so a DOM exception can never
+         leave the lock stuck.
+     -------------------------------------------------------------------------- */
+  function logClient(level, msg, extra) {
+    try {
+      if (!Bridge || !Bridge.call) return;
+      Bridge.call('client.log', {
+        page: 'admission', level: level || 'warn',
+        msg: String(msg || ''), extra: extra || {},
+        t: (new Date()).getTime()
+      });
+    } catch (e) { /* never rethrow */ }
+  }
+
+  var _billTimer = null, _billBusy = false, _billSeq = 0, _billBusyId = 0;
+  var _billWatchdog = null;
   function scheduleServerBill(localPaid) {
     if (!state.ready) return;                 /* skip during boot */
     if (!state.services.length) return;       /* nothing to reconcile */
     if (_billTimer) clearTimeout(_billTimer);
     _billTimer = setTimeout(function () {
-      if (_billBusy) return;
-      _billBusy = true;
-      var payload = {
-        hasIns: hasIns(),
-        insMain: $('insMain') ? $('insMain').selectedIndex : -1,
-        insSupp: $('insSupp') ? $('insSupp').selectedIndex : -1,
-        insSuppPct: parseInt(toEn($('insSuppPct') ? $('insSuppPct').value : '0'), 10) || 0,
-        noPay: $('noPay') ? $('noPay').checked : false,
-        services: state.services
-      };
-      Bridge.call('bill.compute', payload).then(function (b) {
+      try {
+        if (_billBusy) return;
+        _billBusy = true;
+        var seq = ++_billSeq;
+        _billBusyId = seq;
+        var payload = {
+          hasIns: hasIns(),
+          insMain: $('insMain') ? $('insMain').selectedIndex : -1,
+          insSupp: $('insSupp') ? $('insSupp').selectedIndex : -1,
+          insSuppPct: parseInt(toEn($('insSuppPct') ? $('insSuppPct').value : '0'), 10) || 0,
+          noPay: $('noPay') ? $('noPay').checked : false,
+          services: state.services
+        };
+
+        /* hard watchdog: if the reply never arrives, unstick the lock. */
+        if (_billWatchdog) clearTimeout(_billWatchdog);
+        _billWatchdog = setTimeout(function () {
+          if (_billBusy && _billBusyId === seq) {
+            _billBusy = false;
+            logClient('warn', 'bill.compute timeout', { seq: seq });
+          }
+        }, 1500);
+
+        Bridge.call('bill.compute', payload).then(function (b) {
+          if (seq !== _billBusyId) return;    /* stale reply — ignore */
+          _billBusy = false;
+          if (_billWatchdog) { clearTimeout(_billWatchdog); _billWatchdog = null; }
+          if (!b) return;
+          /* reconcile only the money read-outs with the C++ authoritative values */
+          setText($('sfTotal'), money(b.gross));
+          setText($('sfDisc'), money(b.disc));
+          setText($('sfIns'), money((b.org || 0) + (b.supp || 0)));
+          setText($('sfPat'), money(b.pat));
+          setText($('invMainTotal'), money(b.gross));
+          setText($('invMainOrg'), money(b.org));
+          setText($('invMainPat'), money((b.gross || 0) - (b.disc || 0) - (b.org || 0)));
+          setText($('invSuppTotal'), money((b.gross || 0) - (b.disc || 0) - (b.org || 0)));
+          setText($('invSuppShare'), money(b.supp));
+          setText($('invSuppPat'), money(b.pat));
+          setText($('invFinTotal'), money(b.gross));
+          setText($('invFinDisc'), money(b.disc));
+          var paid = b.paid != null ? b.paid : b.pat;
+          setText($('invFinPaid'), money(paid));
+          setText($('invRemain'), money((b.pat || 0) - paid));
+          setText($('tcVal'), money(b.pat));
+        })['catch'](function () {
+          if (seq === _billBusyId) _billBusy = false;
+          if (_billWatchdog) { clearTimeout(_billWatchdog); _billWatchdog = null; }
+        });
+      } catch (e) {
         _billBusy = false;
-        if (!b) return;
-        /* reconcile only the money read-outs with the C++ authoritative values */
-        setText($('sfTotal'), money(b.gross));
-        setText($('sfDisc'), money(b.disc));
-        setText($('sfIns'), money((b.org || 0) + (b.supp || 0)));
-        setText($('sfPat'), money(b.pat));
-        setText($('invMainTotal'), money(b.gross));
-        setText($('invMainOrg'), money(b.org));
-        setText($('invMainPat'), money((b.gross || 0) - (b.disc || 0) - (b.org || 0)));
-        setText($('invSuppTotal'), money((b.gross || 0) - (b.disc || 0) - (b.org || 0)));
-        setText($('invSuppShare'), money(b.supp));
-        setText($('invSuppPat'), money(b.pat));
-        setText($('invFinTotal'), money(b.gross));
-        setText($('invFinDisc'), money(b.disc));
-        var paid = b.paid != null ? b.paid : b.pat;
-        setText($('invFinPaid'), money(paid));
-        setText($('invRemain'), money((b.pat || 0) - paid));
-        setText($('tcVal'), money(b.pat));
-      })['catch'](function () { _billBusy = false; });
+        if (_billWatchdog) { clearTimeout(_billWatchdog); _billWatchdog = null; }
+        logClient('warn', 'bill.compute threw', { err: String(e && e.message || e) });
+      }
     }, 120);
   }
 
@@ -250,13 +296,37 @@
      SERVICE ROWS
      ========================================================================== */
   function addServiceRow(svc) {
+    /* v1.44.0 §2.3 defensive belt: refuse a 501st row so a runaway loop can
+       never grow state.services without bound. */
+    if (state.services.length >= 500) {
+      if (typeof toast === 'function') toast('سقف تعداد خدمت رسیده است');
+      else if (window.AzUi && AzUi.toast) AzUi.toast('سقف تعداد خدمت رسیده است');
+      logClient('warn', 'service cap reached', { count: state.services.length });
+      return;
+    }
     /* price ALWAYS from the catalog — never typed by the operator */
+    var price = Number(svc.price);
+    if (isNaN(price)) {
+      logClient('warn', 'addServiceRow NaN price', { code: String(svc.code || ''), raw: String(svc.price) });
+      price = 0;
+    }
     state.services.push({
       code: svc.code || '', name: svc.name || '',
-      qty: 1, price: Number(svc.price) || 0, discount: 0
+      qty: 1, price: price, discount: 0
     });
-    renderServices();
-    recompute();
+    /* Paint the row IMMEDIATELY, then push the (potentially slow / stalling)
+       server recompute onto a fresh task via setTimeout(0). This alone kills
+       the "instant freeze on add" perception because the DOM row appears
+       before the bridge is ever touched. */
+    try {
+      renderServices();
+    } catch (e) {
+      logClient('warn', 'renderServices threw', { err: String(e && e.message || e) });
+    }
+    setTimeout(function () {
+      try { recompute(); }
+      catch (e) { logClient('warn', 'recompute threw', { err: String(e && e.message || e) }); }
+    }, 0);
   }
 
   function renderServices() {

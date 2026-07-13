@@ -245,8 +245,14 @@ static AdBill adComputeBill(const std::string& body){
     // walk the services array
     std::string arr; jsonGetRaw(body,"services",arr);
     // iterate objects inside arr
+    // v1.44.0 §2.3 FREEZE FIX: hard iteration cap + guaranteed forward progress.
+    // A malformed/unbalanced services payload could previously leave `p` stalled
+    // (q never advancing past o) and spin the HTTP worker forever — from outside
+    // this looked exactly like a total freeze (reply never arrives, _billBusy
+    // stays true). The guard and the p=o+1 fallback make a stall impossible.
     size_t p=0;
-    while(p<arr.size()){
+    int guard=0;
+    while(p<arr.size() && ++guard < 10000){
         size_t o=arr.find('{',p); if(o==std::string::npos) break;
         int depth=0; bool inStr=false; size_t q=o;
         for(;q<arr.size();++q){
@@ -256,6 +262,8 @@ static AdBill adComputeBill(const std::string& body){
             if(c=='{') depth++;
             else if(c=='}'){ depth--; if(depth==0){ q++; break; } }
         }
+        // Never let p stall: if the brace scan did not advance past o, force it.
+        if(q<=o){ p=o+1; continue; }
         std::string obj=arr.substr(o,q-o);
         p=q;
         double price=0, qty=1, discount=0;
@@ -270,6 +278,10 @@ static AdBill adComputeBill(const std::string& body){
         long long sup=(long long)llround((double)afterBase*b.suppPct/100.0);
         long long patShare=afterBase-sup;
         b.gross+=g; b.disc+=ds; b.org+=org; b.supp+=sup; b.pat+=patShare;
+    }
+    if(guard>=10000){
+        ClientLog_Warn(L"admission", L"bill.compute parser guard tripped",
+            L"{\"cap\":10000}");
     }
     bool noPay=jsonGetBool(body,"noPay",false);
     b.paid = noPay ? 0 : b.pat;
@@ -298,6 +310,43 @@ static ReceptionRecord adBuildRecord(const std::string& body){
     r.total=b.gross; r.discount=b.disc; r.orgShare=b.org+b.supp;
     r.mainShare=b.org; r.patientShare=b.pat; r.finalTotal=b.gross;
     r.paid=b.paid;
+    r.basePct=b.basePct; r.suppPct=b.suppPct;
+
+    // v1.44.0 §4.3: capture per-line items so the print designer's "services"
+    // table subtype can render one row per service. Same tolerant brace-walk as
+    // adComputeBill (with the same hard iteration cap + forward-progress guard).
+    {
+        std::string arr; jsonGetRaw(body,"services",arr);
+        size_t p=0; int guard=0;
+        while(p<arr.size() && ++guard < 10000){
+            size_t o=arr.find('{',p); if(o==std::string::npos) break;
+            int depth=0; bool inStr=false; size_t q=o;
+            for(;q<arr.size();++q){ char c=arr[q];
+                if(inStr){ if(c=='\\'){q++;continue;} if(c=='"') inStr=false; continue; }
+                if(c=='"'){ inStr=true; continue; }
+                if(c=='{') depth++; else if(c=='}'){ depth--; if(depth==0){ q++; break; } } }
+            if(q<=o){ p=o+1; continue; }
+            std::string obj=arr.substr(o,q-o); p=q;
+            ReceptionLine ln;
+            std::string sv; if(jsonGetString(obj,"code",sv)) ln.code=u82w(sv);
+            if(jsonGetString(obj,"name",sv)) ln.name=u82w(sv);
+            double price=0, qty=1, discount=0;
+            jsonGetNumber(obj,"price",price);
+            jsonGetNumber(obj,"qty",qty);
+            jsonGetNumber(obj,"discount",discount);
+            ln.qty=(int)(qty>0?qty:1);
+            ln.price=(long long)llround(price);
+            ln.discount=(long long)llround(discount);
+            long long g=(long long)llround(price*ln.qty);
+            long long net=g-ln.discount; if(net<0) net=0;
+            ln.insShare=(long long)llround((double)net*b.basePct/100.0);
+            long long afterBase=net-ln.insShare;
+            long long sup=(long long)llround((double)afterBase*b.suppPct/100.0);
+            ln.insShare+=sup;              // total insurer share (base + supp)
+            ln.patShare=afterBase-sup;
+            r.services.push_back(ln);
+        }
+    }
     return r;
 }
 
@@ -421,7 +470,7 @@ static std::string admissionApi(const std::string& verb, const std::string& body
     if(verb=="service.search"){
         std::string qU; jsonGetString(body,"q",qU);
         std::wstring q=u82w(qU);
-        auto svcs=loadServices();
+        auto svcs=snapshotServices();   // v1.44.0 §2.4: safe local snapshot
         std::string o="{\"rows\":[";
         int n=0;
         for(const auto& s:svcs){
@@ -653,14 +702,103 @@ static std::string admissionApi(const std::string& verb, const std::string& body
 //  is frozen" symptom the user reported). A thrown handler now returns a clean
 //  JSON error instead, so the UI always gets a reply and stays responsive.
 // ============================================================================
-static std::string admissionApiSafe(const std::string& verb, const std::string& body){
+// ----------------------------------------------------------------------------
+// v1.44.0 §2.2 — Structured-exception hardening for the admission verbs.
+//
+// The MinGW-w64 32-bit toolchain this project MUST keep (guardrail: no
+// toolchain switch) is built --with-dwarf2 / --disable-sjlj-exceptions, so the
+// MSVC-style `__try/__except` keywords are NOT available and a Windows
+// structured exception (AV, int-div-0, stack overflow, …) is NOT routed through
+// C++ `catch(...)`. Without a net, an AV inside a verb kills the loopback HTTP
+// worker silently: no reply is ever sent, the JS promise hangs forever, and the
+// operator sees a TOTAL freeze (the reported symptom).
+//
+// Portable fix that compiles on DWARF GCC: a thread-scoped Vectored Exception
+// Handler that, on a genuine fault code, logs ONE structured client.log "crash"
+// line (verb + code + fault address + top-8 stack RVAs) and then longjmp()s
+// back to a setjmp target established just before the handler runs.
+// admissionApiSafe therefore ALWAYS returns a clean JSON reply, so the transport
+// is never taken down by a structured exception. The g_sehArmed thread-local
+// gates the VEH so it only ever redirects faults raised inside an admission
+// verb — everything else falls through to the normal crash-dump chain.
+// ----------------------------------------------------------------------------
+#include <csetjmp>
+
+static thread_local jmp_buf     g_sehJmp;
+static thread_local bool        g_sehArmed = false;
+static thread_local std::string g_sehVerb;
+
+static LONG CALLBACK adSehVeh(EXCEPTION_POINTERS* ep){
+    if(!g_sehArmed || !ep || !ep->ExceptionRecord) return EXCEPTION_CONTINUE_SEARCH;
+    DWORD code = ep->ExceptionRecord->ExceptionCode;
+    bool fatal =
+        code==EXCEPTION_ACCESS_VIOLATION ||
+        code==EXCEPTION_INT_DIVIDE_BY_ZERO ||
+        code==EXCEPTION_ILLEGAL_INSTRUCTION ||
+        code==EXCEPTION_ARRAY_BOUNDS_EXCEEDED ||
+        code==EXCEPTION_STACK_OVERFLOW ||
+        code==EXCEPTION_PRIV_INSTRUCTION;
+    if(!fatal) return EXCEPTION_CONTINUE_SEARCH;
+
+    void* addr = ep->ExceptionRecord->ExceptionAddress;
+    void* frames[8]={0};
+    USHORT nf = CaptureStackBackTrace(0, 8, frames, NULL);
+    HMODULE hExe = GetModuleHandleW(NULL);
+    std::wstring rvas=L"[";
+    for(USHORT i=0;i<nf;i++){
+        if(i) rvas+=L",";
+        unsigned long long rva=(unsigned long long)((BYTE*)frames[i]-(BYTE*)hExe);
+        wchar_t b[32]; swprintf(b,32,L"%llu",rva); rvas+=b;
+    }
+    rvas+=L"]";
+    wchar_t codeHex[16]; swprintf(codeHex,16,L"0x%08X",(unsigned)code);
+    wchar_t addrB[32];   swprintf(addrB,32,L"%p",addr);
+    std::wstring verbW = u82w(g_sehVerb);
+    std::wstring extra = L"{\"verb\":\"" + verbW + L"\",\"code\":\"" +
+        std::wstring(codeHex) + L"\",\"addr\":\"" + std::wstring(addrB) +
+        L"\",\"frames\":" + rvas + L"}";
+    ClientLog_Crash(L"admission", L"admissionApi SEH", extra);
+
+    g_sehArmed = false;
+    longjmp(g_sehJmp, 1);              // unwind back to admissionApiSafe
+    return EXCEPTION_EXECUTE_HANDLER;  // unreachable
+}
+
+// Inner worker: owns the C++ objects (destructors OK). Runs the existing
+// std::exception-hardened path.
+static std::string admissionApiInner(const std::string& verb, const std::string& body){
     try {
         return admissionApi(verb,body);
     } catch(const std::exception& ex){
         logLine(L"admissionApi exception: "+u82w(std::string(ex.what()))+L" verb="+u82w(verb));
+        ClientLog_Error(L"admission", L"admissionApi std::exception",
+            L"{\"verb\":\""+u82w(verb)+L"\"}");
         return "{\"ok\":false,\"err\":\"خطای داخلی سرور\"}";
     } catch(...){
         logLine(L"admissionApi unknown exception verb="+u82w(verb));
+        ClientLog_Error(L"admission", L"admissionApi unknown exception",
+            L"{\"verb\":\""+u82w(verb)+L"\"}");
         return "{\"ok\":false,\"err\":\"خطای ناشناخته سرور\"}";
     }
+}
+
+static std::string admissionApiSafe(const std::string& verb, const std::string& body){
+    static volatile LONG s_vehInstalled=0;
+    if(InterlockedCompareExchange(&s_vehInstalled,1,0)==0){
+        // FIRST handler in the chain so we see the fault before the process-wide
+        // crashFilter; the g_sehArmed thread-local gates it to admission calls.
+        AddVectoredExceptionHandler(1, adSehVeh);
+    }
+    g_sehVerb = verb;
+    if(setjmp(g_sehJmp)!=0){
+        // Longjmp'd here from the VEH after a structured exception (already
+        // logged inside adSehVeh). Return a clean JSON error so the JS side
+        // always gets a reply and never wedges on a pending promise.
+        g_sehArmed=false;
+        return "{\"ok\":false,\"err\":\"SEH\"}";
+    }
+    g_sehArmed = true;
+    std::string r = admissionApiInner(verb, body);
+    g_sehArmed = false;
+    return r;
 }

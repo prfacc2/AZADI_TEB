@@ -131,6 +131,7 @@
     pxPerMM: 3.7795, scale: 1,
     undo: [], redo: [], dirty: false,
     reflowOnResize: true,                 // v1.22.0 responsive paper resize
+    preview: false,                       // v1.44.0 §4.5 live-preview toggle
     templates: window.AZ_TEMPLATES || []
   };
 
@@ -200,15 +201,42 @@
     el.style.zIndex = it.z || 0;
   }
 
+  /* v1.44.0 §4.5: sample data used ONLY in live-preview mode so the operator
+     sees a realistic filled receipt instead of ［labels］/{{tokens}}. Keyed by
+     both bare and {{...}} token forms; matched case-sensitively. */
+  var PREVIEW_SAMPLE = {
+    "patient.fullname": "علی رضایی", "patient.nid": "۰۰۷۱۲۳۴۵۶۷",
+    "appt.no": "۱۲۴۵", "appt.date": "۱۴۰۴/۰۴/۲۱",
+    "ins.base.name": "تأمین اجتماعی", "ins.base.pct": "۷۰٪",
+    "ins.supp.name": "بیمهٔ تکمیلی آتیه", "ins.supp.pct": "۲۰٪",
+    "svc.price": "۱٬۲۰۰٬۰۰۰", "bill.gross": "۱٬۸۵۰٬۰۰۰", "bill.disc": "۵۰٬۰۰۰",
+    "bill.org": "۱٬۲۹۵٬۰۰۰", "bill.supp": "۳۷۰٬۰۰۰", "bill.pat": "۱۸۵٬۰۰۰",
+    "svc.row.idx": "۱", "svc.row.name": "ویزیت عمومی", "svc.row.code": "۹۰۱۰۰۱",
+    "svc.row.qty": "۱", "svc.row.price": "۶۵۰٬۰۰۰",
+    "svc.row.insShare": "۴۵۵٬۰۰۰", "svc.row.patShare": "۱۹۵٬۰۰۰"
+  };
+  // Strip surrounding {{ }} / { } and resolve a token to its preview sample (or "" if unknown field).
+  function previewToken(tok) {
+    var key = String(tok).replace(/^\{\{?/, "").replace(/\}?\}$/, "");
+    if (Object.prototype.hasOwnProperty.call(PREVIEW_SAMPLE, key)) return PREVIEW_SAMPLE[key];
+    var f = window.AZ_FIELDS[tok] || window.AZ_FIELDS["{{" + key + "}}"] || window.AZ_FIELDS["{" + key + "}"];
+    return f && f.sample ? f.sample : ("［" + (f ? f.label : key) + "］");
+  }
+  // Replace every {token}/{{token}} inside a string with preview sample data.
+  function resolvePreview(s) {
+    return String(s).replace(/\{\{?[a-zA-Z][a-zA-Z0-9._]*\}?\}/g, function (tok) { return previewToken(tok); });
+  }
+
   function displayText(it) {
-    if (it.type === "label") return it.text || "";
+    if (it.type === "label") return S.preview ? resolvePreview(it.text || "") : (it.text || "");
     if (it.type === "apptno") return (it.prefix || "") + faDigits(String(it.startValue || 1));
     if (it.type === "field") {
       var f = window.AZ_FIELDS[it.field];
       var lbl = f ? f.label : (it.field || "فیلد");
+      if (S.preview) return (it.prefix || "") + previewToken(it.field) + (it.suffix || "");
       return (it.prefix || "") + "［" + lbl + "］" + (it.suffix || "");
     }
-    return it.text || "";
+    return S.preview ? resolvePreview(it.text || "") : (it.text || "");
   }
 
   /* -------------------------------------------------- table data helpers -- */
@@ -221,32 +249,78 @@
         if (!t.widths || t.widths.length !== t.cols) {
           t.widths = []; for (var i = 0; i < t.cols; i++) t.widths.push(1);
         }
+        // v1.44.0 §4.3: defaults for professional-table fields on legacy models.
+        if (t.kind == null) t.kind = "static";
+        if (t.stripe == null) t.stripe = false;
+        if (t.border == null) t.border = { w: 1, color: it.borderColor || "#333" };
+        if (t.headerBg == null) t.headerBg = "#eef2fb";
+        if (t.padding == null) t.padding = 6;
+        if (!t.colAlign || t.colAlign.length !== t.cols) {
+          t.colAlign = []; for (var j = 0; j < t.cols; j++) t.colAlign.push("right");
+        }
         return t;
       }
     } catch (e) {}
     return { cols: 3, rows: 3, header: true, widths: [1, 1, 1],
+      kind: "static", stripe: false, border: { w: 1, color: "#333" }, headerBg: "#eef2fb", padding: 6, colAlign: ["right", "right", "right"],
       cells: [["ستون ۱", "ستون ۲", "ستون ۳"], ["", "", ""], ["", "", ""]] };
   }
   function tableHtml(it, forThumb) {
     var t = parseTable(it);
+    if (!t.widths || t.widths.length !== t.cols) { t.widths = []; for (var wi = 0; wi < t.cols; wi++) t.widths.push(1); }
+    if (!t.colAlign || t.colAlign.length !== t.cols) { t.colAlign = []; for (var ai = 0; ai < t.cols; ai++) t.colAlign.push("right"); }
     var sum = 0; t.widths.forEach(function (w) { sum += (w || 1); });
     var tdir = (it.dir === 1) ? "ltr" : "rtl";
+    var bw = (t.border && t.border.w != null) ? t.border.w : 1;
+    var bcol = (t.border && t.border.color) ? t.border.color : (it.borderColor || "#333");
+    var hbg = t.headerBg || "#eef2fb";
+    var pad = (t.padding != null) ? t.padding : 6;
+    var isServices = (t.kind === "services");
+    // v1.44.0 §4.3: in the services subtype the (single template) body row is
+    // repeated; in live-preview we show 3 sample rows so the layout reads true.
+    var bodyRepeat = isServices ? (S.preview ? 3 : 1) : 0;
     var html = "<table style='font-size:" + (forThumb ? "100%" : ptPx(it.pt || 9) + "px") +
       ";color:" + (it.textColor || "#000") + ";direction:" + tdir + "'>";
-    for (var r = 0; r < t.rows; r++) {
-      html += "<tr>";
-      for (var c = 0; c < t.cols; c++) {
-        var isHd = (t.header && r === 0);
-        var wpc = ((t.widths[c] || 1) / sum * 100).toFixed(3);
-        var v = (t.cells[r] && t.cells[r][c] != null) ? t.cells[r][c] : "";
-        // show field labels for {tokens}
-        v = String(v).replace(/\{[a-zA-Z]+\}/g, function (tok) {
+    function cellStyle(c, isHd, r) {
+      var wpc = ((t.widths[c] || 1) / sum * 100).toFixed(3);
+      var al = t.colAlign[c] || "right";
+      var st = "width:" + wpc + "%;padding:" + pad + "px;text-align:" + al + ";" +
+        (bw > 0 ? ("border:" + bw + "px solid " + bcol + ";") : "border:0;");
+      if (isHd) st += "background:" + hbg + ";font-weight:700;";
+      else if (t.stripe && (r % 2 === 1)) st += "background:#f6f8fc;";
+      return st;
+    }
+    function renderCell(raw, c, isHd, r, tokenIdx) {
+      var v = (raw != null) ? raw : "";
+      if (S.preview) {
+        v = String(v).replace(/\{\{?[a-zA-Z][a-zA-Z0-9._]*\}?\}/g, function (tok) {
+          // svc.row.* tokens vary per repeated row in the services subtype
+          var key = String(tok).replace(/^\{\{?/, "").replace(/\}?\}$/, "");
+          if (isServices && key.indexOf("svc.row.") === 0 && key === "svc.row.idx") return faDigits(String(tokenIdx + 1));
+          return previewToken(tok);
+        });
+      } else {
+        v = String(v).replace(/\{\{?[a-zA-Z][a-zA-Z0-9._]*\}?\}/g, function (tok) {
           var f = window.AZ_FIELDS[tok]; return f ? ("［" + f.label + "］") : tok;
         });
-        html += "<td class='" + (isHd ? "th" : "") + "' style='width:" + wpc + "%;border-color:" +
-          (it.borderColor || "#333") + "'>" + escapeHtml(v) + "</td>";
       }
-      html += "</tr>";
+      return "<td class='" + (isHd ? "th" : "") + "' style='" + cellStyle(c, isHd, r) + "'>" + escapeHtml(v) + "</td>";
+    }
+    var visualRow = 0;
+    for (var r = 0; r < t.rows; r++) {
+      var isHd = (t.header && r === 0);
+      // services subtype: rows AFTER the header are treated as one template row
+      if (isServices && !isHd && r > (t.header ? 1 : 0)) continue; // only first body row is the template
+      var reps = (isServices && !isHd) ? bodyRepeat : 1;
+      for (var rep = 0; rep < reps; rep++) {
+        html += "<tr>";
+        for (var c = 0; c < t.cols; c++) {
+          var cellv = (t.cells[r] && t.cells[r][c] != null) ? t.cells[r][c] : "";
+          html += renderCell(cellv, c, isHd, isHd ? 0 : visualRow, rep);
+        }
+        html += "</tr>";
+        if (!isHd) visualRow++;
+      }
     }
     html += "</table>";
     return html;
@@ -367,6 +441,7 @@
   }
 
   function updateSelBox() {
+    if (S.preview) { $selBox.classList.add("hidden"); return; }   // v1.44.0 §4.5
     var it = selItem();
     if (!it) { $selBox.classList.add("hidden"); return; }
     $selBox.classList.remove("hidden");
@@ -846,25 +921,83 @@
     document.getElementById("tblCols").value = model.cols;
     document.getElementById("tblRows").value = model.rows;
     document.getElementById("tblHeader").checked = !!model.header;
+    /* v1.44.0 §4.3: hydrate the professional-table controls. */
+    var kindEl = document.getElementById("tblKind"); if (kindEl) kindEl.value = model.kind || "static";
+    var stripeEl = document.getElementById("tblStripe"); if (stripeEl) stripeEl.checked = !!model.stripe;
+    var bwEl = document.getElementById("tblBorderW");
+    if (bwEl) bwEl.value = (model.border && model.border.w != null) ? model.border.w : 1;
+    var bcEl = document.getElementById("tblBorderColor");
+    if (bcEl) bcEl.value = (model.border && model.border.color) ? model.border.color : "#111111";
+    var hbEl = document.getElementById("tblHeaderBg"); if (hbEl) hbEl.value = model.headerBg || "#eef2fb";
+    var pdEl = document.getElementById("tblPadding"); if (pdEl) pdEl.value = (model.padding != null) ? model.padding : 6;
     renderTableEditor(model);
     document.getElementById("tblOverlay").classList.remove("hidden");
   }
   // v1.22.0: track the currently selected cell (row,col) in the table editor.
   var tblSel = { r: -1, c: -1 };
   function readTableModel() {
-    var cols = Math.max(1, Math.min(10, +document.getElementById("tblCols").value || 3));
-    var rows = Math.max(1, Math.min(40, +document.getElementById("tblRows").value || 4));
+    var cols = Math.max(1, Math.min(12, +document.getElementById("tblCols").value || 3));
+    var rows = Math.max(1, Math.min(30, +document.getElementById("tblRows").value || 4));
     var header = document.getElementById("tblHeader").checked;
     var cells = [], widths = [];
     var inputs = document.querySelectorAll("#tblEditor input.cell");
     var k = 0;
     for (var r = 0; r < rows; r++) { cells[r] = []; for (var c = 0; c < cols; c++) { cells[r][c] = inputs[k] ? inputs[k].value : ""; k++; } }
-    for (var c2 = 0; c2 < cols; c2++) widths[c2] = 1;
-    return { cols: cols, rows: rows, header: header, widths: widths, cells: cells };
+    // v1.44.0 §4.3: per-column width + alignment (read from header <th> controls).
+    var colAlign = [];
+    for (var c2 = 0; c2 < cols; c2++) {
+      widths[c2] = 1;
+      var wEl = document.querySelector("#tblEditor .colw[data-c='" + c2 + "']");
+      if (wEl) { var wv = +wEl.value; if (wv > 0) widths[c2] = wv; }
+      var aEl = document.querySelector("#tblEditor .cola[data-c='" + c2 + "']");
+      colAlign[c2] = aEl ? (aEl.value || "right") : "right";
+    }
+    /* v1.44.0 §4.3: professional-table inspector controls → serialized JSON
+       shape that the C++ pdParseTable in printer.cpp already understands. */
+    var kindEl = document.getElementById("tblKind");
+    var stripeEl = document.getElementById("tblStripe");
+    var bwEl = document.getElementById("tblBorderW");
+    var bcEl = document.getElementById("tblBorderColor");
+    var hbEl = document.getElementById("tblHeaderBg");
+    var pdEl = document.getElementById("tblPadding");
+    return {
+      cols: cols, rows: rows, header: header, widths: widths, cells: cells,
+      kind: kindEl ? (kindEl.value || "static") : "static",
+      stripe: stripeEl ? !!stripeEl.checked : false,
+      border: {
+        w: bwEl ? (+bwEl.value >= 0 ? +bwEl.value : 1) : 1,
+        color: bcEl ? (bcEl.value || "#111111") : "#111111"
+      },
+      headerBg: hbEl ? (hbEl.value || "#eef2fb") : "#eef2fb",
+      padding: pdEl ? (+pdEl.value >= 0 ? +pdEl.value : 6) : 6,
+      colAlign: colAlign
+    };
   }
   function renderTableEditor(model) {
     var host = document.getElementById("tblEditor");
-    var html = "<table><tbody>";
+    // v1.44.0 §4.3: normalise widths + colAlign to the current column count.
+    if (!model.widths || model.widths.length !== model.cols) {
+      var w0 = model.widths || []; model.widths = [];
+      for (var wi = 0; wi < model.cols; wi++) model.widths[wi] = (w0[wi] > 0) ? w0[wi] : 1;
+    }
+    if (!model.colAlign || model.colAlign.length !== model.cols) {
+      var a0 = model.colAlign || []; model.colAlign = [];
+      for (var ai = 0; ai < model.cols; ai++) model.colAlign[ai] = a0[ai] || "right";
+    }
+    var html = "<table><thead><tr class='tblctl'>";
+    // v1.44.0 §4.3: per-column width + alignment header controls.
+    for (var hc = 0; hc < model.cols; hc++) {
+      html += "<th data-c='" + hc + "'>" +
+        "<div class='colcfg'>" +
+        "<input class='colw' data-c='" + hc + "' type='number' min='1' max='20' step='1' " +
+        "title='عرض نسبی ستون' value='" + (model.widths[hc] || 1) + "'>" +
+        "<select class='cola' data-c='" + hc + "' title='ترازبندی ستون'>" +
+        "<option value='right'" + (model.colAlign[hc] === "right" ? " selected" : "") + ">راست</option>" +
+        "<option value='center'" + (model.colAlign[hc] === "center" ? " selected" : "") + ">وسط</option>" +
+        "<option value='left'" + (model.colAlign[hc] === "left" ? " selected" : "") + ">چپ</option>" +
+        "</select></div></th>";
+    }
+    html += "</tr></thead><tbody>";
     for (var r = 0; r < model.rows; r++) {
       html += "<tr>";
       for (var c = 0; c < model.cols; c++) {
@@ -914,10 +1047,13 @@
     }
     document.getElementById("tblRebuild").addEventListener("click", function () {
       var cur = readTableModel();
-      var cols = Math.max(1, Math.min(10, +document.getElementById("tblCols").value || 3));
-      var rows = Math.max(1, Math.min(40, +document.getElementById("tblRows").value || 4));
-      var m = { cols: cols, rows: rows, header: document.getElementById("tblHeader").checked, widths: [], cells: [] };
+      var cols = Math.max(1, Math.min(12, +document.getElementById("tblCols").value || 3));
+      var rows = Math.max(1, Math.min(30, +document.getElementById("tblRows").value || 4));
+      var m = { cols: cols, rows: rows, header: document.getElementById("tblHeader").checked, widths: [], cells: [], colAlign: [] };
       for (var r = 0; r < rows; r++) { m.cells[r] = []; for (var c = 0; c < cols; c++) { m.cells[r][c] = (cur.cells[r] && cur.cells[r][c]) || ""; } }
+      // v1.44.0 §4.3: carry width + alignment across a rebuild.
+      for (var cc = 0; cc < cols; cc++) { m.widths[cc] = (cur.widths && cur.widths[cc] > 0) ? cur.widths[cc] : 1; m.colAlign[cc] = (cur.colAlign && cur.colAlign[cc]) || "right"; }
+      m.kind = cur.kind; m.stripe = cur.stripe; m.border = cur.border; m.headerBg = cur.headerBg; m.padding = cur.padding;
       renderTableEditor(m);
     });
     // ---- v1.22.0 add/delete row & column ----
@@ -1195,6 +1331,19 @@
     document.getElementById("btnZoomIn").addEventListener("click", function () { setScale(S.scale * 1.15); });
     document.getElementById("btnZoomOut").addEventListener("click", function () { setScale(S.scale / 1.15); });
     document.getElementById("btnZoomFit").addEventListener("click", fitZoom);
+    // v1.44.0 §4.5: live-preview toggle — resolves tokens to sample data and
+    // hides the selection chrome so the operator sees a realistic receipt.
+    var btnPrev = document.getElementById("btnPreview");
+    if (btnPrev) btnPrev.addEventListener("click", function () {
+      S.preview = !S.preview;
+      var paperEl = document.getElementById("paper");
+      if (paperEl) paperEl.classList.toggle("preview-mode", S.preview);
+      btnPrev.classList.toggle("btn-primary", S.preview);
+      btnPrev.classList.toggle("btn-outline", !S.preview);
+      if (S.preview) { S.selId = null; }
+      renderAll(); renderInspector && renderInspector();
+      toast(S.preview ? "پیش‌نمایش روشن شد" : "پیش‌نمایش خاموش شد", "ok");
+    });
     document.getElementById("btnSave").addEventListener("click", saveDesign);
     document.getElementById("btnDownload").addEventListener("click", downloadDesign);
     document.getElementById("btnUpload").addEventListener("click", uploadDesign);

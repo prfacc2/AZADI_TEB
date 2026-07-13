@@ -122,13 +122,36 @@ static void saveServices(const std::vector<ServiceDef>& v){
     invalidateServiceCache();   // v1.42.0: next read re-parses the new file
 }
 
+// v1.44.0 §2.4: snapshotServices() ALWAYS returns a full copy taken UNDER the
+// cache mutex. This is the only sanctioned way for a caller to iterate the
+// catalog: it can never hand out a reference to the shared g_svcCache that a
+// concurrent saveServices()/invalidateServiceCache() on another thread could
+// replace under the caller's feet. loadServices() (which also returns by value)
+// stays for compatibility, but iteration should go through this snapshot.
+std::vector<ServiceDef> snapshotServices(){
+    ULONGLONG stamp,size; svcFileFingerprint(stamp,size);
+    {
+        std::lock_guard<std::mutex> lk(g_svcCacheMx);
+        if(g_svcCacheValid && g_svcCacheStamp==stamp && g_svcCacheSize==size)
+            return g_svcCache;                     // full copy under the lock
+    }
+    std::vector<ServiceDef> fresh=parseServicesFromDisk();
+    {
+        std::lock_guard<std::mutex> lk(g_svcCacheMx);
+        g_svcCache=fresh;
+        g_svcCacheStamp=stamp; g_svcCacheSize=size;
+        g_svcCacheValid=true;
+        return g_svcCache;                         // full copy under the lock
+    }
+}
+
 // v1.42.0: findService now returns by value into a thread-local buffer so it is
-// safe against the shared cache being replaced by another thread. Uses the
-// cached loadServices() (O(1) on a cache hit) instead of re-parsing every call.
+// safe against the shared cache being replaced by another thread.
+// v1.44.0 §2.4: iterate the LOCAL snapshot, never the shared g_svcCache.
 const ServiceDef* findService(const std::wstring& code){
     static thread_local ServiceDef tls;
     std::wstring c=trim(code);
-    std::vector<ServiceDef> v=loadServices();   // cached
+    std::vector<ServiceDef> v=snapshotServices();   // full copy under the lock
     for(auto&s:v) if(s.code==c){ tls=s; return &tls; }
     return nullptr;
 }

@@ -192,13 +192,24 @@
 
   function callHttp(verb, payload) {
     var d = new Deferred();
+    var done = false;
     xhrPost('/api/' + verb, JSON.stringify(payload || {}),
       function (txt) {
+        if (done) return; done = true;
         var j = parseJson(txt);
         if (j && j.error) { d.reject(new Error(j.error)); return; }
         d.resolve(j != null ? j : {});
       },
-      function (err) { d.reject(err); });
+      function (err) { if (done) return; done = true; d.reject(err); });
+    /* v1.44.0: the HTTP transport used to have NO timeout (unlike WebView2), so a
+       dropped/never-answered reply left the promise pending forever — a root
+       cause of the stuck _billBusy freeze. Reject after 15s so callers can
+       recover. The scheduleServerBill watchdog (1500ms) unsticks the UI even
+       sooner; this is the transport-level backstop. */
+    setTimeout(function () {
+      if (done) return; done = true;
+      d.reject(new Error('timeout: ' + verb));
+    }, 15000);
     return d.promise();
   }
 

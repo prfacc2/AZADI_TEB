@@ -366,7 +366,9 @@ static void recalc(TabPage* t){
     if(!t->services.empty()){
         long long grand=0;
         for(auto& s : t->services){
-            long long line = s.price * (s.qty>0?s.qty:1);
+            // v1.44.0 §2.5: explicit 64-bit cast so a huge price × qty can never
+            // overflow int on the 32-bit build.
+            long long line = (long long)s.price * (s.qty>0?s.qty:1);
             long long ldisc = s.discount;
             long long baseAfterDisc = line - ldisc; if(baseAfterDisc<0) baseAfterDisc=0;
             s.insShare = baseAfterDisc * INSURANCES[insIdx].pct / 100;
@@ -3058,6 +3060,9 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
 
         RecH m; rcH(rc.right,m);
         CenterV v; computeCenterV(m,v,t,rc.bottom);
+        // v1.44.0 §2.5: recalc() here only READS combo state and recomputes the
+        // per-row shares needed to PAINT the totals — it does NOT call
+        // InvalidateRect, so painting can never trigger an infinite repaint.
         recalc(t);
         recClampScroll(h,t);
         const int sy=t->scrollY;
