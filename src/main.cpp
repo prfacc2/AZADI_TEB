@@ -5,11 +5,13 @@
 // ============================================================================
 #include "app.h"
 #include "backup_log.h"
-#include "web_admission.h"
+//  v1.46.0: the embedded browser admission surface has been DELETED. The
+//  reception «پذیرش بیمار» page is rendered 100% by the native GDI form now —
+//  no loopback host to boot, no accelerator routing to a browser control.
 #include "web_thread_pool.h"   // v1.40.0: WM_APP_UI_TASK marshalling (RunOnUiThread)
 #include <stdio.h>
 #ifdef AZ_DEBUG_BUILD
-#include <winsock2.h>   // headless admission_probe self-connect (debug only)
+#include <winsock2.h>   // headless debug self-connect helpers (debug only)
 #include <ws2tcpip.h>
 #endif
 
@@ -974,11 +976,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
     gdipStartup();                   // v1.3.0: GDI+ rendering layer
     seedDefaultDepts();              // v1.4.1: ensure «پذیرش» category exists
 
-    // v1.33.0: start the embedded Patient-Admission loopback host EAGERLY at
-    // launch (instead of lazily on first tab open). Makes the HTML surface come
-    // up instantly when «پذیرش بیمار» is clicked and guarantees the /api bridge
-    // is already listening. Cheap: one loopback socket + a single accept thread.
-    WebAdmission_EnsureHost();
+    // v1.46.0: no embedded admission loopback host is started at launch anymore.
+    // The reception «پذیرش بیمار» page is native GDI, so there is no /api bridge
+    // to boot — the tab opens instantly and cannot freeze the UI thread.
 
     // responsive scale: based on monitor size + DPI
     HDC sdc=GetDC(NULL);
@@ -1038,176 +1038,6 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
                                                switchScreen(SC_MANAGE);
                                                openBackupManager(f); }
             else if(!wcscmp(dbg,L"shift")){    int sh=0; showShiftDialog(f,sh); }
-            // §D.6: headless verification that the EMBEDDED admission page host
-            // actually serves the HTML/CSS/JS bundle + /api bridge. Starts the
-            // loopback host, then self-connects over 127.0.0.1 to GET
-            // /index.html and POST /api/init, logging the results and an
-            // AZ_ADMISSION_PROBE=OK/FAIL marker, then exits. Lets us confirm the
-            // HTML surface loads without needing a full GUI/WebBrowser render.
-            else if(!wcscmp(dbg,L"admission_probe")){
-                int port = WebAdmission_EnsureHost();
-                logLine(L"PROBE admission: host port = " + std::to_wstring(port));
-                bool ok = false;
-                if(port>0){
-                    auto httpGet=[&](const std::string& reqLine, const std::string& body)->std::string{
-                        SOCKET s=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);
-                        if(s==INVALID_SOCKET) return "";
-                        sockaddr_in a={}; a.sin_family=AF_INET;
-                        a.sin_addr.s_addr=htonl(INADDR_LOOPBACK); a.sin_port=htons((u_short)port);
-                        if(connect(s,(sockaddr*)&a,sizeof(a))!=0){ closesocket(s); return ""; }
-                        std::string req=reqLine;
-                        req+="Host: 127.0.0.1\r\nConnection: close\r\n";
-                        if(!body.empty()){ char cl[64]; sprintf(cl,"Content-Length: %d\r\n",(int)body.size()); req+=cl; }
-                        req+="\r\n"; req+=body;
-                        send(s,req.data(),(int)req.size(),0);
-                        std::string resp; char buf[2048]; int n;
-                        while((n=recv(s,buf,sizeof(buf),0))>0) resp.append(buf,n);
-                        closesocket(s); return resp;
-                    };
-                    std::string idx=httpGet("GET /index.html HTTP/1.1\r\n","");
-                    std::string api=httpGet("POST /api/init HTTP/1.1\r\n","{}");
-                    bool idxOk = idx.find("200")!=std::string::npos &&
-                                 (idx.find("<html")!=std::string::npos || idx.find("<!DOCTYPE")!=std::string::npos ||
-                                  idx.find("admission")!=std::string::npos);
-                    bool apiOk = api.find("200")!=std::string::npos && api.find("{")!=std::string::npos;
-                    logLine(L"PROBE index.html len=" + std::to_wstring(idx.size()) + (idxOk?L" OK":L" FAIL"));
-                    logLine(L"PROBE api/init  len=" + std::to_wstring(api.size()) + (apiOk?L" OK":L" FAIL"));
-                    ok = idxOk && apiOk;
-                }
-                // Now verify the embedded VIEW (MSHTML/WebView2) actually
-                // creates a real child window AND that the bundled JS runs end to
-                // end: we pump messages for up to ~10s and check that the page
-                // reached /api/init through the Bridge. A JS *syntax error* (the
-                // bug we are fixing) would stop the script before it ever calls
-                // the bridge, so a non-zero init-hit count proves the ES5 JS
-                // parsed and executed under the real engine.
-                long WebAdmission_DebugInitHits();
-                bool viewOk=false, jsOk=false;
-                if(WebAdmission_Available()){
-                    HWND v = WebAdmission_CreateView(f);
-                    viewOk = (v!=NULL && IsWindow(v));
-                    logLine(std::wstring(L"PROBE createView ") + (viewOk?L"OK":L"FAIL"));
-                    if(v){
-                        DWORD t0=GetTickCount(); MSG pm;
-                        while(GetTickCount()-t0 < 12000){
-                            if(WebAdmission_DebugInitHits() > 0){ jsOk=true; break; }
-                            if(PeekMessageW(&pm,NULL,0,0,PM_REMOVE)){ TranslateMessage(&pm); DispatchMessageW(&pm); }
-                            else Sleep(15);
-                        }
-                        logLine(std::wstring(L"PROBE js-bridge init ") + (jsOk?L"OK":L"FAIL") +
-                                L" hits=" + std::to_wstring(WebAdmission_DebugInitHits()));
-                        WebAdmission_DestroyView(v);
-                    }
-                }
-                ok = ok && viewOk && jsOk;
-                logLine(ok ? L"AZ_ADMISSION_PROBE=OK" : L"AZ_ADMISSION_PROBE=FAIL");
-                // also drop a plain marker file so headless runners can read it
-                {
-                    std::wstring marker;
-                    marker += std::wstring(L"host=") + (port>0?L"OK":L"FAIL") + L" port=" + std::to_wstring(port) + L"\r\n";
-                    marker += std::wstring(L"assets=") + (ok||true?L"":L"") ;
-                    marker += std::wstring(L"view=") + (viewOk?L"OK":L"FAIL") + L"\r\n";
-                    marker += std::wstring(L"jsBridge=") + (jsOk?L"OK":L"FAIL") +
-                              L" initHits=" + std::to_wstring(WebAdmission_DebugInitHits()) + L"\r\n";
-                    marker += ok ? L"AZ_ADMISSION_PROBE=OK\r\n" : L"AZ_ADMISSION_PROBE=FAIL\r\n";
-                    writeFileUtf8(dataDir()+L"\\admission_probe.txt", marker, false);
-                }
-                gdipShutdown(); BackupLog_Shutdown();
-                return ok ? 0 : 2;
-            }
-            // §D.7: headless smoke test for the KEYBOARD routing fix. Opens the
-            // embedded admission view, waits for the bundled JS to boot, focuses
-            // #nid, types a known-existing national ID, then synthesizes an
-            // Enter keystroke via keybd_event. Because Enter now travels through
-            // WebAdmission_TranslateAccel → the hosted control → the page's
-            // keydown listener → Bridge.call('patient.lookup'), the C++ store
-            // records the looked-up nid. We verify via WebAdmission_DebugInitHits
-            // (JS ran) and WebAdmission_DebugLastFilledNid (Enter routed + lookup
-            // fired + auto-fill flow reached the store). Driven by
-            // `--smoke-admission-keys` (AZ_DEBUG_SCREEN=admission_keys).
-            else if(!wcscmp(dbg,L"admission_keys")){
-                long WebAdmission_DebugInitHits();
-                std::string WebAdmission_DebugLastFilledNid();
-                // small local UTF-8 <-> wide helpers (web_admission's are static)
-                auto w2u8_dbg=[](const std::wstring& w)->std::string{
-                    if(w.empty()) return "";
-                    int n=WideCharToMultiByte(CP_UTF8,0,w.c_str(),(int)w.size(),NULL,0,NULL,NULL);
-                    std::string s(n,0); WideCharToMultiByte(CP_UTF8,0,w.c_str(),(int)w.size(),&s[0],n,NULL,NULL);
-                    return s;
-                };
-                auto u82w_dbg=[](const std::string& s)->std::wstring{
-                    if(s.empty()) return L"";
-                    int n=MultiByteToWideChar(CP_UTF8,0,s.c_str(),(int)s.size(),NULL,0);
-                    std::wstring w(n,0); MultiByteToWideChar(CP_UTF8,0,s.c_str(),(int)s.size(),&w[0],n);
-                    return w;
-                };
-                // Seed a known patient so the lookup has something to find.
-                std::wstring knownNid=L"1234567890";
-                {
-                    // Pull the first existing patient's nid if the store is
-                    // non-empty; otherwise fall back to the seeded constant.
-                    auto pats=loadAllPatients();
-                    if(!pats.empty() && !pats[0].nid.empty()) knownNid=pats[0].nid;
-                }
-                logLine(L"SMOKE admission_keys: using nid=" + knownNid);
-                bool viewOk=false, jsOk=false, keyOk=false;
-                if(WebAdmission_Available()){
-                    HWND v=WebAdmission_CreateView(f);
-                    viewOk=(v!=NULL && IsWindow(v));
-                    logLine(std::wstring(L"SMOKE createView ")+(viewOk?L"OK":L"FAIL"));
-                    if(v){
-                        // 1) pump until the page's JS booted (reached /api/init)
-                        DWORD t0=GetTickCount(); MSG pm;
-                        while(GetTickCount()-t0<12000){
-                            if(WebAdmission_DebugInitHits()>0){ jsOk=true; break; }
-                            if(PeekMessageW(&pm,NULL,0,0,PM_REMOVE)){
-                                if(!WebAdmission_TranslateAccel(&pm)){ TranslateMessage(&pm); DispatchMessageW(&pm); }
-                            } else Sleep(15);
-                        }
-                        logLine(std::wstring(L"SMOKE js-bridge ")+(jsOk?L"OK":L"FAIL"));
-                        // 2) focus the host, type the nid, press Enter. We drive
-                        //    focus + fill through the bridge push so the field is
-                        //    populated deterministically, then synthesize Enter.
-                        SetForegroundWindow(f); SetFocus(v);
-                        WebAdmission_PushEvent("debug.focusNid",
-                            std::string("{\"nid\":\"")+w2u8_dbg(knownNid)+"\"}");
-                        // give the page a moment to apply the focus/fill push
-                        DWORD t1=GetTickCount();
-                        while(GetTickCount()-t1<600){
-                            if(PeekMessageW(&pm,NULL,0,0,PM_REMOVE)){
-                                if(!WebAdmission_TranslateAccel(&pm)){ TranslateMessage(&pm); DispatchMessageW(&pm); }
-                            } else Sleep(10);
-                        }
-                        keybd_event(VK_RETURN,0,0,0);
-                        keybd_event(VK_RETURN,0,KEYEVENTF_KEYUP,0);
-                        // 3) wait up to 1500 ms and verify the store saw the nid
-                        DWORD t2=GetTickCount();
-                        std::string want=w2u8_dbg(knownNid);
-                        while(GetTickCount()-t2<1500){
-                            std::string got=WebAdmission_DebugLastFilledNid();
-                            if(!got.empty() && got==want){ keyOk=true; break; }
-                            if(PeekMessageW(&pm,NULL,0,0,PM_REMOVE)){
-                                if(!WebAdmission_TranslateAccel(&pm)){ TranslateMessage(&pm); DispatchMessageW(&pm); }
-                            } else Sleep(15);
-                        }
-                        logLine(std::wstring(L"SMOKE enter->lookup ")+(keyOk?L"OK":L"FAIL")+
-                                L" lastNid=" + u82w_dbg(WebAdmission_DebugLastFilledNid()));
-                        WebAdmission_DestroyView(v);
-                    }
-                }
-                bool ok = viewOk && jsOk && keyOk;
-                logLine(ok?L"AZ_ADMISSION_KEYS=OK":L"AZ_ADMISSION_KEYS=FAIL");
-                {
-                    std::wstring marker;
-                    marker += std::wstring(L"view=")+(viewOk?L"OK":L"FAIL")+L"\r\n";
-                    marker += std::wstring(L"jsBridge=")+(jsOk?L"OK":L"FAIL")+L"\r\n";
-                    marker += std::wstring(L"enterLookup=")+(keyOk?L"OK":L"FAIL")+L"\r\n";
-                    marker += ok?L"AZ_ADMISSION_KEYS=OK\r\n":L"AZ_ADMISSION_KEYS=FAIL\r\n";
-                    writeFileUtf8(dataDir()+L"\\admission_keys.txt", marker, false);
-                }
-                gdipShutdown(); BackupLog_Shutdown();
-                return ok?0:2;
-            }
             // §D.5: headless smoke test for the print-designer open/close path.
             // Exercises the section-picker + designer launch without blocking on
             // user input, then exits 0 (path is reachable) or a non-zero code if
@@ -1249,15 +1079,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
             }
         }
 
-        // Give the embedded admission browser (MSHTML/WebView2) a chance to eat
-        // accelerator keys (Tab / Enter / Ctrl+A / arrows, …). These MUST pass
-        // through TranslateAccelerator BEFORE TranslateMessage — otherwise the
-        // hosted control never sees the keystroke and the page's JS keydown
-        // listener never fires (the root cause of the broken navigation).
-        if(WebAdmission_TranslateAccel(&msg)){
-            continue;   // message consumed by the browser control
-        }
-
+        // v1.46.0: the embedded admission browser is gone, so there is no
+        // browser control to route accelerator keys to. The native GDI reception
+        // form handles Tab / Enter / Ctrl+A itself via standard Win32 dispatch.
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }

@@ -21,7 +21,7 @@
 #include <windows.h>
 
 // v1.45.0 §5: local UTF-8 → wide helper for the worker C++ exception breadcrumb
-// (u82w in web_admission.cpp is file-static and not visible here). JSON-escapes
+// (self-contained; not shared with other translation units). JSON-escapes
 // the payload so the client.log line stays valid JSON-per-line.
 static std::wstring wtpJsonEsc(const std::string& s) {
     int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), NULL, 0);

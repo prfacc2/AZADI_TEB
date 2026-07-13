@@ -49,8 +49,7 @@ static void ensureCs() {
     if (!g_regCsInit) { InitializeCriticalSection(&g_regCs); g_regCsInit = true; }
 }
 
-// tiny UTF-8 -> wide for the log sinks (self-contained; does not depend on the
-// web_admission.cpp-local helpers which are in an anonymous namespace there).
+// tiny UTF-8 -> wide for the log sinks (self-contained; has no external deps).
 static std::wstring pgU82W(const std::string& s) {
     if (s.empty()) return L"";
     int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), NULL, 0);

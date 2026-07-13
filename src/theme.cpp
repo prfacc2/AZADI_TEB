@@ -115,17 +115,11 @@ static BOOL CALLBACK topProc(HWND h, LPARAM){
     }
     return TRUE;
 }
-// v1.43.0: forward-declare the web-admission event pusher (defined in
-// web_admission_dispatch.inc) so theme toggles reach the embedded page.
-void WebAdmission_PushEvent(const char* eventName, const std::string& jsonData);
-
 void broadcastThemeChange(){
     EnumWindows(topProc, 0);
-    // v1.43.0: keep the embedded web admission page (WebView2 / MSHTML) in sync
-    // with the native theme. Push a "theme" event so the page re-skins live
-    // (dark ⇄ light) without a reload and with no visual clash.
-    WebAdmission_PushEvent("theme",
-        std::string("{\"theme\":")+(g_dark?"\"dark\"":"\"light\"")+"}");
+    // v1.46.0: the embedded web-admission page has been deleted; the reception
+    // page is native GDI and re-skins directly via the WM_APP_THEME broadcast
+    // above, so there is no separate surface to push a "theme" event to.
 }
 
 // =================================================================== draw ==

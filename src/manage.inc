@@ -318,9 +318,8 @@ static void mgServicesSave(HWND h){
     if(!ok){ s_mg->msg=err; s_mg->msgCol=g_theme.danger; }
     else {
         mgServicesClearForm();
-        // LIVE SYNC: push the fresh catalog to any open embedded Admission view
-        // so the change is reflected immediately, without a page reload.
-        WebAdmission_NotifyCatalogChanged();
+        // v1.46.0: the embedded Admission view is gone; the native reception
+        // form reads the live catalog directly, so no cross-surface push here.
     }
     mgServicesReload();
     InvalidateRect(h,NULL,TRUE);
@@ -339,8 +338,7 @@ static void mgServicesDelete(HWND h){
     removeService(s.code);
     s_mg->msg=L"خدمت حذف شد."; s_mg->msgCol=g_theme.success;
     mgServicesClearForm();
-    // LIVE SYNC: reflect the deletion in any open embedded Admission view.
-    WebAdmission_NotifyCatalogChanged();
+    // v1.46.0: no embedded Admission view to notify — native form reads live.
     mgServicesReload();
     InvalidateRect(h,NULL,TRUE);
 }
@@ -447,9 +445,7 @@ static void mgInsSave(HWND h){
     }
     saveInsuranceRows(all);
     mgInsClearForm();
-    // LIVE SYNC: push the fresh insurer list + percentages to any open Admission
-    // view so its dropdowns and discount math update without a reload.
-    WebAdmission_NotifyCatalogChanged();
+    // v1.46.0: no embedded Admission view to notify — native form reads live.
     mgInsReload();
     InvalidateRect(h,NULL,TRUE);
 }
@@ -470,7 +466,7 @@ static void mgInsDelete(HWND h){
     saveInsuranceRows(all);
     s_mg->msg=L"بیمه حذف شد."; s_mg->msgCol=g_theme.success;
     mgInsClearForm();
-    WebAdmission_NotifyCatalogChanged();
+    // v1.46.0: no embedded Admission view to notify — native form reads live.
     mgInsReload();
     InvalidateRect(h,NULL,TRUE);
 }

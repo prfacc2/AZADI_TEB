@@ -5,6 +5,41 @@
 
 ---
 
+## 1.46.0 — 1405-04-22
+
+**BREAKING ARCHITECTURE CHANGE — the reception «پذیرش بیمار» page is now
+rendered 100% by native Win32 GDI, exactly as it was before v1.13.0.**
+
+Why:
+- Every attempt (v1.42→v1.45) to stabilise the embedded MSHTML/WebView2
+  admission page failed. The root cause is the loopback-HTTP JS↔C++ bridge:
+  MSHTML's per-host connection cap, WinINet buffering of small localhost
+  responses, and endpoint-security products throttling same-process loopback
+  traffic combine to freeze the UI thread on the operator's real hardware.
+- .NET / C# was evaluated and rejected: it would break the single-static-EXE
+  guarantee, require a .NET runtime, and forces Windows-only build tooling.
+- The native GDI reception form already exists in reception.cpp (~4200 lines),
+  was designed pixel-match to the reference mock (v1.18–v1.31 comments), and
+  had been retained as the "fallback" path. In v1.46 it becomes the ONLY path.
+
+What changed:
+- Deleted: assets/admission/{admission.js,bridge.js,contextmenu.js,admission.css,index.html,vazir.ttf},
+  src/web_admission.{cpp,h}, src/web_admission_{api,dispatch,host,http,mshtml,webview2}.inc,
+  RCDATA 400–405, and the "prefer web admission" branch in reception.cpp.
+- Kept: the print-designer WebView (opened only on demand from Management —
+  never freezes reception because it never runs on that tab).
+- Kept: every C++ data-layer function (billing, services, insurance, employees,
+  print pipeline, backup, appointment). All calculations still run in C++.
+- Kept: 30 reception templates + print designer table element + tokens from v1.44.
+- The reception tab now opens INSTANTLY (no browser boot, no loopback wait,
+  no WebView2 environment creation) and cannot freeze because it uses only
+  standard Win32 message dispatch.
+
+Look and feel: unchanged. Same three-column RTL layout, same insurance panel,
+same services table, same unpaid queue, same action buttons.
+
+---
+
 ## 1.45.0 — 1405-04-22
 
 > **رفعِ ریشه‌ایِ قفل‌شدنِ برنامه پس از افزودنِ خدمت (تلاشِ نسخهٔ ۱.۴۴ اوضاع را
