@@ -5,6 +5,40 @@
 
 ---
 
+## 1.45.0 — 1405-04-22
+
+> **رفعِ ریشه‌ایِ قفل‌شدنِ برنامه پس از افزودنِ خدمت (تلاشِ نسخهٔ ۱.۴۴ اوضاع را
+> بدتر کرده بود).**
+
+**علتِ اصلی (ریشه‌ای):**
+- نسخهٔ قبلی یک Vectored Exception Handler به‌همراهِ `setjmp/longjmp` نصب کرده بود
+  تا استثناهایِ ساختاری را «مهار» کند. اما `longjmp` از داخلِ یک VEH روی ویندوز
+  **رفتارِ تعریف‌نشده (UB)** است: زنجیرهٔ dispatchِ SEH در ntdll و فیلدهایِ TEB
+  را خراب می‌کند، قفل‌هایِ critical-section را نگه می‌دارد و باعث می‌شود اولین
+  فراخوانیِ بعدیِ worker برایِ همیشه در ntdll بلاک شود — یعنی همان قفل‌شدنِ کاملِ
+  برنامه که کاربر گزارش کرده بود (حتی دکمهٔ بستن هم کار نمی‌کرد).
+
+**تغییرات:**
+- حذفِ کاملِ داربستِ VEH + `setjmp/longjmp` از `src/web_admission_api.inc`؛
+  `admissionApiSafe` اکنون تنها بر `admissionApiInner` (با `try/catch`ِ ++C) تکیه
+  می‌کند. — `src/web_admission_api.inc`.
+- حذفِ همان الگویِ UB (VEH + `longjmp`) از تحلیل‌گرِ پشتیبان. — `src/backup_analyzer.cpp`.
+- تنها **یک** VEH در کلِ برنامه باقی مانده که فقط لاگ می‌گیرد و هرگز stack را
+  unwind نمی‌کند (`vehLogFilter`). — `src/handlers.cpp`.
+- افزودنِ `try/catch(std::exception&)/catch(...)` در هر job از استخرِ نخ به‌همراهِ
+  یک خطِ breadcrumb در `logs\client.log`. — `src/web_thread_pool.cpp`.
+- کوتاه‌کردنِ تایم‌اوتِ ترابری HTTP و WebView از ۱۵ ثانیه به **۸ ثانیه** تا UI
+  هرگز بیش از ۸ ثانیه قفل نماند. — `assets/admission/bridge.js`.
+- افزودنِ شبکهٔ ایمنیِ سراسریِ `window.onerror` در پذیرش. — `assets/admission/admission.js`.
+- سخت‌سازیِ بیشترِ گاردهایِ حلقهٔ پارسر: افزودنِ گاردِ صریحِ forward-progress
+  (`lastP`) و سقفِ اسکنِ داخلی (`qGuard`) در `adComputeBill`. — `src/web_admission_api.inc`.
+- گاردِ شمارندهٔ حلقهٔ accept برایِ حالتِ طوفانِ INVALID_SOCKET. — `src/web_admission_http.inc`.
+- افزودنِ گام‌هایِ `[verify]` به `build.sh` (غیرمسدودکننده). — `build.sh`.
+- تمامِ قابلیت‌هایِ نسخهٔ ۱.۴۴ (۳۰ قالب، جدول‌ها، توکن‌ها، پیش‌نمایش، چاپِ
+  باکیفیت) حفظ شده‌اند.
+
+---
+
 ## 1.44.0 — 2026-07-13
 
 > **رفعِ ریشه‌ایِ قفل‌شدنِ پذیرشِ وب هنگامِ افزودنِ خدمت + لاگِ ساختاریافتهٔ

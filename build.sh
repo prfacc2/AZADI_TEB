@@ -60,6 +60,33 @@ if command -v sha256sum >/dev/null 2>&1; then
     echo "SHA-256 -> build/AzadiTeb.exe.sha256"
 fi
 
+# ----------------------------------------------------------------------------
+# v1.45.0 §9: sanity checks the previous attempt failed to do. Non-blocking —
+# these only echo warnings (guarded so `set -e` never aborts the build on them).
+# ----------------------------------------------------------------------------
+set +e
+echo "[verify] no longjmp/setjmp/__try in our source:"
+if grep -rn --include='*.cpp' --include='*.inc' --include='*.h' \
+       -E 'longjmp|setjmp|adSehVeh|g_sehArmed|g_sehJmp|__try|__except' src/ | grep -vqE ':\s*//|^\s*//' ; then
+    grep -rn --include='*.cpp' --include='*.inc' --include='*.h' \
+       -E 'longjmp|setjmp|adSehVeh|g_sehArmed|g_sehJmp|__try|__except' src/ | grep -vE ':\s*//|^\s*//'
+    echo "  WARN: forbidden token still present (non-comment)"
+else
+    echo "  OK"
+fi
+echo "[verify] exactly ONE AddVectoredExceptionHandler call:"
+n=$(grep -rn --include='*.cpp' --include='*.inc' 'AddVectoredExceptionHandler' src/ | wc -l)
+echo "  count=$n"
+[ "$n" = "1" ] || echo "  WARN: expected 1"
+echo "[verify] EXE size (>500KB):"
+sz=$(stat -c%s build/AzadiTeb.exe)
+echo "  size=$sz"
+[ "$sz" -gt 512000 ] || echo "  WARN: EXE too small"
+echo "[verify] no deleted symbols in binary:"
+sym=$(grep -aoE 'adSehVeh|g_sehArmed|g_sehJmp|azAnalyzeVeh|s_azArmed' build/AzadiTeb.exe | sort -u)
+if [ -z "$sym" ]; then echo "  OK (none)"; else echo "  WARN: $sym"; fi
+set -e
+
 ls -lh build/AzadiTeb.exe
 echo "Build OK -> build/AzadiTeb.exe"
 

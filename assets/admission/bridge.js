@@ -140,9 +140,12 @@
       global.chrome.webview.postMessage(
         JSON.stringify({ verb: verb, id: id, payload: payload || {} }));
     } catch (e) { delete pending[id]; d.reject(e); return d.promise(); }
+    /* v1.45.0 §7: shortened 15000 -> 8000ms. A WebView2 postMessage round-trip
+       is a local call; 8s is a generous backstop that still guarantees the
+       promise can never stay pending forever if a reply is dropped. */
     setTimeout(function () {
       if (pending[id]) { delete pending[id]; d.reject(new Error('timeout: ' + verb)); }
-    }, 15000);
+    }, 8000);
     return d.promise();
   }
 
@@ -203,13 +206,14 @@
       function (err) { if (done) return; done = true; d.reject(err); });
     /* v1.44.0: the HTTP transport used to have NO timeout (unlike WebView2), so a
        dropped/never-answered reply left the promise pending forever — a root
-       cause of the stuck _billBusy freeze. Reject after 15s so callers can
-       recover. The scheduleServerBill watchdog (1500ms) unsticks the UI even
-       sooner; this is the transport-level backstop. */
+       cause of the stuck _billBusy freeze. v1.45.0 §7: shortened 15000 -> 8000ms.
+       A local loopback reply should arrive in <100ms, so 8s is a generous
+       transport-level backstop that guarantees no promise stays pending forever.
+       The scheduleServerBill watchdog (1500ms) unsticks the UI even sooner. */
     setTimeout(function () {
       if (done) return; done = true;
       d.reject(new Error('timeout: ' + verb));
-    }, 15000);
+    }, 8000);
     return d.promise();
   }
 

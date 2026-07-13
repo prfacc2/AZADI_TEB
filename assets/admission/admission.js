@@ -29,6 +29,22 @@
 
   function $(id) { return document.getElementById(id); }
 
+  /* v1.45.0 §7: global unhandled-error safety net. Any uncaught JS error is
+     logged as ONE client.log line (abnormal event only) instead of silently
+     wedging the UI. logClient is a hoisted function declaration, so it is safe
+     to reference here even though it is defined further down. Added exactly once. */
+  if (window.addEventListener) {
+    window.addEventListener('error', function (e) {
+      try {
+        logClient('error', 'window.onerror', {
+          msg: String((e && e.message) || ''),
+          src: String((e && e.filename) || ''),
+          line: (e && e.lineno) || 0
+        });
+      } catch (x) {}
+    });
+  }
+
   var state = {
     services: [],          /* current admission service rows */
     insurances: [],        /* {name,pct} base list */
