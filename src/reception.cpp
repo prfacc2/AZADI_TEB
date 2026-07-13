@@ -7,8 +7,11 @@
 // ============================================================================
 #include "app.h"
 #include "sections.h"   // §1.19.0: resolve operator dept → Section id for print routing
-#include "web_admission.h" // v1.33.0: embedded WebView2 «پذیرش بیمار» surface (native fallback)
-//  v1.17.0: the HTML/CSS/JS (MSHTML) presentation host was retired — the
+//  v1.46.0: the embedded browser «پذیرش بیمار» surface has been DELETED. The
+//  reception page is now rendered 100% by the native Win32/GDI form in this
+//  file — the ONE and ONLY renderer. No loopback HTTP bridge, no browser boot,
+//  so the reception tab can never freeze the UI thread.
+//  v1.17.0: the earlier embedded HTML presentation host was retired — the
 //  reception/appointment UI is now 100% native C++. `webhost.h` is no longer
 //  included and the webhost_*.{cpp,inc} sources are no longer compiled. The
 //  `web` HWND field on TabPage is kept (always NULL) so the existing layout
@@ -153,11 +156,10 @@ struct TabPage {
     HWND eUpDate;    HWND cUpHours;   HWND bUpRefresh;
     HWND chkIns;             // «دارای بیمه» — کنار کد ملی، پیش‌فرض تیک‌خورده
     HWND appt;               // نوبت‌دهی child page (kind==TK_APPOINTMENT)
-    //  v1.13.0 (§3/§4): the hybrid HTML/CSS/JS presentation host. When non-NULL
-    //  it is the VISIBLE interface for this reception/appointment tab (rendered
-    //  via the system MSHTML control). C++ stays the source of truth — the host
-    //  bridges every action to the existing repository functions. NULL means the
-    //  classic native form is used (deterministic fallback if MSHTML is absent).
+    //  v1.46.0: legacy embedded-browser host handle. The embedded admission
+    //  surface has been DELETED, so this is ALWAYS NULL now. It is retained only
+    //  so the existing `if(t->web) ...` layout guards remain valid without code
+    //  churn — the reception page is rendered 100% by the native GDI form.
     HWND web;
     std::vector<int> insAllowed;   // insurances this patient carries (inquiry)
     // ---- right info panel (v1.6.0) ----
@@ -2066,14 +2068,10 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         t=(TabPage*)cs->lpCreateParams;
         SetWindowLongPtrW(h,GWLP_USERDATA,(LONG_PTR)t);
         t->page=h;
-        // §3 hybrid host: when opening the Appointment tab we first try to bring
-        // up the HTML/CSS/JS surface (system MSHTML/WebBrowser OLE control) with a
-        // centred loader while native state synchronises. C++ stays the host /
-        // validator / lifecycle owner; JS owns only layout + interaction. If the
-        // renderer is unavailable or fails, we fall back to the classic native
-        // appointment page so the app NEVER loses the feature.
+        // The Appointment tab is rendered 100% in native C++ (Win32/GDI). C++ is
+        // the host / validator / lifecycle owner; there is no embedded browser.
         if(t->kind==TK_APPOINTMENT){
-            //  v1.17.0: the HTML/CSS/JS (MSHTML) presentation layer has been
+            //  v1.17.0: the earlier embedded HTML presentation layer has been
             //  RETIRED. The appointment screen is now rendered 100% in native
             //  C++ (Win32/GDI) — the same engine as the rest of the app — so
             //  there is no embedded browser, no IE/Trident dependency and no
@@ -2088,20 +2086,14 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         // Portal-message and empty tabs are pure painted pages with no form
         // controls — they own no edit boxes, combos or buttons.
         if(t->kind!=TK_RECEPTION) return 0;
-        //  v1.33.0: PREFERRED renderer — «پذیرش بیمار» is rendered by an
-        //  embedded WebView2 (Chromium) surface loaded from the in-app loopback
-        //  host: the modern HTML/CSS/JS admission UI, fully two-way synced with
-        //  C++ through the structured IPC bridge (see web_admission.*). When the
-        //  WebView2 runtime is present we create that view and RETURN — skipping
-        //  the native controls entirely. If the runtime is missing we fall
-        //  through to the proven native GDI reception form below, so the app
-        //  keeps working on every Windows (7→11+) offline. The page never opens
-        //  in an external browser.
+        //  v1.46.0: «پذیرش بیمار» is rendered ONLY by the native GDI form below.
+        //  The embedded browser admission surface has been deleted, so
+        //  t->web is always NULL and the native control creation is the ONE and
+        //  ONLY path. This removes the loopback-HTTP JS↔C++ bridge that froze
+        //  the UI thread on the operator's hardware (v1.42→v1.45 could not fix
+        //  it because the freeze was architectural). No browser boot, no socket
+        //  on the hot path — the tab opens instantly and can never freeze.
         t->web = NULL;
-        if(WebAdmission_Available()){
-            HWND wv = WebAdmission_CreateView(h);
-            if(wv){ t->web = wv; return 0; }   // embedded UI owns the whole tab
-        }
         // v1.25.0: ES_RIGHT so every textbox is right-aligned (راست‌چین) by
         // default — Persian RTL data entry. Fields with enableAutoDir still flip
         // alignment live based on typed content (Latin vs Persian).
@@ -3609,10 +3601,10 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         EndPaint(h,&ps);
         return 0; }
     case WM_DESTROY:
-        // v1.33.0 deterministic teardown: release the embedded WebView2 host
-        // (controller + core WebView) before the page window goes away. Null our
-        // handle first so no stale reference can be reused.
-        if(t && t->web){ HWND w0=t->web; t->web=0; WebAdmission_DestroyView(w0); }
+        // v1.46.0: the embedded admission host is gone; t->web is always NULL
+        // now, so there is nothing to tear down here. Kept as a no-op for
+        // clarity — the native GDI controls are destroyed with the page window.
+        t->web = NULL;
         return 0;
     }
     return DefWindowProcW(h,m,w,l);

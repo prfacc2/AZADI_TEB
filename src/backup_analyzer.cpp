@@ -655,7 +655,7 @@ static void analyzeCore(const std::wstring& path, BkAnalysis& A,
 //  The previous implementation armed a thread-local Vectored Exception Handler
 //  that longjmp()'d back to a setjmp() landing pad on a hardware fault. That is
 //  the SAME undefined-behavior pattern that caused the admission freeze (see
-//  web_admission_api.inc / docs/CHANGELOG.md 1.45.0): longjmp() out of the
+//  docs/CHANGELOG.md 1.45.0): longjmp() out of the
 //  kernel SEH dispatch chain skips the required unwind and can leave ntdll's
 //  exception state and critical sections corrupt, deadlocking later work.
 //

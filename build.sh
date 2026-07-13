@@ -23,6 +23,11 @@ echo "[2/3] Compiling C++..."
 # src/webhost.cpp (and its webhost_*.inc includes + embedded HTML/CSS/JS in
 # webhost_assets.inc) are no longer compiled. This removes the IE/Trident
 # dependency, shrinks the EXE, and makes the UI single-engine + crash-safe.
+# v1.46.0: the embedded WebView2/MSHTML Patient-Admission surface has been
+# DELETED entirely (src/web_admission.cpp + its *.inc includes + the
+# assets/admission bundle). The reception «پذیرش بیمار» page is now rendered
+# 100% by the native Win32/GDI form in src/reception.cpp — no loopback HTTP
+# bridge, no browser boot, so it can never freeze on the operator's hardware.
 SRCS="src/main.cpp src/util.cpp src/handlers.cpp src/theme.cpp src/users.cpp \
       src/billing.cpp src/calculator.cpp src/dialogs.cpp src/update.cpp \
       src/admin.cpp src/reception.cpp src/gdiplus.cpp src/settings.cpp \
@@ -34,7 +39,6 @@ SRCS="src/main.cpp src/util.cpp src/handlers.cpp src/theme.cpp src/users.cpp \
       src/setup_splash.cpp src/web_designer.cpp src/services.cpp \
       src/insurance.cpp \
       src/client_log.cpp \
-      src/web_admission.cpp \
       src/web_pages.cpp src/web_thread_pool.cpp src/web_ping_api.cpp"
 
 $CXX -std=c++17 -O2 -s -municode -mwindows \
@@ -85,6 +89,42 @@ echo "  size=$sz"
 echo "[verify] no deleted symbols in binary:"
 sym=$(grep -aoE 'adSehVeh|g_sehArmed|g_sehJmp|azAnalyzeVeh|s_azArmed' build/AzadiTeb.exe | sort -u)
 if [ -z "$sym" ]; then echo "  OK (none)"; else echo "  WARN: $sym"; fi
+
+# ----------------------------------------------------------------------------
+# v1.46.0 §3: verify the HTML/MSHTML/WebView2 admission surface is fully gone.
+# Every check must print OK; any WARN fails the release.
+# ----------------------------------------------------------------------------
+echo "[v1.46 verify] no web_admission code remains:"
+if grep -rn --include='*.cpp' --include='*.inc' --include='*.h' 'WebAdmission_\|web_admission' src/ ; then
+    echo "  WARN: web_admission symbol still referenced"
+else
+    echo "  OK — reception is 100% native GDI"
+fi
+
+echo "[v1.46 verify] no HTML admission assets:"
+if [ -d assets/admission ] ; then
+    echo "  WARN: assets/admission still exists"
+else
+    echo "  OK"
+fi
+
+echo "[v1.46 verify] no MSHTML/WebView2 references from reception.cpp:"
+if grep -n 'MSHTML\|WebView\|chrome.webview\|window.external' src/reception.cpp ; then
+    echo "  WARN: dead reference"
+else
+    echo "  OK"
+fi
+
+echo "[v1.46 verify] EXE size sanity (>500KB, <10MB):"
+sz46=$(stat -c%s build/AzadiTeb.exe); echo "  size=$sz46"
+{ [ "$sz46" -gt 512000 ] && [ "$sz46" -lt 10485760 ]; } || echo "  WARN: EXE size looks wrong"
+
+echo "[v1.46 verify] no loopback bind in admission path:"
+if grep -rn --include='*.cpp' --include='*.inc' 'sockaddr_in\|bind(\|listen(\|accept(' src/reception.cpp ; then
+    echo "  WARN: reception.cpp shouldn't have sockets"
+else
+    echo "  OK"
+fi
 set -e
 
 ls -lh build/AzadiTeb.exe
