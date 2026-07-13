@@ -159,10 +159,25 @@ static DWORD WINAPI adConnThread(LPVOID p){
 }
 
 static DWORD WINAPI adHttpThread(LPVOID){
+    // v1.45.0 §6: if the listen socket is torn down (e.g. a WSAECONNRESET storm)
+    // accept() can keep returning INVALID_SOCKET and spin this loop. Count
+    // consecutive failures WITHOUT an intervening valid connection; after 200
+    // in a row, log ONE warn line and reset the counter. We NEVER kill the loop
+    // — the app must keep trying to accept so the /api bridge can recover.
+    int adInvalidStreak=0;
     for(;;){
         sockaddr_in ca; int cl=sizeof(ca);
         SOCKET c=accept(g_adListen,(sockaddr*)&ca,&cl);
-        if(c==INVALID_SOCKET){ if(InterlockedCompareExchange(&g_adStop,0,0)) break; Sleep(5); continue; }
+        if(c==INVALID_SOCKET){
+            if(InterlockedCompareExchange(&g_adStop,0,0)) break;
+            if(++adInvalidStreak>=200){
+                ClientLog_Warn(L"admission", L"accept loop invalid-socket storm",
+                    L"{\"streak\":200}");
+                adInvalidStreak=0;   // re-arm; keep trying to accept
+            }
+            Sleep(5); continue;
+        }
+        adInvalidStreak=0;   // a valid connection resets the streak
         if(InterlockedCompareExchange(&g_adStop,0,0)){ closesocket(c); break; }
         // v1.40.0 LOOPBACK-ONLY ENFORCEMENT: even though we bind to
         // INADDR_LOOPBACK, defensively reject any peer that is not 127.0.0.0/8

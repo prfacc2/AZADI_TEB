@@ -15,7 +15,6 @@
 #include <algorithm>
 #include <sstream>
 #include <map>
-#include <csetjmp>
 
 // ============================================================================
 //  defaults

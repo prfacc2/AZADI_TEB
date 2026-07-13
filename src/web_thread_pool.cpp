@@ -11,11 +11,34 @@
 // ============================================================================
 #include "app.h"
 #include "web_thread_pool.h"
+#include "client_log.h"
 
 #include <deque>
 #include <vector>
+#include <string>
+#include <exception>
 #include <winsock2.h>
 #include <windows.h>
+
+// v1.45.0 §5: local UTF-8 → wide helper for the worker C++ exception breadcrumb
+// (u82w in web_admission.cpp is file-static and not visible here). JSON-escapes
+// the payload so the client.log line stays valid JSON-per-line.
+static std::wstring wtpJsonEsc(const std::string& s) {
+    int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), NULL, 0);
+    std::wstring w;
+    if (n > 0) { w.resize(n); MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), &w[0], n); }
+    std::wstring out;
+    for (size_t i = 0; i < w.size(); ++i) {
+        wchar_t c = w[i];
+        if (c == L'"' || c == L'\\') { out += L'\\'; out += c; }
+        else if (c == L'\n') out += L"\\n";
+        else if (c == L'\r') out += L"\\r";
+        else if (c == L'\t') out += L"\\t";
+        else if (c < 0x20) { wchar_t b[8]; swprintf(b, 8, L"\\u%04X", (unsigned)c); out += b; }
+        else out += c;
+    }
+    return out;
+}
 
 extern HWND g_hFrame;
 extern bool g_lowSpec;
@@ -61,7 +84,21 @@ static DWORD WINAPI workerMain(LPVOID) {
             // keep other workers awake if more jobs remain.
             if (more) SetEvent(g_evt);
             if (g_serveFn) {
-                try { g_serveFn(c); } catch (...) { closesocket(c); }
+                // v1.45.0 §5: keep the C++ catch (SEH is handled by the
+                // process-wide crash filter — we NEVER __try/longjmp here) and
+                // leave a single client.log breadcrumb on any C++ throw so a
+                // recurring worker failure is diagnosable without UB.
+                SOCKET localC = c;
+                try {
+                    g_serveFn(c);
+                } catch (const std::exception& ex) {
+                    ClientLog_Error(L"admission", L"worker C++ exception",
+                        L"{\"what\":\"" + wtpJsonEsc(std::string(ex.what())) + L"\"}");
+                    closesocket(localC);
+                } catch (...) {
+                    ClientLog_Error(L"admission", L"worker unknown C++ exception", L"{}");
+                    closesocket(localC);
+                }
             } else {
                 closesocket(c);
             }

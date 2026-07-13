@@ -33,7 +33,6 @@
 #include "backup_mtf.h"
 #include <stdio.h>
 #include <stdint.h>
-#include <csetjmp>
 
 // ----------------------------------------------------------------- SHA-256 ---
 //  Tiny, self-contained SHA-256 (public-domain style implementation) used only
@@ -651,57 +650,24 @@ static void analyzeCore(const std::wstring& path, BkAnalysis& A,
     }
 }
 
-//  Structured-exception guard — a single bad page / access violation in any
-//  parsing step is REALLY CONTAINED here (not merely logged): MinGW's GCC win32
-//  build does not expose MS-style __try/__except for arbitrary code, so we arm a
-//  vectored exception handler that, on a genuine hardware fault, longjmp()s back
-//  to a setjmp() landing pad established before the parse. That unwinds the
-//  faulting native stack to a known-good frame and lets us surface an honest
-//  Persian error instead of letting the access violation tear down the process.
+//  v1.45.0 — Structured-exception containment via longjmp-from-VEH REMOVED.
 //
-//  The jmp landing-pad + an "armed" flag are thread-local so the VEH only ever
-//  redirects faults that originate inside THIS analyzer worker; faults anywhere
-//  else in the app fall through to the normal crash handler untouched.
-static thread_local jmp_buf  s_azJmp;
-static thread_local bool     s_azArmed = false;
-static thread_local DWORD    s_azFaultCode = 0;
-
-static LONG CALLBACK azAnalyzeVeh(EXCEPTION_POINTERS* ep){
-    DWORD code = ep && ep->ExceptionRecord ? ep->ExceptionRecord->ExceptionCode : 0;
-    // Only contain genuine hardware faults that occur WHILE the analyzer is
-    // armed on this thread. Everything else flows through to other handlers.
-    if(s_azArmed &&
-       (code==EXCEPTION_ACCESS_VIOLATION || code==EXCEPTION_IN_PAGE_ERROR ||
-        code==EXCEPTION_DATATYPE_MISALIGNMENT || code==EXCEPTION_ARRAY_BOUNDS_EXCEEDED ||
-        code==EXCEPTION_STACK_OVERFLOW)){
-        wchar_t db[96]; swprintf(db,96,L"SEH contained code=0x%08lX",(unsigned long)code);
-        BackupLog_Event(L"ANALYZE_FAIL",L"",db);
-        s_azFaultCode = code;
-        s_azArmed = false;          // disarm before unwinding
-        longjmp(s_azJmp, 1);        // unwind to the landing pad in analyzeSeh()
-    }
-    return EXCEPTION_CONTINUE_SEARCH;   // not ours / not a fault → let it flow
-}
-
+//  The previous implementation armed a thread-local Vectored Exception Handler
+//  that longjmp()'d back to a setjmp() landing pad on a hardware fault. That is
+//  the SAME undefined-behavior pattern that caused the admission freeze (see
+//  web_admission_api.inc / docs/CHANGELOG.md 1.45.0): longjmp() out of the
+//  kernel SEH dispatch chain skips the required unwind and can leave ntdll's
+//  exception state and critical sections corrupt, deadlocking later work.
+//
+//  analyzeCore() already wraps every parsing step in C++ try/catch and returns
+//  an honest Persian error on any std::exception / unknown C++ throw, so the
+//  common failure modes (corrupt/truncated files) are handled cleanly WITHOUT
+//  any SEH surgery. A genuine hardware fault (which should not occur for a
+//  bounded file read) flows to the process-wide crashFilter, which writes a
+//  dump — a clean crash + restart is far better than ntdll corruption.
 static void analyzeSeh(const std::wstring& path, BkAnalysis& A,
                        BkProgFn prog, void* user){
-    PVOID veh = AddVectoredExceptionHandler(1, azAnalyzeVeh);
-    s_azFaultCode = 0;
-    if(setjmp(s_azJmp)==0){
-        s_azArmed = true;
-        analyzeCore(path,A,prog,user);
-        s_azArmed = false;
-    } else {
-        // We arrived here via longjmp() from the VEH: a hardware fault was
-        // contained. Report it honestly instead of crashing.
-        s_azArmed = false;
-        A.ok = false;
-        wchar_t db[160];
-        swprintf(db,160,L"خطای سخت‌افزاری حین تحلیل مهار شد (کد 0x%08lX). فایل احتمالاً خراب یا ناقص است.",
-                 (unsigned long)s_azFaultCode);
-        A.error = db;
-    }
-    if(veh) RemoveVectoredExceptionHandler(veh);
+    analyzeCore(path,A,prog,user);
 }
 
 //  Detect the type by magic bytes and dispatch. Robust against any failure —
