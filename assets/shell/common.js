@@ -466,9 +466,11 @@
     }
   })();
 
-  /* v1.44.0: intentionally NO "page loaded" log/metric here. Per the logging
-     policy, client.log / client.metrics are written ONLY on abnormal events
-     (hang / crash / timeout / exception) — never on happy-path boot noise. */
+  /* uplink a one-line "page loaded" metric once the bridge is ready. */
+  AzBoot.ready(function () {
+    AzPerf.mark('page.load.' + (_pageId || 'unknown'));
+    AzBridge.log('info', 'page loaded: ' + (_pageId || 'unknown'));
+  });
 
   /* publish. AzBridge is ALSO exposed as `Bridge` so pages written against the
      original admission bridge (Bridge.call/ready/on) keep working unchanged. */

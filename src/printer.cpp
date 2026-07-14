@@ -1010,26 +1010,6 @@ static std::wstring fieldValue(const ReceptionRecord& r, const std::wstring& tok
     if(tok==L"{paid}")     return toFaDigits(formatMoney(r.paid))+L" ریال";
     if(tok==L"{issued}")   return L"چاپ توسط پذیرش: "+
         (r.userName.empty()?g_session.user.fullname:r.userName);
-    // v1.44.0 §4.2 — new bindable tokens (both {name} and {{name}} accepted).
-    {
-        std::wstring t=tok;
-        if(t.size()>=4 && t.compare(0,2,L"{{")==0 && t.compare(t.size()-2,2,L"}}")==0)
-            t=L"{"+t.substr(2,t.size()-4)+L"}";
-        if(t==L"{ins.base.pct}")  { wchar_t b[16]; swprintf(b,16,L"%d",r.basePct); return toFaDigits(b); }
-        if(t==L"{ins.base.name}") return r.insurance;
-        if(t==L"{ins.supp.pct}")  { wchar_t b[16]; swprintf(b,16,L"%d",r.suppPct); return toFaDigits(b); }
-        if(t==L"{ins.supp.name}") return r.suppInsurance;
-        if(t==L"{bill.pat}")   return toFaDigits(formatMoney(r.patientShare));
-        if(t==L"{bill.org}")   return toFaDigits(formatMoney(r.mainShare));
-        if(t==L"{bill.supp}")  return toFaDigits(formatMoney(r.orgShare-r.mainShare));
-        if(t==L"{bill.disc}")  return toFaDigits(formatMoney(r.discount));
-        if(t==L"{bill.gross}") return toFaDigits(formatMoney(r.total));
-        if(t==L"{appt.date}")  return toFaDigits(r.apptDate);
-        if(t==L"{appt.no}")    { wchar_t b[16]; swprintf(b,16,L"%d",r.queueNo); return toFaDigits(b); }
-        if(t==L"{patient.fullname}") return r.firstName+L" "+r.lastName;
-        if(t==L"{patient.nid}")      return toFaDigits(r.nationalId);
-        if(t==L"{svc.price}"){ long long s=0; for(auto&x:r.services) s+=x.price*(x.qty>0?x.qty:1); return toFaDigits(formatMoney(s)); }
-    }
     return L"";
 }
 static std::wstring itemText(const ReceptionRecord& r, const DItem& it){
@@ -1165,14 +1145,6 @@ struct PdTable {
     int cols=0, rows=0; bool header=false;
     std::vector<double> widths;
     std::vector<std::vector<std::wstring>> cells;
-    // v1.44.0 §4.4 — professional table extensions (all optional / defaulted).
-    std::wstring         kind = L"static";  // "static" | "services"
-    bool                 stripe=false;      // zebra striping on body rows
-    double               borderW=-1;        // <0 => use it.borderWidth
-    unsigned int         borderColor=0xFFFFFFFF; // 0xFFFFFFFF => use it.borderColor
-    unsigned int         headerBg=0xEEF2FB;
-    double               padding=-1;        // <0 => derive from dpi
-    std::vector<int>     colAlign;          // per-column: 0=right 1=center 2=left
 };
 static std::wstring pdU8toW(const std::string& s){
     int n=MultiByteToWideChar(CP_UTF8,0,s.c_str(),(int)s.size(),NULL,0);
@@ -1200,34 +1172,11 @@ static bool pdParseTable(const std::wstring& jsonW, PdTable& t){
         if(p<s.size()&&s[p]=='"')++p; return true; };
     auto rdNum=[&]()->double{ ws(); size_t st=p; while(p<s.size()&&(isdigit((unsigned char)s[p])||s[p]=='-'||s[p]=='+'||s[p]=='.'||s[p]=='e'||s[p]=='E'))++p; return atof(s.substr(st,p-st).c_str()); };
     ws(); if(p>=s.size()||s[p]!='{') return false; ++p;
-    // v1.44.0 §7: iteration cap + forward-progress guard so a malformed table
-    // model can never spin the print thread (matches the §2.3 parser contract).
-    int pdGuard=0; size_t pdLastP=(size_t)-1;
-    while(true){
-        if(++pdGuard>20000) break;                 // hard iteration cap
-        if(p==pdLastP) break;                       // no forward progress → bail
-        pdLastP=p;
-        ws(); if(p<s.size()&&s[p]=='}'){++p;break;} if(p>=s.size())break;
+    while(true){ ws(); if(p<s.size()&&s[p]=='}'){++p;break;} if(p>=s.size())break;
         std::string key; if(!rdStr(key))break; ws(); if(p<s.size()&&s[p]==':')++p;
         if(key=="cols") t.cols=(int)rdNum();
         else if(key=="rows") t.rows=(int)rdNum();
         else if(key=="header"){ ws(); if(s.compare(p,4,"true")==0){t.header=true;p+=4;} else if(s.compare(p,5,"false")==0){t.header=false;p+=5;} else rdNum(); }
-        // v1.44.0 §4.4 — professional table extensions.
-        else if(key=="kind"){ std::string kv; if(rdStr(kv)) t.kind=pdU8toW(kv); }
-        else if(key=="stripe"){ ws(); if(s.compare(p,4,"true")==0){t.stripe=true;p+=4;} else if(s.compare(p,5,"false")==0){t.stripe=false;p+=5;} else rdNum(); }
-        else if(key=="padding") t.padding=rdNum();
-        else if(key=="border"){ // {"w":n,"color":"#rrggbb"} OR a bare number
-            ws();
-            if(p<s.size()&&s[p]=='{'){ ++p;
-                while(true){ ws(); if(p<s.size()&&s[p]=='}'){++p;break;} std::string bk; if(!rdStr(bk))break; ws(); if(p<s.size()&&s[p]==':')++p;
-                    if(bk=="w") t.borderW=rdNum();
-                    else if(bk=="color"){ std::string cv; if(rdStr(cv)){ if(cv.size()>=7&&cv[0]=='#') t.borderColor=(unsigned)strtoul(cv.c_str()+1,NULL,16); } }
-                    else { std::string tmp; ws(); if(p<s.size()&&s[p]=='"') rdStr(tmp); else rdNum(); }
-                    ws(); if(p<s.size()&&s[p]==','){++p;continue;} if(p<s.size()&&s[p]=='}'){++p;break;} break; } }
-            else t.borderW=rdNum();
-        }
-        else if(key=="headerBg"){ std::string cv; if(rdStr(cv)){ if(cv.size()>=7&&cv[0]=='#') t.headerBg=(unsigned)strtoul(cv.c_str()+1,NULL,16); } }
-        else if(key=="colAlign"){ ws(); if(p<s.size()&&s[p]=='['){++p; while(true){ ws(); if(p<s.size()&&s[p]==']'){++p;break;} std::string av; if(rdStr(av)){ int a=0; if(av=="center")a=1; else if(av=="left")a=2; t.colAlign.push_back(a);} else rdNum(); ws(); if(p<s.size()&&s[p]==','){++p;continue;} if(p<s.size()&&s[p]==']'){++p;break;} break; } } }
         else if(key=="widths"){ ws(); if(p<s.size()&&s[p]=='['){++p; while(true){ ws(); if(p<s.size()&&s[p]==']'){++p;break;} t.widths.push_back(rdNum()); ws(); if(p<s.size()&&s[p]==','){++p;continue;} if(p<s.size()&&s[p]==']'){++p;break;} break; } } }
         else if(key=="cells"){ ws(); if(p<s.size()&&s[p]=='['){++p;
             while(true){ ws(); if(p<s.size()&&s[p]==']'){++p;break;}
@@ -1345,26 +1294,6 @@ static std::wstring pdFieldValue(const ReceptionRecord& r, const std::wstring& t
     if(tok==L"{visitfee}")     return toFaDigits(formatMoney(r.total))+L" ریال";
     if(tok==L"{paytype}")      return L"نقدی";
     if(tok==L"{cashier}")      return r.userName.empty()?g_session.user.fullname:r.userName;
-    // v1.44.0 §4.2 — new bindable tokens (accept both {name} and {{name}}).
-    {
-        std::wstring t=tok;
-        if(t.size()>=4 && t.compare(0,2,L"{{")==0 && t.compare(t.size()-2,2,L"}}")==0)
-            t=L"{"+t.substr(2,t.size()-4)+L"}";
-        if(t==L"{ins.base.pct}")  { wchar_t b[16]; swprintf(b,16,L"%d",r.basePct); return toFaDigits(b); }
-        if(t==L"{ins.base.name}") return r.insurance;
-        if(t==L"{ins.supp.pct}")  { wchar_t b[16]; swprintf(b,16,L"%d",r.suppPct); return toFaDigits(b); }
-        if(t==L"{ins.supp.name}") return r.suppInsurance;
-        if(t==L"{bill.pat}")   return toFaDigits(formatMoney(r.patientShare));
-        if(t==L"{bill.org}")   return toFaDigits(formatMoney(r.mainShare));
-        if(t==L"{bill.supp}")  return toFaDigits(formatMoney(r.orgShare-r.mainShare));
-        if(t==L"{bill.disc}")  return toFaDigits(formatMoney(r.discount));
-        if(t==L"{bill.gross}") return toFaDigits(formatMoney(r.total));
-        if(t==L"{appt.date}")  return toFaDigits(r.apptDate);
-        if(t==L"{appt.no}")    { wchar_t b[16]; swprintf(b,16,L"%d",r.queueNo); return toFaDigits(b); }
-        if(t==L"{patient.fullname}") return r.firstName+L" "+r.lastName;
-        if(t==L"{patient.nid}")      return toFaDigits(r.nationalId);
-        if(t==L"{svc.price}"){ long long s=0; for(auto&x:r.services) s+=x.price*(x.qty>0?x.qty:1); return toFaDigits(formatMoney(s)); }
-    }
     return L"";
 }
 
@@ -1372,24 +1301,6 @@ static std::wstring pdFieldValue(const ReceptionRecord& r, const std::wstring& t
 //   pxPerMmX/Y : device pixels per millimetre (for border width scaling)
 //   live       : when non-NULL, substitutes {field} tokens with record data;
 //                otherwise (preview with no record) shows the raw cell text.
-// v1.44.0 §4.2/§4.3 — resolve a per-cell services-row token to live data. Only
-// meaningful when kind=="services"; `idx` is the zero-based service line index.
-static std::wstring pdSvcRowValue(const ReceptionRecord& r, const std::wstring& tok, int idx){
-    if(idx<0 || idx>=(int)r.services.size()) return L"";
-    const ReceptionLine& ln=r.services[idx];
-    std::wstring t=tok;
-    if(t.size()>=4 && t.compare(0,2,L"{{")==0 && t.compare(t.size()-2,2,L"}}")==0)
-        t=L"{"+t.substr(2,t.size()-4)+L"}";
-    if(t==L"{svc.row.idx}")      { wchar_t b[16]; swprintf(b,16,L"%d",idx+1); return toFaDigits(b); }
-    if(t==L"{svc.row.name}")     return ln.name;
-    if(t==L"{svc.row.code}")     return toFaDigits(ln.code);
-    if(t==L"{svc.row.qty}")      { wchar_t b[16]; swprintf(b,16,L"%d",ln.qty); return toFaDigits(b); }
-    if(t==L"{svc.row.price}")    return toFaDigits(formatMoney(ln.price));
-    if(t==L"{svc.row.insShare}") return toFaDigits(formatMoney(ln.insShare));
-    if(t==L"{svc.row.patShare}") return toFaDigits(formatMoney(ln.patShare));
-    return L"";
-}
-
 static void pdDrawTable(HDC dc, const PrintItem& it, const RECT& box,
                         double pxPerMmX, double pxPerMmY,
                         double fontPxPerPt, const ReceptionRecord* live){
@@ -1397,43 +1308,21 @@ static void pdDrawTable(HDC dc, const PrintItem& it, const RECT& box,
     int X0=box.left, Y0=box.top, X1=box.right, Y1=box.bottom;
     int W=X1-X0, H=Y1-Y0; if(W<=0||H<=0) return;
 
-    // v1.44.0 §4.3: for a services table with a live record, the printed row
-    // count is header(0/1) + one body row per service line. The template's body
-    // rows act as the repeating pattern (row index 1 = the template body row).
-    bool servicesMode = (t.kind==L"services" && live && !live->services.empty());
-    int hdrRows = t.header ? 1 : 0;
-    int bodyRows = servicesMode ? (int)live->services.size() : (t.rows - hdrRows);
-    if(bodyRows<0) bodyRows=0;
-    int drawRows = hdrRows + bodyRows; if(drawRows<=0) drawRows=t.rows;
-
     // column x-boundaries (RTL: col index 0 starts at the right edge)
     double sumw=0; for(double w:t.widths) sumw+=w; if(sumw<=0) sumw=t.cols;
     std::vector<int> cx; cx.reserve(t.cols+1);
     cx.push_back(X1);
     double acc=0;
     for(int c=0;c<t.cols;++c){ acc+=t.widths[c]; cx.push_back(X1-(int)(W*(acc/sumw))); }
-    // row y-boundaries (top → bottom), equal height across drawRows
-    std::vector<int> ry; ry.reserve(drawRows+1);
-    for(int rr=0;rr<=drawRows;++rr) ry.push_back(Y0+(int)((double)H*rr/drawRows));
-
-    unsigned int hdrBg = t.headerBg;
-    unsigned int stripeBg = 0xF7FAFC;   // subtle zebra tint (web RGB order)
+    // row y-boundaries (top → bottom), equal height
+    std::vector<int> ry; ry.reserve(t.rows+1);
+    for(int rr=0;rr<=t.rows;++rr) ry.push_back(Y0+(int)((double)H*rr/t.rows));
 
     // fill header row background
-    if(t.header && drawRows>0){
+    if(t.header && t.rows>0){
         RECT hr={cx[t.cols], ry[0], cx[0], ry[1]};
-        HBRUSH hb=CreateSolidBrush(pdCR(hdrBg));
+        HBRUSH hb=CreateSolidBrush(RGB(238,242,251));
         FillRect(dc,&hr,hb); DeleteObject(hb);
-    }
-    // zebra striping on body rows
-    if(t.stripe){
-        for(int rr=hdrRows; rr<drawRows; ++rr){
-            if(((rr-hdrRows)%2)==1){
-                RECT sr={cx[t.cols], ry[rr], cx[0], ry[rr+1]};
-                HBRUSH sb=CreateSolidBrush(pdCR(stripeBg));
-                FillRect(dc,&sr,sb); DeleteObject(sb);
-            }
-        }
     }
 
     // cell text
@@ -1443,71 +1332,31 @@ static void pdDrawTable(HDC dc, const PrintItem& it, const RECT& box,
         CLEARTYPE_QUALITY,0,it.fontName.empty()?L"Vazirmatn":it.fontName.c_str());
     HFONT fHead=CreateFontW(lf,0,0,0,FW_BOLD,0,0,0,DEFAULT_CHARSET,0,0,
         CLEARTYPE_QUALITY,0,it.fontName.empty()?L"Vazirmatn":it.fontName.c_str());
-    int pad = (t.padding>=0) ? (int)(t.padding*pxPerMmX/3.78) : (int)(1.2*pxPerMmX);
-    if(pad<2)pad=2;
+    int pad=(int)(1.2*pxPerMmX); if(pad<2)pad=2;
     SetTextColor(dc,pdCR(it.textColor));
-    int bodyPatternRow = hdrRows;  // the template row used as the repeat pattern
-    for(int rr=0;rr<drawRows;++rr){
+    for(int rr=0;rr<t.rows;++rr){
         bool isHead=(t.header && rr==0);
         HGDIOBJ of=SelectObject(dc, isHead?fHead:fNorm);
-        int svcIdx = servicesMode ? (rr-hdrRows) : -1;
-        int srcRow = isHead ? 0 : (servicesMode ? bodyPatternRow : rr);
         for(int c=0;c<t.cols;++c){
             std::wstring cell;
-            if(srcRow<(int)t.cells.size() && c<(int)t.cells[srcRow].size()) cell=t.cells[srcRow][c];
-            if(!isHead && servicesMode){
-                // substitute svc.row.* tokens against the current service line,
-                // then any generic {field} tokens against the record.
-                std::wstring out; size_t i=0;
-                while(i<cell.size()){
-                    if(cell[i]==L'{'){ size_t e=cell.find(L'}',i);
-                        // allow a trailing } for {{...}}
-                        if(e!=std::wstring::npos && e+1<cell.size() && cell[e+1]==L'}') e++;
-                        if(e!=std::wstring::npos){ std::wstring tok=cell.substr(i,e-i+1);
-                            std::wstring v=pdSvcRowValue(*live,tok,svcIdx);
-                            if(v.empty()) v=pdFieldValue(*live,tok);
-                            out+=v; i=e+1; continue; } }
-                    out+=cell[i++];
-                }
-                cell=out;
-            } else if(live){
-                cell=pdSubstFields(*live,cell,pdFieldValue);
-            }
+            if(rr<(int)t.cells.size() && c<(int)t.cells[rr].size()) cell=t.cells[rr][c];
+            if(live) cell=pdSubstFields(*live,cell,pdFieldValue);
             // RTL: visual column c occupies [cx[c+1] .. cx[c]]
             RECT cr={cx[c+1]+pad, ry[rr]+pad/2, cx[c]-pad, ry[rr+1]-pad/2};
             if(cr.right<=cr.left||cr.bottom<=cr.top) continue;
-            UINT alignFlag=DT_CENTER;
-            if(c<(int)t.colAlign.size()){
-                if(t.colAlign[c]==0) alignFlag=DT_RIGHT;
-                else if(t.colAlign[c]==2) alignFlag=DT_LEFT;
-            }
             DrawTextW(dc,cell.c_str(),-1,&cr,
-                alignFlag|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_END_ELLIPSIS|DT_NOPREFIX);
+                DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_END_ELLIPSIS|DT_NOPREFIX);
         }
         SelectObject(dc,of);
     }
     DeleteObject(fNorm); DeleteObject(fHead);
 
-    // grid lines. border width: table override → item → 1 px. Web RGB→GDI swap.
-    double bwMm = (t.borderW>=0) ? t.borderW : it.borderWidth;
-    int bw=(int)(bwMm*pxPerMmX); if(bw<1 && bwMm>0)bw=1;
-    if(bwMm<=0){
-        // borderless table (§5.7): still draw a single bottom rule under header.
-        if(t.header){
-            int hpw=(int)(0.35*pxPerMmX); if(hpw<1)hpw=1;
-            HPEN hp=CreatePen(PS_SOLID,hpw,
-                pdCR(t.borderColor!=0xFFFFFFFF?t.borderColor:it.borderColor));
-            HGDIOBJ oo=SelectObject(dc,hp);
-            MoveToEx(dc,cx[t.cols],ry[1],0); LineTo(dc,cx[0],ry[1]);
-            SelectObject(dc,oo); DeleteObject(hp);
-        }
-        return;
-    }
-    unsigned int bc = (t.borderColor!=0xFFFFFFFF) ? t.borderColor : it.borderColor;
-    HPEN pen=CreatePen(PS_SOLID,bw,pdCR(bc));
+    // grid lines
+    int bw=(int)(it.borderWidth*pxPerMmX); if(bw<1)bw=1;
+    HPEN pen=CreatePen(PS_SOLID,bw,pdCR(it.borderColor));
     HGDIOBJ op=SelectObject(dc,pen);
-    for(int c=0;c<=t.cols;++c){ MoveToEx(dc,cx[c],ry[0],0); LineTo(dc,cx[c],ry[drawRows]); }
-    for(int rr=0;rr<=drawRows;++rr){ MoveToEx(dc,cx[t.cols],ry[rr],0); LineTo(dc,cx[0],ry[rr]); }
+    for(int c=0;c<=t.cols;++c){ MoveToEx(dc,cx[c],ry[0],0); LineTo(dc,cx[c],ry[t.rows]); }
+    for(int rr=0;rr<=t.rows;++rr){ MoveToEx(dc,cx[t.cols],ry[rr],0); LineTo(dc,cx[0],ry[rr]); }
     SelectObject(dc,op); DeleteObject(pen);
 }
 
@@ -1563,29 +1412,6 @@ static HDC pdCreatePrinterDC(const std::wstring& prn, const PrintDesign& d){
     return dc;
 }
 
-// v1.44.0 §6: remember the printer the operator picked in the standard dialog so
-// the NEXT receipt prints straight to it (no dialog). The chosen device name is
-// carried in the DEVMODE returned by PrintDlg (hDevMode → dmDeviceName).
-static void pdPersistPickedPrinter(PRINTDLGW& pd){
-    if(!pd.hDevMode) return;
-    DEVMODEW* dm=(DEVMODEW*)GlobalLock(pd.hDevMode);
-    if(dm){
-        std::wstring nm=dm->dmDeviceName;      // NUL-terminated within CCHDEVICENAME
-        if(!nm.empty()) setSetting(L"printer_name", nm);
-        GlobalUnlock(pd.hDevMode);
-    }
-}
-// v1.44.0 §6: put the printer DC into the highest-quality raster mode so scaled
-// logos/photos/QR are HALFTONE-resampled (not nearest-neighbour) and vector
-// primitives honour world transforms cleanly. GDI text keeps CLEARTYPE_QUALITY;
-// vector borders/lines are drawn anti-aliased via gpLine/gpRoundRect (GDI+).
-static void pdSetHighQuality(HDC dc){
-    SetGraphicsMode(dc, GM_ADVANCED);
-    SetStretchBltMode(dc, HALFTONE);
-    SetBrushOrgEx(dc, 0, 0, NULL);
-    SetBkMode(dc, TRANSPARENT);
-}
-
 bool printPrintDesign(const ReceptionRecord& r, int sectionId, HWND owner){
     PrintDesign d;
     if(!SectionDesign_Resolve(sectionId, d)) return false;   // no design → caller falls back
@@ -1606,7 +1432,6 @@ bool printPrintDesign(const ReceptionRecord& r, int sectionId, HWND owner){
         pd.Flags=PD_RETURNDC|PD_NOPAGENUMS|PD_NOSELECTION|PD_USEDEVMODECOPIES;
         if(!PrintDlgW(&pd)) return true;   // user cancelled → treat as handled
         dc=pd.hDC;
-        pdPersistPickedPrinter(pd);        // v1.44.0 §6: reuse next time
     }
     if(!dc) return false;
 
@@ -1629,7 +1454,6 @@ bool printPrintDesign(const ReceptionRecord& r, int sectionId, HWND owner){
         pd.Flags=PD_RETURNDC|PD_NOPAGENUMS|PD_NOSELECTION|PD_USEDEVMODECOPIES;
         if(!PrintDlgW(&pd)) return true;        // cancelled → handled
         dc=pd.hDC; if(!dc) return false;
-        pdPersistPickedPrinter(pd);             // v1.44.0 §6: reuse next time
         dpiX=GetDeviceCaps(dc,LOGPIXELSX); dpiY=GetDeviceCaps(dc,LOGPIXELSY);
         offX=GetDeviceCaps(dc,PHYSICALOFFSETX); offY=GetDeviceCaps(dc,PHYSICALOFFSETY);
         sx=dpiX/25.4; sy=dpiY/25.4;
@@ -1640,7 +1464,7 @@ bool printPrintDesign(const ReceptionRecord& r, int sectionId, HWND owner){
             DeleteDC(dc); return false; }
     }
     StartPage(dc);
-    pdSetHighQuality(dc);   // v1.44.0 §6: HALFTONE + GM_ADVANCED + transparent bg
+    SetBkMode(dc,TRANSPARENT);
 
     // paint items in z-order
     std::vector<const PrintItem*> ord;
@@ -1656,12 +1480,13 @@ bool printPrintDesign(const ReceptionRecord& r, int sectionId, HWND owner){
             RECT rr={x0,y0,x1,y1};
             pdDrawTable(dc, it, rr, sx, sy, dpiY/72.0, &r);
         } else if(it.type==PIT_HLINE){
-            // v1.44.0 §6: anti-aliased line (GDI+); falls back to GDI if GDI+ off.
-            float wpx=(float)(it.borderWidth*sx); if(wpx<1.0f)wpx=1.0f;
-            gpLine(dc,x0,y0,x1,y0,pdCR(it.borderColor),wpx);
+            int wpx=(int)(it.borderWidth*sx); if(wpx<1)wpx=1;
+            HPEN p=CreatePen(PS_SOLID,wpx,pdCR(it.borderColor)); HGDIOBJ o=SelectObject(dc,p);
+            MoveToEx(dc,x0,y0,0); LineTo(dc,x1,y0); SelectObject(dc,o); DeleteObject(p);
         } else if(it.type==PIT_VLINE){
-            float wpx=(float)(it.borderWidth*sx); if(wpx<1.0f)wpx=1.0f;
-            gpLine(dc,x0,y0,x0,y1,pdCR(it.borderColor),wpx);
+            int wpx=(int)(it.borderWidth*sx); if(wpx<1)wpx=1;
+            HPEN p=CreatePen(PS_SOLID,wpx,pdCR(it.borderColor)); HGDIOBJ o=SelectObject(dc,p);
+            MoveToEx(dc,x0,y0,0); LineTo(dc,x0,y1); SelectObject(dc,o); DeleteObject(p);
         } else if(it.type==PIT_RECT||it.type==PIT_FRAME||it.type==PIT_LOGO||
                   it.type==PIT_PHOTO||it.type==PIT_QR||it.type==PIT_IMAGE){
             int wpx=(int)(it.borderWidth*sx); if(wpx<1)wpx=1;

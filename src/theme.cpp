@@ -117,9 +117,6 @@ static BOOL CALLBACK topProc(HWND h, LPARAM){
 }
 void broadcastThemeChange(){
     EnumWindows(topProc, 0);
-    // v1.46.0: the embedded web-admission page has been deleted; the reception
-    // page is native GDI and re-skins directly via the WM_APP_THEME broadcast
-    // above, so there is no separate surface to push a "theme" event to.
 }
 
 // =================================================================== draw ==

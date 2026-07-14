@@ -44,9 +44,6 @@
     <button class="btn btn-sm btn-outline" id="btnZoomIn" title="بزرگ‌نمایی">+</button>
     <button class="btn btn-sm btn-outline" id="btnZoomFit" title="متناسب با صفحه">⤢</button>
     <span class="tb-sep"></span>
-    <!-- v1.44.0 §4.5: live-preview toggle (hides editing chrome + resolves tokens to sample data) -->
-    <button class="btn btn-sm btn-outline" id="btnPreview" title="پیش‌نمایش با داده‌های نمونه">👁 پیش‌نمایش</button>
-    <span class="tb-sep"></span>
     <button class="btn btn-sm btn-outline" id="btnDownload" title="دانلود طرح به‌صورت فایل">⬇ دانلود</button>
     <button class="btn btn-sm btn-outline" id="btnUpload" title="بارگذاری طرح از فایل">⬆ بارگذاری</button>
     <button class="btn btn-sm btn-primary" id="btnSave" title="ذخیره و اعمال (Ctrl+S)">💾 ذخیره و اعمال</button>
@@ -129,19 +126,9 @@
     </div>
     <div class="tbl-body">
       <div class="tbl-controls">
-        <div class="insp-row"><label>نوع جدول</label>
-          <select id="tblKind" class="form-control form-control-sm">
-            <option value="static">ثابت (محتوای تایپ‌شده)</option>
-            <option value="services">خدمات (یک سطر برای هر خدمت)</option>
-          </select></div>
-        <div class="insp-row"><label>تعداد ستون‌ها</label><input type="number" id="tblCols" class="form-control form-control-sm" min="1" max="12" value="3"></div>
-        <div class="insp-row"><label>تعداد ردیف‌ها</label><input type="number" id="tblRows" class="form-control form-control-sm" min="1" max="30" value="4"></div>
+        <div class="insp-row"><label>تعداد ستون‌ها</label><input type="number" id="tblCols" class="form-control form-control-sm" min="1" max="10" value="3"></div>
+        <div class="insp-row"><label>تعداد ردیف‌ها</label><input type="number" id="tblRows" class="form-control form-control-sm" min="1" max="40" value="4"></div>
         <div class="insp-row"><label>ردیف سرستون</label><input type="checkbox" id="tblHeader" class="form-check" checked></div>
-        <div class="insp-row"><label>راه‌راه (zebra)</label><input type="checkbox" id="tblStripe" class="form-check"></div>
-        <div class="insp-row"><label>ضخامت خط (px)</label><input type="number" id="tblBorderW" class="form-control form-control-sm" min="0" max="4" step="1" value="1"></div>
-        <div class="insp-row"><label>رنگ خط</label><input type="color" id="tblBorderColor" class="form-control form-control-sm" value="#111111"></div>
-        <div class="insp-row"><label>رنگ سرستون</label><input type="color" id="tblHeaderBg" class="form-control form-control-sm" value="#eef2fb"></div>
-        <div class="insp-row"><label>فاصلهٔ داخلی (px)</label><input type="number" id="tblPadding" class="form-control form-control-sm" min="0" max="24" value="6"></div>
         <button class="btn btn-sm btn-outline" id="tblRebuild" style="width:100%">بازسازی شبکهٔ جدول</button>
         <div class="tbl-quickbtns">
           <button class="btn btn-sm btn-outline" id="tblAddRow" title="افزودن ردیف">＋ ردیف</button>

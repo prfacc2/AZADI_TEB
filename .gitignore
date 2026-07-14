@@ -27,15 +27,4 @@ package-lock.json
 test_designer.mjs
 designer_test.png
 build/AzadiTeb_probe.exe
-
-# ============================================================================
-#  v2.0.0 — .NET / Avalonia UI + C++ CMake build artifacts
-# ============================================================================
-# .NET build output (keep only the final build/AzadiTeb.exe)
-app/**/bin/
-app/**/obj/
-build/_publish/
-# C++ Core CMake build tree
-backend/build/
-# sandbox dotnet toolchain env
 .dotnet-env.sh

@@ -12,7 +12,6 @@
 #include "app.h"
 #include <vector>
 #include <string>
-#include <mutex>
 
 // ---- local pipe escaping helpers (mirror employees.cpp) --------------------
 static std::wstring svcEsc(const std::wstring& s){
@@ -25,38 +24,7 @@ static std::vector<std::wstring> svcSplit(const std::wstring& line){
 }
 static std::wstring servicesPath(){ return dataDir()+L"\\services.dat"; }
 
-// ---- v1.42.0 performance cache ---------------------------------------------
-//  loadServices() used to re-read + re-parse the WHOLE services.dat file on
-//  EVERY call. The admission service picker calls it on every keystroke and the
-//  billing path calls findService() per row, so with thousands of services the
-//  repeated O(N) parse caused visible lag / FPS drops. We now keep an in-memory
-//  cache invalidated by the file's last-write time (FILETIME) + size. When the
-//  file is unchanged we hand back the cached vector in O(1); when it changes on
-//  disk (another process, or our own saveServices) we re-parse exactly once.
-//  A mutex guards the cache because the loopback HTTP host serves requests on a
-//  worker-thread pool (concurrent service.search calls are expected).
-static std::mutex               g_svcCacheMx;
-static std::vector<ServiceDef>  g_svcCache;
-static bool                     g_svcCacheValid = false;
-static ULONGLONG                g_svcCacheStamp = 0;   // hi/lo FILETIME packed
-static ULONGLONG                g_svcCacheSize  = 0;
-
-// Cheap fingerprint of services.dat: (last-write-time, size). 0 when missing.
-static void svcFileFingerprint(ULONGLONG& stampOut, ULONGLONG& sizeOut){
-    stampOut=0; sizeOut=0;
-    WIN32_FILE_ATTRIBUTE_DATA fad;
-    if(GetFileAttributesExW(servicesPath().c_str(),GetFileExInfoStandard,&fad)){
-        ULARGE_INTEGER t; t.LowPart=fad.ftLastWriteTime.dwLowDateTime;
-                          t.HighPart=fad.ftLastWriteTime.dwHighDateTime;
-        stampOut=t.QuadPart;
-        ULARGE_INTEGER sz; sz.LowPart=fad.nFileSizeLow; sz.HighPart=fad.nFileSizeHigh;
-        sizeOut=sz.QuadPart;
-    }
-}
-
-// Parse services.dat from disk (no caching). Kept separate so the cache layer
-// and any explicit "force reload" path can share it.
-static std::vector<ServiceDef> parseServicesFromDisk(){
+std::vector<ServiceDef> loadServices(){
     std::vector<ServiceDef> out;
     std::wstring all=readFileUtf8(servicesPath());
     size_t pos=0;
@@ -85,30 +53,6 @@ static std::vector<ServiceDef> parseServicesFromDisk(){
     return out;
 }
 
-// Invalidate the cache (called after any save so the next read re-parses).
-static void invalidateServiceCache(){
-    std::lock_guard<std::mutex> lk(g_svcCacheMx);
-    g_svcCacheValid=false;
-}
-
-std::vector<ServiceDef> loadServices(){
-    ULONGLONG stamp,size; svcFileFingerprint(stamp,size);
-    {
-        std::lock_guard<std::mutex> lk(g_svcCacheMx);
-        if(g_svcCacheValid && g_svcCacheStamp==stamp && g_svcCacheSize==size)
-            return g_svcCache;                     // O(1) cache hit
-    }
-    // Miss: parse OUTSIDE the lock (disk I/O), then publish under the lock.
-    std::vector<ServiceDef> fresh=parseServicesFromDisk();
-    {
-        std::lock_guard<std::mutex> lk(g_svcCacheMx);
-        g_svcCache=fresh;
-        g_svcCacheStamp=stamp; g_svcCacheSize=size;
-        g_svcCacheValid=true;
-        return g_svcCache;
-    }
-}
-
 static void saveServices(const std::vector<ServiceDef>& v){
     std::wstring out;
     for(auto&s:v){
@@ -119,40 +63,12 @@ static void saveServices(const std::vector<ServiceDef>& v){
                sb+L"|"+svcEsc(s.created)+L"|"+svcEsc(s.modified)+s.extra+L"\r\n";
     }
     writeFileUtf8(servicesPath(),out,false);
-    invalidateServiceCache();   // v1.42.0: next read re-parses the new file
 }
 
-// v1.44.0 §2.4: snapshotServices() ALWAYS returns a full copy taken UNDER the
-// cache mutex. This is the only sanctioned way for a caller to iterate the
-// catalog: it can never hand out a reference to the shared g_svcCache that a
-// concurrent saveServices()/invalidateServiceCache() on another thread could
-// replace under the caller's feet. loadServices() (which also returns by value)
-// stays for compatibility, but iteration should go through this snapshot.
-std::vector<ServiceDef> snapshotServices(){
-    ULONGLONG stamp,size; svcFileFingerprint(stamp,size);
-    {
-        std::lock_guard<std::mutex> lk(g_svcCacheMx);
-        if(g_svcCacheValid && g_svcCacheStamp==stamp && g_svcCacheSize==size)
-            return g_svcCache;                     // full copy under the lock
-    }
-    std::vector<ServiceDef> fresh=parseServicesFromDisk();
-    {
-        std::lock_guard<std::mutex> lk(g_svcCacheMx);
-        g_svcCache=fresh;
-        g_svcCacheStamp=stamp; g_svcCacheSize=size;
-        g_svcCacheValid=true;
-        return g_svcCache;                         // full copy under the lock
-    }
-}
-
-// v1.42.0: findService now returns by value into a thread-local buffer so it is
-// safe against the shared cache being replaced by another thread.
-// v1.44.0 §2.4: iterate the LOCAL snapshot, never the shared g_svcCache.
 const ServiceDef* findService(const std::wstring& code){
-    static thread_local ServiceDef tls;
-    std::wstring c=trim(code);
-    std::vector<ServiceDef> v=snapshotServices();   // full copy under the lock
-    for(auto&s:v) if(s.code==c){ tls=s; return &tls; }
+    static std::vector<ServiceDef> cache;
+    cache=loadServices();
+    for(auto&s:cache) if(s.code==trim(code)) return &s;
     return nullptr;
 }
 
