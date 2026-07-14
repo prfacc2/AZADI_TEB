@@ -5,6 +5,55 @@
 
 ---
 
+## 1.48.0 — 2026-07-14
+
+> **جایگزینیِ ظاهرِ بخشِ «پذیرش بیمار» با Avalonia UI (به‌جایِ صفحهٔ HTML امبد).**
+> تنها و فقط **ظاهرِ** صفحهٔ پذیرش بیمار عوض شده است؛ هستهٔ C++، منطقِ کسب‌وکار،
+> پنلِ مدیریت و بقیهٔ برنامه **دست‌نخورده** باقی مانده‌اند. UIِ جدیدِ Avalonia با
+> همان پلِ `/api` رویِ `127.0.0.1` (همان پلی که صفحهٔ HTML قبلی استفاده می‌کرد)
+> به C++ متصل و **کاملاً sync** است — پس C++ هم‌چنان تنها منبعِ حقیقت است
+> (بیمار، خدمات، بیمه، محاسبهٔ صورتحساب، صف صندوق، چاپ).
+
+**فارسی — چه چیزی عوض شد:**
+- صفحهٔ HTML پذیرش (`assets/admission/*`) دیگر ظاهرِ پیش‌فرضِ پذیرش نیست. یک اپِ
+  Avalonia (net9، `avalonia/AzadiTeb.Reception/`) به‌شکلِ خودکفا build و
+  به‌صورتِ RCDATA(700) داخلِ همان EXEِ تک‌فایلی جاسازی می‌شود.
+- هنگامِ بازشدنِ تبِ پذیرش، C++ اپِ Avalonia را اجرا و پنجره‌اش را (SetParent)
+  داخلِ همان تب reparent می‌کند و آن را با هر resize پر می‌کند — دقیقاً مثلِ
+  رفتارِ کنترلِ WebView2ِ قبلی. ورودی/خروجی از همان `/api/<verb>` عبور می‌کند.
+- اگر روی سیستمی .NET/Avalonia قابل‌اجرا نبود، برنامه به‌صورتِ خودکار به موتورِ
+  HTML (WebView2/MSHTML) و در نهایت فرمِ native GDI برمی‌گردد؛ پس قابلیت هرگز
+  از دست نمی‌رود.
+
+**English — what changed:**
+- The HTML admission page (`assets/admission/*`) is no longer the reception's
+  presentation. A self-contained Avalonia app (net9, `avalonia/AzadiTeb.Reception/`)
+  is published and embedded as `RCDATA(700)` inside the same single-file EXE.
+- On opening the reception tab, C++ launches the Avalonia exe and reparents its
+  top window (`SetParent`) into that tab, keeping it sized to fill — exactly like
+  the retired WebView2 child. All data flows over the **same** loopback
+  `/api/<verb>` bridge, so the C++ core is unchanged and stays the single source
+  of truth.
+- Graceful fallback: if .NET/Avalonia cannot run, the app falls back to the HTML
+  engine (WebView2/MSHTML) and finally the native GDI form — the feature is never
+  lost.
+
+**فایل‌ها (Files):**
+- `avalonia/AzadiTeb.Reception/` — پروژهٔ جدیدِ Avalonia MVVM (Program، App،
+  `Views/MainWindow.axaml` = چیدمانِ ۳ ستونیِ پذیرش، `Views/Styles.axaml` =
+  پالتِ رنگیِ برگرفته از `admission.css`، `Services/ApiBridge.cs` = کلاینتِ
+  HTTPِ همان پلِ `/api`، `Services/PersianTools.cs`، `ViewModels/*`).
+- `src/av_reception.h` / `src/av_reception.cpp` — میزبانِ C++ که اپِ Avalonia
+  را اجرا/جاسازی/resize/تخریب می‌کند و از RCDATA(700) استخراج می‌کند.
+- `src/web_admission_dispatch.inc` — افزودنِ Avalonia به‌عنوانِ موتورِ **اصلی**
+  (قبل از WebView2/MSHTML) در `WebAdmission_CreateView/Resize/DestroyView`.
+- `src/web_admission.cpp` — `#include "av_reception.h"`.
+- `src/app.rc` — بلاکِ `700 RCDATA` برایِ اپِ Avalonia.
+- `build.sh` — مرحلهٔ `[0/3]`: publishِ Avalonia (win-x86 self-contained) و کپی
+  به `build/AzadiTeb.Reception.exe`؛ افزودنِ `src/av_reception.cpp` به SRCS.
+
+---
+
 ## 1.41.0 — 2026-07-11
 
 > **رفعِ ریشه‌ایِ خرابیِ کیبورد (Enter / Tab / Shift+Tab / Ctrl+A) در صفحهٔ

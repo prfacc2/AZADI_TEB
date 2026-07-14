@@ -12,6 +12,33 @@ RES=i686-w64-mingw32-windres
 
 mkdir -p build obj
 
+# ----------------------------------------------------------------------------
+#  v1.48.0: publish the Avalonia (.NET) Patient-Reception surface FIRST so it
+#  can be embedded as RCDATA(700) into the native exe. The reception «پذیرش
+#  بیمار» APPEARANCE is now this Avalonia UI, embedded (reparented) inside the
+#  reception tab and driven over the SAME loopback /api bridge the retired HTML
+#  page used — the C++ core is unchanged.
+#
+#  If the .NET SDK is not available (or AZ_SKIP_AVALONIA=1), we write a 1-byte
+#  placeholder so app.rc still compiles; the app then cleanly falls back to the
+#  HTML/native reception engine at runtime. This keeps the pure-MinGW build path
+#  working on machines without .NET.
+# ----------------------------------------------------------------------------
+AVALONIA_PROJ="avalonia/AzadiTeb.Reception/AzadiTeb.Reception.csproj"
+AVALONIA_OUT="build/AzadiTeb.Reception.exe"
+if [ -z "$AZ_SKIP_AVALONIA" ] && command -v dotnet >/dev/null 2>&1 && [ -f "$AVALONIA_PROJ" ]; then
+    echo "[0/3] Publishing Avalonia reception surface (.NET, win-x86 self-contained)..."
+    dotnet publish "$AVALONIA_PROJ" -c Release -r win-x86 --self-contained \
+        -o avalonia/AzadiTeb.Reception/publish >/dev/null
+    cp -f avalonia/AzadiTeb.Reception/publish/AzadiTeb.Reception.exe "$AVALONIA_OUT"
+    echo "     -> $AVALONIA_OUT ($(du -h "$AVALONIA_OUT" | awk '{print $1}'))"
+else
+    if [ ! -s "$AVALONIA_OUT" ]; then
+        printf '\0' > "$AVALONIA_OUT"    # 1-byte placeholder → runtime fallback
+        echo "[0/3] Avalonia build skipped — embedding placeholder (HTML fallback)."
+    fi
+fi
+
 echo "[1/3] Compiling resources..."
 $RES -O coff -i src/app.rc -o obj/app.res
 
@@ -32,7 +59,7 @@ SRCS="src/main.cpp src/util.cpp src/handlers.cpp src/theme.cpp src/users.cpp \
       src/user_settings.cpp src/net_sync.cpp src/profile_requests.cpp \
       src/backup_log_viewer.cpp src/backup_mtf.cpp src/saved_messages.cpp \
       src/setup_splash.cpp src/web_designer.cpp src/services.cpp \
-      src/web_admission.cpp \
+      src/web_admission.cpp src/av_reception.cpp \
       src/web_pages.cpp src/web_thread_pool.cpp src/web_ping_api.cpp"
 
 $CXX -std=c++17 -O2 -s -municode -mwindows \
