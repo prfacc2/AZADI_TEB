@@ -27,15 +27,12 @@ package-lock.json
 test_designer.mjs
 designer_test.png
 build/AzadiTeb_probe.exe
-
-# ============================================================================
-#  v2.0.0 — .NET / Avalonia UI + C++ CMake build artifacts
-# ============================================================================
-# .NET build output (keep only the final build/AzadiTeb.exe)
-app/**/bin/
-app/**/obj/
-build/_publish/
-# C++ Core CMake build tree
-backend/build/
-# sandbox dotnet toolchain env
 .dotnet-env.sh
+
+# v1.48.0 — Avalonia (.NET) reception surface: ignore build intermediates only.
+# The SOURCE under avalonia/AzadiTeb.Reception/ IS committed; the published
+# self-contained exe is embedded into the native EXE at build time and the
+# shipped copy lives at build/AzadiTeb.Reception.exe (committed).
+avalonia/**/bin/
+avalonia/**/obj/
+avalonia/**/publish/

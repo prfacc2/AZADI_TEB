@@ -2,9 +2,9 @@
 //  web_pages.h — multi-page embedded-web PAGE REGISTRY (v1.40.0)
 //
 //  A tiny, dependency-free registry that lets the single loopback HTTP host
-//  serve MANY embedded pages (the print designer + demo pages) from RCDATA
-//  blobs, and route /api/<verb> requests to the page module that owns that
-//  verb. (The admission bundle that once used this host was removed in v1.46.0.)
+//  (src/web_admission_http.inc) serve MANY embedded pages — not just the
+//  admission bundle — from RCDATA blobs, and route /api/<verb> requests to the
+//  page module that owns that verb.
 //
 //  Two registration surfaces:
 //    * WebPages_RegisterAsset(pageId, urlPath, rcId, contentType)

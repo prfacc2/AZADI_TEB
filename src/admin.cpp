@@ -6,9 +6,7 @@
 #include "ui_kit.h"
 #include "print_designer.h"   // §1.19.0: print-settings (section design preview/apply)
 #include "sections.h"         // §1.19.0: section list for print-settings page
-//  v1.46.0: the embedded Admission browser surface has been deleted;
-//  the reception page is 100% native GDI now and always reads the live catalog
-//  directly, so no cross-surface catalog/insurance push is needed.
+#include "web_admission.h"    // live catalog/insurance sync to embedded Admission
 #include <commctrl.h>
 #include <stdio.h>
 #include <algorithm>

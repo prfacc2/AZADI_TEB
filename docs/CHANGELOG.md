@@ -5,315 +5,52 @@
 
 ---
 
-## 2.0.0 — 1405-04-23 — بازنویسی کامل لایهٔ نمایش با Avalonia UI (.NET 9)
+## 1.48.0 — 2026-07-14
 
-**تحولِ معماری: از Win32/GDI به Avalonia UI + MVVM با هستهٔ C++ به‌صورت سرویس REST.**
+> **جایگزینیِ ظاهرِ بخشِ «پذیرش بیمار» با Avalonia UI (به‌جایِ صفحهٔ HTML امبد).**
+> تنها و فقط **ظاهرِ** صفحهٔ پذیرش بیمار عوض شده است؛ هستهٔ C++، منطقِ کسب‌وکار،
+> پنلِ مدیریت و بقیهٔ برنامه **دست‌نخورده** باقی مانده‌اند. UIِ جدیدِ Avalonia با
+> همان پلِ `/api` رویِ `127.0.0.1` (همان پلی که صفحهٔ HTML قبلی استفاده می‌کرد)
+> به C++ متصل و **کاملاً sync** است — پس C++ هم‌چنان تنها منبعِ حقیقت است
+> (بیمار، خدمات، بیمه، محاسبهٔ صورتحساب، صف صندوق، چاپ).
 
-چرا:
-- فرمِ پذیرشِ Win32/GDI با کنترل‌های مختصاتیِ دستی، هنگام افزودن خدمات هنگ می‌کرد
-  و توسعه‌پذیر نبود. مسیر HTML/MSHTML هم مستعد فریز بود. طبق نقشهٔ راهِ کارفرما،
-  **کل لایهٔ نمایش بازنویسی شد** و منطقِ کسب‌وکارِ C++ حفظ و به REST تبدیل شد.
+**فارسی — چه چیزی عوض شد:**
+- صفحهٔ HTML پذیرش (`assets/admission/*`) دیگر ظاهرِ پیش‌فرضِ پذیرش نیست. یک اپِ
+  Avalonia (net9، `avalonia/AzadiTeb.Reception/`) به‌شکلِ خودکفا build و
+  به‌صورتِ RCDATA(700) داخلِ همان EXEِ تک‌فایلی جاسازی می‌شود.
+- هنگامِ بازشدنِ تبِ پذیرش، C++ اپِ Avalonia را اجرا و پنجره‌اش را (SetParent)
+  داخلِ همان تب reparent می‌کند و آن را با هر resize پر می‌کند — دقیقاً مثلِ
+  رفتارِ کنترلِ WebView2ِ قبلی. ورودی/خروجی از همان `/api/<verb>` عبور می‌کند.
+- اگر روی سیستمی .NET/Avalonia قابل‌اجرا نبود، برنامه به‌صورتِ خودکار به موتورِ
+  HTML (WebView2/MSHTML) و در نهایت فرمِ native GDI برمی‌گردد؛ پس قابلیت هرگز
+  از دست نمی‌رود.
 
-چه چیزی اضافه شد (`app/AzadiTeb.UI/` — لایهٔ نمایشِ جدید):
-- **Avalonia UI 11.2 روی .NET 9** با الگوی **MVVM** (CommunityToolkit.Mvvm) و
-  `ViewLocator` قراردادی.
-- **فرم پذیرش بیمار (`ReceptionView`)** کاملاً Data-Binding، Responsive و RTL:
-  کارت‌های «اطلاعات بیمار / بیمه و نوبت / خدمات / صف پذیرش» + پنلِ چسبانِ
-  «صدور خودکار قبض». هیچ کنترلی با مختصاتِ x/y ساخته نشده است.
-- **تمِ Light/Dark** با توکن‌های رنگِ برگرفته از ظاهرِ HTML موردپسندِ اپراتور
-  (`Styles/Colors.axaml` + `Styles/Controls.axaml`) و فونتِ **وزیرمتنِ embedded**.
-- **ابزارهای فارسی** (`Services/PersianTools.cs`): تقویم جلالی، اعداد فارسی،
-  اسلش‌گذاریِ خودکارِ تاریخ تولد، فرمتِ ریال.
-- **کلاینتِ backend** (`IReceptionBackend`) با پیاده‌سازیِ REST
-  (`RestReceptionBackend`) + fallbackِ خودکار به موتورِ محلی
-  (`LocalReceptionBackend`) ⇒ برنامه هرگز هنگ یا کرش نمی‌کند.
-- **Async کامل** + Cancellation/Debounce برای محاسبهٔ زندهٔ قبض.
-- **توست غیرمسدودکننده** به‌جای دیالوگ‌های مسدودکننده.
+**English — what changed:**
+- The HTML admission page (`assets/admission/*`) is no longer the reception's
+  presentation. A self-contained Avalonia app (net9, `avalonia/AzadiTeb.Reception/`)
+  is published and embedded as `RCDATA(700)` inside the same single-file EXE.
+- On opening the reception tab, C++ launches the Avalonia exe and reparents its
+  top window (`SetParent`) into that tab, keeping it sized to fill — exactly like
+  the retired WebView2 child. All data flows over the **same** loopback
+  `/api/<verb>` bridge, so the C++ core is unchanged and stays the single source
+  of truth.
+- Graceful fallback: if .NET/Avalonia cannot run, the app falls back to the HTML
+  engine (WebView2/MSHTML) and finally the native GDI form — the feature is never
+  lost.
 
-چه چیزی اضافه شد (`backend/` — هستهٔ C++20 REST):
-- کتابخانهٔ `azaditeb_core` (Repository + `BillingService` + DI) و سرورِ REST
-  `AzadiTebCore` با cpp-httplib و nlohmann/json (vendored).
-- Endpointها: `/api/ping`, `/api/reference`, `/api/patient/search`,
-  `/api/bill/compute`, `/api/admission`.
-- تستِ واحدِ محاسبات قبض (`tests/billing_tests.cpp`) — همه سبز.
-
-بیلد:
-- `build.sh` بازنویسی شد: خروجیِ **AzadiTeb.exe** به‌صورت single-file و
-  self-contained برای win-x64 در پوشهٔ `build/`.
-- نسخهٔ قدیمیِ EXE پاک و نسخهٔ جدید جایگزین شد.
-
-نکته:
-- کدِ نسخهٔ ۱ (`src/*.cpp`, Win32) به‌عنوان مرجع در مخزن باقی مانده است.
-- مستندِ معماریِ جدید: `docs/ARCHITECTURE_V2.md`.
-
----
-
-## 1.47.0 — 1405-04-22
-
-**رفعِ به‌هم‌ریختگیِ ظاهرِ فرمِ پذیرشِ بومی (بازگردانی ظاهرِ تمیزِ نسخهٔ HTML).**
-
-مشکل:
-- پس از حذفِ سطحِ مرورگرِ تعبیه‌شده در v1.46.0 و رندرِ صفحهٔ «پذیرش بیمار» به‌صورتِ
-  ۱۰۰٪ بومیِ Win32/GDI، ارتفاعِ کنترل‌ها (۴۰px) باعث می‌شد جعبه‌هایِ متنی
-  «دوبرابرِ ارتفاعِ استاندارد» دیده شوند (متن در بالا، فضایِ خالی در پایین) و
-  نوارِ برچسب (۲۲px) آن‌قدر کوتاه بود که عنوان به لبهٔ بالایِ جعبه می‌چسبید و
-  همه‌چیز درهم‌رفته به‌نظر می‌رسید.
-
-چه چیزی تغییر کرد (src/reception.cpp → computeCenterV):
-- ارتفاعِ کنترل‌ها از `40px` به `32px` استاندارد کاهش یافت (جعبه‌ها دیگر بلند و
-  غیرعادی نیستند و متن مرتب داخلِ جعبه می‌نشیند).
-- نوارِ برچسب از `22px` به `26px` و فاصلهٔ بینِ ردیف‌ها از `12px` به `16px`
-  افزایش یافت تا برچسب همیشه با فاصلهٔ واضح *بالایِ* جعبه قرار گیرد و هیچ
-  تداخلی رخ ندهد — مطابقِ ظاهرِ تمیزِ نسخهٔ HTML.
-- منطقِ fit-factor و جدول‌هایِ پایین بدون تغییر باقی ماندند؛ کلِ صفحه هنوز در یک
-  فریم و بدون اسکرول جا می‌شود.
-
-بقیهٔ رفتار: بدون تغییر. پذیرشِ بیمار و افزودنِ خدمت هم‌چنان بومی، هم‌زمان و
-بدون قفل‌شدن کار می‌کنند (پلِ HTTP لوپ‌بک از v1.46.0 حذف شده است).
-
----
-
-## 1.46.0 — 1405-04-22
-
-**BREAKING ARCHITECTURE CHANGE — the reception «پذیرش بیمار» page is now
-rendered 100% by native Win32 GDI, exactly as it was before v1.13.0.**
-
-Why:
-- Every attempt (v1.42→v1.45) to stabilise the embedded MSHTML/WebView2
-  admission page failed. The root cause is the loopback-HTTP JS↔C++ bridge:
-  MSHTML's per-host connection cap, WinINet buffering of small localhost
-  responses, and endpoint-security products throttling same-process loopback
-  traffic combine to freeze the UI thread on the operator's real hardware.
-- .NET / C# was evaluated and rejected: it would break the single-static-EXE
-  guarantee, require a .NET runtime, and forces Windows-only build tooling.
-- The native GDI reception form already exists in reception.cpp (~4200 lines),
-  was designed pixel-match to the reference mock (v1.18–v1.31 comments), and
-  had been retained as the "fallback" path. In v1.46 it becomes the ONLY path.
-
-What changed:
-- Deleted: assets/admission/{admission.js,bridge.js,contextmenu.js,admission.css,index.html,vazir.ttf},
-  src/web_admission.{cpp,h}, src/web_admission_{api,dispatch,host,http,mshtml,webview2}.inc,
-  RCDATA 400–405, and the "prefer web admission" branch in reception.cpp.
-- Kept: the print-designer WebView (opened only on demand from Management —
-  never freezes reception because it never runs on that tab).
-- Kept: every C++ data-layer function (billing, services, insurance, employees,
-  print pipeline, backup, appointment). All calculations still run in C++.
-- Kept: 30 reception templates + print designer table element + tokens from v1.44.
-- The reception tab now opens INSTANTLY (no browser boot, no loopback wait,
-  no WebView2 environment creation) and cannot freeze because it uses only
-  standard Win32 message dispatch.
-
-Look and feel: unchanged. Same three-column RTL layout, same insurance panel,
-same services table, same unpaid queue, same action buttons.
-
----
-
-## 1.45.0 — 1405-04-22
-
-> **رفعِ ریشه‌ایِ قفل‌شدنِ برنامه پس از افزودنِ خدمت (تلاشِ نسخهٔ ۱.۴۴ اوضاع را
-> بدتر کرده بود).**
-
-**علتِ اصلی (ریشه‌ای):**
-- نسخهٔ قبلی یک Vectored Exception Handler به‌همراهِ `setjmp/longjmp` نصب کرده بود
-  تا استثناهایِ ساختاری را «مهار» کند. اما `longjmp` از داخلِ یک VEH روی ویندوز
-  **رفتارِ تعریف‌نشده (UB)** است: زنجیرهٔ dispatchِ SEH در ntdll و فیلدهایِ TEB
-  را خراب می‌کند، قفل‌هایِ critical-section را نگه می‌دارد و باعث می‌شود اولین
-  فراخوانیِ بعدیِ worker برایِ همیشه در ntdll بلاک شود — یعنی همان قفل‌شدنِ کاملِ
-  برنامه که کاربر گزارش کرده بود (حتی دکمهٔ بستن هم کار نمی‌کرد).
-
-**تغییرات:**
-- حذفِ کاملِ داربستِ VEH + `setjmp/longjmp` از `src/web_admission_api.inc`؛
-  `admissionApiSafe` اکنون تنها بر `admissionApiInner` (با `try/catch`ِ ++C) تکیه
-  می‌کند. — `src/web_admission_api.inc`.
-- حذفِ همان الگویِ UB (VEH + `longjmp`) از تحلیل‌گرِ پشتیبان. — `src/backup_analyzer.cpp`.
-- تنها **یک** VEH در کلِ برنامه باقی مانده که فقط لاگ می‌گیرد و هرگز stack را
-  unwind نمی‌کند (`vehLogFilter`). — `src/handlers.cpp`.
-- افزودنِ `try/catch(std::exception&)/catch(...)` در هر job از استخرِ نخ به‌همراهِ
-  یک خطِ breadcrumb در `logs\client.log`. — `src/web_thread_pool.cpp`.
-- کوتاه‌کردنِ تایم‌اوتِ ترابری HTTP و WebView از ۱۵ ثانیه به **۸ ثانیه** تا UI
-  هرگز بیش از ۸ ثانیه قفل نماند. — `assets/admission/bridge.js`.
-- افزودنِ شبکهٔ ایمنیِ سراسریِ `window.onerror` در پذیرش. — `assets/admission/admission.js`.
-- سخت‌سازیِ بیشترِ گاردهایِ حلقهٔ پارسر: افزودنِ گاردِ صریحِ forward-progress
-  (`lastP`) و سقفِ اسکنِ داخلی (`qGuard`) در `adComputeBill`. — `src/web_admission_api.inc`.
-- گاردِ شمارندهٔ حلقهٔ accept برایِ حالتِ طوفانِ INVALID_SOCKET. — `src/web_admission_http.inc`.
-- افزودنِ گام‌هایِ `[verify]` به `build.sh` (غیرمسدودکننده). — `build.sh`.
-- تمامِ قابلیت‌هایِ نسخهٔ ۱.۴۴ (۳۰ قالب، جدول‌ها، توکن‌ها، پیش‌نمایش، چاپِ
-  باکیفیت) حفظ شده‌اند.
-
----
-
-## 1.44.0 — 2026-07-13
-
-> **رفعِ ریشه‌ایِ قفل‌شدنِ پذیرشِ وب هنگامِ افزودنِ خدمت + لاگِ ساختاریافتهٔ
-> رویدادهایِ غیرعادی + بازطراحیِ حرفه‌ایِ «طراحِ چاپ» با المانِ جدولِ کامل و
-> ۱۴ توکنِ تازه و پیش‌نمایشِ زنده + ۳۰ قالبِ پذیرش با تضمینِ کامپایلی + جریانِ
-> چاپِ باکیفیت با آنتی‌آلیاسِ DPI-scaled + سخت‌سازیِ عمومیِ برنامه (VEH، دیده‌بانِ
-> نخِ UI، WM_ENDSESSION، گاردهایِ حلقهٔ پارسر).**
-
-**۱-۲) رفعِ قفل‌شدنِ پذیرش هنگامِ افزودنِ خدمت — JS/C++**
-- `_billBusy` دیگر قفلِ دائمی نمی‌سازد: افزودنِ watchdog + شمارندهٔ توالی (seq) +
-  `setTimeout(0)` برای آزادسازیِ حلقهٔ رویداد. — `assets/admission/admission.js`.
-- `callHttp` با تایم‌اوتِ ۱۵ ثانیه‌ای در برابرِ بلاک‌شدنِ نامحدود. —
-  `assets/admission/bridge.js`.
-- `admissionApiSafe` اکنون با لفافهٔ VEH + `setjmp/longjmp` استثناهایِ ساختاری را
-  (که در GCC/DWARF فاقدِ `__try/__except` است) مهار می‌کند و به‌جایِ کشتنِ نخ،
-  JSONِ خطا برمی‌گرداند. — `src/web_admission_api.inc`.
-- `bill.compute` پارسر: سقفِ تکرار + تضمینِ پیشرویِ رو‌به‌جلو (forward-progress)
-  در برابرِ حلقهٔ بی‌نهایت. — `src/web_admission_api.inc`, `src/manage.inc`,
-  `src/printer.cpp`.
-- بازآراییِ کشِ خدمات با `snapshotServices()` برایِ رفعِ re-entrancy. —
-  `src/services.cpp`, `src/app.h`.
-- رفعِ سرریزِ cast در پذیرشِ بومی (۶۴-بیتی) + بررسیِ `WM_PAINT`. —
-  `src/reception.cpp`.
-- تایم‌اوتِ سوکتِ loopback (۳۰۰۰ms) + ثبتِ هشدارِ `WSAETIMEDOUT`. —
-  `src/web_admission_http.inc`.
-
-**۳) لاگِ ساختاریافتهٔ رویدادهایِ غیرعادی — C++/JS**
-- افزودنِ `src/client_log.cpp`/`.h`: نوشتنِ JSON-per-line در `logs\client.log`
-  فقط هنگامِ رویدادهایِ غیرعادی (warn/error/crash)؛ نویزِ «page loaded» حذف شد.
-  نوشتنِ هم‌زمان-امن با `FILE_SHARE_READ|WRITE` و retry پس از `Sleep(3)` روی
-  `ERROR_SHARING_VIOLATION`؛ اتصالِ crash-handler. — `src/client_log.cpp`,
-  `src/client_log.h`, `src/handlers.cpp`, `assets/shell/common.js`.
-
-**۴) طراحِ چاپ — HTML/JS/C++**
-- ۱۴ نوعِ توکنِ جدید (`{{svc.price}}`, `{{ins.base.pct}}` و…). —
-  `assets/designer/fields.js`, `src/printer.cpp`.
-- المانِ حرفه‌ایِ TABLE با بازرس (rows/cols/header/stripe/border/headerBg/
-  padding/colAlign/زیرنوعِ خدمات‌درمقابلِ‌ثابت) + سریال‌سازی با `tables`. —
-  `assets/designer/designer.js`, `designer.css`, `index.html`, `src/printer.cpp`.
-- پیش‌نمایشِ زنده (`btnPreview` + `PREVIEW_SAMPLE` + `resolvePreview` +
-  `.preview-mode`). — `assets/designer/designer.js`, `designer.css`, `index.html`.
-
-**۵) ۳۰ قالبِ پذیرش — C++/JS**
-- دقیقاً ۳۰ ورودیِ `RECEPTION_TEMPLATES[]` با
-  `static_assert(count==30)` (تضمینِ کامپایلی) + گالریِ شبکه‌ای با فیلترِ
-  «بخش = پذیرش». — `src/print_designer_templates.inc`,
-  `assets/designer/templates.js`.
-
-**۶) جریانِ چاپِ باکیفیت — C++**
-- پس از «ثبت پذیرش و صدور قبض»: محاسبه + ذخیره + چاپ با آنتی‌آلیاسِ GDI/GDI+
-  و DPI-scaled؛ `pdSetHighQuality` (GM_ADVANCED + HALFTONE)، خطوطِ آنتی‌آلیاس با
-  `gpLine`، و پایدارسازیِ چاپگرِ انتخابی با `pdPersistPickedPrinter`. —
-  `src/printer.cpp`, `src/gdiplus.cpp`.
-
-**۷) سخت‌سازیِ عمومی — C++**
-- `WM_ENDSESSION`، `AddVectoredExceptionHandler`، دیده‌بانِ نخِ UI (۵ ثانیه با
-  `SendMessageTimeout`/`SMTO_ABORTIFHUNG`)، و گاردهایِ حلقه. — `src/main.cpp`,
-  `src/handlers.cpp`.
-
-**۸) ساخت/انتشار**
-- افزودنِ `src/client_log.cpp` به `SRCS` در `build.sh`؛ ساختِ موفقِ EXEِ
-  ۳۲-بیتیِ استاتیکِ معتبر (PE32، >۵۰۰KB) با
-  `i686-w64-mingw32-g++`. — `build.sh`.
-
----
-
-## 1.43.0 — 2026-07-12
-
-> **رفعِ عدم‌تکمیلِ خودکارِ اطلاعاتِ بیمار (جنسیت/موبایل) + سخت‌سازیِ ضدِ قفل‌شدنِ
-> پذیرش + محاسبهٔ معتبرِ صورت‌حساب در C++ + هم‌گام‌سازیِ پوستهٔ تیره با صفحهٔ پذیرش +
-> بخشِ جدیدِ «مدیریت بیمه‌ها» با درصدِ پوشش و نوعِ پایه/تکمیلی.**
-
-**۱) رفعِ باگِ عدم‌پرشدنِ جنسیت و موبایل پس از واردکردنِ کد ملی — HTML/JS**
-- علت: گزینه‌هایِ کشویِ «جنسیت» مقدارِ `value=` نداشتند و مقدارِ بازگشتی از رکوردِ
-  بیمار ممکن بود دارایِ نشانه‌هایِ جهت (ZWNJ/LRM/RLM) یا نمایشِ غیرِفارسی باشد؛
-  همچنین موبایل با ارقامِ انگلیسی/فارسیِ ناهمگون پر نمی‌شد.
-- رفع: افزودنِ `value="مرد"/"زن"` به گزینه‌ها + تابعِ نرمال‌سازِ `setGender()` که
-  مرد/زن/male/female/m/f/۱/۲… را تشخیص و انتخاب می‌کند، و نرمال‌سازیِ ارقامِ موبایل/
-  تلفن. اکنون جنسیت، موبایل، تلفن، آدرس و بیمه به‌درستی auto-fill می‌شوند. —
-  `assets/admission/index.html`, `assets/admission/admission.js`.
-
-**۲) سخت‌سازیِ ضدِ قفل‌شدنِ پذیرش پس از افزودنِ خدمت — C++**
-- افزودنِ لایهٔ محافظِ `admissionApiSafe()` (try/catch) رویِ هر دو ترابرِ IPC
-  (WebView2 و HTTPِ loopback): هر استثنایِ مدیریت‌نشده به‌جایِ کشتنِ نخِ کارگر/
-  ری‌اِنترِ پیام‌حلقه (که منجر به قفل می‌شد) اکنون به‌صورتِ JSONِ خطا برمی‌گردد. —
-  `src/web_admission_api.inc`, `src/web_admission_http.inc`, `src/web_admission_host.inc`.
-- بالابردنِ کفِ تعدادِ نخ‌هایِ استخرِ کارگر (۴ رویِ سیستمِ ضعیف، ۶ در حالتِ عادی)
-  تا در سیستم‌هایِ ضعیف نیز گرسنگیِ نخ (starvation) رخ ندهد. — `src/web_thread_pool.cpp`.
-
-**۳) محاسبهٔ معتبرِ صورت‌حساب در C++ (رفعِ مبلغِ اشتباه) — C++/JS**
-- JS ابتدا نتیجهٔ محلیِ فوری را نمایش می‌دهد، سپس به‌صورتِ ناهم‌زمان (debounced)
-  `bill.compute`ِ C++ را صدا می‌زند و همهٔ مبالغ را با نتیجهٔ معتبرِ C++ آشتی می‌دهد؛
-  UI هرگز بلاک نمی‌شود. — `assets/admission/admission.js` (`scheduleServerBill`).
-
-**۴) هم‌گام‌سازیِ پوستهٔ تیره با صفحهٔ پذیرش — C++/CSS/JS**
-- پیش‌تر صفحهٔ HTMLِ پذیرش هیچ منطقِ پوسته‌ای نداشت. اکنون C++ در `init` مقدارِ
-  `theme` را می‌فرستد و هنگامِ تغییرِ پوسته رویدادِ `theme` را push می‌کند؛ JS با
-  `applyTheme()` کلاسِ تیره/روشن را روی `html/body` می‌گذارد و ~۲۰۰ خط CSSِ تیرهٔ
-  خوانا/واکنش‌گرا اعمال می‌شود. تعویضِ مکررِ تیره/روشن دیگر گلیچ نمی‌سازد. —
-  `src/theme.cpp`, `src/web_admission_api.inc`, `assets/admission/admission.js`,
-  `assets/admission/admission.css`.
-
-**۵) بخشِ جدید «مدیریت بیمه‌ها» — C++**
-- افزودنِ فروشگاهِ ویرایش‌پذیرِ بیمه‌ها (`data/insurances.dat`) با ستون‌هایِ
-  نام | درصدِ پوشش | نوع(پایه/تکمیلی) | وضعیت؛ در اولین اجرا از جدولِ داخلی seed
-  می‌شود. — `src/insurance.cpp`, `src/app.h`.
-- صفحهٔ بومیِ «مدیریت بیمه‌ها» در پنلِ مدیریت (فرمِ افزودن/ویرایش/حذف + جستجو +
-  جدول)؛ افزودن/ویرایشِ درصدِ پوشش و نوعِ بیمه به‌صورتِ زنده به پذیرش push می‌شود. —
-  `src/manage.inc` (صفحهٔ `PG_INSURANCE`).
-- پذیرش و همهٔ محاسباتِ صورت‌حساب اکنون درصدِ پوششِ بیمهٔ پایه/تکمیلی را از همین
-  فروشگاه می‌خوانند (`insBasePctAt`/`insSuppPctAt`)؛ اندیس‌هایِ کشویِ وب دقیقاً با
-  C++ هم‌راستا هستند. — `src/web_admission_api.inc`.
-
-**۶) قیمتِ خدمات به ریال + تاریخِ تولدِ تاریخی**
-- ستون/برچسبِ مبلغ در «مدیریت خدمات» به «مبلغ (ریال)»/«مبلغ پایه (ریال)» است.
-- فیلدِ تاریخِ تولد در پذیرش ورودیِ تاریخِ جلالیِ ماسک‌دار است (مناسبِ ایران).
-
-**فایل‌ها:** `assets/admission/{index.html,admission.js,admission.css}`,
-`src/{insurance.cpp,manage.inc,app.h,app.rc,theme.cpp,web_admission_api.inc,
-web_admission_http.inc,web_admission_host.inc,web_thread_pool.cpp}`, `build.sh`.
-
----
-
-## 1.42.0 — 2026-07-12
-
-> **رفعِ باگِ قفل‌شدنِ برنامه پس از افزودنِ خدمت + بازطراحیِ انتخابگرِ خدمت +
-> کارایی برای هزاران خدمت + بهبودِ صفحهٔ «مدیریت خدمات» + تأییدِ چاپِ متنی
-> (نه عکس) و مطابق با «طراحی چاپگر».**
-
-**۱) رفعِ ریشه‌ایِ قفل‌شدن (freeze) پس از ثبتِ پذیرش/چاپ — C++**
-- علت: هندلرهای `admission.save` و `print.*` عملیاتِ چاپ (که ممکن است دیالوگِ
-  مودالِ `PrintDlgW` باز کند و DCِ چاپگر بسازد) را **به‌صورت هم‌زمان (synchronous)**
-  داخلِ callbackِ `WebMessageReceived`ِ WebView2 (رویِ نخِ رابط‌کاربری) یا رویِ نخِ
-  کارگرِ HTTP اجرا می‌کردند. این کار WebView را **deadlock** می‌کرد → همان علامتِ
-  «همه‌چیز قفل شد، هیچ دکمه‌ای کار نمی‌کند».
-- رفع: کلِّ کارِ چاپ + بازکردنِ کشویِ پول (cash-drawer) با `RunOnUiThread`
-  (PostMessageِ ناهم‌زمان به نخِ GUI) **به تعویق** انداخته شد و پاسخِ
-  `{"ok":true,"printMode":"deferred"}` بی‌درنگ به JS برگردانده می‌شود؛ رابط‌کاربری
-  دیگر هرگز قفل نمی‌شود. — `src/web_admission_api.inc` (verbهای `admission.save` و
-  `print.last/print.insurance/print.rx/print.receipt`).
-
-**۲) کارایی برای هزاران خدمت — C++**
-- `loadServices()` پیش‌تر در هر بار صدا زدن، کلِّ فایلِ `data/services.dat` را
-  دوباره می‌خواند و پارس می‌کرد (در هر ضربهٔ کلید در جستجویِ خدمت و در هر ردیفِ
-  صورت‌حساب). با هزاران خدمت این باعثِ لگ/افتِ فریم می‌شد.
-- افزودنِ **کشِ درون‌حافظه‌ای با ابطالِ مبتنی بر زمانِ آخرین‌نگارشِ فایل (FILETIME)
-  + اندازهٔ فایل**؛ در صورتِ عدم‌تغییرِ فایل، بازگشت در O(1). `saveServices()` کش را
-  باطل می‌کند. مقاوم در برابرِ چند نخ (mutex). — `src/services.cpp`.
-
-**۳) بازطراحیِ انتخابگرِ خدمت — یک مینی‌پاپ‌آپِ (modal) شکیل — HTML/CSS/JS**
-- دکمهٔ «افزودن خدمت» اکنون یک پنجرهٔ کوچکِ حرفه‌ای باز می‌کند: ورودِ **کد خدمت**،
-  جستجویِ زندهٔ نام/کد، جدولِ نتایجِ چسبنده‌سر، افزودن با کلیک/Enter/کلیدهایِ جهت،
-  و افزودنِ چندبارهٔ سریع. — `assets/admission/index.html`,
-  `assets/admission/admission.css`, `assets/admission/admission.js`.
-
-**۴) صفحهٔ «مدیریت خدمات» — رفعِ نمایشِ خالی (هیچی)**
-- فهرستِ `LVS_OWNERDATA` گاهی پس از بارگذاری، ردیف‌هایِ کهنه/خالی نگه می‌داشت.
-  اکنون `ListView_SetItemCountEx` + `ListView_RedrawItems` + `UpdateWindow` صریح
-  اجرا می‌شود تا جدولِ خدمات همیشه داده‌ها را نشان دهد. — `src/manage.inc`.
-
-**۵) چاپ — تأییدِ متنی‌بودن (نه عکس) و مطابقتِ کامل با «طراحی چاپگر»**
-- بازبینی نشان داد مسیرِ چاپِ طراحی‌شده (`printPrintDesign`) از قبل **متنی** است:
-  آیتم‌هایِ متن با `DrawTextW` و فونتِ واقعیِ Vazirmatn (با auto-fit برایِ عدمِ
-  برش) رسم می‌شوند، جدول‌ها با `pdDrawTable` (متن)، و فقط لوگو/عکس با
-  `gpDrawImageRectFit` تصویری می‌شوند. هیچ رَستری‌سازیِ تمام‌صفحه‌ای در خروجیِ
-  چاپگر وجود ندارد (BitBltهایِ موجود صرفاً double-bufferِ روی‌صفحه‌اند). خروجی
-  دقیقاً همان چیدمانِ طراحی‌شده در «مدیریت ← طراحی چاپگر» است.
-
-**فایل‌های تغییرکرده:** `src/web_admission_api.inc`, `src/services.cpp`,
-`src/manage.inc`, `src/app.h` (نسخه ۱٫۴۲٫۰), `assets/admission/index.html`,
-`assets/admission/admission.css`, `assets/admission/admission.js`,
-`docs/CHANGELOG.md`.
+**فایل‌ها (Files):**
+- `avalonia/AzadiTeb.Reception/` — پروژهٔ جدیدِ Avalonia MVVM (Program، App،
+  `Views/MainWindow.axaml` = چیدمانِ ۳ ستونیِ پذیرش، `Views/Styles.axaml` =
+  پالتِ رنگیِ برگرفته از `admission.css`، `Services/ApiBridge.cs` = کلاینتِ
+  HTTPِ همان پلِ `/api`، `Services/PersianTools.cs`، `ViewModels/*`).
+- `src/av_reception.h` / `src/av_reception.cpp` — میزبانِ C++ که اپِ Avalonia
+  را اجرا/جاسازی/resize/تخریب می‌کند و از RCDATA(700) استخراج می‌کند.
+- `src/web_admission_dispatch.inc` — افزودنِ Avalonia به‌عنوانِ موتورِ **اصلی**
+  (قبل از WebView2/MSHTML) در `WebAdmission_CreateView/Resize/DestroyView`.
+- `src/web_admission.cpp` — `#include "av_reception.h"`.
+- `src/app.rc` — بلاکِ `700 RCDATA` برایِ اپِ Avalonia.
+- `build.sh` — مرحلهٔ `[0/3]`: publishِ Avalonia (win-x86 self-contained) و کپی
+  به `build/AzadiTeb.Reception.exe`؛ افزودنِ `src/av_reception.cpp` به SRCS.
 
 ---
 

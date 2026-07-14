@@ -1,18 +1,8 @@
 # 🏥 آزادی طب (Azadi-Teb)
 
-**سامانه پذیرش و مدیریت درمانگاه — نسخه ۲.۰.۰**
+**سامانه پذیرش و مدیریت درمانگاه — نسخه ۱.۱۰.۰**
 
-> **نسخهٔ ۲: تحولِ معماری.** لایهٔ نمایش با **Avalonia UI (.NET 9) + MVVM**
-> بازنویسی شد (ظاهرِ زیبا، Responsive، RTL، Dark/Light) و منطقِ کسب‌وکار در
-> **هستهٔ C++20** حفظ و به‌صورتِ سرویسِ **REST** جدا شد. برنامه دیگر هنگ یا
-> کرش نمی‌کند. جزئیات کامل: [`docs/ARCHITECTURE_V2.md`](docs/ARCHITECTURE_V2.md).
->
-> - لایهٔ نمایش: `app/AzadiTeb.UI/` (Avalonia، MVVM)
-> - هستهٔ C++ REST: `backend/`
-> - خروجی نهایی: `build/AzadiTeb.exe` (single-file، self-contained، win-x64)
-> - بیلد: `./build.sh` (فقط UI) یا `./build.sh core` (به‌همراه هستهٔ C++)
-
-نسخهٔ قدیمِ Win32 (کد `src/*.cpp`) به‌عنوان مرجع در مخزن باقی مانده است.
+برنامه دسکتاپ ویندوز با C++ خالص (Win32 API) — بدون هیچ وابستگی خارجی، یک فایل EXE واحد.
 
 ---
 
@@ -89,20 +79,36 @@
 ```bash
 # روی لینوکس (Debian/Ubuntu):
 sudo apt install g++-mingw-w64-i686
+# برای ساختِ ظاهرِ Avaloniaِ پذیرش، به .NET 9 SDK هم نیاز است:
+#   https://dotnet.microsoft.com/download/dotnet/9.0
 ./build.sh        # خروجی: build/AzadiTeb.exe
+
+# اگر .NET نصب نباشد و فقط بخشِ C++ را بخواهید:
+AZ_SKIP_AVALONIA=1 ./build.sh   # پذیرش به‌صورتِ خودکار به موتورِ HTML برمی‌گردد
 ```
 
 روی ویندوز با MSYS2/MinGW32 هم همان فرمان‌های داخل `build.sh` قابل اجراست.
 
+## 🖥️ ظاهرِ «پذیرش بیمار» با Avalonia UI (نسخهٔ ۱.۴۸)
+
+از نسخهٔ ۱.۴۸، **تنها ظاهرِ** بخشِ پذیرش بیمار با یک اپِ **Avalonia UI (.NET 9)**
+رندر می‌شود (به‌جایِ صفحهٔ HTMLِ قبلی). هستهٔ C++، منطقِ کسب‌وکار، پنلِ مدیریت و
+بقیهٔ برنامه **دست‌نخورده** است. UIِ Avalonia با همان پلِ `/api` رویِ
+`127.0.0.1` به C++ متصل است، پس همه‌چیز کاملاً **sync** می‌ماند (C++ تنها منبعِ
+حقیقت است). اپِ Avalonia به‌صورتِ خودکفا build و داخلِ همان EXEِ تک‌فایلی جاسازی
+می‌شود؛ در زمانِ اجرا استخراج و داخلِ تبِ پذیرش reparent می‌شود. اگر .NET/Avalonia
+اجرا نشد، برنامه به موتورِ HTML و سپس فرمِ native GDI برمی‌گردد.
+
 ## 📂 ساختار مخزن
 
 ```
-├── src/             ← سورس C++ (Win32 خالص)
+├── src/             ← سورس C++ (Win32 خالص) + av_reception.* (میزبانِ Avalonia)
+├── avalonia/        ← پروژهٔ Avalonia UI (.NET 9) ظاهرِ پذیرش بیمار
 ├── fonts/           ← فونت Vazirmatn (داخل EXE تعبیه می‌شود)
-├── build/           ← خروجی EXE نهایی
+├── build/           ← خروجی EXE نهایی (+ AzadiTeb.Reception.exe جاسازی‌شده)
 ├── docs/            ← مستندات کامل (PROJECT_GUIDE / CHANGELOG / PROMPT)
 ├── update/          ← فایل version.txt برای آپدیت از راه دور
-└── build.sh         ← اسکریپت بیلد
+└── build.sh         ← اسکریپت بیلد (publishِ Avalonia + کامپایلِ C++)
 ```
 
 ## 🔄 آپدیت از راه دور — راه‌اندازی سرور

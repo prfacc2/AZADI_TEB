@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.47.0"
+#define APP_VERSION_W   L"1.41.0"
 
 // ----------------------------------------------------------- logging policy -
 //  RELEASE 1.2.0 (Section A): all general user-behavior logging is gated behind
@@ -241,8 +241,6 @@ void         writeSchemaVersion();   // §I: stamp data\.schema_version (informa
 void         logLine(const std::wstring& s);
 // §J: record a flow breadcrumb (last 32 are dumped into the crash report).
 void         Breadcrumb(const wchar_t* what);
-// v1.44.0: structured, abnormal-events-ONLY client log (logs\client.log).
-#include "client_log.h"
 std::wstring formatMoney(long long v);                   // 1,234,567
 long long    parseMoney(const std::wstring& s);
 std::wstring trim(const std::wstring& s);
@@ -296,30 +294,6 @@ struct InsuranceDef { const wchar_t* name; int pct; };
 extern const InsuranceDef INSURANCES[];     extern const int N_INSURANCES;
 extern const InsuranceDef SUPP_INSURANCES[];extern const int N_SUPP;
 
-// v1.43.0 — EDITABLE insurance store («مدیریت بیمه‌ها»). Percentages, names and
-// the base/supplementary split are now data-driven (data\insurances.dat) so the
-// clinic can define exactly how much share each insurer covers. On first run the
-// store is seeded from the built-in INSURANCES/SUPP_INSURANCES tables above, so
-// behaviour is identical until the operator edits it. The admission billing and
-// selectors read these dynamic rows (indices stay aligned with the JSON sent to
-// the web UI).
-struct InsuranceRow {
-    std::wstring name;   // نام بیمه
-    int          pct = 0;// درصد سهم سازمان (۰..۱۰۰)
-    int          supp = 0;// 0 = پایه ، 1 = مکمل (تکمیلی)
-    int          status = 1;// 1 = فعال ، 0 = غیرفعال
-    std::wstring extra;  // forward-compat: unknown future columns round-trip here
-};
-std::vector<InsuranceRow> loadInsuranceRows();          // all rows (cached)
-void                      saveInsuranceRows(const std::vector<InsuranceRow>& v);
-std::vector<InsuranceRow> insBaseList();                // supp==0 && status==1 (+ ensures index 0 = آزاد)
-std::vector<InsuranceRow> insSuppList();                // supp==1 && status==1 (+ ensures index 0 = ندارد)
-int  insBasePctAt(int idx);                             // safe pct by base-list index
-int  insSuppPctAt(int idx);                             // safe pct by supp-list index
-std::wstring insBaseNameAt(int idx);
-std::wstring insSuppNameAt(int idx);
-void insuranceStoreInvalidate();                        // drop the cache (after save)
-
 // -------------------------------------------------------------- tariffs ----
 //  Default service tariffs (Rial) so the program computes the bill itself.
 //  Indexed by patient-visit type: 0=عادی 1=سرپایی 2=بستری.
@@ -330,15 +304,6 @@ long long applyApptTariff(long long base, int apptType);
 long long defaultServicePrice(int patientType, int apptType);
 
 // -------------------------------------------------------------- reception --
-// v1.44.0 §4.3: one service line-item, used to render the "services" table
-// subtype in the print designer (one printed row per line). Runtime-only —
-// NOT persisted to the CSV, so existing reception storage is unaffected.
-struct ReceptionLine {
-    std::wstring code, name;
-    int          qty;
-    long long    price, discount, insShare, patShare;
-    ReceptionLine():qty(1),price(0),discount(0),insShare(0),patShare(0){}
-};
 struct ReceptionRecord {
     std::wstring firstName, lastName, nationalId, fatherName, birthDate,
                  gender, mobile, landline, address, patientType,
@@ -347,11 +312,9 @@ struct ReceptionRecord {
     long long total, mainShare, patientShare, baseDiff, orgShare,
               finalTotal, discount, paid;
     int queueNo, insIdx, suppIdx;
-    int basePct, suppPct;                 // v1.44.0: coverage % (for {{ins.*.pct}})
-    std::vector<ReceptionLine> services;  // v1.44.0: per-line items (print only)
     ReceptionRecord():total(0),mainShare(0),patientShare(0),baseDiff(0),
         orgShare(0),finalTotal(0),discount(0),paid(0),queueNo(0),
-        insIdx(0),suppIdx(0),basePct(0),suppPct(0){}
+        insIdx(0),suppIdx(0){}
 };
 int  saveReception(ReceptionRecord& r);          // assigns queue no, persists CSV
 int  countTodayReceptions();
@@ -502,7 +465,6 @@ struct ServiceDef {
     ServiceDef():price(0),status(1){}
 };
 std::vector<ServiceDef> loadServices();
-std::vector<ServiceDef> snapshotServices();   // v1.44.0 §2.4: full copy under lock
 bool  addService(const ServiceDef& s, std::wstring& err);   // insert (code must be unique)
 bool  updateService(const ServiceDef& s, std::wstring& err);// edit by code
 bool  removeService(const std::wstring& code);
