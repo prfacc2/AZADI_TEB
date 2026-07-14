@@ -5,52 +5,64 @@
 
 ---
 
-## 1.48.0 — 2026-07-14
+## 1.49.0 — 2026-07-14
 
-> **جایگزینیِ ظاهرِ بخشِ «پذیرش بیمار» با Avalonia UI (به‌جایِ صفحهٔ HTML امبد).**
-> تنها و فقط **ظاهرِ** صفحهٔ پذیرش بیمار عوض شده است؛ هستهٔ C++، منطقِ کسب‌وکار،
-> پنلِ مدیریت و بقیهٔ برنامه **دست‌نخورده** باقی مانده‌اند. UIِ جدیدِ Avalonia با
-> همان پلِ `/api` رویِ `127.0.0.1` (همان پلی که صفحهٔ HTML قبلی استفاده می‌کرد)
-> به C++ متصل و **کاملاً sync** است — پس C++ هم‌چنان تنها منبعِ حقیقت است
-> (بیمار، خدمات، بیمه، محاسبهٔ صورتحساب، صف صندوق، چاپ).
+> **بازگردانی به نسخهٔ پاک + رفعِ ریشه‌ایِ «هنگ‌کردنِ کاملِ برنامه» در پذیرش، و
+> ساده‌سازیِ فرمِ «مدیریت خدمات».** پروژه از روی فایلِ بکاپِ سالم بازسازی شد
+> (دو آپدیتِ آزمایشیِ Avalonia و همهٔ فایل‌هایِ اضافه حذف شدند)، سپس دو ایرادِ
+> اصلی برطرف شد.
 
-**فارسی — چه چیزی عوض شد:**
-- صفحهٔ HTML پذیرش (`assets/admission/*`) دیگر ظاهرِ پیش‌فرضِ پذیرش نیست. یک اپِ
-  Avalonia (net9، `avalonia/AzadiTeb.Reception/`) به‌شکلِ خودکفا build و
-  به‌صورتِ RCDATA(700) داخلِ همان EXEِ تک‌فایلی جاسازی می‌شود.
-- هنگامِ بازشدنِ تبِ پذیرش، C++ اپِ Avalonia را اجرا و پنجره‌اش را (SetParent)
-  داخلِ همان تب reparent می‌کند و آن را با هر resize پر می‌کند — دقیقاً مثلِ
-  رفتارِ کنترلِ WebView2ِ قبلی. ورودی/خروجی از همان `/api/<verb>` عبور می‌کند.
-- اگر روی سیستمی .NET/Avalonia قابل‌اجرا نبود، برنامه به‌صورتِ خودکار به موتورِ
-  HTML (WebView2/MSHTML) و در نهایت فرمِ native GDI برمی‌گردد؛ پس قابلیت هرگز
-  از دست نمی‌رود.
+### Fixed — رفعِ هنگِ کاملِ برنامه (deadlock) در پذیرش بیمار
 
-**English — what changed:**
-- The HTML admission page (`assets/admission/*`) is no longer the reception's
-  presentation. A self-contained Avalonia app (net9, `avalonia/AzadiTeb.Reception/`)
-  is published and embedded as `RCDATA(700)` inside the same single-file EXE.
-- On opening the reception tab, C++ launches the Avalonia exe and reparents its
-  top window (`SetParent`) into that tab, keeping it sized to fill — exactly like
-  the retired WebView2 child. All data flows over the **same** loopback
-  `/api/<verb>` bridge, so the C++ core is unchanged and stays the single source
-  of truth.
-- Graceful fallback: if .NET/Avalonia cannot run, the app falls back to the HTML
-  engine (WebView2/MSHTML) and finally the native GDI form — the feature is never
-  lost.
+- **ریشهٔ مشکل:** درخواست‌هایِ `/api` (پلِ loopback بینِ HTML و هستهٔ C++) روی
+  **thread هایِ کارگرِ** استخرِ وب اجرا می‌شوند. اما مسیرهایِ `admission.save`،
+  `print.insurance`، `print.rx`، `print.receipt` و `print.last` مستقیماً توابعِ
+  چاپ را صدا می‌زدند (`printReceipt` / `printDesignedReceipt` /
+  `printPrintDesign` / `printLastReceipt`). این توابع پنجرهٔ **مودالِ چاپِ
+  ویندوز** (`PrintDlgW` / `MessageBoxW`) را باز می‌کنند و به HWND هایِ متعلق به
+  **thread رابط کاربری** دست می‌زنند. اجرایِ آن‌ها از یک thread کارگر باعثِ
+  **deadlock** می‌شد: کلِ برنامه قفل می‌کرد — حتی دکمهٔ بستن هم کار نمی‌کرد —
+  دقیقاً همان چیزی که کاربر پس از افزودنِ خدمت و ذخیره/چاپ گزارش داد.
+- **راه‌حل:** یک همگام‌سازِ جدید `RunOnUiThreadSync()` اضافه شد
+  (`src/web_thread_pool.h` + `src/web_thread_pool.cpp`) که یک callable را روی
+  thread صاحبِ `g_hFrame` اجرا می‌کند و thread کارگر را تا پایانِ کار (با
+  محدودیتِ ۳۰ ثانیه) نگه می‌دارد. اگر از خودِ UI thread صدا زده شود همان‌جا
+  inline اجرا می‌شود تا هرگز خود-قفلی رخ ندهد.
+- کلِ بلوکِ چاپ در `admission.save` و همهٔ `print.*` اکنون داخلِ
+  `RunOnUiThreadSync(...)` اجرا می‌شوند (`src/web_admission_api.inc`). هستهٔ C++
+  همچنان منبعِ یگانهٔ حقیقت است و رفتار تغییری نکرده — فقط روی thread درست اجرا
+  می‌شود.
 
-**فایل‌ها (Files):**
-- `avalonia/AzadiTeb.Reception/` — پروژهٔ جدیدِ Avalonia MVVM (Program، App،
-  `Views/MainWindow.axaml` = چیدمانِ ۳ ستونیِ پذیرش، `Views/Styles.axaml` =
-  پالتِ رنگیِ برگرفته از `admission.css`، `Services/ApiBridge.cs` = کلاینتِ
-  HTTPِ همان پلِ `/api`، `Services/PersianTools.cs`، `ViewModels/*`).
-- `src/av_reception.h` / `src/av_reception.cpp` — میزبانِ C++ که اپِ Avalonia
-  را اجرا/جاسازی/resize/تخریب می‌کند و از RCDATA(700) استخراج می‌کند.
-- `src/web_admission_dispatch.inc` — افزودنِ Avalonia به‌عنوانِ موتورِ **اصلی**
-  (قبل از WebView2/MSHTML) در `WebAdmission_CreateView/Resize/DestroyView`.
-- `src/web_admission.cpp` — `#include "av_reception.h"`.
-- `src/app.rc` — بلاکِ `700 RCDATA` برایِ اپِ Avalonia.
-- `build.sh` — مرحلهٔ `[0/3]`: publishِ Avalonia (win-x86 self-contained) و کپی
-  به `build/AzadiTeb.Reception.exe`؛ افزودنِ `src/av_reception.cpp` به SRCS.
+### Added — handlerِ نیرومندِ «کد خدمت → انتخابِ خدمت» در پذیرش
+
+- در `assets/admission/admission.js` تابعِ `resolveAndAddService()` افزوده شد که
+  ورودیِ کادرِ خدمت را در دو مرحله علیهِ کاتالوگِ زندهٔ مدیریت resolve می‌کند:
+  (۱) `service.resolve` برایِ تطبیقِ **دقیقِ کدِ خدمت** (اولویت)، سپس
+  (۲) `service.search` به‌عنوانِ fallbackِ متن‌آزاد. پرچمِ `_svcSearchInFlight`
+  از هم‌پوشانیِ فراخوان‌ها جلوگیری می‌کند و در همهٔ مسیرها (then/catch) پاک می‌شود،
+  پس کادر هرگز «گیر» نمی‌کند. Enter یک خدمت را می‌افزاید و دکمهٔ «افزودن خدمت» در
+  حالتِ مبهم فهرست را نشان می‌دهد. افزودنِ چندین خدمتِ پیاپی و محاسبهٔ درستِ
+  صورت‌حساب کاملاً پشتیبانی می‌شود.
+
+### Changed — ساده‌سازیِ فرمِ «مدیریت خدمات» (فقط سه فیلد)
+
+- در `src/manage.inc` فرمِ خدمات اکنون **دقیقاً سه فیلد** دارد: «نام خدمت»،
+  «کد خدمت» و «قیمت (ریال)». فیلدهایِ دسته/بخش/نوع‌بیمه/وضعیت/توضیحات از UI حذف
+  شدند (کنترل‌هایشان همچنان ساخته می‌شوند ولی پنهان‌اند تا لایهٔ داده و رکوردهایِ
+  قدیمیِ `services.dat` بی‌مشکل کار کنند). هنگامِ **ویرایش**، ستون‌هایِ پنهانِ
+  رکوردِ قبلی حفظ می‌شوند؛ خدماتِ جدید همیشه «فعال» (status=1) ذخیره می‌شوند تا در
+  پذیرش قابلِ انتخاب بمانند. `mgPaintServices` / `mgLayout` / `mgServicesReadForm`
+  / `mgServicesSave` بر همین اساس به‌روز شدند.
+
+### Removed — فایل‌هایِ اضافه (بازگردانی به بکاپِ سالم)
+
+- حذفِ پوشهٔ `avalonia/` و `src/av_reception.cpp` / `src/av_reception.h`؛
+  بازگردانیِ `src/app.rc` / `src/web_admission.cpp` /
+  `src/web_admission_dispatch.inc` به نسخهٔ بکاپ (بدونِ مسیرِ Avalonia).
+
+### Changed — نسخه
+
+- ارتقایِ نسخه به **1.49.0** در `src/app.rc`.
 
 ---
 

@@ -21,15 +21,6 @@ HWND WebAdmission_CreateView(HWND parent){
     if(!parent) return nullptr;
     if(!WebAdmission_EnsureHost()) return nullptr;
 
-    // 0) v1.48.0 PRIMARY: the Avalonia (.NET) reception surface. This replaces
-    //    the retired embedded HTML page as the reception's appearance. It talks
-    //    to the SAME loopback /api bridge (below), so the C++ core is unchanged
-    //    and stays the single source of truth. If .NET/Avalonia can't run we
-    //    fall through to the HTML engines so the feature is never lost.
-    if(AvReception_Available()){
-        HWND av=AvReception_CreateView(parent);
-        if(av) return av;
-    }
     // 1) modern Chromium engine when its runtime is present
     if(WV2_Available()){
         HWND wv=WV2_CreateView(parent);
@@ -45,7 +36,6 @@ HWND WebAdmission_CreateView(HWND parent){
 
 void WebAdmission_Resize(HWND view, int w, int h){
     if(!view) return;
-    if(AvReception_Owns(view)){ AvReception_Resize(view,w,h); return; }
     if(WV2_Owns(view)){ WV2_Resize(view,w,h); return; }
     MshtmlAdmission_Resize(view,w,h);
 }
@@ -89,9 +79,8 @@ void WebAdmission_NotifyCatalogChanged(){
 
 void WebAdmission_DestroyView(HWND view){
     if(!view) return;
-    if(AvReception_DestroyView(view)) return;   // was an Avalonia view
-    if(WV2_DestroyView(view)) return;           // was a WebView2 view
-    MshtmlAdmission_Destroy(view);              // else an MSHTML view
+    if(WV2_DestroyView(view)) return;   // was a WebView2 view
+    MshtmlAdmission_Destroy(view);      // else an MSHTML view
 }
 
 // Give the embedded admission browser a chance to consume accelerator keys

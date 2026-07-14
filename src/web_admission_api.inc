@@ -489,23 +489,32 @@ static std::string admissionApi(const std::string& verb, const std::string& body
         //                     3) classic GDI receipt
         // v1.40.0 (B5): track WHICH path actually printed and report it to JS so
         // the operator is warned when the classic fallback template was used.
+        //
+        // v1.49.0 FREEZE FIX: this handler runs on a loopback /api WORKER thread.
+        // The print pipeline opens modal dialogs (PrintDlgW / MessageBoxW) and
+        // touches UI-thread-owned HWNDs, so it MUST execute on the thread that
+        // owns g_hFrame. Calling it here directly deadlocked the whole program
+        // (the "everything freezes after adding a service + saving" bug). We now
+        // marshal the entire print block onto the UI thread and wait for it.
         HWND owner = g_hFrame;
         int  sid=adResolveSectionId();
-        bool done=false;
         std::wstring printMode=L"none";
-        if(sid>0){
-            done=printPrintDesign(r,sid,owner);
-            if(done) printMode=L"print-design section="+std::to_wstring(sid);
-        }
-        if(!done){
-            done=printDesignedReceipt(r,0,owner);
-            if(done) printMode=L"designed-receipt idx=0";
-        }
-        if(!done){
-            printReceipt(r,2,owner);
-            printMode=L"classic-gdi";
-        }
-        kickCashDrawer();
+        RunOnUiThreadSync([&](){
+            bool done=false;
+            if(sid>0){
+                done=printPrintDesign(r,sid,owner);
+                if(done) printMode=L"print-design section="+std::to_wstring(sid);
+            }
+            if(!done){
+                done=printDesignedReceipt(r,0,owner);
+                if(done) printMode=L"designed-receipt idx=0";
+            }
+            if(!done){
+                printReceipt(r,2,owner);
+                printMode=L"classic-gdi";
+            }
+            kickCashDrawer();
+        });
 
         logLine(L"admission printed via: "+printMode+L"  nid="+r.nationalId);
         if(g_hFrame) PostMessageW(g_hFrame,WM_APP_DESIGN_PUSHED,0,0);
@@ -524,24 +533,29 @@ static std::string admissionApi(const std::string& verb, const std::string& body
     }
 
     // ---- print.* : route to the real GDI print pipeline --------------------
+    //  v1.49.0 FREEZE FIX: like admission.save, every print path opens a modal
+    //  Windows print dialog and touches UI-thread HWNDs, so it must be marshalled
+    //  onto the UI thread (running it on this worker thread froze the whole app).
     if(verb.rfind("print.",0)==0){
         HWND owner=g_hFrame;
         if(verb=="print.last"){
-            printLastReceipt(owner);
+            RunOnUiThreadSync([&](){ printLastReceipt(owner); });
             return "{\"ok\":true}";
         }
         ReceptionRecord r;
         bool have=false;
         if(!body.empty() && body!="{}"){ r=adBuildRecord(body); have=(r.total>0)||!r.nationalId.empty(); }
         if(!have) loadLastReceipt(r);
-        if(verb=="print.insurance"){ printReceipt(r,0,owner); }
-        else if(verb=="print.rx"){   printReceipt(r,1,owner); }
-        else if(verb=="print.receipt"){
-            int sid=adResolveSectionId(); bool done=false;
-            if(sid>0) done=printPrintDesign(r,sid,owner);
-            if(!done) done=printDesignedReceipt(r,0,owner);
-            if(!done) printReceipt(r,2,owner);
-        }
+        RunOnUiThreadSync([&](){
+            if(verb=="print.insurance"){ printReceipt(r,0,owner); }
+            else if(verb=="print.rx"){   printReceipt(r,1,owner); }
+            else if(verb=="print.receipt"){
+                int sid=adResolveSectionId(); bool done=false;
+                if(sid>0) done=printPrintDesign(r,sid,owner);
+                if(!done) done=printDesignedReceipt(r,0,owner);
+                if(!done) printReceipt(r,2,owner);
+            }
+        });
         logLine(L"admission print (web): "+u82w(verb));
         return "{\"ok\":true}";
     }

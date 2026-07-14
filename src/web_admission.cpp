@@ -14,7 +14,6 @@
 // ============================================================================
 #include "app.h"
 #include "web_admission.h"
-#include "av_reception.h"       // v1.48.0: Avalonia reception surface (primary)
 #include "web_pages.h"          // v1.40.0: multi-page registry (generic dispatch)
 #include "web_thread_pool.h"    // v1.40.0: bounded worker pool for the host
 #include "sections.h"

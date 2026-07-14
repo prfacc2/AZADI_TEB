@@ -27,12 +27,3 @@ package-lock.json
 test_designer.mjs
 designer_test.png
 build/AzadiTeb_probe.exe
-.dotnet-env.sh
-
-# v1.48.0 — Avalonia (.NET) reception surface: ignore build intermediates only.
-# The SOURCE under avalonia/AzadiTeb.Reception/ IS committed; the published
-# self-contained exe is embedded into the native EXE at build time and the
-# shipped copy lives at build/AzadiTeb.Reception.exe (committed).
-avalonia/**/bin/
-avalonia/**/obj/
-avalonia/**/publish/

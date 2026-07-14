@@ -51,6 +51,23 @@ void WebPool_Shutdown();
 // ---------------------------------------------------------------------------
 void RunOnUiThread(std::function<void()> fn);
 
+// ---------------------------------------------------------------------------
+//  SYNCHRONOUS UI-thread marshalling (v1.49.0 — freeze fix).
+//  Runs `fn` on the GUI thread and BLOCKS the calling worker thread until it
+//  has finished. This is the ONLY safe way for a loopback /api worker thread to
+//  invoke anything that opens a modal dialog / uses a UI-thread-owned HWND —
+//  most importantly the print pipeline (PrintDlgW / MessageBoxW / the print
+//  designer window), which MUST run on the thread that owns g_hFrame. Calling
+//  those directly from a worker deadlocked the whole app (the classic
+//  "everything freezes, even the close button" bug the operator hit right after
+//  adding a service and saving/printing the admission).
+//
+//  Safe to call from ANY thread:
+//    * On the UI thread itself it just runs `fn` inline (no self-deadlock).
+//    * With no frame window yet it also runs inline as a best-effort fallback.
+//  Exceptions thrown by `fn` are swallowed (same policy as RunOnUiThread).
+void RunOnUiThreadSync(std::function<void()> fn);
+
 // Invoked by frameProc when it receives WM_APP_UI_TASK. `lParam` is the opaque
 // task pointer that RunOnUiThread posted. Runs the callable then frees it.
 void WebUiTask_Run(LPARAM lParam);

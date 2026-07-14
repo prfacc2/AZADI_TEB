@@ -254,22 +254,23 @@ static void mgServicesLoadForm(const ServiceDef& s){
     s_mg->svEditCode=s.code;
 }
 //  Read the form into a ServiceDef.
+//  v1.49.0: only three fields survive in the UI — name, code, price. The other
+//  columns (category / dept / insurance / description) are no longer edited; we
+//  leave them empty for a NEW service and preserve the previous values when
+//  EDITING (mgServicesSave copies them back from the stored record). Status is
+//  always «فعال» (1) so simplified services stay usable in admission.
 static ServiceDef mgServicesReadForm(){
     ServiceDef s;
     if(!s_mg) return s;
     wchar_t b[512]={0};
     GetWindowTextW(s_mg->svCode,b,512);  s.code=trim(b);
     GetWindowTextW(s_mg->svName,b,512);  s.name=trim(b);
-    GetWindowTextW(s_mg->svCat, b,512);  s.category=trim(b);
     GetWindowTextW(s_mg->svPrice,b,512); s.price=parseMoney(b);
-    GetWindowTextW(s_mg->svDesc,b,512);  s.desc=trim(b);
-    if(s_mg->svDept){ wchar_t d[128]={0};
-        int sel=(int)SendMessageW(s_mg->svDept,CB_GETCURSEL,0,0);
-        if(sel>0){ SendMessageW(s_mg->svDept,CB_GETLBTEXT,sel,(LPARAM)d); s.dept=d; } }
-    if(s_mg->svIns){ wchar_t it[128]={0};
-        int sel=(int)SendMessageW(s_mg->svIns,CB_GETCURSEL,0,0); if(sel<0) sel=0;
-        SendMessageW(s_mg->svIns,CB_GETLBTEXT,sel,(LPARAM)it); s.insType=it; }
-    s.status = (SendMessageW(s_mg->svStatus,CB_GETCURSEL,0,0)==1)?0:1;
+    s.category.clear();
+    s.dept.clear();
+    s.insType.clear();
+    s.desc.clear();
+    s.status = 1;   // always active
     return s;
 }
 //  «ذخیره» — insert a new service or update the one loaded in the form.
@@ -278,6 +279,17 @@ static void mgServicesSave(HWND h){
     ServiceDef s=mgServicesReadForm();
     std::wstring err; bool ok;
     if(!s_mg->svEditCode.empty() && s.code==s_mg->svEditCode){
+        // EDIT: preserve the hidden columns from the existing record so an old
+        // service that already carried a category/dept/insurance/description
+        // does not silently lose them just because the form no longer shows them.
+        for(const auto& e:s_mg->svAll){
+            if(e.code==s.code){
+                s.category=e.category; s.dept=e.dept;
+                s.insType =e.insType;  s.desc=e.desc;
+                s.status  =e.status;   s.created=e.created;
+                break;
+            }
+        }
         ok=updateService(s,err);
         if(ok){ s_mg->msg=L"خدمت «"+s.name+L"» ویرایش شد."; s_mg->msgCol=g_theme.success; }
     } else {
@@ -2645,35 +2657,25 @@ static void mgLayout(HWND h){
         ShowWindow(s_mg->bNoteSend,SW_SHOW);
     } else if(s_mg->page==PG_SERVICES){
         // ---- service-management form (top) + services table (fills rest) ----
-        //  A white form card (painted in mgPaintServices) holds the inputs; the
-        //  controls are positioned here on a shared grid so labels (painted just
-        //  above each control) never overlap them.
+        //  Simplified (v1.49.0): the service form now has EXACTLY three fields —
+        //  «نام خدمت», «کد خدمت», «قیمت». Category / department / insurance /
+        //  status / description are gone from the UI; their controls are still
+        //  created (kept hidden) so the data layer and any legacy .dat records
+        //  keep working, but the operator only ever fills these three boxes.
         int lh=S(20), fgap=S(14);
         int formL=a.left+S(12), formR=rEdge;
         int formW=formR-formL;
         int cgap=S(12);
-        int colW=(formW-2*cgap)/3;               // 3 columns
+        int colW=(formW-2*cgap)/3;               // 3 columns (single row)
         auto cx=[&](int c){ return formR-(c+1)*colW-c*cgap; };  // RTL col left edge
         int y=top+S(28);                          // room for the card title
-        // row1: کد خدمت | نام خدمت | دسته
+        // single row (RTL):  نام خدمت | کد خدمت | قیمت (ریال)
         int r1c=y+lh;
-        MoveWindow(s_mg->svCode, cx(0), r1c, colW, fh, TRUE);
-        MoveWindow(s_mg->svName, cx(1), r1c, colW, fh, TRUE);
-        MoveWindow(s_mg->svCat,  cx(2), r1c, colW, fh, TRUE);
-        // row2: بخش | مبلغ پایه | نوع بیمه
-        int r2l=r1c+fh+fgap;
-        int r2c=r2l+lh;
-        MoveWindow(s_mg->svDept,  cx(0), r2c, colW, S(220), TRUE);
-        MoveWindow(s_mg->svPrice, cx(1), r2c, colW, fh, TRUE);
-        MoveWindow(s_mg->svIns,   cx(2), r2c, colW, S(160), TRUE);
-        // row3: وضعیت (col0) | توضیحات (spans col1..col2)
-        int r3l=r2c+fh+fgap;
-        int r3c=r3l+lh;
-        int descL=cx(2), descW=cx(1)+colW-descL;
-        MoveWindow(s_mg->svStatus, cx(0), r3c, colW, S(120), TRUE);
-        MoveWindow(s_mg->svDesc,   descL, r3c, descW, fh, TRUE);
+        MoveWindow(s_mg->svName,  cx(0), r1c, colW, fh, TRUE);
+        MoveWindow(s_mg->svCode,  cx(1), r1c, colW, fh, TRUE);
+        MoveWindow(s_mg->svPrice, cx(2), r1c, colW, fh, TRUE);
         // action buttons row
-        int by=r3c+fh+fgap+S(4);
+        int by=r1c+fh+fgap+S(4);
         int bw=S(120), bgap=S(10), bx=formR;
         MoveWindow(s_mg->svSave,   bx-bw, by, bw, S(40), TRUE); bx-=bw+bgap;
         MoveWindow(s_mg->svEdit,   bx-bw, by, bw, S(40), TRUE); bx-=bw+bgap;
@@ -2686,8 +2688,9 @@ static void mgLayout(HWND h){
         MoveWindow(s_mg->svSearch, formL, srchTop, srchW, srchH, TRUE);
         int ly=srchTop+srchH+S(10);
         MoveWindow(s_mg->svList, formL, ly, formW, a.bottom-ly-S(8), TRUE);
-        HWND show[]={s_mg->svCode,s_mg->svName,s_mg->svCat,s_mg->svDept,
-            s_mg->svPrice,s_mg->svIns,s_mg->svStatus,s_mg->svDesc,
+        // Only the three fields + action buttons + search + list are shown; the
+        // retired controls (svCat/svDept/svIns/svStatus/svDesc) stay hidden.
+        HWND show[]={s_mg->svName,s_mg->svCode,s_mg->svPrice,
             s_mg->svSave,s_mg->svEdit,s_mg->svDelete,s_mg->svClear,
             s_mg->svSearch,s_mg->svList};
         for(HWND w:show) if(w) ShowWindow(w,SW_SHOW);
@@ -3173,10 +3176,8 @@ static void mgPaintServices(HDC dc, HWND h){
     int colW=(formW-2*cgap)/3;
     auto cx=[&](int c){ return formR-(c+1)*colW-c*cgap; };
     int y=top+S(28);
-    int r1c=y+lh;
-    int r2l=r1c+fh+fgap, r2c=r2l+lh;
-    int r3l=r2c+fh+fgap, r3c=r3l+lh;
-    int by=r3c+fh+fgap+S(4);
+    int r1c=y+lh;                 // single field row
+    int by=r1c+fh+fgap+S(4);      // action-button row (right below the one row)
     int cardBot=by+S(40)+S(10);
     // ---- form card background ----
     RECT card={formL-S(4),top-S(2),formR+S(4),cardBot};
@@ -3191,14 +3192,10 @@ static void mgPaintServices(HDC dc, HWND h){
         RECT lr={x,ly,x+w,ly+S(16)};
         DrawTextW(dc,txt,-1,&lr,DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
     };
-    lbl(cx(0),r1c-lh,colW,L"کد خدمت (خودکار در صورت خالی)");
-    lbl(cx(1),r1c-lh,colW,L"نام خدمت");
-    lbl(cx(2),r1c-lh,colW,L"دسته");
-    lbl(cx(0),r2c-lh,colW,L"بخش");
-    lbl(cx(1),r2c-lh,colW,L"مبلغ پایه (ریال)");
-    lbl(cx(2),r2c-lh,colW,L"نوع بیمه");
-    lbl(cx(0),r3c-lh,colW,L"وضعیت");
-    { int descL=cx(2), descW=cx(1)+colW-descL; lbl(descL,r3c-lh,descW,L"توضیحات"); }
+    // Exactly three labels, matching the three fields (RTL: name | code | price)
+    lbl(cx(0),r1c-lh,colW,L"نام خدمت");
+    lbl(cx(1),r1c-lh,colW,L"کد خدمت (خودکار در صورت خالی)");
+    lbl(cx(2),r1c-lh,colW,L"قیمت (ریال)");
     // ---- status message (below the buttons) ----
     if(!s_mg->msg.empty()){
         SelectObject(dc,g_fSmall); SetTextColor(dc,s_mg->msgCol);
