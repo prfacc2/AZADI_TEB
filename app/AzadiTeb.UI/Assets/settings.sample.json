@@ -1,0 +1,5 @@
+{
+  "_comment": "Copy this file next to AzadiTeb.exe as data/settings.json to enable the C++ REST backend. Leave BackendBaseUrl empty for offline (local) mode.",
+  "BackendBaseUrl": "http://127.0.0.1:8787",
+  "DarkTheme": false
+}

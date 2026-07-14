@@ -1,0 +1,109 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="clr-namespace:AzadiTeb.UI.ViewModels"
+        xmlns:views="clr-namespace:AzadiTeb.UI.Views"
+        xmlns:conv="clr-namespace:AzadiTeb.UI.Converters"
+        mc:Ignorable="d" d:DesignWidth="1280" d:DesignHeight="820"
+        x:Class="AzadiTeb.UI.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Icon="/Assets/azaditeb.ico"
+        Title="آزادی طب — پذیرش بیمار"
+        Width="1280" Height="820"
+        MinWidth="720" MinHeight="560"
+        FlowDirection="RightToLeft"
+        FontFamily="{DynamicResource AppFont}"
+        Background="{DynamicResource AppBgGradient}"
+        WindowStartupLocation="CenterScreen">
+
+    <Window.Resources>
+        <conv:ToastKindToBrushConverter x:Key="ToastBrush"/>
+        <conv:ToastKindToIconConverter x:Key="ToastIcon"/>
+    </Window.Resources>
+
+    <Grid RowDefinitions="Auto *">
+
+        <!-- ==================== Top bar ==================== -->
+        <Border Grid.Row="0" Background="{DynamicResource HeaderGradient}"
+                BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,0,0,1"
+                BoxShadow="0 1 6 0 #14142810" Height="64" Padding="16,0">
+            <Grid ColumnDefinitions="Auto * Auto">
+
+                <!-- brand (RIGHT in RTL = first) -->
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="12"
+                            VerticalAlignment="Center">
+                    <Border Width="42" Height="42" CornerRadius="12"
+                            Background="{DynamicResource TealGradient}"
+                            VerticalAlignment="Center">
+                        <TextBlock Text="&#x271A;" FontSize="24" Foreground="White"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="آزادی طب" FontWeight="Bold" FontSize="18"
+                                   Foreground="{DynamicResource InkBrush}"/>
+                        <TextBlock Text="پذیرش و مدیریت درمانگاه" FontSize="11.5"
+                                   Foreground="{DynamicResource MutedBrush}"/>
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- center: active page pill -->
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8"
+                            HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <Border Classes="pill" Background="{DynamicResource AccentSoftBrush}"
+                            BorderBrush="{DynamicResource AccentBrush}">
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <TextBlock Text="&#x1F464;" FontSize="14" VerticalAlignment="Center"/>
+                            <TextBlock Text="پذیرش بیمار" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource AccentBrush}"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Classes="pill">
+                        <TextBlock Text="{Binding BackendStatus}" Classes="muted"/>
+                    </Border>
+                </StackPanel>
+
+                <!-- LEFT in RTL: clock + theme + exit -->
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="10"
+                            VerticalAlignment="Center">
+                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Left">
+                        <TextBlock Text="{Binding ClockText}" FontWeight="Bold" FontSize="15"
+                                   HorizontalAlignment="Left"
+                                   Foreground="{DynamicResource InkBrush}"/>
+                        <TextBlock Text="{Binding DateText}" FontSize="11"
+                                   HorizontalAlignment="Left"
+                                   Foreground="{DynamicResource MutedBrush}"/>
+                    </StackPanel>
+                    <Button Classes="icon" Command="{Binding ToggleThemeCommand}"
+                            ToolTip.Tip="تغییر تم روشن/تیره" Content="&#x1F319;"/>
+                    <Button Classes="icon close" Name="CloseBtn"
+                            ToolTip.Tip="خروج" Content="&#x2715;"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- ==================== Work area ==================== -->
+        <Panel Grid.Row="1">
+            <views:ReceptionView DataContext="{Binding Reception}"/>
+
+            <!-- Toast overlay (non-blocking) -->
+            <Border VerticalAlignment="Bottom" HorizontalAlignment="Center"
+                    Margin="0,0,0,28" IsVisible="{Binding ToastVisible}"
+                    Background="{DynamicResource PanelBrush}"
+                    BorderBrush="{DynamicResource LineBrush}" BorderThickness="1"
+                    CornerRadius="12" Padding="16,11" MaxWidth="640"
+                    BoxShadow="0 8 30 0 #14142835">
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Border Width="26" Height="26" CornerRadius="13"
+                            Background="{Binding ToastKind, Converter={StaticResource ToastBrush}}">
+                        <TextBlock Text="{Binding ToastKind, Converter={StaticResource ToastIcon}}"
+                                   Foreground="White" FontSize="13"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <TextBlock Text="{Binding ToastMessage}" VerticalAlignment="Center"
+                               Foreground="{DynamicResource InkBrush}" TextWrapping="Wrap"/>
+                </StackPanel>
+            </Border>
+        </Panel>
+    </Grid>
+</Window>

@@ -5,6 +5,49 @@
 
 ---
 
+## 2.0.0 — 1405-04-23 — بازنویسی کامل لایهٔ نمایش با Avalonia UI (.NET 9)
+
+**تحولِ معماری: از Win32/GDI به Avalonia UI + MVVM با هستهٔ C++ به‌صورت سرویس REST.**
+
+چرا:
+- فرمِ پذیرشِ Win32/GDI با کنترل‌های مختصاتیِ دستی، هنگام افزودن خدمات هنگ می‌کرد
+  و توسعه‌پذیر نبود. مسیر HTML/MSHTML هم مستعد فریز بود. طبق نقشهٔ راهِ کارفرما،
+  **کل لایهٔ نمایش بازنویسی شد** و منطقِ کسب‌وکارِ C++ حفظ و به REST تبدیل شد.
+
+چه چیزی اضافه شد (`app/AzadiTeb.UI/` — لایهٔ نمایشِ جدید):
+- **Avalonia UI 11.2 روی .NET 9** با الگوی **MVVM** (CommunityToolkit.Mvvm) و
+  `ViewLocator` قراردادی.
+- **فرم پذیرش بیمار (`ReceptionView`)** کاملاً Data-Binding، Responsive و RTL:
+  کارت‌های «اطلاعات بیمار / بیمه و نوبت / خدمات / صف پذیرش» + پنلِ چسبانِ
+  «صدور خودکار قبض». هیچ کنترلی با مختصاتِ x/y ساخته نشده است.
+- **تمِ Light/Dark** با توکن‌های رنگِ برگرفته از ظاهرِ HTML موردپسندِ اپراتور
+  (`Styles/Colors.axaml` + `Styles/Controls.axaml`) و فونتِ **وزیرمتنِ embedded**.
+- **ابزارهای فارسی** (`Services/PersianTools.cs`): تقویم جلالی، اعداد فارسی،
+  اسلش‌گذاریِ خودکارِ تاریخ تولد، فرمتِ ریال.
+- **کلاینتِ backend** (`IReceptionBackend`) با پیاده‌سازیِ REST
+  (`RestReceptionBackend`) + fallbackِ خودکار به موتورِ محلی
+  (`LocalReceptionBackend`) ⇒ برنامه هرگز هنگ یا کرش نمی‌کند.
+- **Async کامل** + Cancellation/Debounce برای محاسبهٔ زندهٔ قبض.
+- **توست غیرمسدودکننده** به‌جای دیالوگ‌های مسدودکننده.
+
+چه چیزی اضافه شد (`backend/` — هستهٔ C++20 REST):
+- کتابخانهٔ `azaditeb_core` (Repository + `BillingService` + DI) و سرورِ REST
+  `AzadiTebCore` با cpp-httplib و nlohmann/json (vendored).
+- Endpointها: `/api/ping`, `/api/reference`, `/api/patient/search`,
+  `/api/bill/compute`, `/api/admission`.
+- تستِ واحدِ محاسبات قبض (`tests/billing_tests.cpp`) — همه سبز.
+
+بیلد:
+- `build.sh` بازنویسی شد: خروجیِ **AzadiTeb.exe** به‌صورت single-file و
+  self-contained برای win-x64 در پوشهٔ `build/`.
+- نسخهٔ قدیمیِ EXE پاک و نسخهٔ جدید جایگزین شد.
+
+نکته:
+- کدِ نسخهٔ ۱ (`src/*.cpp`, Win32) به‌عنوان مرجع در مخزن باقی مانده است.
+- مستندِ معماریِ جدید: `docs/ARCHITECTURE_V2.md`.
+
+---
+
 ## 1.47.0 — 1405-04-22
 
 **رفعِ به‌هم‌ریختگیِ ظاهرِ فرمِ پذیرشِ بومی (بازگردانی ظاهرِ تمیزِ نسخهٔ HTML).**
