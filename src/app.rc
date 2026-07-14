@@ -57,22 +57,11 @@
 601 RCDATA "../assets/pages/ping/ping.css"
 602 RCDATA "../assets/pages/ping/ping.js"
 
-// v1.48.0: embedded Avalonia (.NET) Patient-Admission surface. The reception
-// «پذیرش بیمار» APPEARANCE is now rendered by this self-contained Avalonia exe,
-// embedded (reparented) inside the reception tab and driven over the SAME
-// loopback /api bridge the retired HTML page used — so the C++ core is
-// unchanged and stays the single source of truth. Extracted once to
-// %LOCALAPPDATA%\AzadiTeb\reception\ at runtime, then launched + reparented.
-// build.sh publishes avalonia/AzadiTeb.Reception → build/AzadiTeb.Reception.exe
-// before compiling resources; when that exe is absent this RCDATA block is a
-// 1-byte placeholder and the app cleanly falls back to the HTML/native engine.
-700 RCDATA "../build/AzadiTeb.Reception.exe"
-
 1 24 "app.manifest"
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,48,0,0
- PRODUCTVERSION 1,48,0,0
+ FILEVERSION 1,49,0,0
+ PRODUCTVERSION 1,49,0,0
  FILEFLAGSMASK 0x3fL
  FILEFLAGS 0x0L
  FILEOS 0x40004L
@@ -85,11 +74,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "Azadi-Teb"
             VALUE "FileDescription", "Azadi-Teb Clinic Reception & Management System"
-            VALUE "FileVersion", "1.48.0.0"
+            VALUE "FileVersion", "1.49.0.0"
             VALUE "InternalName", "AzadiTeb"
             VALUE "OriginalFilename", "AzadiTeb.exe"
             VALUE "ProductName", "Azadi-Teb"
-            VALUE "ProductVersion", "1.48.0"
+            VALUE "ProductVersion", "1.49.0"
         END
     END
     BLOCK "VarFileInfo"

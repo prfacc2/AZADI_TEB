@@ -137,3 +137,45 @@ void WebUiTask_Run(LPARAM lParam) {
     try { (*task)(); } catch (...) {}
     delete task;
 }
+
+// ---------------------------------------------------------------------------
+//  RunOnUiThreadSync — run `fn` on the GUI thread and wait for it to finish.
+//  See web_thread_pool.h for the rationale (freeze fix). We reuse the existing
+//  WM_APP_UI_TASK plumbing but wrap `fn` in a small trampoline that signals an
+//  auto-reset event once the real work has run, then block the caller on that
+//  event. SendMessage is deliberately AVOIDED (it would re-enter the frame proc
+//  and can itself deadlock if the UI thread is mid-SendMessage to us); the
+//  post + event handshake is robust regardless of who is waiting on whom.
+// ---------------------------------------------------------------------------
+void RunOnUiThreadSync(std::function<void()> fn) {
+    if (!fn) return;
+    HWND h = g_hFrame;
+    // No frame yet, OR we ARE the UI thread → run inline (never self-deadlock).
+    if (!h || GetCurrentThreadId() == GetWindowThreadProcessId(h, NULL)) {
+        try { fn(); } catch (...) {}
+        return;
+    }
+    HANDLE done = CreateEventW(NULL, /*manualReset*/TRUE, /*initial*/FALSE, NULL);
+    if (!done) { // fall back to a best-effort async post if the event failed
+        RunOnUiThread(std::move(fn));
+        return;
+    }
+    // trampoline: run the real fn, then signal completion.
+    std::function<void()>* task = new std::function<void()>(
+        [fn, done]() {
+            try { fn(); } catch (...) {}
+            SetEvent(done);
+        });
+    if (!PostMessageW(h, WM_APP_UI_TASK, 0, (LPARAM)task)) {
+        // post failed → run inline on THIS thread as a last resort and clean up.
+        try { fn(); } catch (...) {}
+        delete task;
+        CloseHandle(done);
+        return;
+    }
+    // Block until the UI thread has finished the task. Bounded wait so a wedged
+    // UI thread can never pin a worker forever; 30s is far beyond any legitimate
+    // print dialog interaction and matches the JS-side bridge timeout budget.
+    WaitForSingleObject(done, 30000);
+    CloseHandle(done);
+}

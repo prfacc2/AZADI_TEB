@@ -688,48 +688,99 @@
     }
     on($('svcSearch'), 'input', svcSearch);
     on($('svcSearch'), 'keyup', svcSearch);
-    /* Enter confirms the current service selection. To avoid ever adding a
-       STALE match (the 180ms debounce may not have fired yet), we always ask
-       C++ for the freshest match for the exact query and add the first hit —
-       so Enter reflects the live Management catalog, not a cached suggestion. */
-    var _svcSearchInFlight = false;   /* B4: debounce Enter re-entry */
+    /* --------------------------------------------------------------------
+       v1.49.0 — ROBUST "enter a service code → pick the service" handler.
+       When the operator types a value and confirms it (Enter or the
+       «افزودن خدمت» button) we resolve it against the LIVE Management catalog
+       in two stages, so an exact SERVICE CODE always wins over a fuzzy name
+       match, and multiple services can be added one after another:
+
+         1) service.resolve  — exact code lookup (SRV0001, 1001, …). This is
+            the fast, unambiguous path when the operator knows the code.
+         2) service.search   — free-text fallback (name / partial code). If it
+            returns exactly one hit we add it; if several, we open the picker.
+
+       Every path is guarded by _svcSearchInFlight so a burst of Enter presses
+       can never stack overlapping bridge calls (which is what used to make the
+       surface feel "stuck"). The bridge itself has a 15s timeout, so even a
+       lost response can never wedge the box — the flag is always cleared in
+       both then() and catch().
+       -------------------------------------------------------------------- */
+    var _svcSearchInFlight = false;   /* B4: debounce Enter/click re-entry */
+
+    function clearSvcBox() {
+      renderSvcSuggest([]);
+      if ($('svcSearch')) $('svcSearch').value = '';
+    }
+
+    /* Resolve `q` and either add the matched service or show the picker.
+       `preferPicker` (used by the button) shows the list when the query is
+       ambiguous instead of silently adding the first hit. */
+    function resolveAndAddService(q, preferPicker) {
+      q = trimStr(q || '');
+      if (!q) return;
+      if (_svcSearchInFlight) return;
+      _svcSearchInFlight = true;
+
+      function done() { _svcSearchInFlight = false; }
+
+      /* stage 1: exact service-code lookup */
+      Bridge.call('service.resolve', { code: q }).then(function (r) {
+        if (r && r.found && r.service) {
+          addServiceRow(r.service);          /* price comes from the catalog */
+          clearSvcBox();
+          toast('خدمت «' + (r.service.name || '') + '» افزوده شد', 'ok');
+          done();
+          return;
+        }
+        /* stage 2: free-text search fallback */
+        Bridge.call('service.search', { q: q }).then(function (sr) {
+          done();
+          var rows = (sr && (sr.rows || sr.services)) || [];
+          state.catalog = rows;
+          if (!rows.length) {
+            renderSvcSuggest([]);
+            toast('خدمتی با این عبارت یافت نشد', 'err');
+            return;
+          }
+          if (rows.length === 1 || !preferPicker) {
+            addServiceRow(rows[0]);
+            clearSvcBox();
+            toast('خدمت «' + (rows[0].name || '') + '» افزوده شد', 'ok');
+          } else {
+            renderSvcSuggest(rows);          /* several matches → let user pick */
+          }
+        })['catch'](function () { done(); });
+      })['catch'](function () {
+        /* resolve verb unavailable/failed → degrade to pure search */
+        Bridge.call('service.search', { q: q }).then(function (sr) {
+          done();
+          var rows = (sr && (sr.rows || sr.services)) || [];
+          state.catalog = rows;
+          if (rows.length) {
+            if (rows.length === 1 || !preferPicker) {
+              addServiceRow(rows[0]); clearSvcBox();
+              toast('خدمت «' + (rows[0].name || '') + '» افزوده شد', 'ok');
+            } else { renderSvcSuggest(rows); }
+          } else {
+            renderSvcSuggest([]);
+            toast('خدمتی با این عبارت یافت نشد', 'err');
+          }
+        })['catch'](function () { done(); });
+      });
+    }
+
+    /* Enter confirms the current service selection. */
     on($('svcSearch'), 'keydown', function (e) {
       e = e || window.event;
       if ((e.keyCode || e.which) !== 13) return;
-      if (e.preventDefault) e.preventDefault();
-      if (_svcSearchInFlight) return;   /* a service.search is already running */
-      var q = $('svcSearch') ? trimStr($('svcSearch').value) : '';
-      if (!q) return;
-      _svcSearchInFlight = true;
-      Bridge.call('service.search', { q: q }).then(function (r) {
-        _svcSearchInFlight = false;
-        var rows = r.rows || r.services || [];
-        state.catalog = rows;
-        if (rows.length) {
-          addServiceRow(rows[0]);
-          renderSvcSuggest([]); $('svcSearch').value = '';
-          toast('خدمت «' + (rows[0].name || '') + '» افزوده شد', 'ok');
-        } else {
-          renderSvcSuggest([]);
-          toast('خدمتی با این عبارت یافت نشد', 'err');
-        }
-      })['catch'](function () { _svcSearchInFlight = false; });
+      if (e.preventDefault) e.preventDefault(); else e.returnValue = false;
+      resolveAndAddService($('svcSearch') ? $('svcSearch').value : '', false);
+      return false;
     });
-    /* افزودن خدمت button: if the query resolves to exactly one service, add it
-       directly; otherwise show the suggestion list to pick from. */
+    /* «افزودن خدمت» button: prefer showing the picker when ambiguous. */
     on($('svcAddBtn'), 'click', function () {
-      var q = $('svcSearch') ? trimStr($('svcSearch').value) : '';
-      Bridge.call('service.search', { q: q }).then(function (r) {
-        var rows = r.rows || r.services || [];
-        state.catalog = rows;
-        if (q && rows.length === 1) {
-          addServiceRow(rows[0]);
-          renderSvcSuggest([]); $('svcSearch').value = '';
-          toast('خدمت «' + (rows[0].name || '') + '» افزوده شد', 'ok');
-        } else {
-          renderSvcSuggest(rows);
-        }
-      });
+      resolveAndAddService($('svcSearch') ? $('svcSearch').value : '', true);
     });
 
     /* insurance changes → recompute (never blanks patient fields) */
