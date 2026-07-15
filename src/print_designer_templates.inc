@@ -50,6 +50,27 @@ static PrintItem mkApptNo(double x,double y,double w,double h,double pt){
     it.fontPt=pt; it.bold=true; it.align=1; it.startValue=1; it.step=1; return it;
 }
 
+// §1.51.0: dynamic services-list table. The model JSON describes the header
+// (cols/labels/widths); rows are filled from the live ReceptionRecord.services
+// vector at print time. RTL column order: col 0 = rightmost.
+//   col 0 = ردیف (row #), col 1 = نام خدمت (name), col 2 = کد (code), col 3 = مبلغ (line total)
+static PrintItem mkServices(double x,double y,double w,double h,double pt){
+    PrintItem it; it.id=nid(); it.type=PIT_SERVICES; it.x=x; it.y=y; it.w=w; it.h=h;
+    // ردیف = \u0631\u062f\u06cc\u0641, نام خدمت = \u0646\u0627\u0645 \u062e\u062f\u0645\u062a,
+    // کد = \u06a9\u062f, مبلغ = \u0645\u0628\u0644\u063a
+    it.text=L"{\"cols\":4,\"header\":true,\"widths\":[0.55,3.2,1.1,2.15],"
+            L"\"labels\":[\"\u0631\u062f\u06cc\u0641\",\"\u0646\u0627\u0645 \u062e\u062f\u0645\u062a\","
+            L"\"\u06a9\u062f\",\"\u0645\u0628\u0644\u063a\"]}";
+    it.fontPt=pt; it.bold=false; it.align=1;
+    it.borderColor=0x1F5FD6; it.borderWidth=0.35;
+    it.textColor=0x0D2144; it.fillTransparent=true;
+    it.padding=0.8;
+    return it;
+}
+
+// localized caption for the services section
+#define FA_SVCLIST  L"\u0644\u06cc\u0633\u062a \u062e\u062f\u0645\u0627\u062a"   // لیست خدمات
+
 // localized field captions reused across templates
 #define FA_CLINIC   L"\u062f\u0631\u0645\u0627\u0646\u06af\u0627\u0647 \u0622\u0632\u0627\u062f\u06cc \u0637\u0628"
 #define FA_NAME     L"\u0646\u0627\u0645: "
@@ -66,8 +87,13 @@ static PrintItem mkApptNo(double x,double y,double w,double h,double pt){
 #define FA_PHONE    L"\u062a\u0644\u0641\u0646: "
 
 // A generic "reception receipt" body added to many templates.
-static void addReceptionBody(PrintDesign& d,double margin,double top,
-                             double contentW,double pt){
+// §1.51.0: now appends a "لیست خدمات" caption + dynamic services table after
+// the billing fields, and returns the y-coordinate just below the services
+// block so callers can position the appointment-number counter beneath it
+// without overlap. svcH controls the services table height (smaller for
+// compact papers like A6 / thermal rolls).
+static double addReceptionBody(PrintDesign& d,double margin,double top,
+                             double contentW,double pt,double svcH=42.0){
     double x=margin, y=top, rowH=7.5;
     d.items.push_back(mkField(x,y,contentW,rowH,L"firstName",FA_NAME,pt,0)); y+=rowH;
     d.items.push_back(mkField(x,y,contentW,rowH,L"lastName",FA_FAMILY,pt,0)); y+=rowH;
@@ -77,6 +103,19 @@ static void addReceptionBody(PrintDesign& d,double margin,double top,
     d.items.push_back(mkHLine(x,y+1,contentW,0.3)); y+=rowH;
     d.items.push_back(mkField(x,y,contentW,rowH,L"total",FA_TOTAL,pt,0)); y+=rowH;
     d.items.push_back(mkField(x,y,contentW,rowH,L"paid",FA_PAID,pt,0)); y+=rowH;
+    // §1.51.0: services list — caption + dynamic table
+    y += 2;
+    d.items.push_back(mkLabel(x,y,contentW,6,FA_SVCLIST,pt+0.5,true,1)); y+=7;
+    d.items.push_back(mkServices(x,y,contentW,svcH,pt-0.5)); y += svcH + 2;
+    return y;
+}
+
+// Add ONLY the services block (caption + table) at a given position; returns
+// the y just below it. Used by templates that lay out patient fields manually.
+static double addServicesBlock(PrintDesign& d,double x,double y,double w,double pt,double svcH){
+    d.items.push_back(mkLabel(x,y,w,6,FA_SVCLIST,pt+0.5,true,1)); y+=7;
+    d.items.push_back(mkServices(x,y,w,svcH,pt-0.5)); y += svcH + 2;
+    return y;
 }
 
 // Build one template by index 0..19; returns the finished design.
@@ -271,7 +310,7 @@ static PrintDesign buildTemplate(int idx){
         addReceptionBody(d,m,m+20,cw,12);
         d.items.push_back(mkApptNo(m,d.paperH-26,cw,12,24));
         break; }
-    case 19: default: { // T20 مدرن مینیمال
+    case 19: { // T20 مدرن مینیمال
         setPaper(L"A5",0); d.name=L"\u067e\u0630\u06cc\u0631\u0634 \u0645\u062f\u0631\u0646 \u0645\u06cc\u0646\u06cc\u0645\u0627\u0644 (A5\u060c \u062a\u06a9 \u0631\u0646\u06af)";
         double m=12; double cw=d.paperW-2*m;
         d.items.push_back(mkLabel(m,m,cw,12,FA_CLINIC,17,true,2));
@@ -279,19 +318,109 @@ static PrintDesign buildTemplate(int idx){
         addReceptionBody(d,m,m+22,cw,12);
         d.items.push_back(mkApptNo(m,d.paperH-24,cw,12,22));
         break; }
+    case 20: default: { // §1.51.0 T21 دیفالت با لیست خدمات (DEFAULT with services list)
+        // A beautiful, balanced default receipt centered around the services list.
+        // A5 portrait. Header band → patient grid → services table → totals → appt.
+        setPaper(L"A5",0);
+        d.name=L"\u062f\u06cc\u0641\u0627\u0644\u062a \u0628\u0627 \u0644\u06cc\u0633\u062a \u062e\u062f\u0645\u0627\u062a";
+        double m=10; double cw=d.paperW-2*m;   // 128
+        // header
+        d.items.push_back(mkLabel(m,m,cw,11,FA_CLINIC,17,true,1));
+        d.items.push_back(mkHLine(m,m+13,cw,0.6));
+        // receipt no + date row
+        d.items.push_back(mkField(m,m+16,cw/2,7,L"receiptNo",FA_RECEIPT,10,2));
+        d.items.push_back(mkField(m+cw/2,m+16,cw/2,7,L"date",FA_DATE,10,0));
+        // patient info grid (2 columns)
+        double y=m+25; double rowH=7; double col=cw/2-2;
+        d.items.push_back(mkField(m,y,col,rowH,L"firstName",FA_NAME,10,0));
+        d.items.push_back(mkField(m+col+4,y,col,rowH,L"lastName",FA_FAMILY,10,0)); y+=rowH;
+        d.items.push_back(mkField(m,y,col,rowH,L"nationalCode",FA_NID,10,0));
+        d.items.push_back(mkField(m+col+4,y,col,rowH,L"insurance",FA_INS,10,0)); y+=rowH;
+        d.items.push_back(mkField(m,y,col,rowH,L"doctor",FA_DOCTOR,10,0));
+        d.items.push_back(mkField(m+col+4,y,col,rowH,L"mobile",FA_PHONE,10,0)); y+=rowH+2;
+        // services list — the centerpiece
+        d.items.push_back(mkLabel(m,y,cw,6,FA_SVCLIST,11,true,1)); y+=7;
+        double svcH=58;   // generous room for the services table
+        d.items.push_back(mkServices(m,y,cw,svcH,9.5)); y+=svcH+2;
+        // totals row
+        d.items.push_back(mkHLine(m,y,cw,0.3)); y+=2;
+        d.items.push_back(mkField(m,y,col,rowH,L"total",FA_TOTAL,11,0));
+        d.items.push_back(mkField(m+col+4,y,col,rowH,L"paid",FA_PAID,11,0)); y+=rowH;
+        // appointment number + footer
+        d.items.push_back(mkApptNo(m,d.paperH-22,cw,10,20));
+        d.items.push_back(mkLabel(m,d.paperH-11,cw,5,FA_APPT,8,false,1));
+        break; }
     }
     return d;
 }
 
 } // namespace
 
+// Resolve just the NAME of template idx (so migration can match by name without
+// rebuilding the whole design). Mirrors the names hardcoded in buildTemplate().
+static std::wstring buildTemplateName(int idx){
+    switch(idx){
+    case 0: return L"\u067e\u0630\u06cc\u0631\u0634 \u0627\u0633\u062a\u0627\u0646\u062f\u0627\u0631\u062f A5 \u0639\u0645\u0648\u062f\u06cc";
+    case 1: return L"\u067e\u0630\u06cc\u0631\u0634 \u0627\u0633\u062a\u0627\u0646\u062f\u0627\u0631\u062f A5 \u0627\u0641\u0642\u06cc";
+    case 2: return L"\u067e\u0630\u06cc\u0631\u0634 \u0641\u0634\u0631\u062f\u0647 A6";
+    case 3: return L"\u067e\u0630\u06cc\u0631\u0634 \u0631\u0633\u06cc\u062f \u06a9\u0648\u062a\u0627\u0647 \u06f8\u06f0mm \u062d\u0631\u0627\u0631\u062a\u06cc";
+    case 4: return L"\u067e\u0630\u06cc\u0631\u0634 \u0631\u0633\u06cc\u062f \u06a9\u0648\u062a\u0627\u0647 \u06f5\u06f8mm \u062d\u0631\u0627\u0631\u062a\u06cc";
+    case 5: return L"\u067e\u0630\u06cc\u0631\u0634 \u0628\u0627 \u0644\u0648\u06af\u0648 \u062f\u0631 \u0628\u0627\u0644\u0627";
+    case 6: return L"\u067e\u0630\u06cc\u0631\u0634 \u0628\u0627 QR \u06a9\u0646\u0627\u0631 \u0634\u0645\u0627\u0631\u0647 \u0642\u0628\u0636";
+    case 7: return L"\u067e\u0630\u06cc\u0631\u0634 \u0628\u06cc\u0645\u0647 \u067e\u0627\u06cc\u0647 + \u062a\u06a9\u0645\u06cc\u0644\u06cc (\u062f\u0648 \u0633\u062a\u0648\u0646\u0647)";
+    case 8: return L"\u062a\u0632\u0631\u06cc\u0642\u0627\u062a \u0627\u0633\u062a\u0627\u0646\u062f\u0627\u0631\u062f A5";
+    case 9: return L"\u062a\u0632\u0631\u06cc\u0642\u0627\u062a \u0628\u0627 \u0686\u06a9\u200c\u0644\u06cc\u0633\u062a \u062f\u0627\u0631\u0648 (A5)";
+    case 10: return L"\u062a\u0632\u0631\u06cc\u0642\u0627\u062a \u0631\u0633\u06cc\u062f \u06f8\u06f0mm";
+    case 11: return L"\u0622\u0632\u0645\u0627\u06cc\u0634\u06af\u0627\u0647 \u2014 \u0628\u0631\u0686\u0633\u0628 \u0646\u0645\u0648\u0646\u0647 (50\u00d730mm)";
+    case 12: return L"\u0622\u0632\u0645\u0627\u06cc\u0634\u06af\u0627\u0647 \u2014 \u0631\u0633\u06cc\u062f \u067e\u0630\u06cc\u0631\u0634 A5";
+    case 13: return L"\u0622\u0632\u0645\u0627\u06cc\u0634\u06af\u0627\u0647 \u2014 \u0631\u0633\u06cc\u062f \u0628\u0627 QR \u0648 \u06a9\u062f \u0645\u0644\u06cc";
+    case 14: return L"\u0631\u0627\u062f\u06cc\u0648\u0644\u0648\u0698\u06cc \u2014 \u0628\u0631\u06af\u0647 \u067e\u0630\u06cc\u0631\u0634 A5";
+    case 15: return L"\u0631\u0627\u062f\u06cc\u0648\u0644\u0648\u0698\u06cc \u2014 \u0631\u0633\u06cc\u062f \u0628\u0627 \u0639\u06a9\u0633 \u067e\u0631\u0633\u0646\u0644\u06cc";
+    case 16: return L"\u0641\u06cc\u0632\u06cc\u0648\u062a\u0631\u0627\u067e\u06cc \u2014 \u0631\u0633\u06cc\u062f \u062c\u0644\u0633\u0647 (A5)";
+    case 17: return L"\u0641\u06cc\u0632\u06cc\u0648\u062a\u0631\u0627\u067e\u06cc \u2014 \u06a9\u0627\u0631\u062a \u06f1\u06f0 \u062c\u0644\u0633\u0647";
+    case 18: return L"\u067e\u0630\u06cc\u0631\u0634 \u0644\u0627\u06a9\u0686\u0631\u06cc/\u06a9\u0644\u06cc\u0646\u06cc\u06a9 \u062e\u0635\u0648\u0635\u06cc (A5 \u0628\u0627 \u062d\u0627\u0634\u06cc\u0647 \u0637\u0644\u0627\u06cc\u06cc)";
+    case 19: return L"\u067e\u0630\u06cc\u0631\u0634 \u0645\u062f\u0631\u0646 \u0645\u06cc\u0646\u06cc\u0645\u0627\u0644 (A5\u060c \u062a\u06a9 \u0631\u0646\u06af)";
+    default: return L"";
+    }
+}
+
 // ----------------------------------------------------------------- seeding ---
+// §1.51.0: seed the 20 built-ins AND migrate any previously-seeded builtins so
+// their services list is present. The migration is idempotent: it rebuilds each
+// builtin from buildTemplate(idx) — which now includes a services block — and
+// overwrites the stored design if the stored one has NO PIT_SERVICES item yet.
+// A one-shot setting flag (svc_migration_1_51) guards re-runs.
 void Designs_Init(){
     std::vector<PrintDesign> existing; Designs_Builtins(existing);
-    if((int)existing.size() >= 20) return;     // already seeded
-    if(!existing.empty()) return;              // partial seed: leave alone
-    for(int i=0;i<20;i++){
-        PrintDesign d = buildTemplate(i);
-        Designs_Insert(d);
+    // fresh install → seed all 20 + the default services template (21 total)
+    if(existing.empty()){
+        for(int i=0;i<20;i++){
+            PrintDesign d = buildTemplate(i);
+            Designs_Insert(d);
+        }
+        PrintDesign def = buildTemplate(20);   // §1.51.0: DEFAULT services template
+        Designs_Insert(def);
+        setSetting(L"svc_migration_1_51", L"1");
+        return;
+    }
+    // already seeded → ensure every builtin has a PIT_SERVICES item (one-time)
+    if(getSetting(L"svc_migration_1_51", L"0") != L"1"){
+        for(int i=0;i<20;i++){
+            // find the stored builtin whose name matches template idx i
+            std::wstring wantName = buildTemplateName(i);
+            for(auto& d : existing){
+                if(d.name == wantName){
+                    bool hasSvc=false;
+                    for(const auto& it : d.items) if(it.type==PIT_SERVICES){ hasSvc=true; break; }
+                    if(!hasSvc){
+                        PrintDesign fresh = buildTemplate(i);
+                        fresh.id = d.id;   // keep the same stored id / bindings
+                        Designs_Update(fresh);
+                    }
+                    break;
+                }
+            }
+        }
+        setSetting(L"svc_migration_1_51", L"1");
     }
 }

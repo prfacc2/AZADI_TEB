@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.50.0"
+#define APP_VERSION_W   L"1.51.0"
 
 // ----------------------------------------------------------- logging policy -
 //  RELEASE 1.2.0 (Section A): all general user-behavior logging is gated behind
@@ -304,6 +304,19 @@ long long applyApptTariff(long long base, int apptType);
 long long defaultServicePrice(int patientType, int apptType);
 
 // -------------------------------------------------------------- reception --
+// §1.51.0: a single billed service carried alongside the reception record so
+// the print pipeline (PIT_SERVICES) can render a dynamic services list.
+struct ServiceLine {
+    std::wstring code;     // service code
+    std::wstring name;     // service name (as shown to the user)
+    std::wstring category; // optional category / dept label
+    long long    price;    // unit price (Toman)
+    int          qty;      // quantity (>=1)
+    long long    discount; // per-line discount (Toman)
+    long long    insShare; // insurance share for this line (Toman)
+    long long    patShare; // patient share for this line (Toman)
+    ServiceLine():price(0),qty(1),discount(0),insShare(0),patShare(0){}
+};
 struct ReceptionRecord {
     std::wstring firstName, lastName, nationalId, fatherName, birthDate,
                  gender, mobile, landline, address, patientType,
@@ -312,6 +325,7 @@ struct ReceptionRecord {
     long long total, mainShare, patientShare, baseDiff, orgShare,
               finalTotal, discount, paid;
     int queueNo, insIdx, suppIdx;
+    std::vector<ServiceLine> services;   // §1.51.0: billed services list
     ReceptionRecord():total(0),mainShare(0),patientShare(0),baseDiff(0),
         orgShare(0),finalTotal(0),discount(0),paid(0),queueNo(0),
         insIdx(0),suppIdx(0){}

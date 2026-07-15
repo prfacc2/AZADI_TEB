@@ -286,6 +286,49 @@ static ReceptionRecord adBuildRecord(const std::string& body){
     r.total=b.gross; r.discount=b.disc; r.orgShare=b.org+b.supp;
     r.mainShare=b.org; r.patientShare=b.pat; r.finalTotal=b.gross;
     r.paid=b.paid;
+
+    // §1.51.0: capture the services list so the print pipeline (PIT_SERVICES)
+    // can render a dynamic services table. We re-walk the same JSON array the
+    // bill walker used and compute per-line insurance/patient shares with the
+    // identical formula so the printed table always matches the bill totals.
+    {
+        int basePct=b.basePct, suppPct=b.suppPct;
+        std::string arr; jsonGetRaw(body,"services",arr);
+        size_t pos=0;
+        while(pos<arr.size()){
+            size_t o=arr.find('{',pos); if(o==std::string::npos) break;
+            int depth=0; bool inStr=false; size_t q=o;
+            for(;q<arr.size();++q){
+                char c=arr[q];
+                if(inStr){ if(c=='\\'){q++;continue;} if(c=='"') inStr=false; continue; }
+                if(c=='"'){ inStr=true; continue; }
+                if(c=='{') depth++;
+                else if(c=='}'){ depth--; if(depth==0){ q++; break; } }
+            }
+            std::string obj=arr.substr(o,q-o);
+            pos=q;
+            ServiceLine ln;
+            std::string cs, ns, cats;
+            if(jsonGetString(obj,"code",cs))     ln.code=normDigits(u82w(cs));
+            if(jsonGetString(obj,"name",ns))     ln.name=u82w(ns);
+            if(jsonGetString(obj,"category",cats)) ln.category=u82w(cats);
+            double price=0, qty=1, discount=0;
+            jsonGetNumber(obj,"price",price);
+            jsonGetNumber(obj,"qty",qty);
+            jsonGetNumber(obj,"discount",discount);
+            ln.price=(long long)llround(price);
+            ln.qty=(qty>0?(int)qty:1);
+            ln.discount=(long long)llround(discount);
+            long long g=ln.price*(long long)ln.qty;
+            long long net=g-ln.discount; if(net<0) net=0;
+            long long org=(long long)llround((double)net*basePct/100.0);
+            long long afterBase=net-org;
+            long long sup=(long long)llround((double)afterBase*suppPct/100.0);
+            ln.insShare=org+sup;
+            ln.patShare=afterBase-sup;
+            r.services.push_back(ln);
+        }
+    }
     return r;
 }
 

@@ -21,10 +21,18 @@ enum PrintItemType {
     PIT_QR,            // QR / barcode (encodes the receipt number)
     PIT_PHOTO,         // patient personal photo placeholder
     PIT_APPTNO,        // appointment-number counter (§3.13)
-    PIT_TABLE          // §1.21.0: grid/table. Model stored as JSON in `text`:
+    PIT_TABLE,         // §1.21.0: grid/table. Model stored as JSON in `text`:
                        //   {"cols":n,"rows":n,"header":bool,"widths":[..],
                        //    "cells":[[..],..]}  — round-trips through C++ as a
                        //    plain string so it never breaks the data model.
+    PIT_SERVICES       // §1.51.0: dynamic services list rendered from the live
+                       //   ReceptionRecord.services vector at print/preview time.
+                       //   Model stored as JSON in `text`:
+                       //   {"cols":n,"header":bool,"widths":[..],"labels":[..]}
+                       //   cols/labels/widths describe the table header; rows are
+                       //   filled dynamically from r.services (variable count).
+                       //   Falls back gracefully to a sensible default when the
+                       //   JSON model is empty or the record has no services.
 };
 
 // Each PrintItem lives in millimetre space (paper coordinates).

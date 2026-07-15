@@ -2128,6 +2128,99 @@ static bool pcParseTable(const std::wstring& jsonW, PcTable& t){
     if((int)t.widths.size()!=t.cols) t.widths.assign(t.cols,1.0);
     return true;
 }
+// §1.51.0 — preview-mode services table. The print pipeline renders dynamic
+// rows from the live record; the designer preview has no record, so it shows a
+// header + one placeholder row so the operator still sees a real-looking table.
+struct PcServicesModel {
+    int cols=4; bool header=true;
+    std::vector<double> widths;
+    std::vector<std::wstring> labels;
+};
+static bool pcParseServicesModel(const std::wstring& jsonW, PcServicesModel& m){
+    int n=WideCharToMultiByte(CP_UTF8,0,jsonW.c_str(),(int)jsonW.size(),NULL,0,NULL,NULL);
+    std::string s(n,0); if(n) WideCharToMultiByte(CP_UTF8,0,jsonW.c_str(),(int)jsonW.size(),&s[0],n,NULL,NULL);
+    size_t p=0; auto ws=[&]{ while(p<s.size()&&(s[p]==' '||s[p]=='\t'||s[p]=='\n'||s[p]=='\r'))++p; };
+    auto rdStr=[&](std::string& out)->bool{ ws(); if(p>=s.size()||s[p]!='"')return false; ++p;
+        while(p<s.size()&&s[p]!='"'){ char c=s[p++]; if(c=='\\'&&p<s.size()){ char e=s[p++];
+            switch(e){case 'n':out+='\n';break;case 'r':out+='\r';break;case 't':out+='\t';break;
+                case '"':out+='"';break;case '\\':out+='\\';break;case '/':out+='/';break;
+                case 'u':{ if(p+4<=s.size()){ unsigned v=(unsigned)strtoul(s.substr(p,4).c_str(),NULL,16); p+=4;
+                    if(v<0x80)out+=(char)v; else if(v<0x800){out+=(char)(0xC0|(v>>6));out+=(char)(0x80|(v&0x3F));}
+                    else{out+=(char)(0xE0|(v>>12));out+=(char)(0x80|((v>>6)&0x3F));out+=(char)(0x80|(v&0x3F));} } break; }
+                default:out+=e; } } else out+=c; }
+        if(p<s.size()&&s[p]=='"')++p; return true; };
+    auto rdNum=[&]()->double{ ws(); size_t st=p; while(p<s.size()&&(isdigit((unsigned char)s[p])||s[p]=='-'||s[p]=='+'||s[p]=='.'||s[p]=='e'||s[p]=='E'))++p; return atof(s.substr(st,p-st).c_str()); };
+    ws(); if(p>=s.size()||s[p]!='{') return false; ++p;
+    while(true){ ws(); if(p<s.size()&&s[p]=='}'){++p;break;} if(p>=s.size())break;
+        std::string key; if(!rdStr(key))break; ws(); if(p<s.size()&&s[p]==':')++p;
+        if(key=="cols") m.cols=(int)rdNum();
+        else if(key=="header"){ ws(); if(s.compare(p,4,"true")==0){m.header=true;p+=4;} else if(s.compare(p,5,"false")==0){m.header=false;p+=5;} else rdNum(); }
+        else if(key=="widths"){ ws(); if(p<s.size()&&s[p]=='['){++p; while(true){ ws(); if(p<s.size()&&s[p]==']'){++p;break;} m.widths.push_back(rdNum()); ws(); if(p<s.size()&&s[p]==','){++p;continue;} if(p<s.size()&&s[p]==']'){++p;break;} break; } } }
+        else if(key=="labels"){ ws(); if(p<s.size()&&s[p]=='['){++p; while(true){ ws(); if(p<s.size()&&s[p]==']'){++p;break;}
+                std::string cv; if(rdStr(cv)) m.labels.push_back(pcU8toW(cv));
+                ws(); if(p<s.size()&&s[p]==','){++p;continue;} if(p<s.size()&&s[p]==']'){++p;break;} break; } } }
+        else { ws(); if(p<s.size()&&s[p]=='"'){ std::string tmp; rdStr(tmp); }
+            else if(p<s.size()&&s[p]=='{'){ int d2=0; do{ if(s[p]=='{')d2++; else if(s[p]=='}')d2--; ++p; }while(p<s.size()&&d2>0); }
+            else if(p<s.size()&&s[p]=='['){ int d2=0; do{ if(s[p]=='[')d2++; else if(s[p]==']')d2--; ++p; }while(p<s.size()&&d2>0); }
+            else rdNum(); }
+        ws(); if(p<s.size()&&s[p]==','){++p;continue;} ws(); if(p<s.size()&&s[p]=='}'){++p;break;}
+        if(p>=s.size())break;
+    }
+    if(m.cols<1) m.cols=4;
+    if((int)m.widths.size()!=m.cols) m.widths.assign(m.cols,1.0);
+    if(m.labels.empty()){
+        m.labels.clear();
+        const wchar_t* def[4]={L"ردیف",L"نام خدمت",L"کد",L"مبلغ"};
+        int nc=m.cols>4?m.cols:4;
+        for(int i=0;i<nc;++i) m.labels.push_back(i<4?std::wstring(def[i]):L"");
+    }
+    return true;
+}
+static void pcDrawServices(HDC dc, const PrintItem& it, const RECT& box, double scPxMm){
+    PcServicesModel m; if(!pcParseServicesModel(it.text,m)) return;
+    int X0=box.left,Y0=box.top,X1=box.right,Y1=box.bottom;
+    int W=X1-X0,H=Y1-Y0; if(W<=0||H<=0) return;
+    int nData=1;                                   // preview: one placeholder row
+    int total=(m.header?1:0)+nData; if(total<1) return;
+    double sumw=0; for(double w:m.widths) sumw+=w; if(sumw<=0) sumw=m.cols;
+    std::vector<int> cx; cx.push_back(X1); double acc=0;
+    for(int c=0;c<m.cols;++c){ acc+=m.widths[c]; cx.push_back(X1-(int)(W*(acc/sumw))); }
+    std::vector<int> ry;
+    if(m.header){ int hh=(int)(H*0.30); if(hh<14)hh=14;
+        ry.push_back(Y0); ry.push_back(Y0+hh); ry.push_back(Y1); }
+    else { ry.push_back(Y0); ry.push_back(Y1); }
+    if(m.header){ RECT hr={cx[m.cols],ry[0],cx[0],ry[1]};
+        HBRUSH hb=CreateSolidBrush(RGB(31,95,214)); FillRect(dc,&hr,hb); DeleteObject(hb); }
+    double fontPt=it.fontPt>0?it.fontPt:8.5;
+    int lf=-(int)(fontPt*scPxMm*25.4/72.0 + 0.5); if(lf>-2) lf=-2;
+    HFONT fN=CreateFontW(lf,0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,
+        it.fontName.empty()?L"Vazirmatn":it.fontName.c_str());
+    HFONT fH=CreateFontW(lf,0,0,0,FW_BOLD,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,
+        it.fontName.empty()?L"Vazirmatn":it.fontName.c_str());
+    int pad=S(3);
+    if(m.header){ HGDIOBJ of=SelectObject(dc,fH); SetTextColor(dc,RGB(255,255,255));
+        for(int c=0;c<m.cols;++c){ std::wstring cell=(c<(int)m.labels.size())?m.labels[c]:L"";
+            RECT cr={cx[c+1]+pad,ry[0],cx[c]-pad,ry[1]};
+            if(cr.right<=cr.left||cr.bottom<=cr.top) continue;
+            DrawTextW(dc,cell.c_str(),-1,&cr,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_END_ELLIPSIS|DT_NOPREFIX);
+        } SelectObject(dc,of); }
+    { HGDIOBJ of=SelectObject(dc,fN); SetTextColor(dc,pcCR(it.textColor));
+      const wchar_t* ph[4]={L"۱",L"نمونهٔ خدمت",L"۰۰۱",L"۱۰۰٬۰۰۰ ریال"};
+      int y0r=m.header?ry[1]:ry[0], y1r=m.header?ry[2]:ry[1];
+      for(int c=0;c<m.cols;++c){ std::wstring cell=(c<4)?std::wstring(ph[c]):L"";
+          RECT cr={cx[c+1]+pad,y0r,cx[c]-pad,y1r};
+          if(cr.right<=cr.left||cr.bottom<=cr.top) continue;
+          UINT al=(c==1)?(DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_END_ELLIPSIS|DT_NOPREFIX)
+                        :(DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_END_ELLIPSIS|DT_NOPREFIX);
+          DrawTextW(dc,cell.c_str(),-1,&cr,al);
+      } SelectObject(dc,of); }
+    DeleteObject(fN); DeleteObject(fH);
+    int bw=1; HPEN pen=CreatePen(PS_SOLID,bw,pcCR(it.borderColor)); HGDIOBJ op=SelectObject(dc,pen);
+    for(int c=0;c<=m.cols;++c){ MoveToEx(dc,cx[c],ry[0],0); LineTo(dc,cx[c],ry[total]); }
+    for(int rr=0;rr<=total;++rr){ MoveToEx(dc,cx[m.cols],ry[rr],0); LineTo(dc,cx[0],ry[rr]); }
+    SelectObject(dc,op); DeleteObject(pen);
+}
+
 // preview-mode table: shows raw cell text (no live record substitution)
 static void pcDrawTable(HDC dc, const PrintItem& it, const RECT& box, double scPxMm){
     PcTable t; if(!pcParseTable(it.text,t)) return;
@@ -2198,6 +2291,9 @@ static void pcPaintDesign(HDC dc, const RECT& area, const PrintDesign& d, double
         int x0=mmX(it.x), y0=mmY(it.y), x1=mmX(it.x+it.w), y1=mmY(it.y+it.h);
         if(it.type==PIT_TABLE){
             RECT rr={x0,y0,x1,y1}; pcDrawTable(dc,it,rr,sc);
+        } else if(it.type==PIT_SERVICES){
+            // §1.51.0: dynamic services list (preview shows header + placeholder row)
+            RECT rr={x0,y0,x1,y1}; pcDrawServices(dc,it,rr,sc);
         } else if(it.type==PIT_HLINE){
             HPEN p=CreatePen(PS_SOLID,1,pcCR(it.borderColor)); HGDIOBJ o=SelectObject(dc,p);
             MoveToEx(dc,x0,y0,0); LineTo(dc,x1,y0); SelectObject(dc,o); DeleteObject(p);

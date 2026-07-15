@@ -1294,6 +1294,10 @@ static std::wstring pdFieldValue(const ReceptionRecord& r, const std::wstring& t
     if(tok==L"{visitfee}")     return toFaDigits(formatMoney(r.total))+L" ریال";
     if(tok==L"{paytype}")      return L"نقدی";
     if(tok==L"{cashier}")      return r.userName.empty()?g_session.user.fullname:r.userName;
+    // §1.51.0 — services-list aggregate tokens (the table itself is PIT_SERVICES;
+    // these let a design print a count or a one-line summary outside the table).
+    if(tok==L"{servicescount}"){ wchar_t b[16]; swprintf(b,16,L"%d",(int)r.services.size()); return toFaDigits(b); }
+    if(tok==L"{servicestotal}"){ return toFaDigits(formatMoney(r.total))+L" ریال"; }
     return L"";
 }
 
@@ -1357,6 +1361,177 @@ static void pdDrawTable(HDC dc, const PrintItem& it, const RECT& box,
     HGDIOBJ op=SelectObject(dc,pen);
     for(int c=0;c<=t.cols;++c){ MoveToEx(dc,cx[c],ry[0],0); LineTo(dc,cx[c],ry[t.rows]); }
     for(int rr=0;rr<=t.rows;++rr){ MoveToEx(dc,cx[t.cols],ry[rr],0); LineTo(dc,cx[0],ry[rr]); }
+    SelectObject(dc,op); DeleteObject(pen);
+}
+
+// §1.51.0: parse the PIT_SERVICES model JSON:
+//   {"cols":n,"header":bool,"widths":[..],"labels":[..]}
+// `cols`/`labels`/`widths` describe the table header; rows are filled from the
+// live ReceptionRecord.services vector (variable count) at render time.
+struct PdServicesModel {
+    int cols=4;
+    bool header=true;
+    std::vector<double> widths;
+    std::vector<std::wstring> labels;   // header captions (RTL order, col0=right)
+};
+static bool pdParseServicesModel(const std::wstring& jsonW, PdServicesModel& m){
+    int n=WideCharToMultiByte(CP_UTF8,0,jsonW.c_str(),(int)jsonW.size(),NULL,0,NULL,NULL);
+    std::string s(n,0); if(n) WideCharToMultiByte(CP_UTF8,0,jsonW.c_str(),(int)jsonW.size(),&s[0],n,NULL,NULL);
+    size_t p=0; auto ws=[&]{ while(p<s.size()&&(s[p]==' '||s[p]=='\t'||s[p]=='\n'||s[p]=='\r'))++p; };
+    auto rdStr=[&](std::string& out)->bool{ ws(); if(p>=s.size()||s[p]!='"')return false; ++p;
+        while(p<s.size()&&s[p]!='"'){ char c=s[p++]; if(c=='\\'&&p<s.size()){ char e=s[p++];
+            switch(e){case 'n':out+='\n';break;case 'r':out+='\r';break;case 't':out+='\t';break;
+                case '"':out+='"';break;case '\\':out+='\\';break;case '/':out+='/';break;
+                case 'u':{ if(p+4<=s.size()){ unsigned v=(unsigned)strtoul(s.substr(p,4).c_str(),NULL,16); p+=4;
+                    if(v<0x80)out+=(char)v; else if(v<0x800){out+=(char)(0xC0|(v>>6));out+=(char)(0x80|(v&0x3F));}
+                    else{out+=(char)(0xE0|(v>>12));out+=(char)(0x80|((v>>6)&0x3F));out+=(char)(0x80|(v&0x3F));} } break; }
+                default:out+=e; } } else out+=c; }
+        if(p<s.size()&&s[p]=='"')++p; return true; };
+    auto rdNum=[&]()->double{ ws(); size_t st=p; while(p<s.size()&&(isdigit((unsigned char)s[p])||s[p]=='-'||s[p]=='+'||s[p]=='.'||s[p]=='e'||s[p]=='E'))++p; return atof(s.substr(st,p-st).c_str()); };
+    ws(); if(p>=s.size()||s[p]!='{') return false; ++p;
+    while(true){ ws(); if(p<s.size()&&s[p]=='}'){++p;break;} if(p>=s.size())break;
+        std::string key; if(!rdStr(key))break; ws(); if(p<s.size()&&s[p]==':')++p;
+        if(key=="cols") m.cols=(int)rdNum();
+        else if(key=="header"){ ws(); if(s.compare(p,4,"true")==0){m.header=true;p+=4;} else if(s.compare(p,5,"false")==0){m.header=false;p+=5;} else rdNum(); }
+        else if(key=="widths"){ ws(); if(p<s.size()&&s[p]=='['){++p; while(true){ ws(); if(p<s.size()&&s[p]==']'){++p;break;} m.widths.push_back(rdNum()); ws(); if(p<s.size()&&s[p]==','){++p;continue;} if(p<s.size()&&s[p]==']'){++p;break;} break; } } }
+        else if(key=="labels"){ ws(); if(p<s.size()&&s[p]=='['){++p; while(true){ ws(); if(p<s.size()&&s[p]==']'){++p;break;}
+                std::string cv; if(rdStr(cv)) m.labels.push_back(pdU8toW(cv));
+                ws(); if(p<s.size()&&s[p]==','){++p;continue;} if(p<s.size()&&s[p]==']'){++p;break;} break; } } }
+        else { ws(); if(p<s.size()&&s[p]=='"'){ std::string tmp; rdStr(tmp); }
+            else if(p<s.size()&&s[p]=='{'){ int d=0; do{ if(s[p]=='{')d++; else if(s[p]=='}')d--; ++p; }while(p<s.size()&&d>0); }
+            else if(p<s.size()&&s[p]=='['){ int d=0; do{ if(s[p]=='[')d++; else if(s[p]==']')d--; ++p; }while(p<s.size()&&d>0); }
+            else rdNum();
+        }
+        ws(); if(p<s.size()&&s[p]==','){++p;continue;} ws(); if(p<s.size()&&s[p]=='}'){++p;break;}
+        if(p>=s.size())break;
+    }
+    if(m.cols<1) m.cols=4;
+    if((int)m.widths.size()!=m.cols) m.widths.assign(m.cols,1.0);
+    if(m.labels.empty()){
+        // sensible default Persian header (RTL order: col0=right → ردیف، نام، کد، مبلغ)
+        m.labels.clear();
+        const wchar_t* def[4]={L"ردیف",L"نام خدمت",L"کد",L"مبلغ"};
+        int nc=m.cols>4?m.cols:4;
+        for(int i=0;i<nc;++i) m.labels.push_back(i<4?std::wstring(def[i]):L"");
+    }
+    return true;
+}
+
+// §1.51.0: draw a dynamic services table inside `box` (device px).
+// Renders one header row (optional) + one row per ReceptionRecord.services entry.
+// Columns (RTL, col0=rightmost):
+//   0 = ردیف (row number), 1 = نام خدمت (name), 2 = کد (code), 3 = مبلغ (line total)
+// If cols>4, extra columns render empty. If cols<4, only the first `cols` render.
+// `live` is the record whose services vector we render; if NULL or empty we show
+// a placeholder row so the designer preview still looks like a real table.
+static void pdDrawServices(HDC dc, const PrintItem& it, const RECT& box,
+                           double pxPerMmX, double pxPerMmY,
+                           double fontPxPerPt, const ReceptionRecord* live){
+    PdServicesModel m; pdParseServicesModel(it.text, m);
+    int X0=box.left, Y0=box.top, X1=box.right, Y1=box.bottom;
+    int W=X1-X0, H=Y1-Y0; if(W<=0||H<=0) return;
+
+    int nDataRows = live ? (int)live->services.size() : 0;
+    if(nDataRows==0) nDataRows=1;   // keep at least one (placeholder) row
+    int totalRows = (m.header?1:0) + nDataRows;
+    if(totalRows<1) return;
+
+    // column x-boundaries (RTL: col 0 starts at the right edge)
+    double sumw=0; for(double w:m.widths) sumw+=w; if(sumw<=0) sumw=m.cols;
+    std::vector<int> cx; cx.reserve(m.cols+1);
+    cx.push_back(X1);
+    double acc=0;
+    for(int c=0;c<m.cols;++c){ acc+=m.widths[c]; cx.push_back(X1-(int)(W*(acc/sumw))); }
+    // row y-boundaries (top → bottom). Header gets a slightly taller band.
+    std::vector<int> ry; ry.reserve(totalRows+1);
+    if(m.header){
+        int headH=(int)(H*0.16); if(headH<14) headH=14;
+        ry.push_back(Y0); ry.push_back(Y0+headH);
+        for(int rr=1; rr<=nDataRows; ++rr)
+            ry.push_back(ry.back() + (int)((double)(H-headH)*rr/nDataRows));
+        // fix last
+        ry.back()=Y1;
+    } else {
+        for(int rr=0; rr<=nDataRows; ++rr) ry.push_back(Y0+(int)((double)H*rr/nDataRows));
+    }
+
+    // fonts
+    double fontPt = it.fontPt>0 ? it.fontPt : 8.5;
+    int lf=-(int)(fontPt*fontPxPerPt);
+    HFONT fNorm=CreateFontW(lf,0,0,0,FW_NORMAL,it.italic?1:0,0,0,DEFAULT_CHARSET,0,0,
+        CLEARTYPE_QUALITY,0,it.fontName.empty()?L"Vazirmatn":it.fontName.c_str());
+    HFONT fHead=CreateFontW(lf,0,0,0,FW_BOLD,0,0,0,DEFAULT_CHARSET,0,0,
+        CLEARTYPE_QUALITY,0,it.fontName.empty()?L"Vazirmatn":it.fontName.c_str());
+    int pad=(int)(1.2*pxPerMmX); if(pad<2)pad=2;
+
+    // header background
+    if(m.header){
+        RECT hr={cx[m.cols], ry[0], cx[0], ry[1]};
+        HBRUSH hb=CreateSolidBrush(RGB(31,95,214));   // deep blue header band
+        FillRect(dc,&hr,hb); DeleteObject(hb);
+    }
+    // alternating row banding for readability
+    for(int rr=0; rr<nDataRows; ++rr){
+        if((rr&1)==0) continue;       // band every other data row
+        int y0r = m.header ? ry[1+rr] : ry[rr];
+        int y1r = m.header ? ry[2+rr] : ry[rr+1];
+        RECT br={cx[m.cols], y0r, cx[0], y1r};
+        HBRUSH hb=CreateSolidBrush(RGB(243,247,254));
+        FillRect(dc,&br,hb); DeleteObject(hb);
+    }
+
+    SetTextColor(dc, m.header ? RGB(255,255,255) : pdCR(it.textColor));
+    // header cells (white text on blue)
+    if(m.header){
+        HGDIOBJ of=SelectObject(dc,fHead);
+        for(int c=0;c<m.cols;++c){
+            std::wstring cell = (c<(int)m.labels.size()) ? m.labels[c] : L"";
+            RECT cr={cx[c+1]+pad, ry[0]+pad/2, cx[c]-pad, ry[1]-pad/2};
+            if(cr.right<=cr.left||cr.bottom<=cr.top) continue;
+            DrawTextW(dc,cell.c_str(),-1,&cr,
+                DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_END_ELLIPSIS|DT_NOPREFIX);
+        }
+        SelectObject(dc,of);
+        SetTextColor(dc, pdCR(it.textColor));
+    }
+    // data rows
+    {
+        HGDIOBJ of=SelectObject(dc,fNorm);
+        for(int rr=0; rr<nDataRows; ++rr){
+            const ServiceLine* sln = (live && rr<(int)live->services.size()) ? &live->services[rr] : NULL;
+            int ry0 = m.header ? ry[1+rr] : ry[rr];
+            int ry1 = m.header ? ry[2+rr] : ry[rr+1];
+            for(int c=0;c<m.cols;++c){
+                std::wstring cell;
+                if(sln){
+                    if(c==0){ wchar_t b[8]; swprintf(b,8,L"%d",rr+1); cell=toFaDigits(b); }
+                    else if(c==1) cell=sln->name;
+                    else if(c==2) cell=toFaDigits(sln->code);
+                    else if(c==3) cell=toFaDigits(formatMoney(sln->price*(long long)sln->qty - sln->discount))+L" ریال";
+                    else cell=L"";
+                } else {
+                    // placeholder (designer preview with no record)
+                    const wchar_t* ph[4]={L"۱",L"نمونهٔ خدمت",L"۰۰۱",L"۱۰۰٬۰۰۰ ریال"};
+                    cell = (c<4)? std::wstring(ph[c]) : L"";
+                }
+                RECT cr={cx[c+1]+pad, ry0+pad/2, cx[c]-pad, ry1-pad/2};
+                if(cr.right<=cr.left||cr.bottom<=cr.top) continue;
+                // name column left-aligned-ish (center looks fine too); numbers centered
+                UINT al = (c==1) ? (DT_RTLREADING|DT_CENTER) : (DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_END_ELLIPSIS|DT_NOPREFIX);
+                if(c==1) al = DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_END_ELLIPSIS|DT_NOPREFIX;
+                DrawTextW(dc,cell.c_str(),-1,&cr,al);
+            }
+        }
+        SelectObject(dc,of);
+    }
+    DeleteObject(fNorm); DeleteObject(fHead);
+
+    // grid lines
+    int bw=(int)(it.borderWidth*pxPerMmX); if(bw<1)bw=1;
+    HPEN pen=CreatePen(PS_SOLID,bw,pdCR(it.borderColor));
+    HGDIOBJ op=SelectObject(dc,pen);
+    for(int c=0;c<=m.cols;++c){ MoveToEx(dc,cx[c],ry[0],0); LineTo(dc,cx[c],ry[totalRows]); }
+    for(int rr=0;rr<=totalRows;++rr){ MoveToEx(dc,cx[m.cols],ry[rr],0); LineTo(dc,cx[0],ry[rr]); }
     SelectObject(dc,op); DeleteObject(pen);
 }
 
@@ -1479,6 +1654,10 @@ bool printPrintDesign(const ReceptionRecord& r, int sectionId, HWND owner){
         if(it.type==PIT_TABLE){
             RECT rr={x0,y0,x1,y1};
             pdDrawTable(dc, it, rr, sx, sy, dpiY/72.0, &r);
+        } else if(it.type==PIT_SERVICES){
+            // §1.51.0: dynamic services list rendered from the live record.
+            RECT rr={x0,y0,x1,y1};
+            pdDrawServices(dc, it, rr, sx, sy, dpiY/72.0, &r);
         } else if(it.type==PIT_HLINE){
             int wpx=(int)(it.borderWidth*sx); if(wpx<1)wpx=1;
             HPEN p=CreatePen(PS_SOLID,wpx,pdCR(it.borderColor)); HGDIOBJ o=SelectObject(dc,p);

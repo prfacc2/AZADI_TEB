@@ -128,28 +128,25 @@ svg{display:inline-block;vertical-align:middle;}
 .col-center{ -ms-flex:1 1 auto; flex:1 1 auto; margin:0 12px; }
 .col-left  { -ms-flex:0 0 250px;flex:0 0 250px;width:250px; }
 
-/* Thin scrollbars everywhere.
-   · Chromium/WebView2 → ::-webkit-scrollbar (6px).
-   · Firefox           → scrollbar-width/-color.
-   · MSHTML/Trident    → the proprietary scrollbar-*-color set below tints the
-     (fixed-width) IE scrollbar so it at least reads subtle instead of a loud
-     3-D grey; width can't be reduced there, but the colour blends it in. */
-*{scrollbar-width:thin;scrollbar-color:#9fb2c9 transparent;}
+/* ── ALL scrollbars HIDDEN on the Patient-Admission page (scroll still works) ──
+   · Chromium/WebView2 → ::-webkit-scrollbar{display:none;width:0;height:0}
+   · Firefox           → scrollbar-width:none
+   · MSHTML/Trident    → scrollbar-*-colour set to the page background so the
+     fixed-width IE bar becomes invisible against the tinted page. */
+*{scrollbar-width:none;scrollbar-color:transparent transparent;}
 html{
-  scrollbar-face-color:#9fb2c9;scrollbar-track-color:#eef2f8;
-  scrollbar-arrow-color:#9fb2c9;scrollbar-shadow-color:#eef2f8;
-  scrollbar-highlight-color:#eef2f8;scrollbar-3dlight-color:#eef2f8;
-  scrollbar-darkshadow-color:#eef2f8;
+  scrollbar-face-color:#eaf1fb;scrollbar-track-color:#eaf1fb;
+  scrollbar-arrow-color:#eaf1fb;scrollbar-shadow-color:#eaf1fb;
+  scrollbar-highlight-color:#eaf1fb;scrollbar-3dlight-color:#eaf1fb;
+  scrollbar-darkshadow-color:#eaf1fb;
 }
-.col::-webkit-scrollbar,.tbl-wrap::-webkit-scrollbar,.mini-list::-webkit-scrollbar,
-.svc-suggest::-webkit-scrollbar,.card-body::-webkit-scrollbar{width:6px;height:6px;}
-.col::-webkit-scrollbar-track,.tbl-wrap::-webkit-scrollbar-track,
-.mini-list::-webkit-scrollbar-track,.svc-suggest::-webkit-scrollbar-track{background:transparent;}
-.col::-webkit-scrollbar-thumb,.tbl-wrap::-webkit-scrollbar-thumb,
-.mini-list::-webkit-scrollbar-thumb,.svc-suggest::-webkit-scrollbar-thumb{
-  background:#9fb2c9;border-radius:8px;border:1px solid transparent;
-}
-.col::-webkit-scrollbar-thumb:hover,.tbl-wrap::-webkit-scrollbar-thumb:hover{background:#7f95b0;}
+*::-webkit-scrollbar{display:none;width:0 !important;height:0 !important;
+  -webkit-appearance:none;appearance:none;background:transparent;}
+*::-webkit-scrollbar-track,*::-webkit-scrollbar-thumb,
+*::-webkit-scrollbar-corner{display:none;background:transparent;}
+/* keep overflow scrollable everywhere — only the bar is hidden */
+.col,.tbl-wrap,.mini-list,.svc-suggest,.card-body,
+.svc-suggest,.svc-list,.sel-scroll{overflow:auto;}
 
 /* --------------------------------------------------------------- SUBMIT --- */
 .submit-bar{
@@ -247,6 +244,14 @@ html{
 .inp-sm{height:33px;font-size:13px;}
 .inp-mini{width:130px;}
 select.inp{cursor:pointer;background:#f9fbfe;}
+/* doctor (#doc2name) & performer (#perfname) selects: internal scroll enabled,
+   scrollbar completely hidden (Chromium + Firefox + IE). */
+select.inp#doc2name,select.inp#perfname{
+  overflow:auto;
+  scrollbar-width:none;scrollbar-color:transparent transparent;
+}
+select.inp#doc2name::-webkit-scrollbar,
+select.inp#perfname::-webkit-scrollbar{display:none;width:0 !important;height:0 !important;}
 .inp[disabled]{background:#eef1f6;color:#8a97a7;}
 
 /* input with a trailing icon (search / calendar) */
@@ -523,7 +528,7 @@ select.inp{cursor:pointer;background:#f9fbfe;}
 .svc-suggest .s-code{color:#5a6b80;font-size:12px;font-weight:600;}
 .svc-suggest .s-price{font-weight:800;color:#184dae;}
 
-/* service totals footer strip */
+/* service totals footer strip — frame-safe, never exits left/right borders */
 .svc-foot,.queue-foot{
   display:-ms-flexbox;display:flex;
   -ms-flex-align:center;align-items:center;
@@ -531,25 +536,57 @@ select.inp{cursor:pointer;background:#f9fbfe;}
   border-top:2px solid #c3d3e8;
   background:-webkit-linear-gradient(top,#f3f8ff 0%,#e6eefa 100%);
   background:linear-gradient(180deg,#f3f8ff 0%,#e6eefa 100%);
-  padding:10px 16px;
+  padding:9px 10px;
+  /* HARD frame boundary — nothing inside may visually overflow the borders */
+  overflow:hidden;
+  -webkit-box-sizing:border-box;box-sizing:border-box;
+  width:100%;min-width:0;
 }
-/* four EQUAL-width columns, each fully centred, spread across the whole line;
-   جمع خدمات sits on the far right (first in RTL DOM), جمع سهم بیمار on the far
-   left (last in DOM) — with wide even gaps so big numbers never collide/mix. */
+/* four columns; جمع خدمات (sfTotal) sits on the far RIGHT (first in RTL DOM),
+   جمع سهم بیمه (sfIns) on the far LEFT (last in DOM). Each cell is fully
+   self-contained with internal padding so wide numbers never touch the frame
+   edge and never collide with a neighbour. */
 .sf-cell{
-  -ms-flex:1 1 0;flex:1 1 0;
-  -ms-flex-preferred-size:0;
-  text-align:center;min-width:0;
+  -ms-flex:1 1 25%;flex:1 1 25%;
+  -ms-flex-preferred-size:25%;flex-basis:25%;
+  max-width:25%;min-width:0;
+  text-align:center;
   display:-ms-flexbox;display:flex;
   -ms-flex-direction:column;flex-direction:column;
   -ms-flex-align:center;align-items:center;
   -ms-flex-pack:center;justify-content:center;
-  padding:0 6px;
+  padding:0 8px;
+  -webkit-box-sizing:border-box;box-sizing:border-box;
+  overflow:hidden;
 }
+/* جمع خدمات (first/rightmost cell) nudged a touch further toward the right
+   edge so its caption "جمع" stays clearly inside the frame. */
+.sf-cell:first-child{padding-right:14px;padding-left:6px;}
+/* جمع سهم بیمه (last/leftmost cell) gets symmetric left padding so it stays
+   clearly inside the left border. */
+.sf-cell:last-child{padding-left:14px;padding-right:6px;}
 .sf-cell + .sf-cell{border-right:1px solid #cfdcee;}
-.sf-cell span{font-size:11.5px;color:#54687f;margin-bottom:4px;font-weight:700;white-space:nowrap;text-align:center;}
-/* numbers can grow large → keep them on one line, centred, never wrapping/mixing */
-.sf-cell b{font-size:15px;color:#0d2144;font-weight:800;line-height:1.2;white-space:nowrap;text-align:center;}
+.sf-cell span{
+  font-size:11px;color:#54687f;margin-bottom:3px;font-weight:700;
+  white-space:nowrap;text-align:center;overflow:hidden;
+  text-overflow:ellipsis;max-width:100%;display:block;
+  -webkit-box-sizing:border-box;box-sizing:border-box;
+}
+/* numbers can grow large → keep them on one line, centred, never wrapping/mixing,
+   clipped with ellipsis if ever too wide so they never exit the frame. */
+.sf-cell b{
+  font-size:14px;color:#0d2144;font-weight:800;line-height:1.2;
+  white-space:nowrap;text-align:center;max-width:100%;
+  overflow:hidden;text-overflow:ellipsis;display:block;
+  -webkit-box-sizing:border-box;box-sizing:border-box;
+}
+@media (max-width:760px){
+  .sf-cell{padding:0 4px;}
+  .sf-cell:first-child{padding-right:8px;padding-left:3px;}
+  .sf-cell:last-child{padding-left:8px;padding-right:3px;}
+  .sf-cell span{font-size:10px;}
+  .sf-cell b{font-size:12px;}
+}
 
 .queue-foot{-ms-flex-pack:justify;justify-content:space-between;}
 .q-count{font-size:13px;color:#41546c;font-weight:600;}
