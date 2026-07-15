@@ -378,12 +378,22 @@ static std::string admissionApi(const std::string& verb, const std::string& body
     }
 
     // ---- service.resolve: code -> {name, price} (management-driven) ----
+    //  v1.50.0 FREEZE/RACE FIX: findService() keeps a function-local `static`
+    //  cache with NO locking. This verb runs on loopback HTTP *worker threads*
+    //  while the UI thread can call findService() concurrently (native reception
+    //  path) — two threads reassigning the same static vector is a data race
+    //  (corrupt heap / hang). Resolve against a LOCAL snapshot instead;
+    //  loadServices() allocates its own vector so it is re-entrant.
     if(verb=="service.resolve"){
         std::string codeU; jsonGetString(body,"code",codeU);
-        const ServiceDef* sd=findService(u82w(codeU));
-        if(!sd) sd=findService(normDigits(u82w(codeU)));
-        if(sd && sd->status!=0)
-            return "{\"found\":true,\"service\":"+serviceJson(*sd)+"}";
+        std::wstring want =trim(u82w(codeU));
+        std::wstring wantD=normDigits(want);
+        auto svcs=loadServices();
+        for(const auto& s:svcs){
+            if(s.status==0) continue;
+            if(s.code==want || s.code==wantD || normDigits(s.code)==wantD)
+                return "{\"found\":true,\"service\":"+serviceJson(s)+"}";
+        }
         return "{\"found\":false}";
     }
 
