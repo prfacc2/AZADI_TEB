@@ -78,6 +78,32 @@
     else el.attachEvent('on' + ev, fn);
   }
 
+  /* ==========================================================================
+     v1.50.0 — FREEZE-PROOF HELPERS.
+     Root cause of the whole-app freeze: the old per-row onclick handlers
+     SYNCHRONOUSLY tore down (innerHTML='') the very DOM node that was still
+     dispatching the click event. The in-process MSHTML/Trident engine shares
+     the app's Win32 message pump; destroying the dispatching node wedges it and
+     freezes the ENTIRE program (close button, tab switch, everything).
+     Solution: every handler that rebuilds a list it lives inside MUST route the
+     mutation through defer() so the DOM is only touched after the event has
+     fully unwound. ========================================================================== */
+  function defer(fn) {
+    setTimeout(function () {
+      try { fn(); } catch (e) { if (window.console) console.error(e); }
+    }, 0);
+  }
+
+  /* nearest ancestor (or self) of `node` carrying attribute `attr`, stopping at
+     `stop`. ES5/MSHTML-safe (no Element.closest). */
+  function findUp(node, attr, stop) {
+    while (node && node !== stop) {
+      if (node.getAttribute && node.getAttribute(attr) != null) return node;
+      node = node.parentNode;
+    }
+    return null;
+  }
+
   function toast(msg, kind) {
     var t = $('toast');
     if (!t) return;
@@ -174,16 +200,34 @@
   }
 
   /* ==========================================================================
-     SERVICE ROWS
+     SERVICE ROWS — v1.50.0 FREEZE FIX.
+     The old code rebuilt the whole table (innerHTML) and re-bound per-node
+     handlers SYNCHRONOUSLY inside the very event dispatch whose source node it
+     was destroying. On the in-process MSHTML/Trident engine (which shares the
+     app's UI thread + Win32 message pump), tearing down the node that is still
+     dispatching the current event wedges the engine — and the WHOLE app froze.
+     New design: addServiceRow only mutates state; ALL re-rendering goes through
+     scheduleRender() (setTimeout 0) so the DOM is never torn down while an
+     event is still being dispatched. Row actions use ONE delegated listener
+     bound once in wire() — zero per-render handler rebinding.
      ========================================================================== */
+  var _renderTimer = null;
+  function scheduleRender() {
+    if (_renderTimer) return;             /* coalesce bursts into one render */
+    _renderTimer = setTimeout(function () {
+      _renderTimer = null;
+      try { renderServices(); } catch (e) { if (window.console) console.error(e); }
+      try { recompute(); } catch (e2) { if (window.console) console.error(e2); }
+    }, 0);
+  }
+
   function addServiceRow(svc) {
     /* price ALWAYS from the catalog — never typed by the operator */
     state.services.push({
       code: svc.code || '', name: svc.name || '',
       qty: 1, price: Number(svc.price) || 0, discount: 0
     });
-    renderServices();
-    recompute();
+    scheduleRender();
   }
 
   function renderServices() {
@@ -197,7 +241,7 @@
     for (i = 0; i < state.services.length; i++) {
       s = computeRow(state.services[i]);
       html +=
-        '<tr>' +
+        '<tr data-row="' + i + '">' +
         '<td>' + toFa(i + 1) + '</td>' +
         '<td class="td-name">' + esc(s.name || '') + '</td>' +
         '<td>' + toFa(s.code || '—') + '</td>' +
@@ -207,55 +251,26 @@
         '<td>' + money(s._org + s._supp) + '</td>' +
         '<td>' + money(s._pat) + '</td>' +
         '<td>' +
-          '<button class="act-btn act-edit" data-edit="' + i + '" title="ویرایش تعداد">✎</button>' +
-          '<button class="act-btn act-del" data-del="' + i + '" title="حذف">✕</button>' +
+          '<button type="button" class="act-btn act-edit" data-edit="' + i + '" title="ویرایش تعداد">✎</button>' +
+          '<button type="button" class="act-btn act-del" data-del="' + i + '" title="حذف">✕</button>' +
         '</td>' +
         '</tr>';
     }
     body.innerHTML = html;
-
-    var qtys = body.getElementsByClassName('qty-inp');
-    for (i = 0; i < qtys.length; i++) {
-      qtys[i].onchange = onQtyChange;
-      /* B4: reflect qty edits instantly (not only on blur/change) */
-      qtys[i].oninput = onQtyChange;
-      qtys[i].onkeyup = onQtyChange;
-      qtys[i].onkeydown = function (e) {
-        e = e || window.event;
-        var k = e.keyCode || e.which;
-        if (k === 13) {                       /* Enter in qty → back to search */
-          if (e.preventDefault) e.preventDefault(); else e.returnValue = false;
-          var s = $('svcSearch');
-          if (s) { s.focus(); if (s.select) try { s.select(); } catch (er) {} }
-          return false;
-        }
-      };
-      qtys[i].ondblclick = function () { this.focus(); this.select(); };
-    }
-    var dels = body.getElementsByClassName('act-del');
-    for (i = 0; i < dels.length; i++) {
-      dels[i].onclick = function (e) {
-        e = e || window.event; var tgt = e.target || e.srcElement;
-        state.services.splice(+tgt.getAttribute('data-del'), 1);
-        renderServices(); recompute();
-      };
-    }
-    var eds = body.getElementsByClassName('act-edit');
-    for (i = 0; i < eds.length; i++) {
-      eds[i].onclick = function (e) {
-        e = e || window.event; var tgt = e.target || e.srcElement;
-        var idx = +tgt.getAttribute('data-edit');
-        var inp = body.getElementsByClassName('qty-inp')[idx];
-        if (inp) { inp.focus(); inp.select(); }
-      };
-    }
+    /* NO handler binding here — everything is delegated (wired once). */
   }
-  function onQtyChange(e) {
-    e = e || window.event; var tgt = e.target || e.srcElement;
-    var idx = +tgt.getAttribute('data-i');
-    var q = Math.max(1, parseInt(toEn(tgt.value), 10) || 1);
-    state.services[idx].qty = q;
-    renderServices(); recompute();
+
+  /* live-refresh the computed cells of the row that owns `inputEl` WITHOUT
+     rebuilding the table (rebuilding would destroy the input mid-keystroke). */
+  function refreshRowCells(inputEl, idx) {
+    if (!(idx >= 0 && idx < state.services.length)) return;
+    var s = computeRow(state.services[idx]);
+    var tr = inputEl;
+    while (tr && String(tr.tagName || '').toLowerCase() !== 'tr') tr = tr.parentNode;
+    if (!tr || !tr.cells || tr.cells.length < 9) return;
+    setText(tr.cells[5], money(s._disc));
+    setText(tr.cells[6], money(s._org + s._supp));
+    setText(tr.cells[7], money(s._pat));
   }
 
   /* ==========================================================================
@@ -312,20 +327,16 @@
   function renderPatientResults(rows) {
     var box = $('patResults');
     if (!box) return;
+    state.patResults = rows || [];
     if (!rows || !rows.length) { box.innerHTML = '<div class="empty">نتیجه‌ای نیست</div>'; return; }
-    box.innerHTML = '';
-    var i, lim = Math.min(rows.length, 25);
+    var html = '', i, p, lim = Math.min(rows.length, 25);
     for (i = 0; i < lim; i++) {
-      (function (p) {
-        var d = document.createElement('div');
-        d.className = 'row';
-        d.innerHTML = '<span class="r-name">' +
-          esc(trimStr((p.first || '') + ' ' + (p.last || ''))) +
-          '</span><span class="r-sub">' + toFa(p.nid || '') + '</span>';
-        d.onclick = function () { fillPatient(p); box.innerHTML = '<div class="empty">نتیجه‌ای نیست</div>'; toast('اطلاعات بیمار بارگذاری شد', 'ok'); };
-        box.appendChild(d);
-      })(rows[i]);
+      p = rows[i];
+      html += '<div class="row" data-p="' + i + '"><span class="r-name">' +
+        esc(trimStr((p.first || '') + ' ' + (p.last || ''))) +
+        '</span><span class="r-sub">' + toFa(p.nid || '') + '</span></div>';
     }
+    box.innerHTML = html;   /* delegated click — wired once in wire() */
   }
 
   function renderDocResults(rows) {
@@ -333,18 +344,13 @@
     if (!box) return;
     state.doctors = rows || [];
     if (!rows || !rows.length) { box.innerHTML = '<div class="empty">نتیجه‌ای نیست</div>'; return; }
-    box.innerHTML = '';
-    var i, lim = Math.min(rows.length, 25);
+    var html = '', i, doc, lim = Math.min(rows.length, 25);
     for (i = 0; i < lim; i++) {
-      (function (doc, ix) {
-        var d = document.createElement('div');
-        d.className = 'row';
-        d.innerHTML = '<span class="r-name">' + esc(doc.name || '') +
-          '</span><span class="r-sub">' + esc(doc.specialty || '') + '</span>';
-        d.onclick = function () { selectDoctor(doc, ix); };
-        box.appendChild(d);
-      })(rows[i], i);
+      doc = rows[i];
+      html += '<div class="row" data-d="' + i + '"><span class="r-name">' + esc(doc.name || '') +
+        '</span><span class="r-sub">' + esc(doc.specialty || '') + '</span></div>';
     }
+    box.innerHTML = html;   /* delegated click — wired once in wire() */
   }
   function selectDoctor(doc, ix) {
     /* populate the doctor <select> options and select this one */
@@ -365,24 +371,15 @@
     if (!box) return;
     state.catalog = rows || [];
     if (!rows || !rows.length) { box.className = 'svc-suggest'; box.innerHTML = ''; return; }
-    box.innerHTML = '';
-    var i, lim = Math.min(rows.length, 40);
+    var html = '', i, s, lim = Math.min(rows.length, 40);
     for (i = 0; i < lim; i++) {
-      (function (s) {
-        var d = document.createElement('div');
-        d.className = 's-row';
-        d.innerHTML = '<span><b>' + esc(s.name || '') + '</b> <span class="s-code">' +
-          toFa(s.code || '') + '</span></span>' +
-          '<span class="s-price">' + money(s.price) + ' ریال</span>';
-        d.onclick = function () {
-          addServiceRow(s);
-          box.className = 'svc-suggest'; box.innerHTML = '';
-          if ($('svcSearch')) $('svcSearch').value = '';
-          toast('خدمت «' + (s.name || '') + '» افزوده شد', 'ok');
-        };
-        box.appendChild(d);
-      })(rows[i]);
+      s = rows[i];
+      html += '<div class="s-row" data-s="' + i + '">' +
+        '<span><b>' + esc(s.name || '') + '</b> <span class="s-code">' +
+        toFa(s.code || '') + '</span></span>' +
+        '<span class="s-price">' + money(s.price) + ' ریال</span></div>';
     }
+    box.innerHTML = html;   /* delegated click — wired once in wire() */
     box.className = 'svc-suggest open';
   }
 
@@ -394,6 +391,7 @@
     var body = $('queueBody');
     if (!body) return;
     var filter = filterQueue(state.queue);
+    state.queueView = filter;             /* v1.50.0: delegated handlers read this */
     setText($('qCount'), toFa(state.queue.length));
     if (!filter.length) {
       body.innerHTML = '<tr><td colspan="7" class="empty">موردی در صندوق نیست</td></tr>';
@@ -410,28 +408,13 @@
         '<td>' + toFa(q.time || '') + '</td>' +
         '<td>' + toFa(q.minsAgo != null ? (q.minsAgo + ' دقیقه') : '') + '</td>' +
         '<td>' +
-          '<button class="act-btn act-repeat" title="بازخوانی" data-q="' + i + '">⟳</button>' +
-          '<button class="act-btn act-del" title="حذف" data-qdel="' + i + '">✕</button>' +
+          '<button type="button" class="act-btn act-repeat" title="بازخوانی" data-q="' + i + '">⟳</button>' +
+          '<button type="button" class="act-btn act-del" title="حذف" data-qdel="' + i + '">✕</button>' +
         '</td>' +
       '</tr>';
     }
     body.innerHTML = html;
-    var reps = body.getElementsByClassName('act-repeat');
-    for (i = 0; i < reps.length; i++) {
-      reps[i].onclick = function (e) {
-        e = e || window.event; var tgt = e.target || e.srcElement;
-        var q = filter[+tgt.getAttribute('data-q')];
-        if (q) { fillPatient(q); toast('بیمار از صندوق بازخوانی شد', 'ok'); }
-      };
-    }
-    var qdels = body.getElementsByClassName('act-del');
-    for (i = 0; i < qdels.length; i++) {
-      qdels[i].onclick = function (e) {
-        e = e || window.event; var tgt = e.target || e.srcElement;
-        var q = filter[+tgt.getAttribute('data-qdel')];
-        if (q) Bridge.call('queue.remove', { id: q.id }).then(function () { refreshQueue(); });
-      };
-    }
+    /* NO handler binding here — everything is delegated (wired once). */
   }
   function filterQueue(rows) {
     var q = $('qSearch') ? trimStr($('qSearch').value) : '';
@@ -783,12 +766,154 @@
       resolveAndAddService($('svcSearch') ? $('svcSearch').value : '', true);
     });
 
+    /* ====================================================================
+       v1.50.0 — DELEGATED list/table handlers (bound ONCE, never rebound).
+       Root cause of the whole-app freeze: the old per-node onclick handlers
+       synchronously rebuilt (innerHTML) the very subtree that was still
+       dispatching the click. In-process MSHTML wedges on that, and since it
+       shares the app's UI thread, the ENTIRE program froze. Delegation +
+       defer() guarantees the DOM is only mutated after dispatch unwinds.
+       ==================================================================== */
+
+    /* service suggestion dropdown → pick a service (deferred) */
+    on($('svcSuggest'), 'click', function (e) {
+      e = e || window.event;
+      var box = $('svcSuggest');
+      var row = findUp(e.target || e.srcElement, 'data-s', box);
+      if (!row) return;
+      var s = state.catalog[+row.getAttribute('data-s')];
+      if (!s) return;
+      if (e.preventDefault) e.preventDefault(); else e.returnValue = false;
+      defer(function () {
+        addServiceRow(s);                  /* schedules its own render */
+        box.className = 'svc-suggest'; box.innerHTML = '';
+        if ($('svcSearch')) $('svcSearch').value = '';
+        toast('خدمت «' + (s.name || '') + '» افزوده شد', 'ok');
+      });
+    });
+
+    /* services table → delete / edit buttons (delegated) */
+    on($('svcBody'), 'click', function (e) {
+      e = e || window.event;
+      var body = $('svcBody');
+      var tgt = e.target || e.srcElement;
+      var del = findUp(tgt, 'data-del', body);
+      if (del) {
+        var di = +del.getAttribute('data-del');
+        defer(function () {
+          if (di >= 0 && di < state.services.length) state.services.splice(di, 1);
+          scheduleRender();
+        });
+        return;
+      }
+      var ed = findUp(tgt, 'data-edit', body);
+      if (ed) {
+        var ei = +ed.getAttribute('data-edit');
+        defer(function () {
+          var inp = body.getElementsByClassName('qty-inp')[ei];
+          if (inp) { try { inp.focus(); inp.select(); } catch (er) {} }
+        });
+      }
+    });
+
+    /* services table → qty edits (delegated). While typing we only refresh the
+       computed cells of THAT row (never rebuild the table under the caret);
+       the full re-render happens on blur/change. */
+    function onQtyEvent(e) {
+      e = e || window.event;
+      var tgt = e.target || e.srcElement;
+      if (!tgt || !/(^|\s)qty-inp(\s|$)/.test(tgt.className || '')) return;
+      var idx = +tgt.getAttribute('data-i');
+      if (!(idx >= 0 && idx < state.services.length)) return;
+      var q = Math.max(1, parseInt(toEn(tgt.value), 10) || 1);
+      state.services[idx].qty = q;
+      refreshRowCells(tgt, idx);
+      recompute();                          /* totals only — no DOM teardown */
+    }
+    on($('svcBody'), 'input', onQtyEvent);
+    on($('svcBody'), 'keyup', onQtyEvent);
+    on($('svcBody'), 'change', function (e) {
+      e = e || window.event;
+      var tgt = e.target || e.srcElement;
+      if (!tgt || !/(^|\s)qty-inp(\s|$)/.test(tgt.className || '')) return;
+      onQtyEvent(e);
+      scheduleRender();                     /* safe: deferred out of dispatch */
+    });
+    on($('svcBody'), 'keydown', function (e) {
+      e = e || window.event;
+      var tgt = e.target || e.srcElement;
+      if (!tgt || !/(^|\s)qty-inp(\s|$)/.test(tgt.className || '')) return;
+      var k = e.keyCode || e.which;
+      if (k === 13) {                       /* Enter in qty → back to search */
+        if (e.preventDefault) e.preventDefault(); else e.returnValue = false;
+        defer(function () {
+          scheduleRender();
+          var s = $('svcSearch');
+          if (s) { try { s.focus(); if (s.select) s.select(); } catch (er) {} }
+        });
+        return false;
+      }
+    });
+    on($('svcBody'), 'dblclick', function (e) {
+      e = e || window.event;
+      var tgt = e.target || e.srcElement;
+      if (!tgt || !/(^|\s)qty-inp(\s|$)/.test(tgt.className || '')) return;
+      try { tgt.focus(); tgt.select(); } catch (er) {}
+    });
+
+    /* patient results list → load patient (delegated, deferred) */
+    on($('patResults'), 'click', function (e) {
+      e = e || window.event;
+      var box = $('patResults');
+      var row = findUp(e.target || e.srcElement, 'data-p', box);
+      if (!row) return;
+      var p = (state.patResults || [])[+row.getAttribute('data-p')];
+      if (!p) return;
+      defer(function () {
+        fillPatient(p);
+        box.innerHTML = '<div class="empty">نتیجه‌ای نیست</div>';
+        toast('اطلاعات بیمار بارگذاری شد', 'ok');
+      });
+    });
+
+    /* doctor results list → select doctor (delegated, deferred) */
+    on($('docResults'), 'click', function (e) {
+      e = e || window.event;
+      var box = $('docResults');
+      var row = findUp(e.target || e.srcElement, 'data-d', box);
+      if (!row) return;
+      var ix = +row.getAttribute('data-d');
+      var doc = (state.doctors || [])[ix];
+      if (!doc) return;
+      defer(function () { selectDoctor(doc, ix); });
+    });
+
+    /* queue table → recall / remove (delegated, deferred) */
+    on($('queueBody'), 'click', function (e) {
+      e = e || window.event;
+      var body = $('queueBody');
+      var tgt = e.target || e.srcElement;
+      var rep = findUp(tgt, 'data-q', body);
+      if (rep) {
+        var q = (state.queueView || [])[+rep.getAttribute('data-q')];
+        if (q) defer(function () { fillPatient(q); toast('بیمار از صندوق بازخوانی شد', 'ok'); });
+        return;
+      }
+      var del = findUp(tgt, 'data-qdel', body);
+      if (del) {
+        var qd = (state.queueView || [])[+del.getAttribute('data-qdel')];
+        if (qd) defer(function () {
+          Bridge.call('queue.remove', { id: qd.id }).then(function () { refreshQueue(); });
+        });
+      }
+    });
+
     /* insurance changes → recompute (never blanks patient fields) */
-    on($('insMain'), 'change', function () { renderServices(); recompute(); });
-    on($('insSupp'), 'change', function () { renderServices(); recompute(); });
-    on($('insSuppPct'), 'input', function () { renderServices(); recompute(); });
-    on($('insSuppPct'), 'keyup', function () { renderServices(); recompute(); });
-    on($('hasIns'), 'change', function () { renderServices(); recompute(); });
+    on($('insMain'), 'change', function () { scheduleRender(); });
+    on($('insSupp'), 'change', function () { scheduleRender(); });
+    on($('insSuppPct'), 'input', function () { scheduleRender(); });
+    on($('insSuppPct'), 'keyup', function () { scheduleRender(); });
+    on($('hasIns'), 'change', function () { scheduleRender(); });
     on($('noPay'), 'change', function () { recompute(); });
 
     /* collapse / expand lists */
@@ -1091,7 +1216,13 @@
     else document.attachEvent('onreadystatechange', function () { if (document.readyState === 'complete') fn(); });
   }
 
+  /* v1.50.0: idempotence guard — if any engine fires the ready event more than
+     once (MSHTML readystatechange quirks), we must NEVER wire the delegated
+     handlers twice (that would double-add services on every click). */
+  var _wired = false;
   domReady(function () {
+    if (_wired) return;
+    _wired = true;
     wire();
     subscribeEvents();
     setActiveTab('tabQueue');
