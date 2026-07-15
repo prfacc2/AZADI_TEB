@@ -982,10 +982,20 @@ void openPrinterSettings(HWND owner){
 // ============================================================================
 #include "printer_designer.inc"
 
+// §1.52.0 — forward declaration so the legacy fieldValue resolver can reuse the
+// canonical bare-name → {token} normalizer defined further below (pdNormalizeField).
+static std::wstring pdNormalizeField(const std::wstring& f);
+
 // ============================================================================
 //  RENDER A SAVED DESIGN ONTO A PRINTER DC
 // ============================================================================
-static std::wstring fieldValue(const ReceptionRecord& r, const std::wstring& tok){
+static std::wstring fieldValue(const ReceptionRecord& r, const std::wstring& tokIn){
+    // §1.52.0 — accept BOTH the canonical {token} form and the bare field name
+    // (e.g. "firstName"). The new ready-made templates and the Print Designer
+    // field picker store the *bare* human-readable key; the classic resolver only
+    // matched the {token} form, which is why every field printed blank. Normalize
+    // once up-front so every comparison below works for both shapes.
+    std::wstring tok = pdNormalizeField(tokIn);
     if(tok==L"{first}")    return r.firstName;
     if(tok==L"{last}")     return r.lastName;
     if(tok==L"{full}")     return r.firstName+L" "+r.lastName;
@@ -1212,7 +1222,81 @@ static std::wstring pdSubstFields(const ReceptionRecord& r, const std::wstring& 
     return out;
 }
 
-static std::wstring pdFieldValue(const ReceptionRecord& r, const std::wstring& tok){
+// §1.52.0 — normalize a bare field name (as stored by the ready-made templates
+// and the Print Designer field picker, e.g. "firstName") into the canonical
+// {token} vocabulary that pdFieldValue understands ("{first}"). Templates and
+// user-created designs store the *bare* human-readable key in PrintItem.field;
+// pdFieldValue historically only matched the {token} form, which is why every
+// field printed blank. This single mapping fixes that root cause for ALL
+// existing and future designs without touching their stored JSON.
+static std::wstring pdNormalizeField(const std::wstring& f){
+    if(f.empty()) return f;
+    if(f.size()>=2 && f.front()==L'{' && f.back()==L'}') return f; // already a token
+    // lowercase compare helper (ASCII only — field names are ASCII).
+    // §1.52.0 — accept const char* literals so callers can pass plain
+    // narrow strings; widen each byte on the fly.
+    auto eq=[&](const char* a)->bool{
+        size_t i=0; for(; i<f.size() && a[i]; ++i){
+            wchar_t c=f[i]; if(c>=L'A'&&c<=L'Z') c=(wchar_t)(c-L'A'+L'a');
+            wchar_t d=(wchar_t)(unsigned char)a[i];
+            if(d>=L'A'&&d<=L'Z') d=(wchar_t)(d-L'A'+L'a');
+            if(c!=d) return false; }
+        return a[i]==0 && i==f.size();
+    };
+    // identity / general clinic meta
+    if(eq("firstName")||eq("firstname")||eq("fname")||eq("name"))  return L"{first}";
+    if(eq("lastName") ||eq("lastname") ||eq("lname")||eq("surname")) return L"{last}";
+    if(eq("fullName") ||eq("fullname") ||eq("fullname"))            return L"{full}";
+    if(eq("fatherName")||eq("fathername")||eq("father"))             return L"{father}";
+    if(eq("nationalCode")||eq("nationalcode")||eq("nationalId")||eq("nationalid")||eq("nid")||eq("nationalNo")||eq("id")) return L"{nid}";
+    if(eq("birthDate") ||eq("birthdate") ||eq("birth")||eq("dob"))   return L"{birth}";
+    if(eq("gender")    ||eq("sex"))                                  return L"{gender}";
+    if(eq("mobile")    ||eq("cellphone")||eq("cell")||eq("phone2"))  return L"{mobile}";
+    if(eq("landline")  ||eq("phone")||eq("tel")||eq("telephone"))    return L"{landline}";
+    if(eq("address"))                                                return L"{address}";
+    if(eq("patientType")||eq("patienttype")||eq("ptype")||eq("visitType")||eq("visittype")) return L"{ptype}";
+    if(eq("insurance") ||eq("ins")||eq("insName")||eq("insurer"))    return L"{ins}";
+    if(eq("suppInsurance")||eq("suppinsurance")||eq("supplementary")||eq("supp")||eq("suppIns")) return L"{supp}";
+    if(eq("queueNo")   ||eq("queueno")||eq("queue")||eq("turn")||eq("turnNo")) return L"{queue}";
+    if(eq("apptDate")  ||eq("apptdate")||eq("date")||eq("regDate")||eq("regdate")||eq("appointmentDate")) return L"{date}";
+    if(eq("apptTime")  ||eq("appttime")||eq("time")||eq("regTime")||eq("regtime")||eq("appointmentTime")) return L"{time}";
+    if(eq("shift"))                                                  return L"{shift}";
+    if(eq("dept")     ||eq("department")||eq("section")||eq("unit")) return L"{dept}";
+    if(eq("doctor")   ||eq("physician")||eq("doc"))                  return L"{doctor}";
+    if(eq("userName") ||eq("username")||eq("user")||eq("operator")||eq("receptionist")) return L"{user}";
+    if(eq("clinic")   ||eq("clinicName")||eq("clinicname")||eq("center")) return L"{clinic}";
+    if(eq("receiptNo")||eq("receiptno")||eq("receipt")||eq("invoiceNo")||eq("invoiceno")) return L"{receiptNo}";
+    // money
+    if(eq("total")    ||eq("gross")||eq("totalPrice")||eq("billTotal"))  return L"{total}";
+    if(eq("mainShare")||eq("mainshare")||eq("insShare")||eq("insshare")||eq("insuranceShare")) return L"{insshare}";
+    if(eq("discount"))                                                return L"{discount}";
+    if(eq("paid")     ||eq("amountPaid")||eq("amountpaid"))          return L"{paid}";
+    if(eq("patientShare")||eq("patientshare")||eq("patShare")||eq("patshare")||eq("share")) return L"{patientshare}";
+    if(eq("finalTotal")||eq("finaltotal")||eq("final")||eq("net")||eq("netTotal")) return L"{finaltotal}";
+    if(eq("visitFee") ||eq("visitfee")||eq("fee"))                   return L"{visitfee}";
+    if(eq("payType")  ||eq("paytype")||eq("paymentType")||eq("paymenttype")) return L"{paytype}";
+    if(eq("cashier")  ||eq("issued")||eq("issuer"))                  return L"{cashier}";
+    // services aggregates
+    if(eq("servicesCount")||eq("servicescount")||eq("serviceCount")||eq("servicecount")) return L"{servicescount}";
+    if(eq("servicesTotal")||eq("servicestotal")||eq("serviceTotal")||eq("servicetotal")) return L"{servicestotal}";
+    // clinic meta
+    if(eq("clinicAddress")||eq("clinicaddress")||eq("address_clinic")) return L"{clinicaddr}";
+    if(eq("clinicPhone") ||eq("clinicphone")||eq("phone_clinic"))     return L"{clinicphone}";
+    if(eq("clinicManager")||eq("clinicmanager")||eq("manager"))       return L"{clinicmgr}";
+    if(eq("clinicLicense")||eq("cliniclicense")||eq("license")||eq("licence")) return L"{cliniclic}";
+    if(eq("age"))                                                    return L"{age}";
+    if(eq("refDoctor")||eq("refdoctor")||eq("referringDoctor")||eq("referring")) return L"{refdoctor}";
+    if(eq("room"))                                                   return L"{room}";
+    if(eq("service"))                                                return L"{service}";
+    // unknown bare name → wrap as {name} so the token pass can still decide
+    return L"{"+f+L"}";
+}
+
+static std::wstring pdFieldValue(const ReceptionRecord& r, const std::wstring& tokIn){
+    // §1.52.0 — accept BOTH the canonical {token} form and the bare field name
+    // (e.g. "firstName") that ready-made templates / the designer store. We
+    // normalize once up-front so every comparison below works for both shapes.
+    std::wstring tok = pdNormalizeField(tokIn);
     // The new designer's field keys mirror the legacy {token} vocabulary, plus
     // a few extras. Reuse the classic resolver, then handle the new ones.
     if(tok==L"{first}")    return r.firstName;
@@ -1236,7 +1320,7 @@ static std::wstring pdFieldValue(const ReceptionRecord& r, const std::wstring& t
     if(tok==L"{datetime}") return toFaDigits(r.apptDate+L" - "+r.apptTime);
     if(tok==L"{shift}")    return r.shift;
     if(tok==L"{dept}")     return r.dept;
-    if(tok==L"{doctor}")   return L"";              // doctor not captured yet
+    if(tok==L"{doctor}")   return r.dept;            // §1.52.0: treating-doctor lives in r.dept (adBuildRecord)
     if(tok==L"{apptdate}") return toFaDigits(r.apptDate);
     if(tok==L"{appttime}") return toFaDigits(r.apptTime);
     if(tok==L"{appttype}") return r.patientType;
@@ -1610,11 +1694,32 @@ bool printPrintDesign(const ReceptionRecord& r, int sectionId, HWND owner){
     }
     if(!dc) return false;
 
+    // §1.52.0 — RESPONSIVE A4→A5 AUTO-SCALE. All built-in templates are authored
+    // in A4 mm coordinates (210×297). If the operator later switches the paper
+    // size to A5 (148×210) — or any smaller sheet — the item coordinates would
+    // overflow the page. We auto-detect the "authored space" from the bounding
+    // box of all items (max x+w, max y+h) and compute a uniform scale factor so
+    // the whole design shrinks proportionally and relocates to fit the current
+    // paper perfectly. When paper == authored size (normal A4 case) scale == 1
+    // and nothing changes. No schema change needed: the authored size is inferred
+    // from the item extents, so this also fixes designs the user already saved.
+    double authW=d.paperW, authH=d.paperH;
+    for(const auto& it:d.items){ double ex=it.x+it.w; if(ex>authW)authW=ex;
+                                  double ey=it.y+it.h; if(ey>authH)authH=ey; }
+    double pscale=1.0;
+    if(authW>d.paperW+0.01 || authH>d.paperH+0.01){
+        double fx=d.paperW/authW, fy=d.paperH/authH;
+        pscale = fx<fy ? fx : fy;
+        if(pscale>1.0) pscale=1.0;
+    }
+
     int dpiX=GetDeviceCaps(dc,LOGPIXELSX), dpiY=GetDeviceCaps(dc,LOGPIXELSY);
     int offX=GetDeviceCaps(dc,PHYSICALOFFSETX), offY=GetDeviceCaps(dc,PHYSICALOFFSETY);
     double sx=dpiX/25.4, sy=dpiY/25.4;
-    auto mmX=[&](double mm){ return (int)(mm*sx)-offX; };
-    auto mmY=[&](double mm){ return (int)(mm*sy)-offY; };
+    // mm→device-px, applying the responsive A4→A5 scale so an A4-authored design
+    // relocates and shrinks proportionally onto whatever paper size is active.
+    auto mmX=[&](double mm){ return (int)(mm*pscale*sx)-offX; };
+    auto mmY=[&](double mm){ return (int)(mm*pscale*sy)-offY; };
 
     DOCINFOW di={sizeof(di)};
     std::wstring docName=std::wstring(APP_NAME_W)+L" — print";
@@ -1653,22 +1758,24 @@ bool printPrintDesign(const ReceptionRecord& r, int sectionId, HWND owner){
         int x0=mmX(it.x), y0=mmY(it.y), x1=mmX(it.x+it.w), y1=mmY(it.y+it.h);
         if(it.type==PIT_TABLE){
             RECT rr={x0,y0,x1,y1};
-            pdDrawTable(dc, it, rr, sx, sy, dpiY/72.0, &r);
+            // §1.52.0: scale the internal font/cell px-per-mm so an A4-authored
+            // table shrinks correctly onto an A5 sheet (WYSIWYG with preview).
+            pdDrawTable(dc, it, rr, sx*pscale, sy*pscale, (dpiY/72.0)*pscale, &r);
         } else if(it.type==PIT_SERVICES){
             // §1.51.0: dynamic services list rendered from the live record.
             RECT rr={x0,y0,x1,y1};
-            pdDrawServices(dc, it, rr, sx, sy, dpiY/72.0, &r);
+            pdDrawServices(dc, it, rr, sx*pscale, sy*pscale, (dpiY/72.0)*pscale, &r);
         } else if(it.type==PIT_HLINE){
-            int wpx=(int)(it.borderWidth*sx); if(wpx<1)wpx=1;
+            int wpx=(int)(it.borderWidth*sx*pscale); if(wpx<1)wpx=1;
             HPEN p=CreatePen(PS_SOLID,wpx,pdCR(it.borderColor)); HGDIOBJ o=SelectObject(dc,p);
             MoveToEx(dc,x0,y0,0); LineTo(dc,x1,y0); SelectObject(dc,o); DeleteObject(p);
         } else if(it.type==PIT_VLINE){
-            int wpx=(int)(it.borderWidth*sx); if(wpx<1)wpx=1;
+            int wpx=(int)(it.borderWidth*sx*pscale); if(wpx<1)wpx=1;
             HPEN p=CreatePen(PS_SOLID,wpx,pdCR(it.borderColor)); HGDIOBJ o=SelectObject(dc,p);
             MoveToEx(dc,x0,y0,0); LineTo(dc,x0,y1); SelectObject(dc,o); DeleteObject(p);
         } else if(it.type==PIT_RECT||it.type==PIT_FRAME||it.type==PIT_LOGO||
                   it.type==PIT_PHOTO||it.type==PIT_QR||it.type==PIT_IMAGE){
-            int wpx=(int)(it.borderWidth*sx); if(wpx<1)wpx=1;
+            int wpx=(int)(it.borderWidth*sx*pscale); if(wpx<1)wpx=1;
             bool isImgItem=(it.type==PIT_LOGO||it.type==PIT_PHOTO||it.type==PIT_IMAGE);
             // v1.21.0: fill rect/frame background when not transparent (WYSIWYG).
             if((it.type==PIT_RECT||it.type==PIT_FRAME) && !it.fillTransparent){
@@ -1711,8 +1818,9 @@ bool printPrintDesign(const ReceptionRecord& r, int sectionId, HWND owner){
             if(it.visibility==1 && (it.type==PIT_FIELD) && pdFieldValue(r,it.field).empty()) continue;
             if(s.empty()) continue;
             // v1.23.0: apply inner padding so text never touches the box edge,
-            // matching the designer preview exactly.
-            int padPx=(int)(it.padding*sx); if(padPx<0)padPx=0;
+            // matching the designer preview exactly.  §1.52.0: scale padding by
+            // pscale so A4→A5 stays proportional.
+            int padPx=(int)(it.padding*sx*pscale); if(padPx<0)padPx=0;
             RECT rr={x0+padPx,y0+padPx,x1-padPx,y1-padPx};
             if(rr.right<=rr.left){ rr.left=x0; rr.right=x1; }
             if(rr.bottom<=rr.top){ rr.top=y0; rr.bottom=y1; }
@@ -1726,8 +1834,10 @@ bool printPrintDesign(const ReceptionRecord& r, int sectionId, HWND owner){
             // at the designed point size and shrink (down to a sensible floor)
             // until the wrapped block fits inside the box height AND each line
             // fits the width. This kills the "half-cut letters / missing ر"
-            // problem the operator reported on real prints.
+            // problem the operator reported on real prints.  §1.52.0: start the
+            // auto-fit from the responsively-scaled point size (A4→A5).
             double basePt = it.fontPt>0 ? it.fontPt : 10.0;
+            basePt *= pscale;
             UINT base = al|DT_WORDBREAK|dirf|DT_NOPREFIX;
             HFONT f=NULL; HGDIOBJ of=NULL; RECT meas; int th=0;
             double pt=basePt; double floorPt = (basePt<7.0)? basePt*0.7 : 6.0;

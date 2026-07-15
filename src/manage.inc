@@ -2186,7 +2186,7 @@ static void pcDrawServices(HDC dc, const PrintItem& it, const RECT& box, double 
     std::vector<int> cx; cx.push_back(X1); double acc=0;
     for(int c=0;c<m.cols;++c){ acc+=m.widths[c]; cx.push_back(X1-(int)(W*(acc/sumw))); }
     std::vector<int> ry;
-    if(m.header){ int hh=(int)(H*0.30); if(hh<14)hh=14;
+    if(m.header){ int hh=(int)(H*0.16); if(hh<14)hh=14;   // §1.52.0: WYSIWYG — match pdDrawServices (printer.cpp) 16% header band
         ry.push_back(Y0); ry.push_back(Y0+hh); ry.push_back(Y1); }
     else { ry.push_back(Y0); ry.push_back(Y1); }
     if(m.header){ RECT hr={cx[m.cols],ry[0],cx[0],ry[1]};
@@ -2261,6 +2261,18 @@ static void pcPaintDesign(HDC dc, const RECT& area, const PrintDesign& d, double
         if(d.orientation==1) std::swap(pw,ph); }
     int aw=area.right-area.left, ah=area.bottom-area.top;
     if(aw<10||ah<10) return;
+    // §1.52.0 — RESPONSIVE A4→A5 AUTO-SCALE (must mirror printPrintDesign exactly).
+    // Built-in templates are authored in A4 mm coordinates; if the active paper is
+    // smaller than the items' bounding box, shrink the whole design proportionally
+    // so WYSIWYG preview matches the printed output.
+    double authW=pw, authH=ph;
+    for(const auto& it:d.items){ double ex=it.x+it.w; if(ex>authW)authW=ex;
+                                  double ey=it.y+it.h; if(ey>authH)authH=ey; }
+    double pscale=1.0;
+    if(authW>pw+0.01 || authH>ph+0.01){
+        double fx=pw/authW, fy=ph/authH;
+        pscale = fx<fy ? fx : fy; if(pscale>1.0) pscale=1.0;
+    }
     double sc = (aw/pw < ah/ph) ? aw/pw : ah/ph;     // mm→px fit
     if(zoom<=0) zoom=1.0;
     sc *= zoom;                                       // v1.22.0: apply zoom
@@ -2278,8 +2290,9 @@ static void pcPaintDesign(HDC dc, const RECT& area, const PrintDesign& d, double
       HGDIOBJ ob=SelectObject(dc,GetStockObject(NULL_BRUSH));
       Rectangle(dc,px,py,px+pgW,py+pgH);
       SelectObject(dc,ob); SelectObject(dc,o); DeleteObject(bp); }
-    auto mmX=[&](double mm){ return px+(int)(mm*sc); };
-    auto mmY=[&](double mm){ return py+(int)(mm*sc); };
+    // apply pscale so an A4-authored design previews correctly on an A5 sheet
+    auto mmX=[&](double mm){ return px+(int)(mm*pscale*sc); };
+    auto mmY=[&](double mm){ return py+(int)(mm*pscale*sc); };
     // items in z-order
     std::vector<const PrintItem*> ord;
     for(const auto& it:d.items) ord.push_back(&it);
@@ -2290,10 +2303,10 @@ static void pcPaintDesign(HDC dc, const RECT& area, const PrintDesign& d, double
         const PrintItem& it=*pit;
         int x0=mmX(it.x), y0=mmY(it.y), x1=mmX(it.x+it.w), y1=mmY(it.y+it.h);
         if(it.type==PIT_TABLE){
-            RECT rr={x0,y0,x1,y1}; pcDrawTable(dc,it,rr,sc);
+            RECT rr={x0,y0,x1,y1}; pcDrawTable(dc,it,rr,sc*pscale);
         } else if(it.type==PIT_SERVICES){
             // §1.51.0: dynamic services list (preview shows header + placeholder row)
-            RECT rr={x0,y0,x1,y1}; pcDrawServices(dc,it,rr,sc);
+            RECT rr={x0,y0,x1,y1}; pcDrawServices(dc,it,rr,sc*pscale);
         } else if(it.type==PIT_HLINE){
             HPEN p=CreatePen(PS_SOLID,1,pcCR(it.borderColor)); HGDIOBJ o=SelectObject(dc,p);
             MoveToEx(dc,x0,y0,0); LineTo(dc,x1,y0); SelectObject(dc,o); DeleteObject(p);
@@ -2337,8 +2350,9 @@ static void pcPaintDesign(HDC dc, const RECT& area, const PrintDesign& d, double
             if(s.empty()) continue;
             // WYSIWYG font size: pt → px.  sc is px-per-mm, and 1pt = 1/72 in =
             // 25.4/72 mm, so px = pt * sc * (25.4/72).  (The old 3.78/2.83 factor
-            // was ~3.8× too large and made text overlap.)
-            int lf=-(int)(it.fontPt*sc*25.4/72.0 + 0.5);
+            // was ~3.8× too large and made text overlap.)  §1.52.0: also apply
+            // the responsive A4→A5 pscale so fonts shrink with the boxes.
+            int lf=-(int)(it.fontPt*pscale*sc*25.4/72.0 + 0.5);
             if(lf>-2) lf=-2;
             RECT rr={x0,y0,x1,y1};
             HFONT f=CreateFontW(lf,0,0,0,it.bold?FW_BOLD:FW_NORMAL,it.italic?1:0,0,0,
