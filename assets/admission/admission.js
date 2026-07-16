@@ -294,9 +294,25 @@
     setIf('mobile', toFa(p.mobile || ''));
     setIf('phone', toFa(p.phone || ''));   /* B2: تلفن ثابت now really arrives */
     setIf('addr', p.addr || '');           /* B2: آدرس now really arrives */
-    if (p.gender && $('gender')) $('gender').value = p.gender;
-
-    var full = trimStr((p.first || '') + ' ' + (p.last || ''));
+    /* §1.53.0 FIX: gender auto-select was unreliable because the <select> has no
+       explicit value= attributes (options carry only text), and a stored gender
+       with stray whitespace / different unicode form silently failed to match.
+       Normalise to the canonical مرد/زن and pick the option by TEXT so it always
+       lands on the right row regardless of how the value was stored. */
+    if ($('gender')) {
+      var g = trimStr((p.gender || '') + '');
+      var gn = g;
+      if (g.indexOf('زن') >= 0 || g === 'female' || g === 'f' || g === '0') gn = 'زن';
+      else if (g.indexOf('مرد') >= 0 || g === 'male' || g === 'm' || g === '1') gn = 'مرد';
+      var sel = $('gender');
+      var matched = false;
+      for (var gi = 0; gi < sel.options.length; gi++) {
+        if (trimStr(sel.options[gi].text) === gn || trimStr(sel.options[gi].value) === gn) {
+          sel.selectedIndex = gi; matched = true; break;
+        }
+      }
+      if (!matched) sel.selectedIndex = 0;
+    }
     setText($('pfName'), full || 'بیمار جدید');
     setText($('pfFile'), toFa(p.file || p.nid || '----'));
 
@@ -374,10 +390,13 @@
     var html = '', i, s, lim = Math.min(rows.length, 40);
     for (i = 0; i < lim; i++) {
       s = rows[i];
+      /* §1.53.0: professional dropdown — code shown as a distinct monospaced badge
+         on the right of the name, price on a separate aligned column with a label,
+         so the eye can scan code / name / price as three clear columns. */
       html += '<div class="s-row" data-s="' + i + '">' +
-        '<span><b>' + esc(s.name || '') + '</b> <span class="s-code">' +
-        toFa(s.code || '') + '</span></span>' +
-        '<span class="s-price">' + money(s.price) + ' ریال</span></div>';
+        '<span class="s-code">' + toFa(s.code || '') + '</span>' +
+        '<span class="s-name">' + esc(s.name || '') + '</span>' +
+        '<span class="s-price"><i>' + money(s.price) + '</i> ریال</span></div>';
     }
     box.innerHTML = html;   /* delegated click — wired once in wire() */
     box.className = 'svc-suggest open';

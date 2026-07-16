@@ -227,13 +227,35 @@ static void mgServicesClearForm(){
     if(s_mg->svStatus) SendMessageW(s_mg->svStatus,CB_SETCURSEL,0,0);
     s_mg->svEditCode.clear();
 }
+//  §1.53.0: live Rials formatting — as the operator types digits into the
+//  «قیمت» box we re-format the value with thousand separators (1,234,567) and
+//  keep the caret at the end. Non-digit characters are silently dropped so the
+//  field behaves like ES_NUMBER but shows grouping. Re-entrant safe: we bail
+//  out while we're already rewriting to avoid a feedback storm.
+static bool s_svPriceFormatting=false;
+static void mgServicesFormatPriceLive(){
+    if(!s_mg || !s_mg->svPrice) return;
+    if(s_svPriceFormatting) return;
+    s_svPriceFormatting=true;
+    wchar_t b[64]={0}; GetWindowTextW(s_mg->svPrice,b,64);
+    long long v=parseMoney(b);
+    std::wstring fmt=formatMoney(v);
+    if(fmt!=b){
+        DWORD st=GetWindowLongW(s_mg->svPrice,GWL_STYLE);
+        int sl0=0, sl1=0; SendMessageW(s_mg->svPrice,EM_GETSEL,(WPARAM)&sl0,(LPARAM)&sl1);
+        SetWindowTextW(s_mg->svPrice,fmt.c_str());
+        int len=(int)fmt.size();
+        SendMessageW(s_mg->svPrice,EM_SETSEL,len,len);
+    }
+    s_svPriceFormatting=false;
+}
 //  Load a record into the form (for editing).
 static void mgServicesLoadForm(const ServiceDef& s){
     if(!s_mg) return;
     SetWindowTextW(s_mg->svCode,s.code.c_str());
     SetWindowTextW(s_mg->svName,s.name.c_str());
     SetWindowTextW(s_mg->svCat, s.category.c_str());
-    { wchar_t pb[32]; swprintf(pb,32,L"%lld",s.price); SetWindowTextW(s_mg->svPrice,pb); }
+    { std::wstring ps=formatMoney(s.price); SetWindowTextW(s_mg->svPrice,ps.c_str()); }
     SetWindowTextW(s_mg->svDesc,s.desc.c_str());
     // department combo by name
     if(s_mg->svDept){
@@ -3508,7 +3530,7 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         s_mg->svName  =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)MG_SV_NAME,g_hInst,0);
         s_mg->svCat   =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)MG_SV_CAT,g_hInst,0);
         s_mg->svDept  =createThemedCombo(h,MG_SV_DEPT);
-        s_mg->svPrice =CreateWindowExW(0,L"EDIT",L"",es|ES_NUMBER,0,0,10,10,h,(HMENU)MG_SV_PRICE,g_hInst,0);
+        s_mg->svPrice =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)MG_SV_PRICE,g_hInst,0);
         s_mg->svIns   =createThemedCombo(h,MG_SV_INS);
         s_mg->svStatus=createThemedCombo(h,MG_SV_STATUS);
         s_mg->svDesc  =CreateWindowExW(0,L"EDIT",L"",
@@ -3660,6 +3682,10 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         if(id==MG_SV_SEARCH && HIWORD(w)==EN_CHANGE){
             wchar_t b[256]={0}; GetWindowTextW(s_mg->svSearch,b,256);
             s_mg->svQuery=b; mgServicesFilter();
+            return 0;
+        }
+        if(id==MG_SV_PRICE && HIWORD(w)==EN_CHANGE){
+            mgServicesFormatPriceLive();
             return 0;
         }
         switch(id){

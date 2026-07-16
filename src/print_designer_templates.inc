@@ -105,34 +105,43 @@ static PrintItem mkServices(double x,double y,double w,double h,double pt){
 #define FA_ENT      L"\u0628\u062e\u0634 \u06af\u0648\u0634 \u06af\u0644\u0648 \u0628\u06cc\u0646\u06cc"                                    // بخش گوش گلو بینی
 #define FA_SKIN     L"\u0628\u062e\u0634 \u067e\u0648\u0633\u062a"                                                                           // بخش پوست
 
-// §1.52.0 — the canonical A4 reception body. Lays out a 2-column patient grid,
+// §1.53.0 — the canonical A4 reception body. Lays out a 2-column patient grid,
 // a centered "لیست خدمات" caption + dynamic services table, and a totals row.
+// RTL column order is fixed: the RIGHT cell (x) carries «نام» (firstName) and the
+// LEFT cell (x+col+gap) carries «نام خانوادگی» (lastName) — exactly how a Persian
+// reader scans a row, and how the HTML admission form orders them.
 // Returns the y-coordinate just below the totals so callers can place the
-// appointment-number counter / footer without overlap. svcH defaults to 36mm —
-// compact enough to leave room for the appt counter on A4, and it scales down
-// cleanly to A5 via the responsive pscale.
+// appointment-number counter / footer without overlap. svcH defaults to 42mm so
+// up to ~6 services print without compressing; it scales down cleanly to A5 via
+// the responsive pscale.
 static double addA4Body(PrintDesign& d,double m,double top,
-                        double cw,double pt,double svcH=36.0){
+                        double cw,double pt,double svcH=42.0){
     double x=m, y=top, rowH=8, col=cw/2-3;
-    // patient info grid (2 columns, RTL)
-    d.items.push_back(mkField(x,y,col,rowH,L"firstName",FA_NAME,pt,0));
-    d.items.push_back(mkField(x+col+6,y,col,rowH,L"lastName",FA_FAMILY,pt,0)); y+=rowH;
-    d.items.push_back(mkField(x,y,col,rowH,L"nationalCode",FA_NID,pt,0));
-    d.items.push_back(mkField(x+col+6,y,col,rowH,L"insurance",FA_INS,pt,0)); y+=rowH;
-    d.items.push_back(mkField(x,y,col,rowH,L"doctor",FA_DOCTOR,pt,0));
-    d.items.push_back(mkField(x+col+6,y,col,rowH,L"mobile",FA_PHONE,pt,0)); y+=rowH+2;
-    // services list — the centerpiece (present in EVERY template)
+    // patient info grid (2 columns, RTL). §1.53.0 FIX: the RIGHT cell (x+col+6)
+    // carries the FIRST field of each pair so a Persian reader scans نام → نام
+    // خانوادگی → کد ملی → بیمه → پزشک → تلفن right-to-left, exactly like the
+    // admission form. The LEFT cell (x) carries the second field.
+    d.items.push_back(mkField(x+col+6,y,col,rowH,L"firstName",FA_NAME,pt,0));
+    d.items.push_back(mkField(x,y,col,rowH,L"lastName",FA_FAMILY,pt,0)); y+=rowH;
+    d.items.push_back(mkField(x+col+6,y,col,rowH,L"nationalCode",FA_NID,pt,0));
+    d.items.push_back(mkField(x,y,col,rowH,L"insurance",FA_INS,pt,0)); y+=rowH;
+    d.items.push_back(mkField(x+col+6,y,col,rowH,L"doctor",FA_DOCTOR,pt,0));
+    d.items.push_back(mkField(x,y,col,rowH,L"mobile",FA_PHONE,pt,0)); y+=rowH+2;
+    // services list — the centerpiece (present in EVERY template). The header band
+    // + first data row are always drawn even when the record has no services, so
+    // the table is never an invisible blank rectangle on the printed page.
     d.items.push_back(mkLabel(x,y,cw,7,FA_SVCLIST,pt+1,true,1)); y+=8;
     d.items.push_back(mkServices(x,y,cw,svcH,pt-0.5)); y+=svcH+3;
-    // totals row
+    // totals row — RTL: «جمع کل» on the RIGHT (x+col+6), «پرداختی» on the LEFT (x)
     d.items.push_back(mkHLine(x,y,cw,0.3)); y+=2;
-    d.items.push_back(mkField(x,y,col,rowH,L"total",FA_TOTAL,pt+0.5,0));
-    d.items.push_back(mkField(x+col+6,y,col,rowH,L"paid",FA_PAID,pt+0.5,0)); y+=rowH;
+    d.items.push_back(mkField(x+col+6,y,col,rowH,L"total",FA_TOTAL,pt+0.5,0));
+    d.items.push_back(mkField(x,y,col,rowH,L"paid",FA_PAID,pt+0.5,0)); y+=rowH;
     return y;
 }
 
 // Add ONLY the services block (caption + table) at a given position; returns
-// the y just below it.
+// the y just below it. The services block always renders (header + at least one
+// placeholder row) so it is never an invisible blank rectangle.
 static double addServicesBlock(PrintDesign& d,double x,double y,double w,double pt,double svcH){
     d.items.push_back(mkLabel(x,y,w,7,FA_SVCLIST,pt+1,true,1)); y+=8;
     d.items.push_back(mkServices(x,y,w,svcH,pt-0.5)); y += svcH + 2;
@@ -233,18 +242,18 @@ static PrintDesign buildTemplate(int idx){
         d.name=L"\u067e\u0630\u06cc\u0631\u0634 \u0628\u06cc\u0645\u0647 \u067e\u0627\u06cc\u0647 + \u062a\u06a9\u0645\u06cc\u0644\u06cc";
         d.items.push_back(mkLabel(m,m,cw,12,FA_CLINIC,18,true,1));
         d.items.push_back(mkHLine(m,m+14,cw,0.6));
-        d.items.push_back(mkField(m,m+18,col,8,L"firstName",FA_NAME,11,0));
-        d.items.push_back(mkField(m+col+6,m+18,col,8,L"lastName",FA_FAMILY,11,0));
+        d.items.push_back(mkField(m+col+6,m+18,col,8,L"firstName",FA_NAME,11,0));
+        d.items.push_back(mkField(m,m+18,col,8,L"lastName",FA_FAMILY,11,0));
         d.items.push_back(mkRect(m,m+28,col,22,0.3,2));
         d.items.push_back(mkLabel(m+2,m+29,col,7,L"\u0628\u06cc\u0645\u0647 \u067e\u0627\u06cc\u0647",11,true,1));
         d.items.push_back(mkField(m+2,m+38,col-4,7,L"insurance",L"",10,2));
         d.items.push_back(mkRect(m+col+6,m+28,col,22,0.3,2));
         d.items.push_back(mkLabel(m+col+8,m+29,col,7,L"\u0628\u06cc\u0645\u0647 \u062a\u06a9\u0645\u06cc\u0644\u06cc",11,true,1));
         d.items.push_back(mkField(m+col+8,m+38,col-4,7,L"suppInsurance",L"",10,2));
-        addServicesBlock(d,m,m+54,cw,11,36);
-        d.items.push_back(mkHLine(m,m+100,cw,0.3));
-        d.items.push_back(mkField(m,m+102,col,8,L"total",FA_TOTAL,12,0));
-        d.items.push_back(mkField(m+col+6,m+102,col,8,L"paid",FA_PAID,12,0));
+        addServicesBlock(d,m,m+54,cw,11,42);
+        d.items.push_back(mkHLine(m,m+106,cw,0.3));
+        d.items.push_back(mkField(m+col+6,m+108,col,8,L"total",FA_TOTAL,12,0));
+        d.items.push_back(mkField(m,m+108,col,8,L"paid",FA_PAID,12,0));
         d.items.push_back(mkApptNo(m,d.paperH-30,cw,13,24));
         break; }
     case 8: { // T09 تزریقات استاندارد
@@ -262,12 +271,12 @@ static PrintDesign buildTemplate(int idx){
         d.name=L"\u062a\u0632\u0631\u06cc\u0642\u0627\u062a \u0628\u0627 \u0686\u06a9\u200c\u0644\u06cc\u0633\u062a \u062f\u0627\u0631\u0648";
         d.items.push_back(mkLabel(m,m,cw,12,FA_INJECT,18,true,1));
         d.items.push_back(mkHLine(m,m+14,cw,0.6));
-        d.items.push_back(mkField(m,m+18,cw/2,8,L"firstName",FA_NAME,11,0));
-        d.items.push_back(mkField(m+cw/2,m+18,cw/2,8,L"lastName",FA_FAMILY,11,0));
-        d.items.push_back(mkField(m,m+28,cw/2,8,L"nationalCode",FA_NID,11,0));
-        d.items.push_back(mkField(m+cw/2,m+28,cw/2,8,L"insurance",FA_INS,11,0));
-        addServicesBlock(d,m,m+40,cw,11,36);
-        d.items.push_back(mkRect(m,m+88,cw,40,0.3,2));
+        d.items.push_back(mkField(m+cw/2,m+18,cw/2,8,L"firstName",FA_NAME,11,0));
+        d.items.push_back(mkField(m,m+18,cw/2,8,L"lastName",FA_FAMILY,11,0));
+        d.items.push_back(mkField(m+cw/2,m+28,cw/2,8,L"nationalCode",FA_NID,11,0));
+        d.items.push_back(mkField(m,m+28,cw/2,8,L"insurance",FA_INS,11,0));
+        addServicesBlock(d,m,m+40,cw,11,42);
+        d.items.push_back(mkRect(m,m+94,cw,40,0.3,2));
         d.items.push_back(mkLabel(m+2,m+89,cw-4,7,L"\u0686\u06a9\u200c\u0644\u06cc\u0633\u062a \u062f\u0627\u0631\u0648\u0647\u0627",11,true,2));
         for(int i=0;i<5;i++) d.items.push_back(mkHLine(m+4,m+98+i*6,cw-8,0.2));
         d.items.push_back(mkApptNo(m,d.paperH-30,cw,13,24));
@@ -329,8 +338,8 @@ static PrintDesign buildTemplate(int idx){
         d.name=L"\u0641\u06cc\u0632\u06cc\u0648\u062a\u0631\u0627\u067e\u06cc \u06a9\u0627\u0631\u062a \u06f1\u06f0 \u062c\u0644\u0633\u0647";
         d.items.push_back(mkFrame(d.paperW,d.paperH,9,0x1F6FEB,0.8));
         d.items.push_back(mkLabel(m,m,cw,11,FA_PHYSIO,17,true,1));
-        d.items.push_back(mkField(m,m+14,cw/2,8,L"firstName",FA_NAME,11,0));
-        d.items.push_back(mkField(m+cw/2,m+14,cw/2,8,L"lastName",FA_FAMILY,11,0));
+        d.items.push_back(mkField(m+cw/2,m+14,cw/2,8,L"firstName",FA_NAME,11,0));
+        d.items.push_back(mkField(m,m+14,cw/2,8,L"lastName",FA_FAMILY,11,0));
         addServicesBlock(d,m,m+26,cw,11,34);
         for(int i=0;i<10;i++){
             double bx=m+(i%5)*((cw)/5);
@@ -459,19 +468,19 @@ static PrintDesign buildTemplate(int idx){
         d.name=L"\u067e\u0630\u06cc\u0631\u0634 \u0641\u0634\u0631\u062f\u0647 \u0633\u0647 \u0633\u062a\u0648\u0646\u06cc";
         d.items.push_back(mkLabel(m,m,cw,11,FA_CLINIC,17,true,1));
         d.items.push_back(mkHLine(m,m+13,cw,0.5));
-        d.items.push_back(mkField(m,m+16,col,7,L"receiptNo",FA_RECEIPT,10,2));
+        d.items.push_back(mkField(m+2*(col+3),m+16,col,7,L"receiptNo",FA_RECEIPT,10,2));
         d.items.push_back(mkField(m+col+3,m+16,col,7,L"date",FA_DATE,10,2));
-        d.items.push_back(mkField(m+2*(col+3),m+16,col,7,L"insurance",FA_INS,10,2));
-        d.items.push_back(mkField(m,m+24,col,7,L"firstName",FA_NAME,10,2));
+        d.items.push_back(mkField(m,m+16,col,7,L"insurance",FA_INS,10,2));
+        d.items.push_back(mkField(m+2*(col+3),m+24,col,7,L"firstName",FA_NAME,10,2));
         d.items.push_back(mkField(m+col+3,m+24,col,7,L"lastName",FA_FAMILY,10,2));
-        d.items.push_back(mkField(m+2*(col+3),m+24,col,7,L"nationalCode",FA_NID,10,2));
-        d.items.push_back(mkField(m,m+32,col,7,L"doctor",FA_DOCTOR,10,2));
+        d.items.push_back(mkField(m,m+24,col,7,L"nationalCode",FA_NID,10,2));
+        d.items.push_back(mkField(m+2*(col+3),m+32,col,7,L"doctor",FA_DOCTOR,10,2));
         d.items.push_back(mkField(m+col+3,m+32,col,7,L"mobile",FA_PHONE,10,2));
-        d.items.push_back(mkField(m+2*(col+3),m+32,col,7,L"paid",FA_PAID,10,2));
-        addServicesBlock(d,m,m+42,cw,11,36);
-        d.items.push_back(mkHLine(m,m+92,cw,0.3));
-        d.items.push_back(mkField(m,m+94,cw/2,8,L"total",FA_TOTAL,12,0));
-        d.items.push_back(mkField(m+cw/2,m+94,cw/2,8,L"paid",FA_PAID,12,0));
+        d.items.push_back(mkField(m,m+32,col,7,L"paid",FA_PAID,10,2));
+        addServicesBlock(d,m,m+42,cw,11,42);
+        d.items.push_back(mkHLine(m,m+98,cw,0.3));
+        d.items.push_back(mkField(m+cw/2,m+100,cw/2,8,L"total",FA_TOTAL,12,0));
+        d.items.push_back(mkField(m,m+100,cw/2,8,L"paid",FA_PAID,12,0));
         d.items.push_back(mkApptNo(m,d.paperH-28,cw,12,22));
         break; }
     case 28: { // T29 پذیرش با عنوان رنگی
@@ -491,18 +500,18 @@ static PrintDesign buildTemplate(int idx){
         d.name=L"\u067e\u0630\u06cc\u0631\u0634 \u062c\u0627\u0645\u0639 \u0628\u0627 \u0647\u0645\u0647 \u0641\u06cc\u0644\u062f\u0647\u0627";
         d.items.push_back(mkLabel(m,m,cw,13,FA_CLINIC,20,true,1));
         d.items.push_back(mkHLine(m,m+16,cw,0.7));
-        d.items.push_back(mkField(m,m+20,col,8,L"receiptNo",FA_RECEIPT,11,2));
-        d.items.push_back(mkField(m+col+6,m+20,col,8,L"date",FA_DATE,11,0));
-        d.items.push_back(mkField(m,m+29,col,8,L"firstName",FA_NAME,11,0));
-        d.items.push_back(mkField(m+col+6,m+29,col,8,L"lastName",FA_FAMILY,11,0));
-        d.items.push_back(mkField(m,m+38,col,8,L"nationalCode",FA_NID,11,0));
-        d.items.push_back(mkField(m+col+6,m+38,col,8,L"insurance",FA_INS,11,0));
-        d.items.push_back(mkField(m,m+47,col,8,L"doctor",FA_DOCTOR,11,0));
-        d.items.push_back(mkField(m+col+6,m+47,col,8,L"mobile",FA_PHONE,11,0));
-        addServicesBlock(d,m,m+58,cw,11,36);
-        d.items.push_back(mkHLine(m,m+108,cw,0.3));
-        d.items.push_back(mkField(m,m+110,col,8,L"total",FA_TOTAL,12,0));
-        d.items.push_back(mkField(m+col+6,m+110,col,8,L"paid",FA_PAID,12,0));
+        d.items.push_back(mkField(m+col+6,m+20,col,8,L"receiptNo",FA_RECEIPT,11,2));
+        d.items.push_back(mkField(m,m+20,col,8,L"date",FA_DATE,11,0));
+        d.items.push_back(mkField(m+col+6,m+29,col,8,L"firstName",FA_NAME,11,0));
+        d.items.push_back(mkField(m,m+29,col,8,L"lastName",FA_FAMILY,11,0));
+        d.items.push_back(mkField(m+col+6,m+38,col,8,L"nationalCode",FA_NID,11,0));
+        d.items.push_back(mkField(m,m+38,col,8,L"insurance",FA_INS,11,0));
+        d.items.push_back(mkField(m+col+6,m+47,col,8,L"doctor",FA_DOCTOR,11,0));
+        d.items.push_back(mkField(m,m+47,col,8,L"mobile",FA_PHONE,11,0));
+        addServicesBlock(d,m,m+58,cw,11,42);
+        d.items.push_back(mkHLine(m,m+114,cw,0.3));
+        d.items.push_back(mkField(m+col+6,m+116,col,8,L"total",FA_TOTAL,12,0));
+        d.items.push_back(mkField(m,m+116,col,8,L"paid",FA_PAID,12,0));
         d.items.push_back(mkApptNo(m,d.paperH-32,cw,14,26));
         d.items.push_back(mkLabel(m,d.paperH-16,cw,7,FA_APPT,10,false,1));
         break; }
@@ -551,12 +560,14 @@ static std::wstring buildTemplateName(int idx){
 }
 
 // ----------------------------------------------------------------- seeding ---
-// §1.52.0: seed the 30 built-in A4 templates AND migrate any previously-seeded
-// builtins. The migration is idempotent: it rebuilds each builtin from
-// buildTemplate(idx) — which now includes a services block + A4 layout — and
-// overwrites the stored design if the stored one has NO PIT_SERVICES item yet
-// OR is still on an old (pre-1.52.0) layout. A one-shot setting flag
-// (tpl_migration_1_52) guards re-runs.
+// §1.53.0: seed the 30 built-in A4 templates AND migrate any previously-seeded
+// builtins. The migration is idempotent: it ALWAYS rebuilds each builtin from
+// buildTemplate(idx) on every version bump — so an existing install picks up
+// the fixed RTL name/lastName order, taller services table, and prettier
+// layouts automatically. A per-version one-shot setting flag guards re-runs.
+// IMPORTANT: we preserve the stored design id and any section<->design bindings
+// (bindings are stored separately by id, so overwriting the design content but
+// keeping the id keeps every section's chosen template connected).
 void Designs_Init(){
     std::vector<PrintDesign> existing; Designs_Builtins(existing);
     const int N = 30;
@@ -566,24 +577,23 @@ void Designs_Init(){
             PrintDesign d = buildTemplate(i);
             Designs_Insert(d);
         }
+        setSetting(L"tpl_migration_1_53", L"1");
         setSetting(L"tpl_migration_1_52", L"1");
         return;
     }
-    // already seeded → one-time migration to the 30 A4 templates
-    if(getSetting(L"tpl_migration_1_52", L"0") != L"1"){
+    // already seeded → one-time migration to the 30 A4 templates (v1.53 fixes)
+    if(getSetting(L"tpl_migration_1_53", L"0") != L"1"){
         for(int i=0;i<N;i++){
             // find the stored builtin whose name matches template idx i
             std::wstring wantName = buildTemplateName(i);
             bool found=false;
             for(auto& d : existing){
                 if(d.name == wantName){
-                    bool hasSvc=false;
-                    for(const auto& it : d.items) if(it.type==PIT_SERVICES){ hasSvc=true; break; }
-                    if(!hasSvc){
-                        PrintDesign fresh = buildTemplate(i);
-                        fresh.id = d.id;   // keep the same stored id / bindings
-                        Designs_Update(fresh);
-                    }
+                    // §1.53.0: always rebuild so RTL fixes + taller services table
+                    // + prettier layouts propagate to existing installs.
+                    PrintDesign fresh = buildTemplate(i);
+                    fresh.id = d.id;   // keep the same stored id / bindings
+                    Designs_Update(fresh);
                     found=true; break;
                 }
             }
@@ -593,6 +603,7 @@ void Designs_Init(){
                 Designs_Insert(fresh);
             }
         }
+        setSetting(L"tpl_migration_1_53", L"1");
         setSetting(L"tpl_migration_1_52", L"1");
     }
 }
