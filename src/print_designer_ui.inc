@@ -627,6 +627,8 @@ static void designer_buildInspector(HWND h){
         static const PI pal[]={
             {L"\u0646\u0627\u0645 (\u0641\u06cc\u0644\u062f)",PIT_FIELD},
             {L"\u0644\u06cc\u0628\u0644 \u0645\u062a\u0646",PIT_LABEL},
+            {L"\u062c\u062f\u0648\u0644 \u062e\u062f\u0645\u0627\u062a",PIT_SERVICES},
+            {L"\u062c\u062f\u0648\u0644 \u0639\u0645\u0648\u0645\u06cc",PIT_TABLE},
             {L"\u062e\u0637 \u0627\u0641\u0642\u06cc",PIT_HLINE},
             {L"\u062e\u0637 \u0639\u0645\u0648\u062f\u06cc",PIT_VLINE},
             {L"\u0645\u0633\u062a\u0637\u06cc\u0644",PIT_RECT},
@@ -789,6 +791,28 @@ static void addPaletteItem(DesignerState* st,int type){
     case PIT_APPTNO: it.w=40; it.h=14; it.fontPt=22; it.bold=true; it.align=1; break;
     case PIT_LABEL: it.text=L"\u0645\u062a\u0646 \u062f\u0644\u062e\u0648\u0627\u0647"; break;
     case PIT_FIELD: it.field=L"firstName"; it.prefix=L"\u0646\u0627\u0645: "; break;
+    case PIT_SERVICES: {
+        // §1.53.0: dynamic services list, sensible default size + model. Centered
+        // horizontally, ~42mm tall (room for header + ~6 service rows). Carries
+        // the canonical 4-column RTL header (ردیف / نام خدمت / کد / مبلغ).
+        it.x=st->design.paperW/2-60; it.y=st->design.paperH/2-20; it.w=120; it.h=42;
+        it.text=L"{\"cols\":4,\"header\":true,\"widths\":[0.55,3.2,1.1,2.15],"
+                L"\"labels\":[\"\u0631\u062f\u06cc\u0641\",\"\u0646\u0627\u0645 \u062e\u062f\u0645\u062a\","
+                L"\"\u06a9\u062f\",\"\u0645\u0628\u0644\u063a\"]}";
+        it.fontPt=8.5; it.bold=false; it.align=1;
+        it.borderColor=0x1F5FD6; it.borderWidth=0.35;
+        it.textColor=0x0D2144; it.fillTransparent=true; it.padding=0.8;
+        break; }
+    case PIT_TABLE: {
+        // a small generic 3×3 editable grid (header + 2 data rows)
+        it.x=st->design.paperW/2-40; it.y=st->design.paperH/2-15; it.w=80; it.h=24;
+        it.text=L"{\"cols\":3,\"rows\":3,\"header\":true,\"widths\":[1,1,1],"
+                L"\"cells\":[[\"\u0639\u0646\u0648\u0627\u0646 \u06f1\",\"\u0639\u0646\u0648\u0627\u0646 \u06f2\",\"\u0639\u0646\u0648\u0627\u0646 \u06f3\"],"
+                L"[\"\u0633\u062a\u0648\u0646 \u06f1\",\"\u0633\u062a\u0648\u0646 \u06f2\",\"\u0633\u062a\u0648\u0646 \u06f3\"],"
+                L"[\"\u0633\u0637\u0631 \u06f2\",\"\u0633\u0637\u0631 \u06f2\",\"\u0633\u0637\u0631 \u06f2\"]]}";
+        it.fontPt=9; it.align=1;
+        it.borderColor=0x000000; it.borderWidth=0.3; it.padding=0.8;
+        break; }
     }
     st->design.items.push_back(it);
     st->selId=it.id; st->multiSel.clear();
@@ -1226,7 +1250,8 @@ static void OpenDesignerWindow(HWND owner,const DesignerLaunch& launch,
         WS_CHILD|WS_VISIBLE|CBS_DROPDOWNLIST|WS_VSCROLL,0,0,10,200,h,
         (HMENU)IDC_DSG_PAPER,g_hInst,NULL);
     SendMessageW(st->hPaperCombo,WM_SETFONT,(WPARAM)g_fUI,TRUE);
-    const wchar_t* papers[]={L"A3",L"A4",L"A5",L"A6",L"B5",L"Letter",L"R80",L"R58"};
+    const wchar_t* papers[]={L"A3",L"A4",L"A5",L"A6",L"B5",L"Letter",L"R80",L"R58",
+                             L"L90",L"L100",L"L102",L"L130"};
     for(auto p:papers) SendMessageW(st->hPaperCombo,CB_ADDSTRING,0,(LPARAM)p);
     SendMessageW(st->hPaperCombo,CB_SELECTSTRING,(WPARAM)-1,(LPARAM)st->design.paper.c_str());
     st->hOrientCombo=CreateWindowExW(0,L"COMBOBOX",L"",

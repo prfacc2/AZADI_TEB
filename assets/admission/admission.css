@@ -516,17 +516,39 @@ select.inp#perfname::-webkit-scrollbar{display:none;width:0 !important;height:0 
 .tbl .act-repeat{color:#22c55e;}
 .tbl .act-repeat:hover{background:#e9f9ef;}
 
-/* service search suggestion dropdown */
-.svc-suggest{display:none;border-top:1px solid #cdd9e8;max-height:220px;overflow:auto;background:#f9fbfe;}
+/* service search suggestion dropdown — §1.53.0 professional styling */
+.svc-suggest{display:none;border:1px solid #b9c8e0;border-top:none;max-height:260px;overflow:auto;
+  background:#fff;box-shadow:0 6px 18px rgba(20,50,110,0.12);}
 .svc-suggest.open{display:block;}
 .svc-suggest .s-row{
-  padding:10px 14px;border-bottom:1px solid #e0e8f2;cursor:pointer;
-  display:-ms-flexbox;display:flex;-ms-flex-pack:justify;justify-content:space-between;
-  -ms-flex-align:center;align-items:center;font-size:13px;
+  padding:9px 12px;border-bottom:1px solid #eef2f8;cursor:pointer;
+  display:-ms-flexbox;display:flex;
+  -ms-flex-align:center;align-items:center;
+  font-size:13px;line-height:1.45;
+  transition:background .08s ease;
 }
-.svc-suggest .s-row:hover{background:#e8f1fc;}
-.svc-suggest .s-code{color:#5a6b80;font-size:12px;font-weight:600;}
-.svc-suggest .s-price{font-weight:800;color:#184dae;}
+.svc-suggest .s-row:hover,.svc-suggest .s-row.sel{background:#eaf2ff;}
+.svc-suggest .s-row:last-child{border-bottom:none;}
+.svc-suggest .s-code{
+  -ms-flex:0 0 62px;flex:0 0 62px;
+  font-family:"Vazirmatn","Consolas",monospace;
+  font-size:12px;font-weight:700;color:#0d3a8a;
+  background:#eef4ff;border:1px solid #cdddf7;border-radius:4px;
+  padding:2px 6px;margin-left:10px;text-align:center;
+  letter-spacing:.2px;white-space:nowrap;
+}
+.svc-suggest .s-name{
+  -ms-flex:1 1 auto;flex:1 1 auto;
+  font-weight:600;color:#1c2738;
+  padding:0 10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.svc-suggest .s-price{
+  -ms-flex:0 0 auto;flex:0 0 auto;
+  font-weight:700;color:#16408a;font-variant-numeric:tabular-nums;
+  white-space:nowrap;font-size:13px;
+}
+.svc-suggest .s-price i{font-style:normal;font-weight:800;color:#0d2144;}
+.svc-suggest .empty-row{padding:14px;text-align:center;color:#8896ab;font-size:12px;}
 
 /* service totals footer strip — frame-safe, never exits left/right borders */
 .svc-foot,.queue-foot{
