@@ -178,11 +178,13 @@
   var ITEM_LABELS = {
     label: "متن ثابت", field: "فیلد داده", hline: "خط افقی", vline: "خط عمودی",
     rect: "کادر", frame: "حاشیه صفحه", logo: "لوگو", photo: "عکس بیمار",
-    qr: "بارکد / QR", apptno: "شماره نوبت", image: "تصویر", table: "جدول"
+    qr: "بارکد / QR", apptno: "شماره نوبت", image: "تصویر", table: "جدول",
+    services: "لیست خدمات"
   };
   var ITEM_ICONS = {
     label: "T", field: "{}", hline: "—", vline: "│", rect: "▭", frame: "⬚",
-    logo: "★", photo: "👤", qr: "▦", apptno: "#", image: "🖼", table: "▦"
+    logo: "★", photo: "👤", qr: "▦", apptno: "#", image: "🖼", table: "▦",
+    services: "☰"
   };
 
   function mm(v) { return v * S.pxPerMM * S.scale; }
@@ -255,6 +257,64 @@
     return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
 
+  /* ---------------------------------------------- services list helpers --- */
+  // §1.53.0 (Bug A): a `services` item is a LIVE table whose header comes from
+  // the design JSON and whose body rows are filled at print time from the
+  // ReceptionRecord.services vector. The model stored in it.text is the SAME
+  // shape the C++ pdParseServicesModel() reads:
+  //   {"cols":n,"header":bool,"widths":[..],"labels":[..]}
+  function parseServices(it) {
+    try {
+      var m = JSON.parse(it.text || "");
+      if (m && typeof m.cols === "number") {
+        if (!m.widths || m.widths.length !== m.cols) {
+          m.widths = []; for (var i = 0; i < m.cols; i++) m.widths.push(1 / m.cols);
+        }
+        if (!m.labels) m.labels = [];
+        if (typeof m.header !== "boolean") m.header = true;
+        return m;
+      }
+    } catch (e) {}
+    return { cols: 4, header: true, widths: [0.1, 0.5, 0.15, 0.25],
+      labels: ["ردیف", "نام خدمت", "کد", "مبلغ (ریال)"] };
+  }
+  // preview: header row (from labels) + 3 sample rows so the designer looks real
+  function servicesHtml(it) {
+    var m = parseServices(it);
+    var sum = 0; m.widths.forEach(function (w) { sum += (w || 0); }); if (sum <= 0) sum = m.cols;
+    var accent = it.fillColor || "#1f5fd6";
+    var html = "<table class='svc-tbl' style='font-size:" + ptPx(it.pt || 8.5) +
+      "px;color:" + (it.textColor || "#16233a") + ";direction:rtl'>";
+    if (m.header) {
+      html += "<tr>";
+      for (var c = 0; c < m.cols; c++) {
+        var wpc = ((m.widths[c] || 1) / sum * 100).toFixed(3);
+        var lb = m.labels[c] != null ? m.labels[c] : "";
+        html += "<td class='th' style='width:" + wpc + "%;background:" + accent +
+          ";color:#fff;border-color:" + (it.borderColor || "#345") + "'>" + escapeHtml(faDigits(lb)) + "</td>";
+      }
+      html += "</tr>";
+    }
+    var sample = [
+      ["۱", "ویزیت پزشک عمومی", "۹۰۱", "۸۵۰٬۰۰۰"],
+      ["۲", "نوار قلب", "۹۰۳", "۴۵۰٬۰۰۰"],
+      ["۳", "تزریقات", "۹۱۲", "۲۰۰٬۰۰۰"]
+    ];
+    for (var r = 0; r < sample.length; r++) {
+      html += "<tr>";
+      for (var cc = 0; cc < m.cols; cc++) {
+        var wpc2 = ((m.widths[cc] || 1) / sum * 100).toFixed(3);
+        var v = (cc < 4) ? sample[r][cc] : "";
+        var bg = (r % 2 === 1) ? "#f3f7fe" : "#fff";
+        html += "<td style='width:" + wpc2 + "%;background:" + bg + ";border-color:" +
+          (it.borderColor || "#345") + "'>" + escapeHtml(v) + "</td>";
+      }
+      html += "</tr>";
+    }
+    html += "</table>";
+    return html;
+  }
+
   function buildItemEl(it) {
     var el = document.createElement("div");
     el.className = "pi pi-" + it.type + (it.id === S.selId ? " sel" : "");
@@ -292,6 +352,8 @@
       el.appendChild(t);
     } else if (it.type === "table") {
       el.innerHTML = tableHtml(it, false);
+    } else if (it.type === "services") {
+      el.innerHTML = servicesHtml(it);
     } else if (it.type === "hline") {
       el.style.height = Math.max(1, mm(it.borderWidth || 0.4)) + "px";
       el.style.background = it.borderColor || "#222";
@@ -416,6 +478,17 @@
       it.text = JSON.stringify({ cols: 3, rows: 4, header: true, widths: [1, 1, 1],
         cells: [["ردیف", "شرح", "مبلغ"], ["", "", ""], ["", "", ""], ["", "", ""]] });
     }
+    else if (type === "services") {
+      // §1.53.0 (Bug A): default size adapts to the section's paper — wide sheet
+      // gets a full-width table, a narrow thermal roll gets a compact one.
+      var dm2 = paperDims(S.design.paper, S.design.orientation);
+      var narrow = dm2[0] < 90;
+      it.w = narrow ? 60 : 130; it.h = narrow ? 30 : 40;
+      it.pt = narrow ? 7.5 : 8.5; it.borderWidth = 0.4;
+      it.borderColor = "#2b5f9e"; it.fillColor = "#1f5fd6"; it.textColor = "#16233a";
+      it.text = JSON.stringify({ cols: 4, header: true, widths: [0.1, 0.5, 0.15, 0.25],
+        labels: ["ردیف", "نام خدمت", "کد", "مبلغ (ریال)"] });
+    }
     return it;
   }
 
@@ -452,7 +525,7 @@
     if (!host) return; host.innerHTML = "";
 
     var objs = [
-      ["label", "متن ثابت"], ["field", "فیلد داده"], ["table", "جدول"],
+      ["label", "متن ثابت"], ["field", "فیلد داده"], ["services", "لیست خدمات"], ["table", "جدول"],
       ["hline", "خط افقی"], ["vline", "خط عمودی"], ["rect", "کادر"],
       ["frame", "حاشیه صفحه"], ["logo", "لوگو"], ["photo", "عکس بیمار"],
       ["image", "تصویر"], ["qr", "بارکد / QR"], ["apptno", "شماره نوبت"]
@@ -483,7 +556,12 @@
         b.className = "pl-field"; b.dataset.kind = "field"; b.dataset.label = f.label;
         b.textContent = f.label;
         b.title = "افزودن فیلد: " + f.label;
-        b.addEventListener("click", function () { addItem("field", f.key); });
+        b.addEventListener("click", function () {
+          // §1.53.0 (Bug D): the {services} marker must insert a LIVE services
+          // list item (not a plain {field}), so the dynamic table is authored.
+          if (f.key === "{services}") { addItem("services"); return; }
+          addItem("field", f.key);
+        });
         g.appendChild(b);
       });
       c.appendChild(g); host.appendChild(c);
@@ -583,6 +661,36 @@
       edit.addEventListener("click", function () { openTableBuilder(it); });
       gtb.appendChild(edit);
     }
+    if (it.type === "services") {
+      // §1.53.0 (Bug A): live-services inspector — columns, header, widths, labels.
+      var gsv = grp("لیست خدمات (پویا)");
+      var m = parseServices(it);
+      function commitSvc() { it.text = JSON.stringify(m); up(true); renderInspector(); }
+      gsv.appendChild(row("تعداد ستون", numInput(m.cols, 2, 6, 1, function (v) {
+        v = Math.max(2, Math.min(6, v | 0));
+        // resize widths + labels to match the new column count
+        var nw = [], nl = [];
+        for (var i = 0; i < v; i++) { nw.push(m.widths[i] != null ? m.widths[i] : (1 / v)); nl.push(m.labels[i] != null ? m.labels[i] : ""); }
+        // renormalise widths to sum≈1
+        var s = 0; nw.forEach(function (x) { s += x; }); if (s > 0) nw = nw.map(function (x) { return Math.round(x / s * 1000) / 1000; });
+        m.cols = v; m.widths = nw; m.labels = nl; commitSvc();
+      })));
+      gsv.appendChild(row("سطر عنوان", checkInput(m.header, function (v) { m.header = !!v; commitSvc(); })));
+      var note = document.createElement("div"); note.style.cssText = "font-size:11px;color:#7a879c;margin:4px 0 6px;line-height:1.5";
+      note.textContent = "عنوان و عرض هر ستون را تنظیم کنید. سطرهای داده هنگام چاپ به‌صورت خودکار از خدمات پذیرش پر می‌شوند.";
+      gsv.appendChild(note);
+      for (var ci = 0; ci < m.cols; ci++) {
+        (function (idx) {
+          var lbl = document.createElement("div"); lbl.style.cssText = "font-size:11px;color:#45506a;margin-top:5px";
+          lbl.textContent = "ستون " + faDigits(idx + 1);
+          gsv.appendChild(lbl);
+          gsv.appendChild(row("عنوان", textInput(m.labels[idx] || "", function (v) { m.labels[idx] = v; commitSvc(); }, "نام ستون")));
+          gsv.appendChild(row("عرض (٪)", numInput(Math.round((m.widths[idx] || 0) * 100), 3, 90, 1, function (v) {
+            m.widths[idx] = Math.max(0.03, v / 100); commitSvc();
+          })));
+        })(ci);
+      }
+    }
     if (it.type === "logo" || it.type === "photo" || it.type === "image") {
       var gi = grp("تصویر");
       var up2 = document.createElement("button"); up2.className = "btn btn-sm btn-primary"; up2.style.width = "100%";
@@ -597,12 +705,14 @@
       }
     }
 
-    if (it.type === "label" || it.type === "field" || it.type === "apptno" || it.type === "table") {
+    if (it.type === "label" || it.type === "field" || it.type === "apptno" || it.type === "table" || it.type === "services") {
       var gt = grp("قلم و متن");
-      if (it.type !== "table")
+      if (it.type !== "table" && it.type !== "services")
         gt.appendChild(row("فونت", selectInput([["Vazirmatn", "وزیر"], ["Tahoma", "تاهوما"], ["IRANSans", "ایران‌سنس"]], it.font, function (v) { it.font = v; up(); })));
       gt.appendChild(row("اندازه (pt)", numInput(it.pt, 5, 96, 0.5, function (v) { it.pt = v; up(); })));
-      if (it.type !== "table") {
+      if (it.type === "services")
+        gt.appendChild(row("رنگ سرستون", colorInput(it.fillColor, function (v) { it.fillColor = v; up(); })));
+      if (it.type !== "table" && it.type !== "services") {
         gt.appendChild(row("ضخیم", checkInput(it.bold, function (v) { it.bold = v; up(); })));
         gt.appendChild(row("کج", checkInput(it.italic, function (v) { it.italic = v; up(); })));
         gt.appendChild(row("چینش", selectInput([["0", "راست"], ["1", "وسط"], ["2", "چپ"]], it.align, function (v) { it.align = +v; up(); })));
@@ -619,12 +729,12 @@
         })));
       }
       gt.appendChild(row("رنگ متن", colorInput(it.textColor, function (v) { it.textColor = v; up(); })));
-      if (it.type !== "table")
+      if (it.type !== "table" && it.type !== "services")
         gt.appendChild(row("فاصله خطوط", numInput(it.lineSpacing, 1, 3, 0.05, function (v) { it.lineSpacing = v; up(); })));
     }
 
     if (it.type === "rect" || it.type === "frame" || it.type === "hline" || it.type === "vline" ||
-        it.type === "qr" || it.type === "logo" || it.type === "photo" || it.type === "image" || it.type === "table") {
+        it.type === "qr" || it.type === "logo" || it.type === "photo" || it.type === "image" || it.type === "table" || it.type === "services") {
       var gb = grp("کادر و خط");
       gb.appendChild(row("رنگ خط", colorInput(it.borderColor, function (v) { it.borderColor = v; up(); })));
       gb.appendChild(row("ضخامت (mm)", numInput(it.borderWidth, 0, 5, 0.1, function (v) { it.borderWidth = v; up(); })));
@@ -1092,6 +1202,10 @@
         e.style.border = "0.6px solid " + (it.borderColor || "#789");
         if (!it.fillTransparent && it.fillColor && it.type === "rect") e.style.background = it.fillColor;
       }
+      else if (it.type === "services") {
+        e.style.border = "0.6px solid " + (it.borderColor || "#2b5f9e");
+        e.style.background = "linear-gradient(" + (it.fillColor || "#1f5fd6") + " 0 22%, #fff 22% 100%)";
+      }
       else if (it.type === "logo" || it.type === "photo" || it.type === "image" || it.type === "qr") {
         e.style.border = "0.6px dashed #9aa7c2"; e.style.background = "#f3f6fb";
       }
@@ -1112,14 +1226,77 @@
     return p;
   }
 
+  // §1.53.0 (Bug B): on very narrow rolls (R80/R58 …) compact the layout so a
+  // template authored in A4 stays legible — stack side-by-side pairs into single
+  // column, shrink the header band and drop QR/logo blocks, clamp to page edges.
+  function compactForNarrow(d) {
+    var dm = paperDims(d.paper, d.orientation);
+    var pw = dm[0], ph = dm[1];
+    if (pw >= 80) return;                    // only compact truly narrow rolls
+    var items = d.items || [];
+    // drop decorative media that eats precious width on a thin roll
+    if (pw < 80) {
+      d.items = items = items.filter(function (it) {
+        return !(it.type === "qr" || it.type === "logo" || it.type === "photo");
+      });
+    }
+    // group items into rows by their y band, then detect side-by-side pairs and
+    // stack them vertically (single column) so nothing runs off the edge.
+    items.sort(function (a, b) { return (a.y - b.y) || (b.x - a.x); });
+    var margin = 3, colW = pw - margin * 2;
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i];
+      // find a horizontal neighbour that shares the same band
+      for (var j = i + 1; j < items.length; j++) {
+        var jt = items[j];
+        if (Math.abs(jt.y - it.y) > Math.max(it.h, 4)) break;   // different band
+        var overlapX = !(jt.x + jt.w <= it.x || it.x + it.w <= jt.x);
+        if (overlapX) continue;
+        // stack jt beneath it
+        jt.y = it.y + it.h + 1.5;
+      }
+    }
+    // final clamp: every item full-width-safe and inside the page
+    items.forEach(function (it) {
+      if (it.type === "frame") { it.x = 2; it.y = 2; it.w = pw - 4; it.h = ph - 4; return; }
+      if (it.x < margin) it.x = margin;
+      if (it.x + it.w > pw - margin) {
+        // shrink to the usable width if it started near the right, else move left
+        if (it.w > colW) it.w = colW;
+        it.x = Math.max(margin, pw - margin - it.w);
+      }
+      if (it.y < 0) it.y = 0;
+      if (it.y + it.h > ph) it.y = Math.max(0, ph - it.h);
+    });
+  }
+
   function applyTemplate(t) {
     pushUndo();
+    // §1.53.0 (Bug B): remember the section's CURRENT paper/orientation so an
+    // A4-authored template is reflowed to whatever paper the section uses,
+    // instead of hijacking the section into the template's own paper.
+    var prevPaper = (S.design && S.design.paper) || null;
+    var prevOrient = (S.design && typeof S.design.orientation === "number") ? S.design.orientation : 0;
+
     var d = clone(t);
     d.id = (S.design && S.design.id) || 0;   // keep binding so save UPDATES current
     d.kind = "user";
     if (!d.name) d.name = t.name || "طرح";
     var k = 1; (d.items || []).forEach(function (it) { it.id = k++; });
     S.design = d; S.selId = 0;
+
+    if (S.reflowOnResize !== false && prevPaper && prevPaper !== d.paper) {
+      // reflow the freshly-cloned template from its authored paper (t.paper) to
+      // the section's paper, then adopt the section's paper/orientation.
+      var tDims = paperDims(t.paper || d.paper, t.orientation || 0);
+      d.paper = prevPaper; d.orientation = prevOrient;
+      var nDims = paperDims(prevPaper, prevOrient);
+      reflowItems(tDims[0], tDims[1], nDims[0], nDims[1]);
+      compactForNarrow(d);
+    } else if (S.reflowOnResize === false && prevPaper && prevPaper !== d.paper) {
+      toast("واکنش‌گرا خاموش است — کاغذ طرح (" + (d.paper) + ") حفظ شد", "warn");
+    }
+
     document.getElementById("paperSel").value = S.design.paper;
     document.getElementById("orientSel").value = S.design.orientation || 0;
     renderAll(); fitZoom(); renderLayers(); renderInspector();

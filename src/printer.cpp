@@ -1014,6 +1014,7 @@ static std::wstring fieldValue(const ReceptionRecord& r, const std::wstring& tok
     if(tok==L"{time}")     return toFaDigits(r.apptTime);
     if(tok==L"{shift}")    return r.shift;
     if(tok==L"{dept}")     return r.dept;
+    if(tok==L"{doctor}")   return r.treatingDoctor.empty()? r.dept : r.treatingDoctor; // §1.53.0
     if(tok==L"{user}")     return r.userName;
     if(tok==L"{total}")    return toFaDigits(formatMoney(r.total))+L" ریال";
     if(tok==L"{discount}") return toFaDigits(formatMoney(r.discount))+L" ریال";
@@ -1312,15 +1313,17 @@ static std::wstring pdFieldValue(const ReceptionRecord& r, const std::wstring& t
     if(tok==L"{ptype}")    return r.patientType;
     if(tok==L"{ins}")      return r.insurance;
     if(tok==L"{supp}")     return r.suppInsurance;
-    if(tok==L"{insno}")    return L"";              // not captured yet
-    if(tok==L"{insexp}")   return L"";
+    if(tok==L"{insno}")    return toFaDigits(r.insNo);    // §1.53.0 (Bug D)
+    if(tok==L"{insexp}")   return toFaDigits(r.insExp);
     if(tok==L"{queue}"){ wchar_t b[16]; swprintf(b,16,L"%d",r.queueNo); return toFaDigits(b); }
     if(tok==L"{date}")     return toFaDigits(r.apptDate);
     if(tok==L"{time}")     return toFaDigits(r.apptTime);
     if(tok==L"{datetime}") return toFaDigits(r.apptDate+L" - "+r.apptTime);
     if(tok==L"{shift}")    return r.shift;
     if(tok==L"{dept}")     return r.dept;
-    if(tok==L"{doctor}")   return r.dept;            // §1.52.0: treating-doctor lives in r.dept (adBuildRecord)
+    // §1.53.0 (Bug D): prefer the dedicated treating-doctor name; fall back to
+    // r.dept (the §1.52.0 behaviour) when the operator left the doctor blank.
+    if(tok==L"{doctor}")   return r.treatingDoctor.empty() ? r.dept : r.treatingDoctor;
     if(tok==L"{apptdate}") return toFaDigits(r.apptDate);
     if(tok==L"{appttime}") return toFaDigits(r.apptTime);
     if(tok==L"{appttype}") return r.patientType;
@@ -1364,17 +1367,20 @@ static std::wstring pdFieldValue(const ReceptionRecord& r, const std::wstring& t
     // Not (yet) captured at reception → resolve to empty/sensible defaults so
     // a design that references them still prints cleanly (the field simply
     // shows blank, or is hidden when visibility==1).
-    if(tok==L"{refdoctor}")    return L"";
+    // §1.53.0 (Bug D): resolve the optional clinical fields from the record.
+    // They stay empty by default so a design that references them prints
+    // cleanly (and hides the row when visibility==1).
+    if(tok==L"{refdoctor}")    return r.refDoctor;
     if(tok==L"{room}")         return r.dept;            // unit/room ≈ section
-    if(tok==L"{nextvisit}")    return L"";
-    if(tok==L"{weight}")       return L"";
-    if(tok==L"{height}")       return L"";
-    if(tok==L"{bp}")           return L"";
-    if(tok==L"{temp}")         return L"";
-    if(tok==L"{pulse}")        return L"";
-    if(tok==L"{allergy}")      return L"";
-    if(tok==L"{diagnosis}")    return L"";
-    if(tok==L"{servicecode}")  return L"";
+    if(tok==L"{nextvisit}")    return toFaDigits(r.nextVisit);
+    if(tok==L"{weight}")       return toFaDigits(r.weight);
+    if(tok==L"{height}")       return toFaDigits(r.height);
+    if(tok==L"{bp}")           return toFaDigits(r.bp);
+    if(tok==L"{temp}")         return toFaDigits(r.temp);
+    if(tok==L"{pulse}")        return toFaDigits(r.pulse);
+    if(tok==L"{allergy}")      return r.allergy;
+    if(tok==L"{diagnosis}")    return r.diagnosis;
+    if(tok==L"{servicecode}")  return r.services.empty()? L"" : toFaDigits(r.services[0].code);
     if(tok==L"{visitfee}")     return toFaDigits(formatMoney(r.total))+L" ریال";
     if(tok==L"{paytype}")      return L"نقدی";
     if(tok==L"{cashier}")      return r.userName.empty()?g_session.user.fullname:r.userName;
@@ -1515,6 +1521,10 @@ static void pdDrawServices(HDC dc, const PrintItem& it, const RECT& box,
     int X0=box.left, Y0=box.top, X1=box.right, Y1=box.bottom;
     int W=X1-X0, H=Y1-Y0; if(W<=0||H<=0) return;
 
+    // §1.53.0 (Bug E): force a consistent RTL text-alignment baseline so mixed
+    // Persian/number content in the services table never flips visually.
+    SetTextAlign(dc, TA_RTLREADING|TA_TOP|TA_LEFT);
+
     int nDataRows = live ? (int)live->services.size() : 0;
     if(nDataRows==0) nDataRows=1;   // keep at least one (placeholder) row
     int totalRows = (m.header?1:0) + nDataRows;
@@ -1570,6 +1580,9 @@ static void pdDrawServices(HDC dc, const PrintItem& it, const RECT& box,
         HGDIOBJ of=SelectObject(dc,fHead);
         for(int c=0;c<m.cols;++c){
             std::wstring cell = (c<(int)m.labels.size()) ? m.labels[c] : L"";
+            // §1.53.0 (Bug E): convert any ASCII digits the user typed in a
+            // header label to Persian digits so the receipt reads uniformly.
+            cell = toFaDigits(cell);
             RECT cr={cx[c+1]+pad, ry[0]+pad/2, cx[c]-pad, ry[1]-pad/2};
             if(cr.right<=cr.left||cr.bottom<=cr.top) continue;
             DrawTextW(dc,cell.c_str(),-1,&cr,
@@ -1600,9 +1613,13 @@ static void pdDrawServices(HDC dc, const PrintItem& it, const RECT& box,
                 }
                 RECT cr={cx[c+1]+pad, ry0+pad/2, cx[c]-pad, ry1-pad/2};
                 if(cr.right<=cr.left||cr.bottom<=cr.top) continue;
-                // name column left-aligned-ish (center looks fine too); numbers centered
-                UINT al = (c==1) ? (DT_RTLREADING|DT_CENTER) : (DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_END_ELLIPSIS|DT_NOPREFIX);
-                if(c==1) al = DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_END_ELLIPSIS|DT_NOPREFIX;
+                // §1.53.0 (Bug E): the name column (c==1) is Persian prose — force
+                // DT_RIGHT|DT_RTLREADING so it hugs the right edge and never flips
+                // when the name mixes Persian words with Latin/number fragments.
+                // All other columns (row #, code, money) are centered.
+                UINT al = (c==1)
+                    ? (DT_RIGHT |DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_END_ELLIPSIS|DT_NOPREFIX)
+                    : (DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_END_ELLIPSIS|DT_NOPREFIX);
                 DrawTextW(dc,cell.c_str(),-1,&cr,al);
             }
         }

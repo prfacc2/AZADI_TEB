@@ -1369,6 +1369,36 @@ static void collect(TabPage* t, ReceptionRecord& r){
     r.shift=shiftName(g_session.shift);
     r.dept=g_session.user.dept;
     r.userName=g_session.user.username;
+
+    // §1.53.0 (Bug D): capture the treating-doctor NAME from the center card's
+    // combo (falls back to empty → {doctor} then falls back to dept). The combo
+    // text is the doctor's display name mirrored from its code.
+    if(t->cDoc2List){
+        int di=(int)SendMessageW(t->cDoc2List,CB_GETCURSEL,0,0);
+        if(di>0){   // index 0 is the «انتخاب…» placeholder
+            wchar_t db2[256]={0};
+            SendMessageW(t->cDoc2List,CB_GETLBTEXT,di,(LPARAM)db2);
+            r.treatingDoctor=trim(db2);
+        }
+    }
+
+    // §1.53.0 (Bug F ROOT CAUSE): copy every entered service row into the
+    // record's services vector BEFORE printing. Previously collect() filled the
+    // identity/money fields but never populated r.services, so the dynamic
+    // services table on every printed receipt was empty.
+    r.services.clear();
+    for(size_t i=0;i<t->services.size();++i){
+        const SvcRow& sr=t->services[i];
+        ServiceLine sl;
+        sl.code     = sr.code;
+        sl.name     = sr.name;
+        sl.price    = sr.price;
+        sl.qty      = sr.qty>0 ? sr.qty : 1;
+        sl.discount = sr.discount;
+        sl.insShare = sr.insShare;
+        sl.patShare = sr.patShare;
+        r.services.push_back(sl);
+    }
 }
 
 static void closeTab(TabPage* t);   // fwd
