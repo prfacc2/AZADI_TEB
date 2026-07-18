@@ -54,6 +54,11 @@ window.AZ_FIELD_CATS = [
     { key:"{allergy}",   label:"حساسیت‌ها", sample:"—" },
     { key:"{diagnosis}", label:"تشخیص", sample:"—" },
   ]},
+  { title:"خدمات", items:[
+    { key:"{services}",      label:"لیست خدمات (جدول پویا)", sample:"جدول خدمات" },
+    { key:"{servicescount}", label:"تعداد خدمات", sample:"۴" },
+    { key:"{servicestotal}", label:"جمع خدمات", sample:"۲٬۵۰۰٬۰۰۰ ریال" },
+  ]},
   { title:"مالی و صورتحساب", items:[
     { key:"{total}",    label:"جمع کل", sample:"۲٬۵۰۰٬۰۰۰ ریال" },
     { key:"{totalonly}",label:"جمع کل (بدون واحد)", sample:"۲٬۵۰۰٬۰۰۰" },

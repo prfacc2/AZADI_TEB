@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.52.0"
+#define APP_VERSION_W   L"1.54.0"
 
 // ----------------------------------------------------------- logging policy -
 //  RELEASE 1.2.0 (Section A): all general user-behavior logging is gated behind
@@ -322,6 +322,16 @@ struct ReceptionRecord {
                  gender, mobile, landline, address, patientType,
                  insurance, suppInsurance, apptDate, apptTime,
                  shift, dept, userName;
+    // §1.53.0 (Bug D/F): a dedicated treating-doctor name captured from the
+    // reception form. {doctor} resolves to this in preference to `dept`, and
+    // falls back to `dept` when empty (backward-compatible with §1.52.0).
+    std::wstring treatingDoctor;
+    // §1.53.0 (Bug D): optional clinical / vitals fields, filled from the
+    // reception "علائم حیاتی / اطلاعات تکمیلی" inputs when present. Empty by
+    // default so templates that reference them print cleanly (hidden when
+    // visibility==1). insNo/insExp hold the insurance booklet no & expiry.
+    std::wstring weight, height, bp, temp, pulse, allergy, diagnosis,
+                 refDoctor, nextVisit, insNo, insExp;
     long long total, mainShare, patientShare, baseDiff, orgShare,
               finalTotal, discount, paid;
     int queueNo, insIdx, suppIdx;

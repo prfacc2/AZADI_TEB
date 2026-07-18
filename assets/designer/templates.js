@@ -87,6 +87,25 @@
     return mk({ type: "table", x: x, y: y, w: w, h: h, borderColor: o.borderColor || "#2b5f9e", borderWidth: 0.5,
       text: JSON.stringify({ cols: cols, rows: rows, header: true, widths: widths, cells: cells }) });
   }
+  // §1.53.0 (Bug A/C): a DYNAMIC services list. Rows are filled at print time
+  // from ReceptionRecord.services (one row per admitted service). This is the
+  // correct item for any "خدمات / services" section — svcTable() (static grid)
+  // is only for genuinely fixed tables (e.g. lab results). The stored JSON shape
+  // matches C++ pdParseServicesModel: {cols,header,widths,labels}.
+  function svcList(x, y, w, h, o) {
+    o = o || {};
+    var labels = o.labels || ["ردیف", "نام خدمت", "کد", "مبلغ (ریال)"];
+    var widths = o.widths || [0.1, 0.5, 0.15, 0.25];
+    var cols = labels.length;
+    return mk({
+      type: "services", x: x, y: y, w: w, h: h,
+      pt: o.pt || 8.5,
+      borderColor: o.borderColor || "#2b5f9e", borderWidth: o.borderWidth || 0.5,
+      fillColor: o.accent || o.borderColor || "#1f5fd6",   // header band colour
+      textColor: o.color || "#16233a", visibility: 0,
+      text: JSON.stringify({ cols: cols, header: o.header !== false, widths: widths, labels: labels })
+    });
+  }
 
   /* ====================================================================== *
    *  RECEPTION (20) — twenty DISTINCT, professional, RTL admission forms.
@@ -228,8 +247,8 @@
       rowA("بیمهٔ پایه", "{ins}", "بیمهٔ مکمل", "{supp}");
       y += 1;
       items.push(L(x, y, cw, 5, "شرح خدمات و صورتحساب", { pt: 11, bold: true, align: 0, dir: 0, textColor: AC })); y += 6;
-      items.push(svcTable(x, y, cw, 46, { borderColor: AC, rows: 7, widths: [0.45, 0.15, 0.2, 0.2],
-        cells: [{ r: 0, c: 0, t: "شرح خدمت" }, { r: 0, c: 1, t: "تعداد" }, { r: 0, c: 2, t: "بهای واحد" }, { r: 0, c: 3, t: "مبلغ کل" }] })); y += 49;
+      items.push(svcList(x, y, cw, 46, { borderColor: AC, accent: AC, widths: [0.45, 0.15, 0.2, 0.2],
+        labels: ["نام خدمت", "تعداد", "بهای واحد", "مبلغ کل"] })); y += 49;
       var tw = (cw - 9) / 4;
       cell(x + 3 * (tw + 3), y, tw, 12, "جمع کل", "{totalonly}").forEach(function (e) { items.push(e); });
       cell(x + 2 * (tw + 3), y, tw, 12, "سهم بیمه", "{insshareonly}").forEach(function (e) { items.push(e); });
@@ -270,8 +289,8 @@
       items.push(PV(x + cw / 2, y, cw / 2, "کد ملی:", "{nid}")); items.push(PV(x, y, cw / 2, "سن:", "{age}")); y += 7.5;
       items.push(PV(x + cw / 2, y, cw / 2, "تلفن:", "{mobile}")); items.push(PV(x, y, cw / 2, "بیمه:", "{ins}")); y += 9;
       items.push(L(x, y, cw, 5, "شرح خدمات دندانپزشکی", { bold: true, pt: 9.5, align: 0, dir: 0, textColor: AC })); y += 6;
-      items.push(svcTable(x, y, cw, 34, { borderColor: AC, rows: 5, widths: [0.5, 0.25, 0.25],
-        cells: [{ r: 0, c: 0, t: "خدمت / دندان" }, { r: 0, c: 1, t: "تعداد" }, { r: 0, c: 2, t: "مبلغ (ریال)" }] })); y += 37;
+      items.push(svcList(x, y, cw, 34, { borderColor: AC, accent: AC, widths: [0.5, 0.25, 0.25],
+        labels: ["خدمت / دندان", "تعداد", "مبلغ (ریال)"] })); y += 37;
       items.push(PV(x + cw / 2, y, cw / 2, "جمع کل:", "{total}")); items.push(PV(x, y, cw / 2, "پرداختی:", "{paid}", { bold: true, color: "#0f7a3a" })); y += 9;
       items.push(R(x, y, cw, 12, { borderColor: AC, borderWidth: 0.9, corner: 2 }));
       items.push(F(x, y + 2.8, cw, 7, "{queue}", { prefix: "نوبت: ", bold: true, pt: 13, align: 1, dir: 2, textColor: AC }));
@@ -304,8 +323,8 @@
       items.push(PV(x + cw / 2, y, cw / 2, "تاریخ:", "{date}")); items.push(PV(x, y, cw / 2, "شماره قبض:", "{receiptNo}")); y += 8;
       items.push(PV(x, y, cw, "بیمار:", "{full}", { bold: true })); y += 7;
       items.push(PV(x + cw / 2, y, cw / 2, "کد ملی:", "{nid}")); items.push(PV(x, y, cw / 2, "بیمه:", "{ins}")); y += 9;
-      items.push(svcTable(x, y, cw, 40, { borderColor: AC, rows: 6, widths: [0.5, 0.2, 0.3],
-        cells: [{ r: 0, c: 0, t: "شرح خدمت" }, { r: 0, c: 1, t: "تعداد" }, { r: 0, c: 2, t: "مبلغ (ریال)" }] })); y += 43;
+      items.push(svcList(x, y, cw, 40, { borderColor: AC, accent: AC, widths: [0.5, 0.2, 0.3],
+        labels: ["نام خدمت", "تعداد", "مبلغ (ریال)"] })); y += 43;
       items.push(HL(x, y, cw, { borderColor: "#e0c9a6" })); y += 3;
       items.push(PV(x, y, cw, "جمع کل:", "{total}")); y += 7;
       items.push(PV(x, y, cw, "سهم بیمه:", "{insshare}")); y += 7;
@@ -445,8 +464,8 @@
       items.push(PV(x, y, cw, "نام و نام خانوادگی:", "{full}", { bold: true, pt: 11 })); y += 8;
       items.push(PV(x + cw / 2, y, cw / 2, "کد ملی:", "{nid}")); items.push(PV(x, y, cw / 2, "پزشک:", "{doctor}")); y += 9;
       items.push(L(x, y, cw, 5, "خدمات ارائه‌شده", { bold: true, pt: 9.5, align: 0, dir: 0, textColor: AC })); y += 6;
-      items.push(svcTable(x, y, cw, 42, { borderColor: AC, rows: 6, widths: [0.45, 0.2, 0.15, 0.2],
-        cells: [{ r: 0, c: 0, t: "شرح خدمت" }, { r: 0, c: 1, t: "کد" }, { r: 0, c: 2, t: "تعداد" }, { r: 0, c: 3, t: "مبلغ" }] })); y += 45;
+      items.push(svcList(x, y, cw, 42, { borderColor: AC, accent: AC, widths: [0.45, 0.2, 0.15, 0.2],
+        labels: ["نام خدمت", "کد", "تعداد", "مبلغ"] })); y += 45;
       items.push(PV(x + cw / 2, y, cw / 2, "جمع کل:", "{total}")); items.push(PV(x, y, cw / 2, "پرداختی:", "{paid}", { bold: true })); y += 10;
       items.push(R(x, y, cw, 12, { borderColor: AC, borderWidth: 0.9, corner: 2 }));
       items.push(F(x, y + 2.8, cw, 7, "{queue}", { prefix: "نوبت: ", bold: true, pt: 13, align: 1, dir: 2, textColor: AC }));
@@ -465,8 +484,8 @@
       items.push(PV(x, y, cw, "نام و نام خانوادگی:", "{full}", { bold: true, pt: 11 })); y += 8;
       items.push(PV(x + cw / 2, y, cw / 2, "تلفن:", "{mobile}")); items.push(PV(x, y, cw / 2, "پزشک:", "{doctor}")); y += 9;
       items.push(L(x, y, cw, 5, "خدمات", { bold: true, pt: 9.5, align: 0, dir: 0, textColor: AC })); y += 6;
-      items.push(svcTable(x, y, cw, 34, { borderColor: AC, rows: 5, widths: [0.6, 0.4],
-        cells: [{ r: 0, c: 0, t: "خدمت" }, { r: 0, c: 1, t: "مبلغ (ریال)" }] })); y += 37;
+      items.push(svcList(x, y, cw, 34, { borderColor: AC, accent: AC, widths: [0.6, 0.4],
+        labels: ["نام خدمت", "مبلغ (ریال)"] })); y += 37;
       items.push(band(x, y, cw, 11, "#fdf2f8", { corner: 2, borderColor: AC, borderWidth: 0.6 }));
       items.push(F(x + 2, y + 2.6, cw - 4, 7, "{paid}", { prefix: "قابل پرداخت: ", bold: true, pt: 12, align: 0, dir: 0, textColor: AC }));
       return items;
@@ -497,8 +516,8 @@
       cell(x + c4 + 3, y, c4, 11, "قد", "{height}", { bg: "#eef3ff" }).forEach(function (e) { items.push(e); });
       cell(x, y, c4, 11, "بخش", "{dept}", { bg: "#eef3ff" }).forEach(function (e) { items.push(e); }); y += 14;
       items.push(L(x, y, cw, 5, "شرح خدمات و صورتحساب", { pt: 11, bold: true, align: 0, dir: 0, textColor: AC })); y += 6;
-      items.push(svcTable(x, y, cw, 50, { borderColor: AC, rows: 8, widths: [0.45, 0.15, 0.2, 0.2],
-        cells: [{ r: 0, c: 0, t: "شرح خدمت" }, { r: 0, c: 1, t: "تعداد" }, { r: 0, c: 2, t: "بهای واحد" }, { r: 0, c: 3, t: "مبلغ کل" }] })); y += 53;
+      items.push(svcList(x, y, cw, 50, { borderColor: AC, accent: AC, widths: [0.45, 0.15, 0.2, 0.2],
+        labels: ["نام خدمت", "تعداد", "بهای واحد", "مبلغ کل"] })); y += 53;
       cell(x + 3 * (c4 + 3), y, c4, 12, "جمع کل", "{totalonly}").forEach(function (e) { items.push(e); });
       cell(x + 2 * (c4 + 3), y, c4, 12, "سهم بیمه", "{insshareonly}").forEach(function (e) { items.push(e); });
       cell(x + c4 + 3, y, c4, 12, "تخفیف", "{discount}").forEach(function (e) { items.push(e); });
@@ -620,6 +639,19 @@
       borderColor: o.borderColor || "#2b5f9e", borderWidth: 0.5,
       text: o.text || tableJson(cols, rows, o.header !== false, o.widths) }, o));
   }
+  // §1.53.0 (Bug A/C): premium-section dynamic services list (same as svcList).
+  function SVCLIST(x, y, w, h, o) {
+    o = o || {};
+    var labels = o.labels || ["ردیف", "نام خدمت", "کد", "مبلغ (ریال)"];
+    var widths = o.widths || [0.1, 0.5, 0.15, 0.25];
+    return mk({
+      type: "services", x: x, y: y, w: w, h: h, pt: o.pt || 8.5,
+      borderColor: o.borderColor || "#2b5f9e", borderWidth: o.borderWidth || 0.5,
+      fillColor: o.accent || o.borderColor || "#1f5fd6",
+      textColor: o.color || "#16233a", visibility: 0,
+      text: JSON.stringify({ cols: labels.length, header: o.header !== false, widths: widths, labels: labels })
+    });
+  }
 
   (function () {
     // ---- 1. Premium reception A5 (blue, با کادر و جدول خدمات) -------------
@@ -649,9 +681,8 @@
       row("بیمهٔ پایه", "{ins}", "بیمهٔ مکمل", "{supp}");
       // services table
       items.push(L(x, y, cw, 5, "شرح خدمات", { pt: 9.5, bold: true, align: 0, dir: 0, textColor: "#1f4e8c" })); y += 6;
-      items.push(TABLE(x, y, cw, 26, 3, 4, { header: true, widths: [0.5, 0.25, 0.25],
-        text: JSON.stringify({ cols: 3, rows: 4, header: true, widths: [0.5, 0.25, 0.25],
-          cells: [{ r: 0, c: 0, t: "شرح خدمت" }, { r: 0, c: 1, t: "تعداد" }, { r: 0, c: 2, t: "مبلغ (ریال)" }] }) })); y += 28;
+      items.push(SVCLIST(x, y, cw, 26, { accent: "#1f4e8c", borderColor: "#1f4e8c", widths: [0.5, 0.25, 0.25],
+        labels: ["نام خدمت", "تعداد", "مبلغ (ریال)"] })); y += 28;
       // totals
       var tw = (cw - 6) / 3;
       CELL(x, y, tw, 11, "جمع کل", "{totalonly}", { bg: "#eef4ff" }).forEach(function (e) { items.push(e); });
@@ -696,9 +727,8 @@
       rowA("نشانی", "{address}", "نوع پذیرش", "{ptype}");
       y += 1;
       items.push(L(x, y, cw, 5, "شرح خدمات و صورتحساب", { pt: 11, bold: true, align: 0, dir: 0, textColor: "#0e4d6e" })); y += 6;
-      items.push(TABLE(x, y, cw, 46, 4, 7, { borderColor: "#0e4d6e", header: true, widths: [0.45, 0.15, 0.2, 0.2],
-        text: JSON.stringify({ cols: 4, rows: 7, header: true, widths: [0.45, 0.15, 0.2, 0.2],
-          cells: [{ r: 0, c: 0, t: "شرح خدمت" }, { r: 0, c: 1, t: "تعداد" }, { r: 0, c: 2, t: "بهای واحد" }, { r: 0, c: 3, t: "مبلغ کل" }] }) })); y += 49;
+      items.push(SVCLIST(x, y, cw, 46, { accent: "#0e4d6e", borderColor: "#0e4d6e", widths: [0.45, 0.15, 0.2, 0.2],
+        labels: ["نام خدمت", "تعداد", "بهای واحد", "مبلغ کل"] })); y += 49;
       var tw = (cw - 9) / 4;
       CELL(x, y, tw, 12, "جمع کل", "{totalonly}").forEach(function (e) { items.push(e); });
       CELL(x + tw + 3, y, tw, 12, "سهم بیمه", "{insshareonly}").forEach(function (e) { items.push(e); });
@@ -726,9 +756,8 @@
       items.push(F(x, y, cw, 5, "{nid}", { prefix: "کد ملی: ", pt: 8, align: 0, dir: 0 })); y += 5.5;
       items.push(F(x, y, cw, 5, "{ins}", { prefix: "بیمه: ", pt: 8, align: 0, dir: 0 })); y += 6;
       items.push(HL(x, y, cw, { borderColor: "#000", borderWidth: 0.3, borderStyle: 1 })); y += 2;
-      items.push(TABLE(x, y, cw, 24, 2, 4, { borderColor: "#000", header: true, widths: [0.65, 0.35],
-        text: JSON.stringify({ cols: 2, rows: 4, header: true, widths: [0.65, 0.35],
-          cells: [{ r: 0, c: 0, t: "شرح خدمت" }, { r: 0, c: 1, t: "مبلغ" }] }) })); y += 26;
+      items.push(SVCLIST(x, y, cw, 24, { accent: "#000", borderColor: "#000", pt: 7.5, widths: [0.65, 0.35],
+        labels: ["نام خدمت", "مبلغ"] })); y += 26;
       items.push(HL(x, y, cw, { borderColor: "#000", borderWidth: 0.3 })); y += 2;
       items.push(F(x, y, cw, 5, "{total}", { prefix: "جمع کل: ", pt: 8, align: 0, dir: 0 })); y += 5;
       items.push(F(x, y, cw, 5, "{insshare}", { prefix: "سهم بیمه: ", pt: 8, align: 0, dir: 0 })); y += 5;

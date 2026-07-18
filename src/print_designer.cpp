@@ -254,6 +254,11 @@ bool Design_FromJson(const std::string& json, PrintDesign& out, std::wstring& er
                     if(!jp.match(',')){ jp.match('}'); break; }
                     if(!jp.ok) break;
                 }
+                // §1.53.0 (Bug E): guarantee a shaping-capable Persian font on the
+                // native load path too (mirrors webJsonToDesign) so no item ever
+                // draws with an empty/undefined face name.
+                if(it.fontName.empty()) it.fontName=L"Vazirmatn";
+                if(it.fontPt<=0) it.fontPt=10;
                 out.items.push_back(it);
                 if(!jp.match(',')){ jp.match(']'); break; }
                 if(!jp.ok) break;

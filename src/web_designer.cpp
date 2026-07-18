@@ -58,8 +58,15 @@ static bool loadRes(int id, std::string& out){
 //  The JS engine uses type strings ("label","field",…) and "#rrggbb" colours.
 //  The C++ PrintDesign uses int enums and 0x00RRGGBB. We bridge here so a saved
 //  web design is identical to a native one and prints through the same path.
+// §1.53.0 FIX (Bug A): this array MUST have one entry per PrintItemType enum
+// member and be in the EXACT enum order, because jsTypeToInt/intToJsType index
+// straight into it. Before this fix "services" (index 12 = PIT_SERVICES) was
+// MISSING, so a saved PIT_SERVICES item was silently downgraded to a plain
+// label on load, and the browser designer had no way to author a live services
+// list. Order below == PIT_LABEL,PIT_FIELD,PIT_HLINE,PIT_VLINE,PIT_RECT,
+// PIT_FRAME,PIT_IMAGE,PIT_LOGO,PIT_QR,PIT_PHOTO,PIT_APPTNO,PIT_TABLE,PIT_SERVICES.
 static const char* JS_TYPES[] = {
-    "label","field","hline","vline","rect","frame","image","logo","qr","photo","apptno","table" };
+    "label","field","hline","vline","rect","frame","image","logo","qr","photo","apptno","table","services" };
 static int jsTypeToInt(const std::string& t){
     for(int i=0;i<(int)(sizeof(JS_TYPES)/sizeof(JS_TYPES[0]));++i)
         if(t==JS_TYPES[i]) return i;
