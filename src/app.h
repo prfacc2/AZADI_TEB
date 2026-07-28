@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.54.0"
+#define APP_VERSION_W   L"1.55.0"
 
 // ----------------------------------------------------------- logging policy -
 //  RELEASE 1.2.0 (Section A): all general user-behavior logging is gated behind
@@ -293,6 +293,11 @@ std::wstring hashPassword(const std::wstring& p);
 struct InsuranceDef { const wchar_t* name; int pct; };
 extern const InsuranceDef INSURANCES[];     extern const int N_INSURANCES;
 extern const InsuranceDef SUPP_INSURANCES[];extern const int N_SUPP;
+// v1.55.0 — coverage percentage for a base / supplementary insurance INDEX.
+// Returns -1 when the index is out of range (⇒ the {ins_percent} /
+// {supp_percent} print tokens resolve to an empty string, never a fake 0٪).
+int Ins_Percent(int idx);
+int Supp_Percent(int idx);
 
 // -------------------------------------------------------------- tariffs ----
 //  Default service tariffs (Rial) so the program computes the bill itself.
@@ -310,6 +315,12 @@ struct ServiceLine {
     std::wstring code;     // service code
     std::wstring name;     // service name (as shown to the user)
     std::wstring category; // optional category / dept label
+    // v1.55.0: «شرح خدمت» — the descriptive text of the service, resolved from
+    // the Service Management catalogue (ServiceDef::desc, falling back to
+    // ServiceDef::category). Printed in the middle column of the receipt's
+    // services table (نام خدمت | شرح خدمت | تعداد). Never randomised — when the
+    // catalogue has no description this stays EMPTY and prints as "—".
+    std::wstring desc;
     long long    price;    // unit price (Toman)
     int          qty;      // quantity (>=1)
     long long    discount; // per-line discount (Toman)
@@ -332,11 +343,35 @@ struct ReceptionRecord {
     // visibility==1). insNo/insExp hold the insurance booklet no & expiry.
     std::wstring weight, height, bp, temp, pulse, allergy, diagnosis,
                  refDoctor, nextVisit, insNo, insExp;
+    // v1.55.0 — REAL-RECEIPT fields captured at admission so the print designer
+    // can bind them. Every one of these is filled from live form/session data;
+    // nothing here is ever generated randomly. Empty means "not entered", and a
+    // bound field simply prints blank (or is hidden when visibility==1).
+    std::wstring doctorCode;      // کد پزشک معالج (as typed in the doctor-code box)
+    std::wstring performerCode;   // کد انجام‌دهنده
+    std::wstring performer;       // نام انجام‌دهنده
+    std::wstring specialty;       // شرح تخصص (from the doctors store)
+    std::wstring specialtyCode;   // کد تخصص (short group letter/code)
+    std::wstring receptionist;    // نام پذیرش‌کننده (full name of logged-in user)
+    std::wstring cashierName;     // نام صندوق‌دار
+    std::wstring scNum;           // ش.ص — cashier sheet/shift document number
+    std::wstring receiptBarcode;  // بارکد اختصاصی رسید (deterministic, from receiptNo)
+    std::wstring receiptCode;      // کد کوتاه رسید (deterministic alnum tag)
+    std::wstring eprescription;   // کد رهگیری نسخهٔ الکترونیک (as entered)
+    std::wstring referralNo;      // شماره معرفی‌نامه (as entered)
+    std::wstring regStamp;        // تاریخ و ساعت ثبت پذیرش (Jalali date + hh:mm:ss)
+    std::wstring apptSec;         // ساعت نوبت با ثانیه (hh:mm:ss)
+    int  insPercent;              // درصد بیمهٔ پایه (-1 = unknown/none)
+    int  suppPercent;             // درصد بیمهٔ مکمل (-1 = unknown/none)
+    long long cash;               // مبلغ نقدی
+    long long pos;                // مبلغ کارتخوان (POS)
+    long long receiptNo;          // شمارهٔ قبض/رسید (0 = not assigned yet)
     long long total, mainShare, patientShare, baseDiff, orgShare,
               finalTotal, discount, paid;
     int queueNo, insIdx, suppIdx;
     std::vector<ServiceLine> services;   // §1.51.0: billed services list
-    ReceptionRecord():total(0),mainShare(0),patientShare(0),baseDiff(0),
+    ReceptionRecord():insPercent(-1),suppPercent(-1),cash(0),pos(0),receiptNo(0),
+        total(0),mainShare(0),patientShare(0),baseDiff(0),
         orgShare(0),finalTotal(0),discount(0),paid(0),queueNo(0),
         insIdx(0),suppIdx(0){}
 };

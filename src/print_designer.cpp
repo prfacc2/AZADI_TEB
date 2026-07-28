@@ -29,7 +29,10 @@ PrintItem::PrintItem()
       borderColor(0x000000), borderWidth(0), corner(0), padding(1),
       opacity(1.0), visibility(0),
       objectFit(0),
-      startValue(1), step(1) {}
+      startValue(1), step(1),
+      // v1.55.0: 0 == automatic row geometry (backward compatible: an old
+      // design that never stored rowH/headerH keeps its previous rendering).
+      rowH(0), headerH(0) {}
 
 PrintDesign::PrintDesign()
     : id(0), kind(L"user"), paper(L"A5"), paperW(148), paperH(210),
@@ -137,6 +140,10 @@ std::string Design_ToJson(const PrintDesign& d){
         o << "\"img\":\"" << js_esc(it.imgPath) << "\",";
         o << "\"sv\":" << inum(it.startValue) << ",";
         o << "\"sp\":" << inum(it.step);
+        // v1.55.0: only emit the row-geometry keys when they were actually set,
+        // so an untouched design serialises byte-identically to v1.54.0.
+        if(it.rowH    > 0) o << ",\"rh\":" << num(it.rowH);
+        if(it.headerH > 0) o << ",\"hh\":" << num(it.headerH);
         o << "}";
     }
     o << "]}";
@@ -250,6 +257,9 @@ bool Design_FromJson(const std::string& json, PrintDesign& out, std::wstring& er
                     else if(k=="img") it.imgPath=js_utf8_to_w(jp.str());
                     else if(k=="sv") it.startValue=(int)jp.dbl();
                     else if(k=="sp") it.step=(int)jp.dbl();
+                    // v1.55.0 row geometry (absent in older files ⇒ stays 0 = auto)
+                    else if(k=="rh") it.rowH=jp.dbl();
+                    else if(k=="hh") it.headerH=jp.dbl();
                     else jp.skipValue();
                     if(!jp.match(',')){ jp.match('}'); break; }
                     if(!jp.ok) break;

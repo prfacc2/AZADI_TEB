@@ -25,6 +25,13 @@ enum PrintItemType {
                        //   {"cols":n,"rows":n,"header":bool,"widths":[..],
                        //    "cells":[[..],..]}  — round-trips through C++ as a
                        //    plain string so it never breaks the data model.
+    PIT_BARCODE = 13,  // v1.55.0: REAL 1-D barcode (Code128-B / Code39 /
+                       //   EAN-13). The payload comes from the bound `field`
+                       //   token (default {receiptbarcode}), so it always
+                       //   encodes live record data — never a random number.
+                       //   `text` may carry a JSON model:
+                       //   {"sym":"code128"|"code39"|"ean13","hri":bool,
+                       //    "quiet":mm}
     PIT_SERVICES       // §1.51.0: dynamic services list rendered from the live
                        //   ReceptionRecord.services vector at print/preview time.
                        //   Model stored as JSON in `text`:
@@ -78,6 +85,14 @@ struct PrintItem {
     int          startValue;
     int          step;
 
+    // v1.55.0 — TABLE / SERVICES row geometry (millimetres). 0 = automatic
+    // (divide the item height evenly, the pre-1.55 behaviour), so old saved
+    // designs and .aztpl files keep printing byte-identically. When > 0 the
+    // print engine and the browser designer both honour the explicit height,
+    // which is what makes the live «ارتفاع سطر / ارتفاع سرستون» controls work.
+    double       rowH;      // data-row height in mm  (0 = auto)
+    double       headerH;   // header-row height in mm (0 = auto)
+
     PrintItem();
 };
 
@@ -91,6 +106,52 @@ struct PrintDesign {
     std::vector<PrintItem> items;
     PrintDesign();
 };
+
+// ---------------------------------------------------------------------------
+//  v1.55.0 — DATA-BINDING TOKEN VOCABULARY (resolved in printer.cpp
+//  pdFieldValue(); bare aliases normalised in pdNormalizeField()).
+//  Every token below returns LIVE data from the ReceptionRecord / session /
+//  settings store. None of them is ever randomised: when a value was not
+//  captured at admission the token resolves to an EMPTY string so the design
+//  prints cleanly (or hides the row when PrintItem::visibility == 1).
+//
+//   date / time / appointment
+//     {date} {time} {datetime} {shift} {apptdate} {appttime}
+//     {apptdatetime}  تاریخ و ساعت نوبت
+//     {apptsec}       ساعت نوبت با ثانیه (hh:mm:ss)
+//     {reg_ts}        تاریخ و ساعت ثبت پذیرش
+//   patient
+//     {first} {last} {full} {father} {nid} {birth} {gender} {mobile}
+//     {landline} {address} {ptype} {age} {barcode} {nationalcard}
+//     {receiptcode}   کد کوتاه رسید (deterministic از شمارهٔ قبض)
+//   insurance
+//     {ins} {supp} {insno} {insexp} {insidx}
+//     {ins_percent}   درصد بیمهٔ پایه   (خالی وقتی نامعتبر)
+//     {supp_percent}  درصد بیمهٔ مکمل  (خالی وقتی نامعتبر)
+//     {ins_full}      بیمهٔ پایه + درصد
+//     {supp_full}     بیمهٔ مکمل + درصد
+//   doctor / service type
+//     {doctor} {refdoctor} {dept} {room} {queue}
+//     {doctorcode}    کد پزشک
+//     {performer} {performercode}
+//     {specialty}     شرح تخصص
+//     {specialtycode} کد تخصص
+//     {servicetype}   نوع خدمت (عمومی/تخصصی…)
+//   money
+//     {total} {insshare} {patientshare} {discount} {finaltotal} {paid}
+//     {basepay}       سهم پایه
+//     {supppay}       سهم مکمل
+//     {cash} {pos} {discount_from}
+//     {eprescription} کد رهگیری نسخهٔ الکترونیک
+//     {referralno}    شماره معرفی‌نامه
+//   reception / cashier
+//     {user} {cashier} {issued} {shiftuser}
+//     {receptionist}  نام پذیرش‌کننده
+//     {cashier_name}  نام صندوق‌دار
+//     {scnum}         ش.ص
+//     {receiptNo}     شمارهٔ قبض
+//     {receiptbarcode} بارکد اختصاصی رسید (deterministic)
+// ---------------------------------------------------------------------------
 
 // Resolve a paper preset name to mm dimensions (portrait). Returns false if
 // the name is "custom" (caller keeps paperW/paperH).

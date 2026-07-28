@@ -32,6 +32,23 @@ const InsuranceDef SUPP_INSURANCES[] = {
 };
 const int N_SUPP = sizeof(SUPP_INSURANCES)/sizeof(SUPP_INSURANCES[0]);
 
+// ---------------------------------------------------------------------------
+//  v1.55.0 — REAL coverage-percentage lookups used by the print designer's
+//  {ins_percent} / {supp_percent} tokens. These read the SAME authoritative
+//  tables the billing engine uses, so the printed percentage always equals the
+//  percentage the bill was actually computed with. Out-of-range indices return
+//  -1 (meaning «unknown») so the token prints an EMPTY string rather than a
+//  misleading «۰٪». Nothing here is ever randomised or guessed.
+// ---------------------------------------------------------------------------
+int Ins_Percent(int idx){
+    if(idx<0 || idx>=N_INSURANCES) return -1;
+    return INSURANCES[idx].pct;
+}
+int Supp_Percent(int idx){
+    if(idx<0 || idx>=N_SUPP) return -1;
+    return SUPP_INSURANCES[idx].pct;
+}
+
 // ------------------------------------------------------------- tariffs -----
 //  Base service tariff per visit type (Rial). Editable; can later be loaded
 //  from data\tariffs.ini for server-side configuration.

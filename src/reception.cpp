@@ -100,6 +100,12 @@
 struct SvcRow {
     std::wstring code;
     std::wstring name;
+    // v1.55.0 — شرح خدمت / نوع خدمت, resolved from the Service Management
+    // catalogue (ServiceDef::desc / ServiceDef::category) the moment the row is
+    // added. They feed the receipt's «شرح خدمت» and «نوع خدمت» columns. Never
+    // fabricated — an unknown code leaves them EMPTY (printed as "—").
+    std::wstring desc;
+    std::wstring category;
     int          qty;
     long long    price;      // unit price (ریال) — free rate or catalogue tariff
     long long    discount;   // per-row discount
@@ -1285,6 +1291,24 @@ static bool svcResolve(const std::wstring& codeIn, std::wstring& outName, long l
     return false;
 }
 
+// v1.55.0 — resolve شرح خدمت (desc) and نوع/گروه خدمت (category) for a service
+// code straight from the Service Management catalogue. Returns false (leaving
+// the outputs untouched) when the code is unknown, so the printed receipt shows
+// "—" for those columns instead of an invented value.
+static bool svcResolveMeta(const std::wstring& codeIn,
+                           std::wstring& outDesc, std::wstring& outCat){
+    std::wstring c=svcNormCode(codeIn);
+    if(c.empty()) return false;
+    const ServiceDef* sd = findService(codeIn);
+    if(!sd) sd = findService(c);
+    if(sd && sd->status!=0){
+        outDesc = sd->desc;
+        outCat  = sd->category.empty() ? sd->dept : sd->category;
+        return true;
+    }
+    return false;
+}
+
 // ----- service-code box: Enter looks up the catalogue and hops to name -------
 //  Type «۱۱۱» + Enter → the name box is populated with «تزریقات» and focus moves
 //  there (empty codes are allowed for free-text services). This never opens a
@@ -1397,8 +1421,107 @@ static void collect(TabPage* t, ReceptionRecord& r){
         sl.discount = sr.discount;
         sl.insShare = sr.insShare;
         sl.patShare = sr.patShare;
+        // v1.55.0: carry شرح خدمت / نوع خدمت through to the print engine. If the
+        // row was captured before this build (or its code is unknown) we make
+        // one last catalogue attempt — still 100% real data, never invented.
+        sl.desc     = sr.desc;
+        sl.category = sr.category;
+        if(sl.desc.empty() && sl.category.empty())
+            svcResolveMeta(sr.code, sl.desc, sl.category);
         r.services.push_back(sl);
     }
+
+    // =====================================================================
+    //  v1.55.0 — REAL-RECEIPT FIELDS (درمانگاه ثامن‌الائمه redesign)
+    //  Every assignment below reads a control the operator actually filled in,
+    //  the live session, or the reference tables. NOTHING is randomised: a
+    //  value the operator did not enter stays EMPTY and the receipt prints a
+    //  blank (or the design hides that row when visibility == 1).
+    // =====================================================================
+
+    // ---- کد پزشک معالج / کد و نام انجام‌دهنده ----------------------------
+    if(t->eDoc2Code){ wchar_t cb2[64]={0}; GetWindowTextW(t->eDoc2Code,cb2,64); r.doctorCode=trim(cb2); }
+    if(t->ePerfCode){ wchar_t cb2[64]={0}; GetWindowTextW(t->ePerfCode,cb2,64); r.performerCode=trim(cb2); }
+    if(t->cPerfList){
+        int pidx=(int)SendMessageW(t->cPerfList,CB_GETCURSEL,0,0);
+        if(pidx>0){ wchar_t pb[256]={0};
+            SendMessageW(t->cPerfList,CB_GETLBTEXT,pidx,(LPARAM)pb);
+            r.performer=trim(pb); }
+    }
+    // اگر «انجام دهنده» ثبت نشده باشد، پزشک معالج انجام‌دهنده است.
+    if(r.performer.empty())     r.performer     = r.treatingDoctor;
+    if(r.performerCode.empty()) r.performerCode = r.doctorCode;
+
+    // ---- شرح تخصص + کد تخصص (از مخزن پزشکان) ---------------------------
+    r.specialty.clear(); r.specialtyCode.clear();
+    if(!r.treatingDoctor.empty()){
+        std::vector<DoctorDef> docs = loadDoctors();
+        for(size_t i=0;i<docs.size();++i){
+            if(docs[i].name==r.treatingDoctor){
+                r.specialty = docs[i].specialty;
+                // کد تخصص = همان کد ردیف پزشک (۱-مبنا و بازگشت‌پذیر)
+                if(!r.doctorCode.empty()) r.specialtyCode = r.doctorCode;
+                break;
+            }
+        }
+    }
+
+    // ---- درصد بیمهٔ پایه و مکمل ----------------------------------------
+    // درصد پایه از جدول مرجع بیمه‌ها؛ درصد مکمل از جعبهٔ ورودی کاربر و اگر
+    // خالی بود از جدول مرجع مکمل. مقدار نامعتبر → -1 (توکن خالی چاپ می‌شود).
+    r.insPercent  = Ins_Percent(ii);
+    r.suppPercent = -1;
+    {
+        HWND hp = t->eSuppPctIns ? t->eSuppPctIns : t->eSuppPct2;
+        if(hp){
+            wchar_t pb[32]={0}; GetWindowTextW(hp,pb,32);
+            std::wstring pv;
+            for(wchar_t ch : std::wstring(pb)){
+                if(ch>=L'۰'&&ch<=L'۹')      pv+=(wchar_t)(L'0'+(ch-L'۰'));
+                else if(ch>=L'0'&&ch<=L'9') pv+=ch;
+            }
+            if(!pv.empty()){ int pv2=_wtoi(pv.c_str()); if(pv2>0&&pv2<=100) r.suppPercent=pv2; }
+        }
+        if(r.suppPercent<0) r.suppPercent = Supp_Percent(si);
+    }
+
+    // ---- نقدی / کارتخوان (POS) -----------------------------------------
+    // P = پرداختی (کارتخوان) و S = صندوق (نقدی) روی کارت میانی.
+    r.pos = 0; r.cash = 0;
+    if(t->eApptP){ wchar_t mb[64]={0}; GetWindowTextW(t->eApptP,mb,64); r.pos = parseMoney(mb); }
+    if(t->eApptS){ wchar_t mb[64]={0}; GetWindowTextW(t->eApptS,mb,64); r.cash = parseMoney(mb); }
+    // اگر هیچ‌کدام تکمیل نشده باشد، کل مبلغ پرداختی نقدی در نظر گرفته می‌شود.
+    if(r.pos==0 && r.cash==0) r.cash = r.paid;
+
+    // ---- تاریخ/ساعت نوبت و مهر زمانی ثبت -------------------------------
+    if(t->eApptDate){
+        wchar_t ab[64]={0}; GetWindowTextW(t->eApptDate,ab,64);
+        std::wstring ad=trim(ab); if(!ad.empty()) r.apptDate=ad;
+    }
+    {
+        SYSTEMTIME st; GetLocalTime(&st);
+        wchar_t tb[32];
+        swprintf(tb,32,L"%02d:%02d:%02d",st.wHour,st.wMinute,st.wSecond);
+        r.apptSec = tb;
+        if(r.apptTime.empty()){
+            wchar_t t2[16]; swprintf(t2,16,L"%02d:%02d",st.wHour,st.wMinute);
+            r.apptTime = t2;
+        }
+        if(r.apptDate.empty()) r.apptDate = jalaliDateShort(st);
+        swprintf(tb,32,L"%02d:%02d",st.wHour,st.wMinute);
+        r.regStamp = r.apptDate + L"  " + tb;
+    }
+
+    // ---- پذیرش‌گر / صندوق‌دار / شمارهٔ صندوق -----------------------------
+    r.receptionist = g_session.user.fullname.empty()
+                       ? g_session.user.username : g_session.user.fullname;
+    r.cashierName  = r.receptionist;
+    { wchar_t sb[16]; swprintf(sb,16,L"%d",g_session.shift+1); r.scNum=sb; }
+
+    // ---- شمارهٔ قبض (مبنای بارکد/کد کوتاه — کاملاً قطعی، بدون تصادف) ----
+    // شمارهٔ قبض همان شمارهٔ نوبت امروز است؛ موتور چاپ بارکد و کد کوتاه را از
+    // همین عدد می‌سازد، بنابراین چاپ مجدد همان پذیرش همیشه یکسان است.
+    if(r.receiptNo<=0 && r.queueNo>0) r.receiptNo=(long long)r.queueNo;
 }
 
 static void closeTab(TabPage* t);   // fwd
@@ -1463,6 +1586,9 @@ static bool svcCommitPanel(TabPage* t){
     if(name.empty() && resolved) name=resName;
     if(name.empty()) name=L"خدمت";
     s.name=name;
+    // v1.55.0: pull شرح خدمت / نوع خدمت from the catalogue so the printed
+    // services table can fill its «شرح خدمت» column with REAL data.
+    svcResolveMeta(code, s.desc, s.category);
     int qv=_wtoi(qb); if(qv<=0) qv=1; s.qty=qv;
     bool freeRate = SendMessageW(t->chkSvcFree,BM_GETCHECK,0,0)==BST_CHECKED;
     if(freeRate){

@@ -406,6 +406,44 @@ static void drawItemGdip(Graphics& g,DesignerState* st,const PrintItem& it,bool 
             if(((i+j)%2)==0 || i==0||j==0||i==6||j==6)
                 g.FillRectangle(&b,x+i*cell,y+j*cell,cell,cell);
         break; }
+    case PIT_BARCODE:{
+        // v1.55.0 — representative 1-D barcode preview. The real symbol is
+        // generated at print time from the bound field (live data); here we
+        // draw a stable, deterministic bar pattern of the same proportions so
+        // the operator can size and position it accurately (WYSIWYG geometry).
+        SolidBrush b(tc);
+        REAL barsH = (REAL)(hgt*0.78);
+        if(barsH<2) barsH=hgt;
+        REAL qz = (REAL)(w*0.06);
+        REAL avail = w-2*qz; if(avail<4) { qz=0; avail=w; }
+        // 67 modules, a fixed pseudo-pattern (NOT random — a constant table)
+        static const char PAT[] =
+            "1101100101110110010011010011100101101110010110011101001100101101101";
+        int n=(int)(sizeof(PAT)/sizeof(PAT[0]))-1;
+        int i=0;
+        while(i<n){
+            if(PAT[i]=='0'){ ++i; continue; }
+            int j=i; while(j<n && PAT[j]=='1') ++j;
+            REAL bx0 = x+qz + avail*(REAL)i/(REAL)n;
+            REAL bx1 = x+qz + avail*(REAL)j/(REAL)n;
+            if(bx1-bx0 < 1.0f) bx1 = bx0+1.0f;
+            g.FillRectangle(&b,bx0,y,bx1-bx0,barsH);
+            i=j;
+        }
+        // human-readable numeric line placeholder under the bars
+        if(hgt-barsH > 3){
+            FontFamily ff(it.fontName.empty()?L"Vazirmatn":it.fontName.c_str());
+            if(ff.IsAvailable()){
+                REAL fpx=(REAL)std::max(6.0,(it.fontPt>0?it.fontPt:8.0)*st->zoom*(96.0/72.0)*0.9);
+                Font fnt(&ff,fpx,FontStyleRegular,UnitPixel);
+                StringFormat sf; sf.SetAlignment(StringAlignmentCenter);
+                sf.SetLineAlignment(StringAlignmentCenter);
+                RectF tr(x,y+barsH,w,hgt-barsH);
+                SolidBrush tb(tc);
+                g.DrawString(L"\u06f1\u06f2\u06f3\u06f4\u06f5\u06f6\u06f7",-1,&fnt,tr,&sf,&tb);
+            }
+        }
+        break; }
     case PIT_LOGO: case PIT_IMAGE: case PIT_PHOTO:{
         // v1.23.0 WYSIWYG: render the ACTUAL uploaded image (file path or
         // data:base64 URI) using the SAME engine + object-fit + padding as the
@@ -636,6 +674,8 @@ static void designer_buildInspector(HWND h){
             {L"\u062a\u0635\u0648\u06cc\u0631 \u0633\u0641\u0627\u0631\u0634\u06cc",PIT_IMAGE},
             {L"\u0644\u0648\u06af\u0648 \u062f\u0631\u0645\u0627\u0646\u06af\u0627\u0647",PIT_LOGO},
             {L"QR / \u0628\u0627\u0631\u06a9\u062f",PIT_QR},
+            // v1.55.0 — بارکد خطی واقعی (Code128 / Code39 / EAN-13)
+            {L"\u0628\u0627\u0631\u06a9\u062f \u062e\u0637\u06cc (\u0642\u0627\u0628\u0644 \u0627\u0633\u06a9\u0646)",PIT_BARCODE},
             {L"\u0639\u06a9\u0633 \u067e\u0631\u0633\u0646\u0644\u06cc \u0628\u06cc\u0645\u0627\u0631",PIT_PHOTO},
             {L"\u0634\u0645\u0627\u0631\u0647 \u0646\u0648\u0628\u062a",PIT_APPTNO},
         };
@@ -785,6 +825,16 @@ static void addPaletteItem(DesignerState* st,int type){
     case PIT_VLINE: it.w=0.2; it.h=40; it.borderWidth=0.3; break;
     case PIT_RECT:  it.w=40; it.h=20; it.borderWidth=0.3; break;
     case PIT_QR:    it.w=20; it.h=20; it.field=L"receiptNo"; break;
+    case PIT_BARCODE:
+        // v1.55.0 — a real, scannable Code128-B symbol bound to the receipt's
+        // deterministic barcode payload, with the numeric code printed under
+        // the bars (exactly like the insurance page of the paper receipt).
+        it.w=52; it.h=16;
+        it.field=L"{receiptbarcode}";
+        it.text=L"{\"sym\":\"code128\",\"hri\":true,\"quiet\":2}";
+        it.fontPt=8; it.align=1; it.dir=1;
+        it.textColor=0x000000; it.fillTransparent=true; it.borderWidth=0;
+        break;
     case PIT_LOGO:  it.w=24; it.h=24; break;
     case PIT_IMAGE: it.w=30; it.h=20; break;
     case PIT_PHOTO: it.w=22; it.h=28; it.borderWidth=0.3; break;
@@ -796,12 +846,16 @@ static void addPaletteItem(DesignerState* st,int type){
         // horizontally, ~42mm tall (room for header + ~6 service rows). Carries
         // the canonical 4-column RTL header (ردیف / نام خدمت / کد / مبلغ).
         it.x=st->design.paperW/2-60; it.y=st->design.paperH/2-20; it.w=120; it.h=42;
-        it.text=L"{\"cols\":4,\"header\":true,\"widths\":[0.55,3.2,1.1,2.15],"
-                L"\"labels\":[\"\u0631\u062f\u06cc\u0641\",\"\u0646\u0627\u0645 \u062e\u062f\u0645\u062a\","
-                L"\"\u06a9\u062f\",\"\u0645\u0628\u0644\u063a\"]}";
-        it.fontPt=8.5; it.bold=false; it.align=1;
-        it.borderColor=0x1F5FD6; it.borderWidth=0.35;
-        it.textColor=0x0D2144; it.fillTransparent=true; it.padding=0.8;
+        // v1.55.0: the canonical THREE-column RTL header of the real receipt
+        // — نام خدمت | شرح خدمت | تعداد — with monochrome styling and
+        // explicit row/header heights so the table prints identically anywhere.
+        it.text=L"{\"cols\":3,\"header\":true,\"widths\":[0.55,0.30,0.15],"
+                L"\"labels\":[\"\u0646\u0627\u0645 \u062e\u062f\u0645\u062a\","
+                L"\"\u0634\u0631\u062d \u062e\u062f\u0645\u062a\",\"\u062a\u0639\u062f\u0627\u062f\"]}";
+        it.fontPt=8.5; it.bold=false; it.align=0; it.dir=0;
+        it.borderColor=0x000000; it.borderWidth=0.3;
+        it.textColor=0x000000; it.fillTransparent=true; it.padding=0.8;
+        it.headerH=7; it.rowH=6;
         break; }
     case PIT_TABLE: {
         // a small generic 3×3 editable grid (header + 2 data rows)

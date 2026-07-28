@@ -1,827 +1,763 @@
 /* ===========================================================================
-   templates.js — Azadi-Teb ready-made professional print templates (v1.20.0)
-   60 templates total, grouped:
-     • reception   (20) — admission slips / receipts / bills
-     • appointment (20) — queue / appointment cards
-     • lab         (20) — laboratory & radiology request/report headers
-   Each template is mm-based (paper coordinates) so it reflows correctly when
-   the paper size is switched (A4 ↔ A5 etc.). Layouts are built relative to the
-   paper width/height, modelled after common Iranian clinic forms.
+   templates.js — Azadi-Teb ready-made print designs  (v1.55.0 — FULL REWRITE)
+
+   ★ همهٔ طرح‌های آمادهٔ قبلی حذف شده‌اند و ۳۰ طرح کاملاً جدید ساخته شده است.
+
+   مشخصات مشترک هر ۳۰ طرح (بر اساس رسید کاغذی واقعی «درمانگاه شبانه‌روزی
+   ثامن‌الائمه»):
+     • گروه: reception            — همه در دستهٔ «پذیرش»
+     • کاغذ: A4 عمودی (portrait)  — با موتور واکنش‌گرا به A5/A6 هم می‌ریزد
+     • تک‌رنگ (MONOCHROME)        — فقط مشکی/خاکستری/سفید؛ هیچ رنگی به کار
+                                     نرفته تا روی هر چاپگر سیاه‌وسفید عیناً
+                                     مانند پیش‌نمایش چاپ شود
+     • جدول خدمات صحیح            — ستون‌ها از راست به چپ:
+                                     «نام خدمت | شرح خدمت | تعداد»
+                                     با عرض‌های [۰٫۵۵ ، ۰٫۳۰ ، ۰٫۱۵]
+     • بدون «نام پدر» و بدون «آدرس»
+     • RTL واقعی                  — همهٔ آیتم‌ها align:0 (راست‌چین) و dir:0
+                                     (راست‌به‌چپ)؛ فقط عنوان‌های وسط‌چین
+                                     align:1 / dir:2 هستند
+     • هیچ مقدار تصادفی‌ای وجود ندارد — هر مقدار از توکن دادهٔ زندهٔ رکورد
+       پذیرش می‌آید و در printer.cpp → pdFieldValue() پاسخ داده می‌شود
    =========================================================================== */
 (function () {
   "use strict";
 
-  var PAPER = { A4: [210, 297], A5: [148, 210], A6: [105, 148], Letter: [215.9, 279.4] };
+  /* ---------------------------------------------------------------- palette */
+  // تک‌رنگ: تنها این هشت مقدار در کل فایل استفاده می‌شود (هیچ رنگی نیست).
+  var INK      = "#000000";   // متن اصلی / خطوط اصلی
+  var INK_SOFT = "#333333";   // متن ثانویه
+  var INK_DIM  = "#5a5a5a";   // برچسب‌های کوچک
+  var RULE     = "#000000";   // خط‌کشی
+  var RULE_DIM = "#8a8a8a";   // خط‌کشی نازک
+  var BAND     = "#e9e9e9";   // نوار خاکستری روشن (سربرگ جدول/باندها)
+  var BAND_DK  = "#d0d0d0";   // نوار خاکستری تیره‌تر
+  var PAPER_BG = "#ffffff";
+
   var _uid = 0;
   function nid() { return ++_uid; }
 
+  /* ------------------------------------------------------------- primitives */
   function base() {
     return {
-      id: nid(), type: "label", x: 10, y: 10, w: 40, h: 8, rot: 0, z: 1,
+      id: nid(), type: "label", x: 10, y: 10, w: 40, h: 7, rot: 0, z: 1,
       locked: false, isFrame: false, text: "", field: "", prefix: "", suffix: "",
-      font: "Vazirmatn", pt: 11, bold: false, italic: false, align: 0, dir: 0, lineSpacing: 1.25,
-      textColor: "#111111", fillColor: "#ffffff", fillTransparent: true,
-      borderColor: "#333333", borderWidth: 1, corner: 0, padding: 1, opacity: 1,
-      visibility: 0, startValue: 1, step: 1, imgPath: ""
+      font: "Vazirmatn", pt: 9.5, bold: false, italic: false,
+      align: 0, dir: 0, valign: 1, lineSpacing: 1.25,
+      textColor: INK, fillColor: PAPER_BG, fillTransparent: true,
+      borderColor: RULE, borderWidth: 0.3, corner: 0, padding: 0.8, opacity: 1,
+      visibility: 0, startValue: 1, step: 1, imgPath: "",
+      rowH: 0, headerH: 0
     };
   }
   function mk(o) { return Object.assign(base(), o); }
 
-  function L(x, y, w, h, text, o) { return mk(Object.assign({ type: "label", x: x, y: y, w: w, h: h, text: text, align: 0, pt: 10 }, o || {})); }
-  function F(x, y, w, h, field, o) { return mk(Object.assign({ type: "field", x: x, y: y, w: w, h: h, field: field, align: 0, pt: 10 }, o || {})); }
-  function HL(x, y, w, o) { return mk(Object.assign({ type: "hline", x: x, y: y, w: w, h: 0.5, borderWidth: 0.5, borderColor: "#444" }, o || {})); }
-  function VL(x, y, h, o) { return mk(Object.assign({ type: "vline", x: x, y: y, w: 0.5, h: h, borderWidth: 0.5, borderColor: "#444" }, o || {})); }
-  function R(x, y, w, h, o) { return mk(Object.assign({ type: "rect", x: x, y: y, w: w, h: h, borderWidth: 0.8, borderColor: "#345" }, o || {})); }
-  function FR(W, H) { return mk({ type: "frame", x: 4, y: 4, w: W - 8, h: H - 8, isFrame: true, borderWidth: 1.2, borderColor: "#1f4e8c" }); }
-  function LOGO(x, y, s) { return mk({ type: "logo", x: x, y: y, w: s, h: s, borderColor: "#aab", borderWidth: 0.5 }); }
-  function QR(x, y, s) { return mk({ type: "qr", x: x, y: y, w: s, h: s, borderColor: "#aab", borderWidth: 0.5 }); }
-  function PHOTO(x, y, w, h) { return mk({ type: "photo", x: x, y: y, w: w, h: h, borderColor: "#aab", borderWidth: 0.6 }); }
-  function APPT(x, y, w, h, o) { return mk(Object.assign({ type: "apptno", x: x, y: y, w: w, h: h, pt: 30, bold: true, align: 1, startValue: 1, step: 1 }, o || {})); }
-
-  // labelled value: "label: [field]" laid on one row, RTL
-  function pair(x, y, w, labelTxt, field, o) {
-    o = o || {};
-    return F(x, y, w, o.h || 7, field, Object.assign({ prefix: labelTxt + " ", align: 0, pt: o.pt || 9.5, bold: o.bold || false, textColor: o.color || "#111" }, o));
+  // متن ثابت راست‌چین
+  function L(x, y, w, h, text, o) {
+    return mk(Object.assign({ type: "label", x: x, y: y, w: w, h: h, text: text, align: 0, dir: 0 }, o || {}));
   }
-
-  var ALL = [];
-  function push(group, name, paper, orient, items) {
-    items.forEach(function (it, i) { it.id = i + 1; });
-    ALL.push({ id: 0, name: name, kind: "builtin", group: group, paper: paper, orientation: orient || 0, items: items });
+  // عنوان وسط‌چین
+  function T(x, y, w, h, text, o) {
+    return mk(Object.assign({ type: "label", x: x, y: y, w: w, h: h, text: text, align: 1, dir: 2, bold: true }, o || {}));
   }
-
-  /* ====================================================================== *
-   *  SHARED PROFESSIONAL HELPERS (used by reception + premium)
-   *  All text defaults to RTL (dir:0) right-aligned (align:0) so every form
-   *  reads naturally right-to-left. Centered titles use dir:2.
-   * ====================================================================== */
-  // coloured fill band (header / accent strip)
-  function band(x, y, w, h, color, o) {
-    return mk(Object.assign({ type: "rect", x: x, y: y, w: w, h: h, fillTransparent: false,
-      fillColor: color, borderWidth: (o && o.borderWidth) || 0, borderColor: (o && o.borderColor) || color,
-      corner: (o && o.corner) != null ? o.corner : 1.5 }, o || {}));
+  // فیلد دادهٔ راست‌چین
+  function F(x, y, w, h, field, o) {
+    return mk(Object.assign({ type: "field", x: x, y: y, w: w, h: h, field: field, align: 0, dir: 0 }, o || {}));
   }
-  // centered RTL title
-  function title(x, y, w, h, txt, o) { return L(x, y, w, h, txt, Object.assign({ align: 1, dir: 2, bold: true }, o || {})); }
-  // right-aligned RTL label:value pair (label first, value flows to its left)
+  // «برچسب: مقدار» در یک سطر — راست‌چین (برچسب اول، مقدار به سمت چپ)
   function PV(x, y, w, lbl, field, o) {
     o = o || {};
-    return F(x, y, w, o.h || 7, field, Object.assign({
-      prefix: lbl + " ", align: 0, dir: 0, pt: o.pt || 9.5, bold: o.bold || false, textColor: o.color || "#1a2433" }, o));
+    return F(x, y, w, o.h || 6.2, field, Object.assign({
+      prefix: lbl + " ", align: 0, dir: 0, pt: o.pt || 9,
+      bold: !!o.bold, textColor: o.color || INK, visibility: o.visibility || 0
+    }, o));
   }
-  // soft info cell (small grey label on top, bold value below) — RTL
-  function cell(x, y, w, h, lbl, field, o) {
-    o = o || {}; var arr = [];
-    arr.push(R(x, y, w, h, { borderColor: o.bc || "#cdd7e6", borderWidth: 0.4, corner: 1.2,
-      fillTransparent: o.bg === false, fillColor: o.bg || "#f6f9ff" }));
-    arr.push(L(x + 2, y + 1.1, w - 4, 4, lbl, { pt: 7.2, align: 0, dir: 0, textColor: o.lc || "#7a879c" }));
-    if (field) arr.push(F(x + 2, y + 4.8, w - 4, h - 5.6, field, { pt: o.pt || 9.5, bold: o.bold !== false, align: 0, dir: 0, textColor: o.color || "#16233a" }));
-    else arr.push(L(x + 2, y + 4.8, w - 4, h - 5.6, o.text || "", { pt: o.pt || 9.5, bold: o.bold !== false, align: 0, dir: 0, textColor: o.color || "#16233a" }));
-    return arr;
+  function HL(x, y, w, o) {
+    return mk(Object.assign({ type: "hline", x: x, y: y, w: w, h: 0.4,
+      borderWidth: (o && o.bw) || 0.3, borderColor: (o && o.rc) || RULE }, o || {}));
   }
-  function svcTable(x, y, w, h, o) {
+  function VL(x, y, h, o) {
+    return mk(Object.assign({ type: "vline", x: x, y: y, w: 0.4, h: h,
+      borderWidth: (o && o.bw) || 0.3, borderColor: (o && o.rc) || RULE }, o || {}));
+  }
+  function R(x, y, w, h, o) {
+    return mk(Object.assign({ type: "rect", x: x, y: y, w: w, h: h,
+      borderWidth: (o && o.bw) || 0.3, borderColor: (o && o.rc) || RULE }, o || {}));
+  }
+  // نوار پرشدهٔ خاکستری (تک‌رنگ)
+  function BANDBOX(x, y, w, h, tone, o) {
+    return mk(Object.assign({ type: "rect", x: x, y: y, w: w, h: h,
+      fillTransparent: false, fillColor: tone || BAND,
+      borderWidth: (o && o.bw) != null ? o.bw : 0, borderColor: (o && o.rc) || RULE,
+      corner: (o && o.corner) != null ? o.corner : 0 }, o || {}));
+  }
+  function FRAME(W, H, m, o) {
+    m = m || 5;
+    return mk(Object.assign({ type: "frame", x: m, y: m, w: W - 2 * m, h: H - 2 * m,
+      isFrame: true, borderWidth: (o && o.bw) || 0.5, borderColor: RULE }, o || {}));
+  }
+  function LOGO(x, y, w, h) {
+    return mk({ type: "logo", x: x, y: y, w: w, h: h || w, borderColor: RULE_DIM, borderWidth: 0.3 });
+  }
+  function QR(x, y, s) {
+    return mk({ type: "qr", x: x, y: y, w: s, h: s, field: "{receiptbarcode}",
+      borderColor: RULE_DIM, borderWidth: 0.3 });
+  }
+  function PHOTO(x, y, w, h) {
+    return mk({ type: "photo", x: x, y: y, w: w, h: h, borderColor: RULE_DIM, borderWidth: 0.3 });
+  }
+  function APPTNO(x, y, w, h, o) {
+    return mk(Object.assign({ type: "apptno", x: x, y: y, w: w, h: h,
+      pt: (o && o.pt) || 26, bold: true, align: 1, dir: 1, startValue: 1, step: 1 }, o || {}));
+  }
+
+  /* --------------------------------------------------- REAL barcode (v1.55) */
+  // بارکد خطی واقعی و قابل اسکن. payload از توکن دادهٔ زنده می‌آید (پیش‌فرض
+  // {receiptbarcode} که به‌طور قطعی از شمارهٔ قبض ساخته می‌شود) و عدد آن هم
+  // زیر میله‌ها چاپ می‌شود. هرگز تصادفی نیست.
+  function BARCODE(x, y, w, h, o) {
     o = o || {};
-    var cells = o.cells || [{ r: 0, c: 0, t: "شرح خدمت" }, { r: 0, c: 1, t: "تعداد" }, { r: 0, c: 2, t: "مبلغ (ریال)" }];
-    var widths = o.widths || [0.55, 0.2, 0.25];
-    var cols = widths.length, rows = o.rows || 4;
-    return mk({ type: "table", x: x, y: y, w: w, h: h, borderColor: o.borderColor || "#2b5f9e", borderWidth: 0.5,
-      text: JSON.stringify({ cols: cols, rows: rows, header: true, widths: widths, cells: cells }) });
-  }
-  // §1.53.0 (Bug A/C): a DYNAMIC services list. Rows are filled at print time
-  // from ReceptionRecord.services (one row per admitted service). This is the
-  // correct item for any "خدمات / services" section — svcTable() (static grid)
-  // is only for genuinely fixed tables (e.g. lab results). The stored JSON shape
-  // matches C++ pdParseServicesModel: {cols,header,widths,labels}.
-  function svcList(x, y, w, h, o) {
-    o = o || {};
-    var labels = o.labels || ["ردیف", "نام خدمت", "کد", "مبلغ (ریال)"];
-    var widths = o.widths || [0.1, 0.5, 0.15, 0.25];
-    var cols = labels.length;
     return mk({
-      type: "services", x: x, y: y, w: w, h: h,
-      pt: o.pt || 8.5,
-      borderColor: o.borderColor || "#2b5f9e", borderWidth: o.borderWidth || 0.5,
-      fillColor: o.accent || o.borderColor || "#1f5fd6",   // header band colour
-      textColor: o.color || "#16233a", visibility: 0,
-      text: JSON.stringify({ cols: cols, header: o.header !== false, widths: widths, labels: labels })
+      type: "barcode", x: x, y: y, w: w, h: h,
+      field: o.field || "{receiptbarcode}",
+      text: JSON.stringify({ sym: o.sym || "code128", hri: o.hri !== false, quiet: o.quiet != null ? o.quiet : 2 }),
+      pt: o.pt || 8, align: 1, dir: 1,
+      textColor: INK, fillTransparent: true, borderWidth: 0
     });
   }
 
-  /* ====================================================================== *
-   *  RECEPTION (20) — twenty DISTINCT, professional, RTL admission forms.
-   *  Each has its own colour identity, layout and field set (no two alike).
-   * ====================================================================== */
-  (function () {
-    var AC; // accent colour per template
-
-    // 1) کلاسیک آبی A5 — ساده، تمیز، سطری
-    push("reception", "۱) پذیرش کلاسیک آبی", "A5", 0, (function () {
-      AC = "#1f4e8c"; var W = 148, H = 210, x = 8, cw = W - 16, items = [], y = 8;
-      items.push(LOGO(W - x - 18, y, 18));
-      items.push(title(x, y + 1, cw - 22, 9, "درمانگاه آزادی طب", { pt: 16, textColor: AC, align: 0, dir: 0 }));
-      items.push(L(x, y + 10, cw - 22, 6, "برگهٔ پذیرش بیمار", { pt: 9.5, align: 0, dir: 0, textColor: "#5a6b85" })); y += 20;
-      items.push(HL(x, y, cw, { borderColor: AC, borderWidth: 0.8 })); y += 4;
-      items.push(PV(x + cw / 2, y, cw / 2, "تاریخ:", "{date}"));
-      items.push(PV(x, y, cw / 2, "ساعت:", "{time}")); y += 8;
-      items.push(PV(x, y, cw, "نام و نام خانوادگی:", "{full}", { bold: true, pt: 11 })); y += 8;
-      items.push(PV(x + cw / 2, y, cw / 2, "کد ملی:", "{nid}")); items.push(PV(x, y, cw / 2, "نام پدر:", "{father}")); y += 7.5;
-      items.push(PV(x + cw / 2, y, cw / 2, "تاریخ تولد:", "{birth}")); items.push(PV(x, y, cw / 2, "جنسیت:", "{gender}")); y += 7.5;
-      items.push(PV(x + cw / 2, y, cw / 2, "تلفن همراه:", "{mobile}")); items.push(PV(x, y, cw / 2, "بیمه:", "{ins}")); y += 9;
-      items.push(L(x, y, cw, 6, "صورتحساب", { bold: true, pt: 10, align: 0, dir: 0, textColor: AC })); y += 7;
-      items.push(PV(x + cw / 2, y, cw / 2, "جمع کل:", "{total}")); items.push(PV(x, y, cw / 2, "پرداختی:", "{paid}", { bold: true })); y += 10;
-      items.push(R(x, y, cw, 13, { borderColor: AC, borderWidth: 0.9, corner: 2 }));
-      items.push(F(x + 2, y + 3, cw - 4, 7, "{queue}", { prefix: "شماره نوبت: ", bold: true, pt: 13, align: 1, dir: 2, textColor: AC })); y += 16;
-      items.push(HL(x, y, cw, { borderColor: "#cfd6e2" })); y += 1.5;
-      items.push(L(x, y, cw, 5, "نشانی: تهران، خیابان آزادی — تلفن: ۰۲۱-۰۰۰۰۰۰۰۰", { pt: 7.5, align: 1, dir: 2, textColor: "#9aa3b4" }));
-      return items;
-    })());
-
-    // 2) بنر رنگی مدرن A5 — هدر یکپارچه + سلول‌های نرم
-    push("reception", "۲) پذیرش مدرن (هدر رنگی)", "A5", 0, (function () {
-      AC = "#0e7c86"; var W = 148, H = 210, x = 8, cw = W - 16, items = [], y = 8;
-      items.push(band(x, y, cw, 20, AC, { corner: 2 }));
-      items.push(LOGO(x + 2, y + 2, 16));
-      items.push(L(x + 20, y + 2.5, cw - 22, 7, "درمانگاه آزادی طب", { pt: 14, bold: true, align: 0, dir: 0, textColor: "#fff" }));
-      items.push(L(x + 20, y + 10.5, cw - 22, 5, "پذیرش و صورتحساب بیمار", { pt: 8.5, align: 0, dir: 0, textColor: "#d6f3f5" })); y += 24;
-      items.push(PV(x + cw / 2, y, cw / 2, "تاریخ:", "{date}")); items.push(PV(x, y, cw / 2, "شماره پذیرش:", "{receiptNo}")); y += 9;
-      var c2 = (cw - 4) / 2;
-      cell(x + c2 + 4, y, c2, 11, "نام و نام خانوادگی", "{full}", { bc: AC }).forEach(function (e) { items.push(e); });
-      cell(x, y, c2, 11, "کد ملی", "{nid}", { bc: AC }).forEach(function (e) { items.push(e); }); y += 13;
-      cell(x + c2 + 4, y, c2, 11, "نام پدر", "{father}", { bc: AC }).forEach(function (e) { items.push(e); });
-      cell(x, y, c2, 11, "تاریخ تولد", "{birth}", { bc: AC }).forEach(function (e) { items.push(e); }); y += 13;
-      cell(x + c2 + 4, y, c2, 11, "جنسیت", "{gender}", { bc: AC }).forEach(function (e) { items.push(e); });
-      cell(x, y, c2, 11, "تلفن همراه", "{mobile}", { bc: AC }).forEach(function (e) { items.push(e); }); y += 15;
-      items.push(band(x, y, cw * 0.5, 13, "#e7f6f7", { corner: 2, borderColor: AC, borderWidth: 0.5 }));
-      items.push(F(x, y + 3, cw * 0.5, 7, "{queue}", { prefix: "نوبت: ", bold: true, pt: 13, align: 1, dir: 2, textColor: AC }));
-      items.push(PV(x + cw * 0.5 + 3, y + 1, cw * 0.5 - 3, "جمع:", "{total}"));
-      items.push(PV(x + cw * 0.5 + 3, y + 7, cw * 0.5 - 3, "پرداختی:", "{paid}", { bold: true, color: "#0f7a3a" })); y += 16;
-      items.push(L(x, y, cw, 5, "نسخهٔ بیمار — لطفاً تا پایان درمان نزد خود نگه دارید.", { pt: 7.5, align: 1, dir: 2, textColor: "#9aa3b4" }));
-      return items;
-    })());
-
-    // 3) رسید حرارتی فشرده رول ۸ سانت
-    push("reception", "۳) رسید حرارتی ۸ سانت", "R80", 0, (function () {
-      var W = 80, H = 200, x = 4, cw = W - 8, items = [], y = 5;
-      items.push(L(x, y, cw, 7, "درمانگاه آزادی طب", { pt: 13, bold: true, align: 1, dir: 2 })); y += 8;
-      items.push(F(x, y, cw, 4, "{clinicphone}", { prefix: "تلفن: ", pt: 7, align: 1, dir: 2, textColor: "#333" })); y += 5;
-      items.push(HL(x, y, cw, { borderColor: "#000", borderWidth: 0.4 })); y += 2;
-      items.push(PV(x, y, cw, "قبض:", "{receiptNo}", { pt: 8 }));
-      items.push(F(x, y, cw, 5, "{date}", { align: 2, dir: 1, pt: 8 })); y += 6;
-      items.push(PV(x, y, cw, "بیمار:", "{full}", { bold: true, pt: 9 })); y += 5.5;
-      items.push(PV(x, y, cw, "کد ملی:", "{nid}", { pt: 8 })); y += 5.5;
-      items.push(PV(x, y, cw, "بیمه:", "{ins}", { pt: 8 })); y += 6;
-      items.push(HL(x, y, cw, { borderColor: "#000", borderWidth: 0.3 })); y += 2;
-      items.push(PV(x, y, cw, "جمع کل:", "{total}", { pt: 8 })); y += 5;
-      items.push(PV(x, y, cw, "سهم بیمه:", "{insshare}", { pt: 8 })); y += 5;
-      items.push(PV(x, y, cw, "قابل پرداخت:", "{paid}", { bold: true, pt: 10 })); y += 7;
-      items.push(R(x, y, cw, 11, { borderColor: "#000", borderWidth: 0.5, corner: 1 }));
-      items.push(F(x, y + 2.5, cw, 6, "{queue}", { prefix: "نوبت: ", bold: true, pt: 13, align: 1, dir: 2 })); y += 13;
-      items.push(QR(x + cw / 2 - 9, y, 18)); y += 20;
-      items.push(L(x, y, cw, 4, "از انتخاب شما سپاسگزاریم.", { pt: 7.5, align: 1, dir: 2, textColor: "#333" }));
-      return items;
-    })());
-
-    // 4) دو ستونه با خط جداکننده عمودی
-    push("reception", "۴) پذیرش دو ستونه", "A5", 0, (function () {
-      AC = "#5b3b8c"; var W = 148, H = 210, x = 8, cw = W - 16, items = [], y = 8;
-      items.push(title(x, y, cw, 8, "درمانگاه آزادی طب", { pt: 15, textColor: AC })); y += 9;
-      items.push(L(x, y, cw, 5, "برگهٔ پذیرش بیمار", { pt: 9, align: 1, dir: 2, textColor: "#777" })); y += 7;
-      items.push(HL(x, y, cw, { borderColor: AC, borderWidth: 0.7 })); y += 4;
-      var mid = x + cw / 2;
-      items.push(VL(mid, y, 56, { borderColor: "#d7cdec", borderWidth: 0.4 }));
-      var ry = y, ly = y, colw = cw / 2 - 4;
-      items.push(PV(mid + 3, ry, colw, "نام:", "{first}")); ry += 8;
-      items.push(PV(mid + 3, ry, colw, "خانوادگی:", "{last}")); ry += 8;
-      items.push(PV(mid + 3, ry, colw, "نام پدر:", "{father}")); ry += 8;
-      items.push(PV(mid + 3, ry, colw, "کد ملی:", "{nid}")); ry += 8;
-      items.push(PV(x, ly, colw, "تاریخ تولد:", "{birth}")); ly += 8;
-      items.push(PV(x, ly, colw, "جنسیت:", "{gender}")); ly += 8;
-      items.push(PV(x, ly, colw, "تلفن:", "{mobile}")); ly += 8;
-      items.push(PV(x, ly, colw, "بیمه:", "{ins}")); ly += 8;
-      y = Math.max(ry, ly) + 4;
-      items.push(HL(x, y, cw, { borderColor: "#ddd" })); y += 4;
-      items.push(PV(x + cw / 2, y, cw / 2, "جمع کل:", "{total}")); items.push(PV(x, y, cw / 2, "پرداختی:", "{paid}", { bold: true })); y += 10;
-      items.push(R(x, y, cw, 13, { borderColor: AC, borderWidth: 0.9, corner: 3 }));
-      items.push(F(x, y + 3, cw, 7, "{queue}", { prefix: "شماره نوبت: ", bold: true, pt: 13, align: 1, dir: 2, textColor: AC }));
-      return items;
-    })());
-
-    // 5) با QR و کد ملی (بارکد)
-    push("reception", "۵) پذیرش با QR", "A5", 0, (function () {
-      AC = "#0b6e4f"; var W = 148, H = 210, x = 8, cw = W - 16, items = [], y = 8;
-      items.push(LOGO(W - x - 18, y, 18));
-      items.push(QR(x, y, 18));
-      items.push(title(x + 22, y + 2, cw - 44, 8, "درمانگاه آزادی طب", { pt: 14, textColor: AC })); y += 22;
-      items.push(HL(x, y, cw, { borderColor: AC, borderWidth: 0.7 })); y += 4;
-      items.push(PV(x + cw / 2, y, cw / 2, "تاریخ:", "{date}")); items.push(PV(x, y, cw / 2, "شماره:", "{receiptNo}")); y += 9;
-      items.push(PV(x, y, cw, "نام و نام خانوادگی:", "{full}", { bold: true, pt: 11 })); y += 8;
-      items.push(PV(x + cw / 2, y, cw / 2, "کد ملی:", "{nid}")); items.push(PV(x, y, cw / 2, "تلفن:", "{mobile}")); y += 7.5;
-      items.push(PV(x + cw / 2, y, cw / 2, "بیمه:", "{ins}")); items.push(PV(x, y, cw / 2, "بخش:", "{dept}")); y += 9;
-      items.push(L(x, y, cw, 5, "صورتحساب", { bold: true, pt: 10, align: 0, dir: 0, textColor: AC })); y += 6;
-      items.push(PV(x + cw / 2, y, cw / 2, "جمع کل:", "{total}")); items.push(PV(x, y, cw / 2, "پرداختی:", "{paid}", { bold: true })); y += 10;
-      items.push(R(x, y, cw, 13, { borderColor: AC, borderWidth: 0.9, corner: 2 }));
-      items.push(F(x, y + 3, cw, 7, "{queue}", { prefix: "نوبت: ", bold: true, pt: 14, align: 1, dir: 2, textColor: AC })); y += 16;
-      items.push(L(x, y, cw, 5, "برای پیگیری آنلاین، QR بالا را اسکن کنید.", { pt: 7.5, align: 1, dir: 2, textColor: "#9aa3b4" }));
-      return items;
-    })());
-
-    // 6) بیمارستانی A4 کامل با جدول خدمات
-    push("reception", "۶) پذیرش بیمارستانی A4", "A4", 0, (function () {
-      AC = "#0e4d6e"; var W = 210, H = 297, x = 12, cw = W - 24, items = [], y = 12;
-      items.push(band(x, y, cw, 26, AC, { corner: 2 }));
-      items.push(LOGO(x + 3, y + 3, 20));
-      items.push(L(x + 26, y + 3.5, cw - 50, 9, "مرکز درمانی و تخصصی آزادی طب", { pt: 18, bold: true, align: 0, dir: 0, textColor: "#fff" }));
-      items.push(L(x + 26, y + 13, cw - 50, 5, "پذیرش، درمانگاه، تصویربرداری و آزمایشگاه", { pt: 9, align: 0, dir: 0, textColor: "#cfe6f0" }));
-      items.push(QR(x + cw - 22, y + 2, 22)); y += 30;
-      items.push(band(x, y, cw, 9, "#eaf3f7", { corner: 1.5, borderColor: AC, borderWidth: 0.4 }));
-      items.push(L(x + 3, y + 1.8, cw - 6, 5, "برگهٔ پذیرش و صورتحساب بیمار", { pt: 12, bold: true, align: 1, dir: 2, textColor: AC })); y += 12;
-      var c2 = (cw - 6) / 2;
-      function rowA(l1, f1, l2, f2) {
-        cell(x + c2 + 6, y, c2, 12, l1, f1, { bc: AC }).forEach(function (e) { items.push(e); });
-        cell(x, y, c2, 12, l2, f2, { bc: AC }).forEach(function (e) { items.push(e); }); y += 14;
-      }
-      rowA("نام و نام خانوادگی", "{full}", "کد ملی", "{nid}");
-      rowA("نام پدر", "{father}", "تاریخ تولد / سن", "{age}");
-      rowA("جنسیت", "{gender}", "تلفن همراه", "{mobile}");
-      rowA("پزشک معالج", "{doctor}", "بخش / دپارتمان", "{dept}");
-      rowA("بیمهٔ پایه", "{ins}", "بیمهٔ مکمل", "{supp}");
-      y += 1;
-      items.push(L(x, y, cw, 5, "شرح خدمات و صورتحساب", { pt: 11, bold: true, align: 0, dir: 0, textColor: AC })); y += 6;
-      items.push(svcList(x, y, cw, 46, { borderColor: AC, accent: AC, widths: [0.45, 0.15, 0.2, 0.2],
-        labels: ["نام خدمت", "تعداد", "بهای واحد", "مبلغ کل"] })); y += 49;
-      var tw = (cw - 9) / 4;
-      cell(x + 3 * (tw + 3), y, tw, 12, "جمع کل", "{totalonly}").forEach(function (e) { items.push(e); });
-      cell(x + 2 * (tw + 3), y, tw, 12, "سهم بیمه", "{insshareonly}").forEach(function (e) { items.push(e); });
-      cell(x + tw + 3, y, tw, 12, "تخفیف", "{discount}").forEach(function (e) { items.push(e); });
-      cell(x, y, tw, 12, "قابل پرداخت", "{paidonly}", { bg: "#dff0e3", color: "#0f7a3a" }).forEach(function (e) { items.push(e); }); y += 16;
-      items.push(HL(x, y, cw, { borderColor: "#cdd7e6" })); y += 3;
-      items.push(L(x + c2 + 6, y, c2, 6, "مهر و امضای پذیرش", { pt: 9, align: 0, dir: 0, textColor: "#6b7689" }));
-      items.push(L(x, y, c2, 6, "مهر و امضای صندوق", { pt: 9, align: 0, dir: 0, textColor: "#6b7689" }));
-      return items;
-    })());
-
-    // 7) درمانگاه تخصصی — با پزشک و بخش
-    push("reception", "۷) پذیرش تخصصی (پزشک/بخش)", "A5", 0, (function () {
-      AC = "#1f4e8c"; var W = 148, H = 210, x = 8, cw = W - 16, items = [], y = 8;
-      items.push(band(x, y, cw, 11, AC, { corner: 1.5 }));
-      items.push(L(x + 3, y + 2.5, cw - 6, 6, "درمانگاه تخصصی آزادی طب", { pt: 13, bold: true, align: 1, dir: 2, textColor: "#fff" })); y += 14;
-      items.push(PV(x + cw / 2, y, cw / 2, "تاریخ:", "{date}")); items.push(PV(x, y, cw / 2, "ساعت:", "{time}")); y += 8;
-      items.push(PV(x, y, cw, "نام و نام خانوادگی:", "{full}", { bold: true, pt: 11 })); y += 8;
-      items.push(PV(x + cw / 2, y, cw / 2, "کد ملی:", "{nid}")); items.push(PV(x, y, cw / 2, "سن:", "{age}")); y += 7.5;
-      items.push(PV(x + cw / 2, y, cw / 2, "پزشک معالج:", "{doctor}")); items.push(PV(x, y, cw / 2, "بخش:", "{dept}")); y += 7.5;
-      items.push(PV(x + cw / 2, y, cw / 2, "بیمه:", "{ins}")); items.push(PV(x, y, cw / 2, "تلفن:", "{mobile}")); y += 9;
-      items.push(L(x, y, cw, 5, "علائم حیاتی", { bold: true, pt: 9.5, align: 0, dir: 0, textColor: AC })); y += 6;
-      var c3 = (cw - 8) / 3;
-      cell(x + 2 * (c3 + 4), y, c3, 11, "فشار خون", "{bp}").forEach(function (e) { items.push(e); });
-      cell(x + c3 + 4, y, c3, 11, "وزن", "{weight}").forEach(function (e) { items.push(e); });
-      cell(x, y, c3, 11, "قد", "{height}").forEach(function (e) { items.push(e); }); y += 14;
-      items.push(R(x, y, cw, 13, { borderColor: AC, borderWidth: 0.9, corner: 2 }));
-      items.push(F(x, y + 3, cw, 7, "{queue}", { prefix: "شماره نوبت: ", bold: true, pt: 13, align: 1, dir: 2, textColor: AC }));
-      return items;
-    })());
-
-    // 8) دندانپزشکی — با چارت ساده
-    push("reception", "۸) پذیرش دندانپزشکی", "A5", 0, (function () {
-      AC = "#0a7d6b"; var W = 148, H = 210, x = 8, cw = W - 16, items = [], y = 8;
-      items.push(title(x, y, cw, 8, "کلینیک دندانپزشکی آزادی طب", { pt: 14, textColor: AC })); y += 10;
-      items.push(HL(x, y, cw, { borderColor: AC, borderWidth: 0.7 })); y += 4;
-      items.push(PV(x, y, cw, "نام و نام خانوادگی:", "{full}", { bold: true, pt: 11 })); y += 8;
-      items.push(PV(x + cw / 2, y, cw / 2, "کد ملی:", "{nid}")); items.push(PV(x, y, cw / 2, "سن:", "{age}")); y += 7.5;
-      items.push(PV(x + cw / 2, y, cw / 2, "تلفن:", "{mobile}")); items.push(PV(x, y, cw / 2, "بیمه:", "{ins}")); y += 9;
-      items.push(L(x, y, cw, 5, "شرح خدمات دندانپزشکی", { bold: true, pt: 9.5, align: 0, dir: 0, textColor: AC })); y += 6;
-      items.push(svcList(x, y, cw, 34, { borderColor: AC, accent: AC, widths: [0.5, 0.25, 0.25],
-        labels: ["خدمت / دندان", "تعداد", "مبلغ (ریال)"] })); y += 37;
-      items.push(PV(x + cw / 2, y, cw / 2, "جمع کل:", "{total}")); items.push(PV(x, y, cw / 2, "پرداختی:", "{paid}", { bold: true, color: "#0f7a3a" })); y += 9;
-      items.push(R(x, y, cw, 12, { borderColor: AC, borderWidth: 0.9, corner: 2 }));
-      items.push(F(x, y + 2.8, cw, 7, "{queue}", { prefix: "نوبت: ", bold: true, pt: 13, align: 1, dir: 2, textColor: AC }));
-      return items;
-    })());
-
-    // 9) با عکس بیمار (سمت چپ کادر اطلاعات)
-    push("reception", "۹) پذیرش با عکس بیمار", "A5", 0, (function () {
-      AC = "#7a3b8c"; var W = 148, H = 210, x = 8, cw = W - 16, items = [], y = 8;
-      items.push(title(x, y, cw, 8, "درمانگاه آزادی طب", { pt: 15, textColor: AC })); y += 11;
-      items.push(HL(x, y, cw, { borderColor: AC, borderWidth: 0.7 })); y += 4;
-      items.push(PHOTO(x, y, 24, 30));
-      var ix = x + 28, iw = cw - 28;
-      items.push(PV(ix, y, iw, "نام و نام خانوادگی:", "{full}", { bold: true, pt: 11 })); 
-      items.push(PV(ix, y + 8, iw, "کد ملی:", "{nid}"));
-      items.push(PV(ix, y + 15.5, iw, "تاریخ تولد:", "{birth}"));
-      items.push(PV(ix, y + 23, iw, "جنسیت:", "{gender}")); y += 33;
-      items.push(PV(x + cw / 2, y, cw / 2, "تلفن:", "{mobile}")); items.push(PV(x, y, cw / 2, "بیمه:", "{ins}")); y += 9;
-      items.push(PV(x + cw / 2, y, cw / 2, "جمع کل:", "{total}")); items.push(PV(x, y, cw / 2, "پرداختی:", "{paid}", { bold: true })); y += 10;
-      items.push(R(x, y, cw, 13, { borderColor: AC, borderWidth: 0.9, corner: 3 }));
-      items.push(F(x, y + 3, cw, 7, "{queue}", { prefix: "شماره نوبت: ", bold: true, pt: 13, align: 1, dir: 2, textColor: AC }));
-      return items;
-    })());
-
-    // 10) صورتحساب تفکیکی کامل (مالی محور)
-    push("reception", "۱۰) صورتحساب تفکیکی", "A5", 0, (function () {
-      AC = "#b45309"; var W = 148, H = 210, x = 8, cw = W - 16, items = [], y = 8;
-      items.push(band(x, y, cw, 12, AC, { corner: 1.5 }));
-      items.push(L(x + 3, y + 3, cw - 6, 6, "صورتحساب بیمار", { pt: 14, bold: true, align: 1, dir: 2, textColor: "#fff" })); y += 15;
-      items.push(PV(x + cw / 2, y, cw / 2, "تاریخ:", "{date}")); items.push(PV(x, y, cw / 2, "شماره قبض:", "{receiptNo}")); y += 8;
-      items.push(PV(x, y, cw, "بیمار:", "{full}", { bold: true })); y += 7;
-      items.push(PV(x + cw / 2, y, cw / 2, "کد ملی:", "{nid}")); items.push(PV(x, y, cw / 2, "بیمه:", "{ins}")); y += 9;
-      items.push(svcList(x, y, cw, 40, { borderColor: AC, accent: AC, widths: [0.5, 0.2, 0.3],
-        labels: ["نام خدمت", "تعداد", "مبلغ (ریال)"] })); y += 43;
-      items.push(HL(x, y, cw, { borderColor: "#e0c9a6" })); y += 3;
-      items.push(PV(x, y, cw, "جمع کل:", "{total}")); y += 7;
-      items.push(PV(x, y, cw, "سهم بیمه:", "{insshare}")); y += 7;
-      items.push(PV(x, y, cw, "تخفیف:", "{discount}")); y += 7;
-      items.push(band(x, y, cw, 11, "#fff7ed", { corner: 2, borderColor: AC, borderWidth: 0.6 }));
-      items.push(F(x + 2, y + 2.6, cw - 4, 7, "{paid}", { prefix: "مبلغ قابل پرداخت: ", bold: true, pt: 12, align: 0, dir: 0, textColor: AC }));
-      return items;
-    })());
-
-    // 11) رسید پرداخت ساده (مینیمال)
-    push("reception", "۱۱) رسید پرداخت ساده", "A6", 0, (function () {
-      AC = "#334155"; var W = 105, H = 148, x = 7, cw = W - 14, items = [], y = 8;
-      items.push(title(x, y, cw, 7, "درمانگاه آزادی طب", { pt: 12, textColor: AC })); y += 9;
-      items.push(L(x, y, cw, 5, "رسید پرداخت", { pt: 9, align: 1, dir: 2, textColor: "#777" })); y += 7;
-      items.push(HL(x, y, cw, { borderColor: AC, borderWidth: 0.6 })); y += 3;
-      items.push(PV(x, y, cw, "بیمار:", "{full}", { bold: true, pt: 10 })); y += 7;
-      items.push(PV(x + cw / 2, y, cw / 2, "تاریخ:", "{date}")); items.push(PV(x, y, cw / 2, "قبض:", "{receiptNo}")); y += 8;
-      items.push(HL(x, y, cw, { borderColor: "#ddd" })); y += 3;
-      items.push(PV(x, y, cw, "جمع کل:", "{total}", { pt: 10 })); y += 7;
-      items.push(band(x, y, cw, 12, "#eef2f7", { corner: 2, borderColor: AC, borderWidth: 0.5 }));
-      items.push(F(x + 2, y + 3, cw - 4, 7, "{paid}", { prefix: "پرداختی: ", bold: true, pt: 12, align: 1, dir: 2, textColor: AC })); y += 16;
-      items.push(L(x, y, cw, 4.5, "با تشکر از پرداخت شما.", { pt: 8, align: 1, dir: 2, textColor: "#999" }));
-      return items;
-    })());
-
-    // 12) شبانه‌روزی با کادر کامل و شیفت
-    push("reception", "۱۲) پذیرش شبانه‌روزی", "A5", 0, (function () {
-      AC = "#1d4ed8"; var W = 148, H = 210, x = 8, cw = W - 16, items = [], y = 6;
-      items.push(FR(W, H));
-      items.push(title(x, y, cw, 8, "درمانگاه شبانه‌روزی آزادی طب", { pt: 13, textColor: AC })); y += 10;
-      items.push(HL(x, y, cw, { borderColor: AC, borderWidth: 0.7 })); y += 4;
-      items.push(PV(x + cw / 2, y, cw / 2, "تاریخ:", "{date}")); items.push(PV(x, y, cw / 2, "شیفت:", "{shift}")); y += 8;
-      items.push(PV(x, y, cw, "نام و نام خانوادگی:", "{full}", { bold: true, pt: 11 })); y += 8;
-      items.push(PV(x + cw / 2, y, cw / 2, "کد ملی:", "{nid}")); items.push(PV(x, y, cw / 2, "نوع بیمار:", "{ptype}")); y += 7.5;
-      items.push(PV(x + cw / 2, y, cw / 2, "تلفن:", "{mobile}")); items.push(PV(x, y, cw / 2, "بیمه:", "{ins}")); y += 9;
-      items.push(PV(x + cw / 2, y, cw / 2, "جمع کل:", "{total}")); items.push(PV(x, y, cw / 2, "پرداختی:", "{paid}", { bold: true })); y += 10;
-      items.push(R(x, y, cw, 13, { borderColor: AC, borderWidth: 0.9, corner: 2 }));
-      items.push(F(x, y + 3, cw, 7, "{queue}", { prefix: "شماره نوبت: ", bold: true, pt: 13, align: 1, dir: 2, textColor: AC })); y += 16;
-      items.push(F(x, y, cw, 5, "{shiftuser}", { prefix: "ثبت: ", pt: 7.5, align: 0, dir: 0, textColor: "#888" }));
-      return items;
-    })());
-
-    // 13) کادر اطلاعات سلولی (شبکه‌ای)
-    push("reception", "۱۳) پذیرش شبکه‌ای", "A5", 0, (function () {
-      AC = "#0f766e"; var W = 148, H = 210, x = 8, cw = W - 16, items = [], y = 8;
-      items.push(LOGO(W - x - 16, y, 16));
-      items.push(title(x, y + 2, cw - 20, 8, "درمانگاه آزادی طب", { pt: 14, textColor: AC, align: 0, dir: 0 })); y += 19;
-      var c2 = (cw - 4) / 2;
-      function g(l1, f1, l2, f2) {
-        cell(x + c2 + 4, y, c2, 11, l1, f1, { bc: AC, bg: "#f0fdfa" }).forEach(function (e) { items.push(e); });
-        cell(x, y, c2, 11, l2, f2, { bc: AC, bg: "#f0fdfa" }).forEach(function (e) { items.push(e); }); y += 12.5;
-      }
-      g("نام و نام خانوادگی", "{full}", "کد ملی", "{nid}");
-      g("نام پدر", "{father}", "تاریخ تولد", "{birth}");
-      g("جنسیت", "{gender}", "تلفن همراه", "{mobile}");
-      g("بیمهٔ پایه", "{ins}", "بیمهٔ مکمل", "{supp}");
-      g("جمع کل", "{total}", "پرداختی", "{paid}");
-      y += 2;
-      items.push(R(x, y, cw, 13, { borderColor: AC, borderWidth: 0.9, corner: 2 }));
-      items.push(F(x, y + 3, cw, 7, "{queue}", { prefix: "شماره نوبت: ", bold: true, pt: 13, align: 1, dir: 2, textColor: AC }));
-      return items;
-    })());
-
-    // 14) مدرن مینیمال با نوار کناری رنگی
-    push("reception", "۱۴) پذیرش نوار کناری", "A5", 0, (function () {
-      AC = "#dc2626"; var W = 148, H = 210, x = 8, cw = W - 16, items = [], y = 8;
-      items.push(band(W - 6, 0, 6, H, AC, { corner: 0 }));     // right colour stripe (RTL leading edge)
-      items.push(title(x, y, cw - 4, 8, "درمانگاه آزادی طب", { pt: 15, textColor: AC, align: 0, dir: 0 })); y += 10;
-      items.push(L(x, y, cw - 4, 5, "برگهٔ پذیرش بیمار", { pt: 9, align: 0, dir: 0, textColor: "#777" })); y += 7;
-      items.push(HL(x, y, cw - 4, { borderColor: AC, borderWidth: 0.6 })); y += 4;
-      items.push(PV(x, y, cw - 4, "نام و نام خانوادگی:", "{full}", { bold: true, pt: 11 })); y += 8;
-      items.push(PV(x + (cw - 4) / 2, y, (cw - 4) / 2, "کد ملی:", "{nid}")); items.push(PV(x, y, (cw - 4) / 2, "تلفن:", "{mobile}")); y += 7.5;
-      items.push(PV(x + (cw - 4) / 2, y, (cw - 4) / 2, "بیمه:", "{ins}")); items.push(PV(x, y, (cw - 4) / 2, "بخش:", "{dept}")); y += 9;
-      items.push(PV(x + (cw - 4) / 2, y, (cw - 4) / 2, "جمع کل:", "{total}")); items.push(PV(x, y, (cw - 4) / 2, "پرداختی:", "{paid}", { bold: true })); y += 10;
-      items.push(R(x, y, cw - 4, 13, { borderColor: AC, borderWidth: 0.9, corner: 2 }));
-      items.push(F(x, y + 3, cw - 4, 7, "{queue}", { prefix: "نوبت: ", bold: true, pt: 14, align: 1, dir: 2, textColor: AC }));
-      return items;
-    })());
-
-    // 15) بیمه پایه و مکمل (بیمه محور)
-    push("reception", "۱۵) پذیرش بیمه‌ای", "A5", 0, (function () {
-      AC = "#155e75"; var W = 148, H = 210, x = 8, cw = W - 16, items = [], y = 8;
-      items.push(title(x, y, cw, 8, "درمانگاه آزادی طب", { pt: 15, textColor: AC })); y += 11;
-      items.push(HL(x, y, cw, { borderColor: AC, borderWidth: 0.7 })); y += 4;
-      items.push(PV(x, y, cw, "نام و نام خانوادگی:", "{full}", { bold: true, pt: 11 })); y += 8;
-      items.push(PV(x + cw / 2, y, cw / 2, "کد ملی:", "{nid}")); items.push(PV(x, y, cw / 2, "تاریخ تولد:", "{birth}")); y += 9;
-      items.push(L(x, y, cw, 5, "اطلاعات بیمه", { bold: true, pt: 9.5, align: 0, dir: 0, textColor: AC })); y += 6;
-      var c2 = (cw - 4) / 2;
-      cell(x + c2 + 4, y, c2, 11, "بیمهٔ پایه", "{ins}", { bc: AC }).forEach(function (e) { items.push(e); });
-      cell(x, y, c2, 11, "شماره دفترچه", "{insno}", { bc: AC }).forEach(function (e) { items.push(e); }); y += 13;
-      cell(x + c2 + 4, y, c2, 11, "بیمهٔ مکمل", "{supp}", { bc: AC }).forEach(function (e) { items.push(e); });
-      cell(x, y, c2, 11, "اعتبار بیمه", "{insexp}", { bc: AC }).forEach(function (e) { items.push(e); }); y += 14;
-      items.push(L(x, y, cw, 5, "صورتحساب", { bold: true, pt: 9.5, align: 0, dir: 0, textColor: AC })); y += 6;
-      items.push(PV(x + cw / 2, y, cw / 2, "جمع کل:", "{total}")); items.push(PV(x, y, cw / 2, "سهم بیمه:", "{insshare}")); y += 7;
-      items.push(PV(x, y, cw, "قابل پرداخت:", "{paid}", { bold: true, color: "#0f7a3a" })); y += 9;
-      items.push(R(x, y, cw, 12, { borderColor: AC, borderWidth: 0.9, corner: 2 }));
-      items.push(F(x, y + 2.8, cw, 7, "{queue}", { prefix: "نوبت: ", bold: true, pt: 13, align: 1, dir: 2, textColor: AC }));
-      return items;
-    })());
-
-    // 16) سرپایی فوری (اورژانس) — قرمز/برجسته
-    push("reception", "۱۶) پذیرش سرپایی فوری", "A6", 0, (function () {
-      AC = "#b91c1c"; var W = 105, H = 148, x = 7, cw = W - 14, items = [], y = 7;
-      items.push(band(x, y, cw, 11, AC, { corner: 2 }));
-      items.push(L(x + 2, y + 2.5, cw - 4, 6, "پذیرش سرپایی فوری", { pt: 12, bold: true, align: 1, dir: 2, textColor: "#fff" })); y += 14;
-      items.push(PV(x, y, cw, "بیمار:", "{full}", { bold: true, pt: 11 })); y += 8;
-      items.push(PV(x + cw / 2, y, cw / 2, "کد ملی:", "{nid}")); items.push(PV(x, y, cw / 2, "سن:", "{age}")); y += 7.5;
-      items.push(PV(x + cw / 2, y, cw / 2, "تاریخ:", "{date}")); items.push(PV(x, y, cw / 2, "ساعت:", "{time}")); y += 9;
-      items.push(R(x, y, cw, 18, { borderColor: AC, borderWidth: 1.1, corner: 3 }));
-      items.push(F(x, y + 4, cw, 11, "{queue}", { prefix: "", bold: true, pt: 30, align: 1, dir: 2, textColor: AC })); y += 21;
-      items.push(L(x, y, cw, 5, "لطفاً سریعاً به اتاق درمان مراجعه کنید.", { pt: 8, align: 1, dir: 2, textColor: "#777" }));
-      return items;
-    })());
-
-    // 17) قبض رول ۵.۸ سانت (باریک)
-    push("reception", "۱۷) قبض رول ۵.۸ سانت", "R58", 0, (function () {
-      var W = 58, H = 200, x = 3, cw = W - 6, items = [], y = 4;
-      items.push(L(x, y, cw, 6, "آزادی طب", { pt: 12, bold: true, align: 1, dir: 2 })); y += 7;
-      items.push(HL(x, y, cw, { borderColor: "#000", borderWidth: 0.4 })); y += 2;
-      items.push(PV(x, y, cw, "بیمار:", "{full}", { bold: true, pt: 8 })); y += 5;
-      items.push(PV(x, y, cw, "کد ملی:", "{nid}", { pt: 7 })); y += 5;
-      items.push(F(x, y, cw, 4, "{date}", { align: 1, dir: 2, pt: 7 })); y += 5;
-      items.push(HL(x, y, cw, { borderColor: "#000", borderWidth: 0.3 })); y += 2;
-      items.push(PV(x, y, cw, "جمع:", "{total}", { pt: 7.5 })); y += 5;
-      items.push(PV(x, y, cw, "پرداختی:", "{paid}", { bold: true, pt: 9 })); y += 7;
-      items.push(R(x, y, cw, 10, { borderColor: "#000", borderWidth: 0.5, corner: 1 }));
-      items.push(F(x, y + 2.5, cw, 6, "{queue}", { prefix: "نوبت ", bold: true, pt: 12, align: 1, dir: 2 })); y += 12;
-      items.push(L(x, y, cw, 4, "سپاسگزاریم", { pt: 7, align: 1, dir: 2, textColor: "#333" }));
-      return items;
-    })());
-
-    // 18) با شرح خدمت و کد خدمت (جدول دو ستونه)
-    push("reception", "۱۸) پذیرش با شرح خدمت", "A5", 0, (function () {
-      AC = "#4338ca"; var W = 148, H = 210, x = 8, cw = W - 16, items = [], y = 8;
-      items.push(title(x, y, cw, 8, "درمانگاه آزادی طب", { pt: 15, textColor: AC })); y += 11;
-      items.push(HL(x, y, cw, { borderColor: AC, borderWidth: 0.7 })); y += 4;
-      items.push(PV(x, y, cw, "نام و نام خانوادگی:", "{full}", { bold: true, pt: 11 })); y += 8;
-      items.push(PV(x + cw / 2, y, cw / 2, "کد ملی:", "{nid}")); items.push(PV(x, y, cw / 2, "پزشک:", "{doctor}")); y += 9;
-      items.push(L(x, y, cw, 5, "خدمات ارائه‌شده", { bold: true, pt: 9.5, align: 0, dir: 0, textColor: AC })); y += 6;
-      items.push(svcList(x, y, cw, 42, { borderColor: AC, accent: AC, widths: [0.45, 0.2, 0.15, 0.2],
-        labels: ["نام خدمت", "کد", "تعداد", "مبلغ"] })); y += 45;
-      items.push(PV(x + cw / 2, y, cw / 2, "جمع کل:", "{total}")); items.push(PV(x, y, cw / 2, "پرداختی:", "{paid}", { bold: true })); y += 10;
-      items.push(R(x, y, cw, 12, { borderColor: AC, borderWidth: 0.9, corner: 2 }));
-      items.push(F(x, y + 2.8, cw, 7, "{queue}", { prefix: "نوبت: ", bold: true, pt: 13, align: 1, dir: 2, textColor: AC }));
-      return items;
-    })());
-
-    // 19) کلینیک زیبایی — لوکس صورتی/طلایی
-    push("reception", "۱۹) پذیرش کلینیک زیبایی", "A5", 0, (function () {
-      AC = "#be185d"; var W = 148, H = 210, x = 9, cw = W - 18, items = [], y = 8;
-      items.push(FR(W, H));
-      items.push(band(x, y, cw, 18, AC, { corner: 3 }));
-      items.push(LOGO(x + 2, y + 2, 14));
-      items.push(L(x + 18, y + 2.5, cw - 20, 7, "کلینیک زیبایی آزادی طب", { pt: 13, bold: true, align: 0, dir: 0, textColor: "#fff" }));
-      items.push(L(x + 18, y + 10, cw - 20, 5, "پوست، مو و زیبایی", { pt: 8, align: 0, dir: 0, textColor: "#fce7f3" })); y += 22;
-      items.push(PV(x + cw / 2, y, cw / 2, "تاریخ:", "{date}")); items.push(PV(x, y, cw / 2, "نوبت بعدی:", "{nextvisit}")); y += 8;
-      items.push(PV(x, y, cw, "نام و نام خانوادگی:", "{full}", { bold: true, pt: 11 })); y += 8;
-      items.push(PV(x + cw / 2, y, cw / 2, "تلفن:", "{mobile}")); items.push(PV(x, y, cw / 2, "پزشک:", "{doctor}")); y += 9;
-      items.push(L(x, y, cw, 5, "خدمات", { bold: true, pt: 9.5, align: 0, dir: 0, textColor: AC })); y += 6;
-      items.push(svcList(x, y, cw, 34, { borderColor: AC, accent: AC, widths: [0.6, 0.4],
-        labels: ["نام خدمت", "مبلغ (ریال)"] })); y += 37;
-      items.push(band(x, y, cw, 11, "#fdf2f8", { corner: 2, borderColor: AC, borderWidth: 0.6 }));
-      items.push(F(x + 2, y + 2.6, cw - 4, 7, "{paid}", { prefix: "قابل پرداخت: ", bold: true, pt: 12, align: 0, dir: 0, textColor: AC }));
-      return items;
-    })());
-
-    // 20) جامع A4 (همه‌چیز: عکس، QR، علائم حیاتی، جدول)
-    push("reception", "۲۰) پذیرش جامع A4", "A4", 0, (function () {
-      AC = "#1e3a8a"; var W = 210, H = 297, x = 12, cw = W - 24, items = [], y = 12;
-      items.push(band(x, y, cw, 24, AC, { corner: 2 }));
-      items.push(LOGO(x + 3, y + 3, 18));
-      items.push(L(x + 24, y + 3, cw - 70, 8, "درمانگاه جامع آزادی طب", { pt: 17, bold: true, align: 0, dir: 0, textColor: "#fff" }));
-      items.push(F(x + 24, y + 12, cw - 70, 5, "{clinicaddr}", { prefix: "نشانی: ", pt: 8, align: 0, dir: 0, textColor: "#cdd9f5" }));
-      items.push(F(x + 24, y + 17, cw - 70, 5, "{clinicphone}", { prefix: "تلفن: ", pt: 8, align: 0, dir: 0, textColor: "#cdd9f5" }));
-      items.push(QR(x + cw - 22, y + 1.5, 21)); y += 28;
-      items.push(band(x, y, cw, 8, "#eef3ff", { corner: 1.5, borderColor: AC, borderWidth: 0.4 }));
-      items.push(L(x + 3, y + 1.4, cw - 6, 5, "برگهٔ پذیرش، صورتحساب و علائم حیاتی", { pt: 11, bold: true, align: 1, dir: 2, textColor: AC })); y += 11;
-      items.push(PHOTO(x + cw - 26, y, 26, 32));
-      var iw = cw - 30, c2 = (iw - 4) / 2;
-      cell(x + c2 + 4, y, c2, 12, "نام و نام خانوادگی", "{full}", { bc: AC }).forEach(function (e) { items.push(e); });
-      cell(x, y, c2, 12, "کد ملی", "{nid}", { bc: AC }).forEach(function (e) { items.push(e); });
-      cell(x + c2 + 4, y + 13, c2, 12, "نام پدر", "{father}", { bc: AC }).forEach(function (e) { items.push(e); });
-      cell(x, y + 13, c2, 12, "تاریخ تولد / سن", "{age}", { bc: AC }).forEach(function (e) { items.push(e); });
-      cell(x + c2 + 4, y + 26, c2, 12, "جنسیت", "{gender}", { bc: AC }).forEach(function (e) { items.push(e); });
-      cell(x, y + 26, c2, 12, "تلفن همراه", "{mobile}", { bc: AC }).forEach(function (e) { items.push(e); }); y += 41;
-      var c4 = (cw - 9) / 4;
-      cell(x + 3 * (c4 + 3), y, c4, 11, "فشار خون", "{bp}", { bg: "#eef3ff" }).forEach(function (e) { items.push(e); });
-      cell(x + 2 * (c4 + 3), y, c4, 11, "وزن", "{weight}", { bg: "#eef3ff" }).forEach(function (e) { items.push(e); });
-      cell(x + c4 + 3, y, c4, 11, "قد", "{height}", { bg: "#eef3ff" }).forEach(function (e) { items.push(e); });
-      cell(x, y, c4, 11, "بخش", "{dept}", { bg: "#eef3ff" }).forEach(function (e) { items.push(e); }); y += 14;
-      items.push(L(x, y, cw, 5, "شرح خدمات و صورتحساب", { pt: 11, bold: true, align: 0, dir: 0, textColor: AC })); y += 6;
-      items.push(svcList(x, y, cw, 50, { borderColor: AC, accent: AC, widths: [0.45, 0.15, 0.2, 0.2],
-        labels: ["نام خدمت", "تعداد", "بهای واحد", "مبلغ کل"] })); y += 53;
-      cell(x + 3 * (c4 + 3), y, c4, 12, "جمع کل", "{totalonly}").forEach(function (e) { items.push(e); });
-      cell(x + 2 * (c4 + 3), y, c4, 12, "سهم بیمه", "{insshareonly}").forEach(function (e) { items.push(e); });
-      cell(x + c4 + 3, y, c4, 12, "تخفیف", "{discount}").forEach(function (e) { items.push(e); });
-      cell(x, y, c4, 12, "قابل پرداخت", "{paidonly}", { bg: "#dff0e3", color: "#0f7a3a" }).forEach(function (e) { items.push(e); }); y += 15;
-      items.push(HL(x, y, cw, { borderColor: "#cdd7e6" })); y += 2;
-      items.push(F(x, y, cw, 5, "{issued}", { pt: 8, align: 0, dir: 0, textColor: "#8a93a6" }));
-      return items;
-    })());
-  })();
-
-  /* ====================================================================== *
-   *  APPOINTMENT (20)
-   * ====================================================================== */
-  (function () {
-    var names = [
-      "نوبت بزرگ A6", "کارت نوبت کلاسیک", "نوبت رول ۸ سانت", "نوبت با لوگو",
-      "نوبت تخصصی پزشک", "نوبت با تاریخ و ساعت", "نوبت دندانپزشکی", "نوبت آزمایشگاه",
-      "نوبت با QR", "کارت نوبت VIP", "نوبت ساده فوری", "نوبت با نام بیمار",
-      "نوبت دو زبانه", "نوبت با شیفت", "نوبت کلینیک پوست", "نوبت اطفال",
-      "نوبت با کادر رنگی", "نوبت بخش تخصصی", "نوبت رول ۵.۸", "نوبت جامع A5"
-    ];
-    for (var i = 0; i < 20; i++) {
-      var paper = (i === 2) ? "R80" : (i === 18) ? "R58" : (i === 0) ? "A6" : (i === 19) ? "A5" : "A6";
-      var dm = PAPER[paper] || (paper === "R80" ? [80, 200] : paper === "R58" ? [58, 200] : [105, 148]);
-      var W = dm[0], H = dm[1], cw = W - 12, x = 6, items = [], y = 6;
-      if (i === 1 || i === 16) items.push(FR(W, H));
-      if (W >= 90 && (i === 3 || i === 4 || i === 9 || i === 19)) items.push(LOGO(x, y, 16));
-      items.push(L(x, y, cw, 8, "درمانگاه آزادی طب", { pt: W >= 140 ? 14 : 11, bold: true, align: 1, textColor: "#1f4e8c" })); y += 9;
-      items.push(L(x, y, cw, 5, "کارت نوبت", { pt: 9, align: 1, textColor: "#666" })); y += 6;
-      items.push(HL(x, y, cw, { borderColor: "#1f4e8c", borderWidth: 0.7 })); y += 3;
-      // big number
-      var nh = (i === 0 || i === 9) ? 30 : 22;
-      items.push(L(x, y, cw, 5, "شماره نوبت شما", { pt: 9, align: 1, textColor: "#777" })); y += 6;
-      items.push(APPT(x, y, cw, nh, { pt: (i === 0 || i === 9) ? 48 : 36, textColor: "#1f4e8c", prefix: "" })); y += nh + 2;
-      items.push(HL(x, y, cw, { borderColor: "#ccc" })); y += 3;
-      if (i === 11 || i === 19 || i === 4) { items.push(pair(x, y, cw, "بیمار:", "{full}", { align: 1, pt: 9.5 })); y += 7; }
-      if (i === 4 || i === 17 || i === 19) { items.push(pair(x, y, cw, "پزشک:", "{doctor}", { align: 1, pt: 9 })); y += 6.5; }
-      if (i === 7) { items.push(pair(x, y, cw, "بخش:", "{dept}", { align: 1, pt: 9 })); y += 6.5; }
-      items.push(F(x, y, cw / 2, 6, "{date}", { prefix: "تاریخ ", align: 0, pt: 9 }));
-      items.push(F(x + cw / 2, y, cw / 2, 6, "{time}", { prefix: "ساعت ", align: 2, pt: 9 })); y += 7;
-      if (i === 13) { items.push(pair(x, y, cw, "شیفت:", "{shift}", { align: 1, pt: 9 })); y += 6.5; }
-      if (i === 8) { items.push(QR(x + cw / 2 - 9, y, 18)); y += 20; }
-      items.push(L(x, y, cw, 5, "لطفاً تا اعلام شماره منتظر بمانید.", { pt: 8, align: 1, textColor: "#888" }));
-      push("appointment", names[i], paper, 0, items);
-    }
-  })();
-
-  /* ====================================================================== *
-   *  LAB & RADIOLOGY (20)
-   * ====================================================================== */
-  (function () {
-    var names = [
-      "درخواست آزمایش A5", "جواب آزمایش A4", "سربرگ آزمایشگاه", "رادیولوژی درخواست",
-      "سونوگرافی گزارش", "آزمایش با کادر نتایج", "پاتولوژی سربرگ", "آزمایش خون CBC",
-      "رادیولوژی با عکس", "MRI درخواست", "CT اسکن گزارش", "آزمایش هورمونی",
-      "آزمایش با QR و بارکد", "گزارش رادیولوژی A4", "سربرگ تخصصی آزمایشگاه", "درخواست تصویربرداری",
-      "آزمایش با لوگو", "نتایج آزمایشگاه دو ستونه", "رول آزمایشگاه ۸ سانت", "آزمایشگاه جامع A4"
-    ];
-    for (var i = 0; i < 20; i++) {
-      var isA4 = (i === 1 || i === 13 || i === 19 || i === 4 || i === 10);
-      var paper = (i === 18) ? "R80" : isA4 ? "A4" : "A5";
-      var dm = PAPER[paper] || (paper === "R80" ? [80, 200] : [148, 210]);
-      var W = dm[0], H = dm[1], cw = W - 16, x = 8, items = [], y = 8;
-      if (i === 2 || i === 14) items.push(FR(W, H));
-      if (W >= 100) items.push(LOGO(x, y, 20));
-      if (i === 12) items.push(QR(W - 28, y, 18));
-      items.push(L(x + (W >= 100 ? 24 : 0), y, cw - (W >= 100 ? 24 : 0), 8, "آزمایشگاه و تصویربرداری آزادی طب", { pt: W >= 180 ? 16 : 12, bold: true, align: 1, textColor: "#0e6655" }));
-      items.push(L(x, y + 9, cw, 5, /رادیو|MRI|CT|سونو|تصویر/.test(names[i]) ? "فرم تصویربرداری پزشکی" : "فرم آزمایشگاه تشخیص طبی", { pt: 9, align: 1, textColor: "#555" })); y += 17;
-      items.push(HL(x, y, cw, { borderColor: "#0e6655", borderWidth: 0.8 })); y += 4;
-      items.push(F(x, y, cw / 2, 7, "{date}", { prefix: "تاریخ ", pt: 9.5 }));
-      items.push(F(x + cw / 2, y, cw / 2, 7, "{receiptNo}", { prefix: "شماره پذیرش ", align: 2, pt: 9.5 })); y += 8;
-      items.push(pair(x, y, cw, "نام و نام خانوادگی:", "{full}", { bold: true, pt: 11 })); y += 8;
-      items.push(pair(x, y, cw / 2, "کد ملی:", "{nid}")); items.push(pair(x + cw / 2, y, cw / 2, "سن/جنسیت:", "{gender}")); y += 7.5;
-      items.push(pair(x, y, cw / 2, "پزشک معالج:", "{doctor}")); items.push(pair(x + cw / 2, y, cw / 2, "بخش:", "{dept}")); y += 7.5;
-      items.push(pair(x, y, cw, "بیمه:", "{ins}")); y += 8;
-      items.push(HL(x, y, cw)); y += 3;
-      var areaH = isA4 ? (H - y - 40) : (H - y - 30);
-      items.push(L(x, y, cw, 6, /رادیو|MRI|CT|سونو|تصویر/.test(names[i]) ? "شرح درخواست / گزارش تصویربرداری:" : "آزمایش‌های درخواستی / نتایج:", { bold: true, pt: 10, textColor: "#0e6655" })); y += 7;
-      items.push(R(x, y, cw, areaH, { borderColor: "#0e6655", borderWidth: 0.6, corner: 2 }));
-      if (i === 5 || i === 17) {
-        items.push(VL(x + cw * 0.6, y, areaH, { borderColor: "#9bbfb6", borderWidth: 0.4 }));
-        items.push(L(x + cw * 0.6 + 2, y + 2, cw * 0.4 - 4, 5, "نتیجه", { pt: 8, align: 1, textColor: "#0e6655" }));
-        items.push(L(x + 2, y + 2, cw * 0.6 - 4, 5, "شرح آزمایش", { pt: 8, align: 1, textColor: "#0e6655" }));
-      }
-      y += areaH + 3;
-      items.push(HL(x, y, cw, { borderColor: "#bbb" })); y += 2;
-      items.push(L(x, y, cw / 2, 5, "مهر و امضای مسئول فنی", { pt: 8, align: 0, textColor: "#777" }));
-      items.push(F(x + cw / 2, y, cw / 2, 5, "{issued}", { pt: 8, align: 2, textColor: "#777" }));
-      push("lab", names[i], paper, 0, items);
-    }
-  })();
-
-  /* ====================================================================== *
-   *  PREMIUM — richly detailed forms modelled on real Iranian clinics.
-   *  Coloured header bands, info boxes, service tables, signature blocks.
-   * ====================================================================== */
-  function BAND(x, y, w, h, color, o) {
-    return mk(Object.assign({ type: "rect", x: x, y: y, w: w, h: h, fillTransparent: false,
-      fillColor: color, borderWidth: 0, borderColor: color, corner: (o && o.corner) || 1.5 }, o || {}));
-  }
-  // a labelled cell with a soft box (label small grey on top, value bold below)
-  function CELL(x, y, w, h, labelTxt, field, o) {
+  /* ------------------------------------------- SERVICES LIST (v1.55 — core) */
+  // جدول پویای خدمات. ستون‌ها از راست به چپ دقیقاً:
+  //     «نام خدمت | شرح خدمت | تعداد»   با عرض [0.55, 0.30, 0.15]
+  // سطرها هنگام چاپ از ReceptionRecord.services پر می‌شوند (تعداد متغیر).
+  // rowH/headerH ارتفاع دقیق سطر و سرستون را (میلی‌متر) قفل می‌کند تا جدول
+  // در هر کاغذی یکسان چاپ شود؛ ۰ به معنی «خودکار» است.
+  var SVC_LABELS = ["نام خدمت", "شرح خدمت", "تعداد"];
+  var SVC_WIDTHS = [0.55, 0.30, 0.15];
+  function SERVICES(x, y, w, h, o) {
     o = o || {};
-    var arr = [];
-    arr.push(R(x, y, w, h, { borderColor: "#cdd7e6", borderWidth: 0.4, corner: 1.2,
-      fillTransparent: false, fillColor: o.bg || "#f7faff" }));
-    arr.push(L(x + 2, y + 1.2, w - 4, 4, labelTxt, { pt: 7.5, align: 0, dir: 0, textColor: "#7a879c" }));
-    if (field) arr.push(F(x + 2, y + 5, w - 4, 5.5, field, { pt: o.pt || 9.5, bold: o.bold !== false, align: 0, dir: 0, textColor: o.color || "#16233a" }));
-    else arr.push(L(x + 2, y + 5, w - 4, 5.5, o.text || "", { pt: o.pt || 9.5, bold: o.bold !== false, align: 0, dir: 0, textColor: o.color || "#16233a" }));
-    return arr;
-  }
-  function tableJson(cols, rows, header, widths) {
-    return JSON.stringify({ cols: cols, rows: rows, header: !!header,
-      widths: widths || null, cells: [] });
-  }
-  function TABLE(x, y, w, h, cols, rows, o) {
-    o = o || {};
-    return mk(Object.assign({ type: "table", x: x, y: y, w: w, h: h,
-      borderColor: o.borderColor || "#2b5f9e", borderWidth: 0.5,
-      text: o.text || tableJson(cols, rows, o.header !== false, o.widths) }, o));
-  }
-  // §1.53.0 (Bug A/C): premium-section dynamic services list (same as svcList).
-  function SVCLIST(x, y, w, h, o) {
-    o = o || {};
-    var labels = o.labels || ["ردیف", "نام خدمت", "کد", "مبلغ (ریال)"];
-    var widths = o.widths || [0.1, 0.5, 0.15, 0.25];
+    var labels = o.labels || SVC_LABELS;
+    var widths = o.widths || SVC_WIDTHS;
     return mk({
-      type: "services", x: x, y: y, w: w, h: h, pt: o.pt || 8.5,
-      borderColor: o.borderColor || "#2b5f9e", borderWidth: o.borderWidth || 0.5,
-      fillColor: o.accent || o.borderColor || "#1f5fd6",
-      textColor: o.color || "#16233a", visibility: 0,
+      type: "services", x: x, y: y, w: w, h: h,
+      pt: o.pt || 9,
+      borderColor: o.rc || RULE, borderWidth: o.bw != null ? o.bw : 0.3,
+      fillColor: o.band || BAND,
+      fillTransparent: o.band === false,       // true → جدول کاملاً خط‌کشی، بدون سایه
+      textColor: INK,
+      rowH: o.rowH != null ? o.rowH : 6.5,
+      headerH: o.headerH != null ? o.headerH : 7.5,
       text: JSON.stringify({ cols: labels.length, header: o.header !== false, widths: widths, labels: labels })
     });
   }
 
-  (function () {
-    // ---- 1. Premium reception A5 (blue, با کادر و جدول خدمات) -------------
-    (function () {
-      var W = 148, H = 210, x = 9, cw = W - 18, items = [], y = 8;
-      items.push(FR(W, H));
-      items.push(BAND(x, y, cw, 22, "#1f4e8c", { corner: 2 }));
-      items.push(LOGO(x + 2, y + 2, 18));
-      items.push(L(x + 22, y + 2.5, cw - 24, 8, "درمانگاه شبانه‌روزی آزادی طب", { pt: 14, bold: true, align: 0, dir: 0, textColor: "#ffffff" }));
-      items.push(L(x + 22, y + 11, cw - 24, 5, "{clinicaddr}", { field: "{clinicaddr}", type: "field", prefix: "نشانی: ", pt: 7.5, align: 0, dir: 0, textColor: "#dbe7fb" }));
-      items.push(F(x + 22, y + 16, cw - 24, 5, "{clinicphone}", { prefix: "تلفن: ", pt: 7.5, align: 0, dir: 0, textColor: "#dbe7fb" }));
-      y += 24;
-      items.push(L(x, y, cw, 6, "برگهٔ پذیرش بیمار", { pt: 11, bold: true, align: 1, dir: 2, textColor: "#1f4e8c" }));
-      items.push(F(x, y + 1, 36, 5, "{receiptNo}", { prefix: "شماره: ", pt: 8.5, align: 0, dir: 0, textColor: "#555" }));
-      items.push(F(x + cw - 40, y + 1, 40, 5, "{date}", { prefix: "تاریخ ", pt: 8.5, align: 2, dir: 1, textColor: "#555" }));
-      y += 9;
-      // patient info cells (2 columns)
-      var colW = (cw - 4) / 2;
-      function row(lbl1, f1, lbl2, f2) {
-        CELL(x, y, colW, 11, lbl1, f1).forEach(function (e) { items.push(e); });
-        if (lbl2) CELL(x + colW + 4, y, colW, 11, lbl2, f2).forEach(function (e) { items.push(e); });
-        y += 13;
+  /* ------------------------------------------------------------ collections */
+  var ALL = [];
+  function push(group, name, paper, orient, items) {
+    var flat = [];
+    (function walk(a) {
+      for (var i = 0; i < a.length; i++) {
+        if (Array.isArray(a[i])) walk(a[i]);
+        else if (a[i]) flat.push(a[i]);
       }
-      row("نام و نام خانوادگی", "{full}", "کد ملی", "{nid}");
-      row("نام پدر", "{father}", "تاریخ تولد", "{birth}");
-      row("جنسیت", "{gender}", "تلفن همراه", "{mobile}");
-      row("بیمهٔ پایه", "{ins}", "بیمهٔ مکمل", "{supp}");
-      // services table
-      items.push(L(x, y, cw, 5, "شرح خدمات", { pt: 9.5, bold: true, align: 0, dir: 0, textColor: "#1f4e8c" })); y += 6;
-      items.push(SVCLIST(x, y, cw, 26, { accent: "#1f4e8c", borderColor: "#1f4e8c", widths: [0.5, 0.25, 0.25],
-        labels: ["نام خدمت", "تعداد", "مبلغ (ریال)"] })); y += 28;
-      // totals
-      var tw = (cw - 6) / 3;
-      CELL(x, y, tw, 11, "جمع کل", "{totalonly}", { bg: "#eef4ff" }).forEach(function (e) { items.push(e); });
-      CELL(x + tw + 3, y, tw, 11, "سهم بیمه", "{insshareonly}", { bg: "#eef4ff" }).forEach(function (e) { items.push(e); });
-      CELL(x + 2 * (tw + 3), y, tw, 11, "قابل پرداخت", "{paidonly}", { bg: "#dff0e3", color: "#0f7a3a", bold: true }).forEach(function (e) { items.push(e); });
-      y += 14;
-      // queue badge + footer
-      items.push(BAND(x, y, cw * 0.55, 12, "#eaf1fc", { corner: 2, borderColor: "#1f4e8c", borderWidth: 0.5 }));
-      items.push(F(x, y + 2.5, cw * 0.55, 7, "{queue}", { prefix: "نوبت شما: ", bold: true, pt: 13, align: 1, dir: 2, textColor: "#1f4e8c" }));
-      items.push(QR(x + cw - 18, y - 4, 18));
-      y += 16;
-      items.push(HL(x, y, cw, { borderColor: "#cdd7e6" })); y += 1.5;
-      items.push(F(x, y, cw, 4.5, "{issued}", { pt: 7.5, align: 0, dir: 0, textColor: "#8a93a6" }));
-      items.push(L(x, y, cw, 4.5, "نسخهٔ بیمار — لطفاً تا پایان درمان نزد خود نگه دارید.", { pt: 7, align: 2, dir: 0, textColor: "#9aa3b4" }));
-      push("reception", "★ پذیرش حرفه‌ای آبی (جدول خدمات)", "A5", 0, items);
-    })();
+    })(items);
+    flat.forEach(function (it, i) { it.id = i + 1; it.z = i + 1; });
+    ALL.push({ id: 0, name: name, kind: "builtin", group: group,
+      paper: paper, orientation: orient || 0, items: flat });
+  }
 
-    // ---- 2. Premium A4 hospital admission (دو ستونه با کادر) -------------
-    (function () {
-      var W = 210, H = 297, x = 12, cw = W - 24, items = [], y = 12;
-      items.push(BAND(x, y, cw, 26, "#0e4d6e", { corner: 2 }));
-      items.push(LOGO(x + 3, y + 3, 20));
-      items.push(L(x + 26, y + 3.5, cw - 28, 9, "مرکز درمانی و تخصصی آزادی طب", { pt: 18, bold: true, align: 0, dir: 0, textColor: "#ffffff" }));
-      items.push(L(x + 26, y + 13, cw - 28, 5, "پذیرش، درمانگاه تخصصی، تصویربرداری و آزمایشگاه", { pt: 9, align: 0, dir: 0, textColor: "#cfe6f0" }));
-      items.push(F(x + 26, y + 19, cw - 28, 5, "{clinicphone}", { prefix: "تلفن: ", pt: 8.5, align: 0, dir: 0, textColor: "#cfe6f0" }));
-      items.push(QR(x + cw - 22, y + 2, 22));
-      y += 30;
-      items.push(BAND(x, y, cw, 9, "#eaf3f7", { corner: 1.5, borderColor: "#0e4d6e", borderWidth: 0.4 }));
-      items.push(L(x + 3, y + 1.8, cw - 6, 5, "برگهٔ پذیرش و صورتحساب بیمار", { pt: 12, bold: true, align: 1, dir: 2, textColor: "#0e4d6e" }));
-      y += 12;
-      var colW = (cw - 6) / 2;
-      function rowA(lbl1, f1, lbl2, f2) {
-        CELL(x, y, colW, 12, lbl1, f1).forEach(function (e) { items.push(e); });
-        if (lbl2) CELL(x + colW + 6, y, colW, 12, lbl2, f2).forEach(function (e) { items.push(e); });
-        y += 14;
+  /* ======================================================================== *
+   *  BLOCK BUILDERS  (T_HEADER / T_APPT / T_PATIENT / T_DOCTOR /
+   *                   T_SERVICES / T_FINANCE / T_FOOTER)
+   *  هر بلوک آرایه‌ای از آیتم‌ها برمی‌گرداند و ارتفاع مصرفی‌اش را در
+   *  ctx.y جلو می‌برد، بنابراین طرح‌ها به‌سادگی از ترکیب بلوک‌ها ساخته
+   *  می‌شوند و همه دقیقاً هم‌تراز می‌مانند.
+   * ======================================================================== */
+
+  /* ---- سربرگ درمانگاه ---------------------------------------------------- */
+  //  style: 0 = خط‌کشی ساده، 1 = نوار خاکستری، 2 = دو خط موازی،
+  //         3 = کادر دور سربرگ، 4 = بدون لوگو/مینیمال
+  function T_HEADER(c, style, o) {
+    o = o || {};
+    var x = c.x, w = c.w, y = c.y, it = [];
+    var hh = o.h || 26;
+
+    if (style === 1) it.push(BANDBOX(x, y, w, hh, BAND));
+    if (style === 3) it.push(R(x, y, w, hh, { bw: 0.5 }));
+
+    var logoW = (style === 4) ? 0 : (o.logo || 17);
+    if (logoW) it.push(LOGO(x + w - logoW - 1.5, y + 1.5, logoW, logoW));
+
+    var txtW = w - logoW - 4;
+    it.push(T(x + 2, y + 2, txtW, 8, "درمانگاه شبانه‌روزی ثامن‌الائمه",
+      { pt: o.pt || 15, bold: true, textColor: INK }));
+    it.push(T(x + 2, y + 10, txtW, 5, "مرکز جامع سلامت — پذیرش و درمان ۲۴ ساعته",
+      { pt: 8, bold: false, textColor: INK_DIM }));
+    it.push(PV(x + 2, y + 15.5, txtW * 0.5, "تلفن:", "{clinicphone}", { pt: 7.6, color: INK_DIM }));
+    it.push(PV(x + 2 + txtW * 0.52, y + 15.5, txtW * 0.46, "پروانه:", "{cliniclic}", { pt: 7.6, color: INK_DIM }));
+    it.push(PV(x + 2, y + 20, txtW, "مسئول فنی:", "{clinicmgr}", { pt: 7.6, color: INK_DIM, visibility: 1 }));
+
+    if (style === 0) it.push(HL(x, y + hh, w, { bw: 0.6 }));
+    if (style === 2) { it.push(HL(x, y + hh, w, { bw: 0.7 })); it.push(HL(x, y + hh + 1.2, w, { bw: 0.25 })); }
+
+    c.y = y + hh + (style === 2 ? 4 : 3);
+    return it;
+  }
+
+  /* ---- عنوان سند -------------------------------------------------------- */
+  function T_TITLE(c, txt, style) {
+    var x = c.x, w = c.w, y = c.y, it = [];
+    if (style === 1) {
+      it.push(BANDBOX(x, y, w, 8.5, BAND_DK));
+      it.push(T(x, y + 0.6, w, 7.4, txt, { pt: 12 }));
+    } else if (style === 2) {
+      it.push(R(x + w * 0.22, y, w * 0.56, 8.5, { bw: 0.5 }));
+      it.push(T(x + w * 0.22, y + 0.6, w * 0.56, 7.4, txt, { pt: 12 }));
+    } else {
+      it.push(T(x, y, w, 8, txt, { pt: 13 }));
+      it.push(HL(x + w * 0.3, y + 8.2, w * 0.4, { bw: 0.4 }));
+    }
+    c.y = y + 11.5;
+    return it;
+  }
+
+  /* ---- نوار نوبت / شمارهٔ قبض / زمان ------------------------------------ */
+  //  style: 0 = سه سلول کادردار، 1 = نوار خاکستری، 2 = جعبهٔ بزرگ شمارهٔ نوبت
+  function T_APPT(c, style) {
+    var x = c.x, w = c.w, y = c.y, it = [];
+    if (style === 2) {
+      var bw2 = w * 0.3;
+      it.push(R(x + w - bw2, y, bw2, 24, { bw: 0.6 }));
+      it.push(L(x + w - bw2, y + 1.2, bw2, 4.5, "شمارهٔ نوبت", { align: 1, dir: 2, pt: 8, textColor: INK_DIM }));
+      it.push(APPTNO(x + w - bw2, y + 5.5, bw2, 13, { pt: 30 }));
+      it.push(PV(x + w - bw2 + 2, y + 19, bw2 - 4, "ش.قبض:", "{receiptNo}", { pt: 8 }));
+      var rw = w - bw2 - 3;
+      it.push(PV(x, y + 1, rw, "تاریخ و ساعت نوبت:", "{apptdatetime}", { pt: 9.5, bold: true }));
+      it.push(PV(x, y + 7, rw, "ثبت پذیرش:", "{reg_ts}", { pt: 8.6 }));
+      it.push(PV(x, y + 12.5, rw * 0.5, "شیفت:", "{shift}", { pt: 8.6 }));
+      it.push(PV(x + rw * 0.52, y + 12.5, rw * 0.46, "ش.ص:", "{scnum}", { pt: 8.6 }));
+      it.push(PV(x, y + 18, rw, "کد رسید:", "{receiptcode}", { pt: 8.6 }));
+      c.y = y + 27;
+    } else if (style === 1) {
+      it.push(BANDBOX(x, y, w, 9.5, BAND));
+      var cw = w / 4;
+      it.push(PV(x + 3 * cw + 1.5, y + 1.4, cw - 3, "نوبت:", "{queue}", { pt: 9, bold: true }));
+      it.push(PV(x + 2 * cw + 1.5, y + 1.4, cw - 3, "ش.قبض:", "{receiptNo}", { pt: 9 }));
+      it.push(PV(x + 1 * cw + 1.5, y + 1.4, cw - 3, "تاریخ:", "{apptdate}", { pt: 9 }));
+      it.push(PV(x + 1.5, y + 1.4, cw - 3, "ساعت:", "{apptsec}", { pt: 9 }));
+      it.push(PV(x, y + 10.5, w * 0.48, "ثبت پذیرش:", "{reg_ts}", { pt: 8.4, color: INK_DIM }));
+      it.push(PV(x + w * 0.52, y + 10.5, w * 0.48, "شیفت / ش.ص:", "{shiftuser}", { pt: 8.4, color: INK_DIM }));
+      c.y = y + 18;
+    } else {
+      var n = 4, cw2 = w / n;
+      for (var i = 0; i < n; i++) it.push(R(x + i * cw2, y, cw2, 13, { bw: 0.35 }));
+      function box(idx, lbl, fld, big) {
+        var bx = x + (n - 1 - idx) * cw2;
+        it.push(L(bx + 1.5, y + 1, cw2 - 3, 4, lbl, { pt: 7.2, align: 1, dir: 2, textColor: INK_DIM }));
+        it.push(F(bx + 1.5, y + 5.2, cw2 - 3, 6.6, fld, { pt: big ? 13 : 9.6, bold: true, align: 1, dir: 2 }));
       }
-      rowA("نام و نام خانوادگی", "{full}", "کد ملی", "{nid}");
-      rowA("نام پدر", "{father}", "تاریخ تولد / سن", "{age}");
-      rowA("جنسیت", "{gender}", "تلفن همراه", "{mobile}");
-      rowA("پزشک معالج", "{doctor}", "بخش / دپارتمان", "{dept}");
-      rowA("بیمهٔ پایه", "{ins}", "بیمهٔ مکمل", "{supp}");
-      rowA("نشانی", "{address}", "نوع پذیرش", "{ptype}");
-      y += 1;
-      items.push(L(x, y, cw, 5, "شرح خدمات و صورتحساب", { pt: 11, bold: true, align: 0, dir: 0, textColor: "#0e4d6e" })); y += 6;
-      items.push(SVCLIST(x, y, cw, 46, { accent: "#0e4d6e", borderColor: "#0e4d6e", widths: [0.45, 0.15, 0.2, 0.2],
-        labels: ["نام خدمت", "تعداد", "بهای واحد", "مبلغ کل"] })); y += 49;
-      var tw = (cw - 9) / 4;
-      CELL(x, y, tw, 12, "جمع کل", "{totalonly}").forEach(function (e) { items.push(e); });
-      CELL(x + tw + 3, y, tw, 12, "سهم بیمه", "{insshareonly}").forEach(function (e) { items.push(e); });
-      CELL(x + 2 * (tw + 3), y, tw, 12, "تخفیف", "{discount}").forEach(function (e) { items.push(e); });
-      CELL(x + 3 * (tw + 3), y, tw, 12, "قابل پرداخت", "{paidonly}", { bg: "#dff0e3", color: "#0f7a3a" }).forEach(function (e) { items.push(e); });
-      y += 16;
-      items.push(HL(x, y, cw, { borderColor: "#cdd7e6" })); y += 3;
-      items.push(L(x, y, colW, 6, "مهر و امضای پذیرش", { pt: 9, align: 0, dir: 0, textColor: "#6b7689" }));
-      items.push(L(x + colW + 6, y, colW, 6, "مهر و امضای صندوق", { pt: 9, align: 2, dir: 0, textColor: "#6b7689" }));
+      box(0, "شمارهٔ نوبت", "{queue}", true);
+      box(1, "شمارهٔ قبض", "{receiptNo}", false);
+      box(2, "تاریخ نوبت", "{apptdate}", false);
+      box(3, "ساعت", "{apptsec}", false);
+      it.push(PV(x, y + 14.4, w * 0.48, "ثبت پذیرش:", "{reg_ts}", { pt: 8.2, color: INK_DIM }));
+      it.push(PV(x + w * 0.52, y + 14.4, w * 0.48, "کد رسید:", "{receiptcode}", { pt: 8.2, color: INK_DIM }));
+      c.y = y + 22;
+    }
+    return it;
+  }
+
+  /* ---- مشخصات بیمار (بدون نام پدر و بدون آدرس) ------------------------- */
+  //  style: 0 = دو ستونه کادردار، 1 = سطری با خط‌چین، 2 = شبکه‌ای ۳ ستونه،
+  //         3 = با عکس پرسنلی
+  function T_PATIENT(c, style, o) {
+    o = o || {};
+    var x = c.x, w = c.w, y = c.y, it = [];
+    var head = o.head !== false;
+    if (head) {
+      if (o.headBand) { it.push(BANDBOX(x, y, w, 6.4, BAND)); it.push(L(x + 2, y + 0.7, w - 4, 5, "مشخصات بیمار", { pt: 9.6, bold: true })); }
+      else { it.push(L(x, y, w, 5.6, "مشخصات بیمار", { pt: 9.6, bold: true })); it.push(HL(x, y + 6, w, { bw: 0.4 })); }
       y += 8;
-      items.push(F(x, y, cw, 5, "{issued}", { pt: 8, align: 0, dir: 0, textColor: "#9aa3b4" }));
-      push("reception", "★ پذیرش بیمارستانی A4 (کامل)", "A4", 0, items);
-    })();
+    }
 
-    // ---- 3. Premium thermal receipt R80 (رول حرارتی حرفه‌ای) -------------
-    (function () {
-      var W = 80, H = 200, x = 4, cw = W - 8, items = [], y = 5;
-      items.push(L(x, y, cw, 7, "درمانگاه آزادی طب", { pt: 13, bold: true, align: 1, dir: 2, textColor: "#000" })); y += 8;
-      items.push(L(x, y, cw, 4, "{clinicaddr}", { field: "{clinicaddr}", type: "field", pt: 7, align: 1, dir: 2, textColor: "#333" })); y += 4.5;
-      items.push(F(x, y, cw, 4, "{clinicphone}", { prefix: "تلفن: ", pt: 7, align: 1, dir: 2, textColor: "#333" })); y += 5;
-      items.push(HL(x, y, cw, { borderColor: "#000", borderWidth: 0.4 })); y += 2;
-      items.push(F(x, y, cw / 2, 5, "{receiptNo}", { prefix: "قبض ", pt: 8, align: 0, dir: 0 }));
-      items.push(F(x + cw / 2, y, cw / 2, 5, "{date}", { prefix: "", pt: 8, align: 2, dir: 1 })); y += 6;
-      items.push(F(x, y, cw, 5, "{full}", { prefix: "بیمار: ", bold: true, pt: 9, align: 0, dir: 0 })); y += 5.5;
-      items.push(F(x, y, cw, 5, "{nid}", { prefix: "کد ملی: ", pt: 8, align: 0, dir: 0 })); y += 5.5;
-      items.push(F(x, y, cw, 5, "{ins}", { prefix: "بیمه: ", pt: 8, align: 0, dir: 0 })); y += 6;
-      items.push(HL(x, y, cw, { borderColor: "#000", borderWidth: 0.3, borderStyle: 1 })); y += 2;
-      items.push(SVCLIST(x, y, cw, 24, { accent: "#000", borderColor: "#000", pt: 7.5, widths: [0.65, 0.35],
-        labels: ["نام خدمت", "مبلغ"] })); y += 26;
-      items.push(HL(x, y, cw, { borderColor: "#000", borderWidth: 0.3 })); y += 2;
-      items.push(F(x, y, cw, 5, "{total}", { prefix: "جمع کل: ", pt: 8, align: 0, dir: 0 })); y += 5;
-      items.push(F(x, y, cw, 5, "{insshare}", { prefix: "سهم بیمه: ", pt: 8, align: 0, dir: 0 })); y += 5;
-      items.push(F(x, y, cw, 6, "{paid}", { prefix: "قابل پرداخت: ", bold: true, pt: 10, align: 0, dir: 0 })); y += 7;
-      items.push(R(x, y, cw, 10, { borderColor: "#000", borderWidth: 0.5, corner: 1 }));
-      items.push(F(x, y + 2, cw, 6, "{queue}", { prefix: "نوبت: ", bold: true, pt: 12, align: 1, dir: 2 })); y += 12;
-      items.push(QR(x + cw / 2 - 9, y, 18)); y += 20;
-      items.push(L(x, y, cw, 4, "از انتخاب شما سپاسگزاریم.", { pt: 7.5, align: 1, dir: 2, textColor: "#333" }));
-      push("reception", "★ رسید حرارتی حرفه‌ای ۸ سانت", "R80", 0, items);
-    })();
-
-    // ---- 4. Premium appointment card A6 (کارت نوبت لوکس) ----------------
-    (function () {
-      var W = 105, H = 148, x = 7, cw = W - 14, items = [], y = 7;
-      items.push(FR(W, H));
-      items.push(BAND(x, y, cw, 18, "#6d28d9", { corner: 2 }));
-      items.push(LOGO(x + 2, y + 2, 14));
-      items.push(L(x + 18, y + 2.5, cw - 20, 7, "درمانگاه آزادی طب", { pt: 12, bold: true, align: 0, dir: 0, textColor: "#fff" }));
-      items.push(L(x + 18, y + 10, cw - 20, 5, "کارت نوبت", { pt: 8, align: 0, dir: 0, textColor: "#e9d8fd" }));
-      y += 21;
-      items.push(L(x, y, cw, 5, "شماره نوبت شما", { pt: 9, align: 1, dir: 2, textColor: "#7a879c" })); y += 6;
-      items.push(BAND(x + cw / 2 - 22, y, 44, 26, "#f5f0ff", { corner: 3, borderColor: "#6d28d9", borderWidth: 0.6 }));
-      items.push(APPT(x + cw / 2 - 22, y + 1, 44, 24, { pt: 40, textColor: "#6d28d9", dir: 2, prefix: "" })); y += 29;
-      items.push(HL(x, y, cw, { borderColor: "#ddd" })); y += 3;
-      items.push(F(x, y, cw, 6, "{full}", { prefix: "بیمار: ", bold: true, pt: 10, align: 1, dir: 2 })); y += 7;
-      items.push(F(x, y, cw, 5.5, "{doctor}", { prefix: "پزشک: ", pt: 9, align: 1, dir: 2, textColor: "#444" })); y += 6.5;
-      items.push(F(x, y, cw / 2, 5.5, "{apptdate}", { prefix: "تاریخ ", pt: 9, align: 0, dir: 0 }));
-      items.push(F(x + cw / 2, y, cw / 2, 5.5, "{appttime}", { prefix: "ساعت ", pt: 9, align: 2, dir: 1 })); y += 7;
-      items.push(QR(x + cw / 2 - 9, y, 16)); y += 18;
-      items.push(L(x, y, cw, 4.5, "لطفاً تا اعلام شماره منتظر بمانید.", { pt: 7.5, align: 1, dir: 2, textColor: "#888" }));
-      push("appointment", "★ کارت نوبت لوکس (بنفش)", "A6", 0, items);
-    })();
-
-    // ---- 5. Premium lab request A5 (آزمایشگاه با جدول) -----------------
-    (function () {
-      var W = 148, H = 210, x = 9, cw = W - 18, items = [], y = 8;
-      items.push(FR(W, H));
-      items.push(BAND(x, y, cw, 20, "#0e6655", { corner: 2 }));
-      items.push(LOGO(x + 2, y + 2, 16));
-      items.push(L(x + 20, y + 2.5, cw - 22, 7, "آزمایشگاه تشخیص طبی آزادی طب", { pt: 12, bold: true, align: 0, dir: 0, textColor: "#fff" }));
-      items.push(L(x + 20, y + 10, cw - 22, 5, "فرم درخواست و جوابدهی آزمایش", { pt: 8, align: 0, dir: 0, textColor: "#cdeae3" }));
-      items.push(QR(x + cw - 18, y + 1, 17));
-      y += 23;
-      items.push(F(x, y, cw / 2, 6, "{date}", { prefix: "تاریخ ", pt: 9, align: 0, dir: 0 }));
-      items.push(F(x + cw / 2, y, cw / 2, 6, "{receiptNo}", { prefix: "شماره پذیرش ", pt: 9, align: 2, dir: 1 })); y += 7;
-      var colW = (cw - 4) / 2;
-      function rowL(lbl1, f1, lbl2, f2) {
-        CELL(x, y, colW, 11, lbl1, f1).forEach(function (e) { items.push(e); });
-        if (lbl2) CELL(x + colW + 4, y, colW, 11, lbl2, f2).forEach(function (e) { items.push(e); });
-        y += 13;
+    if (style === 3) {
+      var pw = 22, ph = 28;
+      it.push(PHOTO(x + w - pw, y, pw, ph));
+      it.push(L(x + w - pw, y + ph + 0.4, pw, 3.6, "عکس بیمار", { pt: 6.6, align: 1, dir: 2, textColor: INK_DIM }));
+      var iw = w - pw - 3, ic = iw / 2 - 1.5;
+      var rows = [
+        ["نام و نام خانوادگی:", "{full}", true], ["کد ملی:", "{nid}", false],
+        ["تاریخ تولد:", "{birth}", false], ["سن:", "{age}", false],
+        ["جنسیت:", "{gender}", false], ["تلفن همراه:", "{mobile}", false],
+        ["نوع بیمار:", "{ptype}", false], ["تلفن ثابت:", "{landline}", false]
+      ];
+      for (var r = 0; r < rows.length; r++) {
+        var cx = x + (r % 2 === 0 ? iw - ic : 0), cy = y + Math.floor(r / 2) * 6.6;
+        it.push(PV(cx, cy, ic, rows[r][0], rows[r][1], { pt: 9, bold: rows[r][2] }));
       }
-      rowL("نام و نام خانوادگی", "{full}", "کد ملی", "{nid}");
-      rowL("سن", "{age}", "جنسیت", "{gender}");
-      rowL("پزشک درخواست‌کننده", "{doctor}", "بیمه", "{ins}");
-      items.push(L(x, y, cw, 5, "آزمایش‌های درخواستی / نتایج", { pt: 9.5, bold: true, align: 0, dir: 0, textColor: "#0e6655" })); y += 6;
-      items.push(TABLE(x, y, cw, 46, 4, 8, { borderColor: "#0e6655", header: true, widths: [0.4, 0.2, 0.2, 0.2],
-        text: JSON.stringify({ cols: 4, rows: 8, header: true, widths: [0.4, 0.2, 0.2, 0.2],
-          cells: [{ r: 0, c: 0, t: "نام آزمایش" }, { r: 0, c: 1, t: "نتیجه" }, { r: 0, c: 2, t: "واحد" }, { r: 0, c: 3, t: "محدودهٔ مرجع" }] }) })); y += 49;
-      items.push(HL(x, y, cw, { borderColor: "#bbb" })); y += 2;
-      items.push(L(x, y, cw / 2, 5, "مهر و امضای مسئول فنی", { pt: 8, align: 0, dir: 0, textColor: "#777" }));
-      items.push(F(x + cw / 2, y, cw / 2, 5, "{issued}", { pt: 8, align: 2, dir: 0, textColor: "#777" }));
-      push("lab", "★ آزمایشگاه حرفه‌ای (جدول نتایج)", "A5", 0, items);
-    })();
-  })();
+      c.y = y + Math.max(ph + 5, Math.ceil(rows.length / 2) * 6.6) + 3;
+      return it;
+    }
+
+    if (style === 2) {
+      var n3 = 3, cw3 = w / n3;
+      var g = [
+        ["نام و نام خانوادگی", "{full}"], ["کد ملی", "{nid}"], ["سن", "{age}"],
+        ["تاریخ تولد", "{birth}"], ["جنسیت", "{gender}"], ["نوع بیمار", "{ptype}"],
+        ["تلفن همراه", "{mobile}"], ["تلفن ثابت", "{landline}"], ["کد رهگیری", "{eprescription}"]
+      ];
+      for (var k = 0; k < g.length; k++) {
+        var rr = Math.floor(k / n3), cc = k % n3;
+        var bx = x + (n3 - 1 - cc) * cw3, by = y + rr * 11.5;
+        it.push(R(bx, by, cw3, 11.5, { bw: 0.3, rc: RULE_DIM }));
+        it.push(L(bx + 1.6, by + 0.9, cw3 - 3.2, 3.8, g[k][0], { pt: 6.8, textColor: INK_DIM }));
+        it.push(F(bx + 1.6, by + 4.6, cw3 - 3.2, 6, g[k][1], { pt: 9.2, bold: true }));
+      }
+      c.y = y + Math.ceil(g.length / n3) * 11.5 + 3;
+      return it;
+    }
+
+    if (style === 1) {
+      var lines = [
+        [["نام و نام خانوادگی:", "{full}", 0.52, true], ["کد ملی:", "{nid}", 0.48, false]],
+        [["تاریخ تولد:", "{birth}", 0.34, false], ["سن:", "{age}", 0.2, false], ["جنسیت:", "{gender}", 0.22, false], ["نوع بیمار:", "{ptype}", 0.24, false]],
+        [["تلفن همراه:", "{mobile}", 0.5, false], ["تلفن ثابت:", "{landline}", 0.5, false]]
+      ];
+      var yy = y;
+      for (var li = 0; li < lines.length; li++) {
+        var acc = 0;
+        for (var ci = 0; ci < lines[li].length; ci++) {
+          var seg = lines[li][ci], sw = w * seg[2];
+          it.push(PV(x + w - acc - sw, yy, sw - 2, seg[0], seg[1], { pt: 9.2, bold: seg[3] }));
+          acc += sw;
+        }
+        it.push(HL(x, yy + 6.6, w, { bw: 0.2, rc: RULE_DIM }));
+        yy += 8.2;
+      }
+      c.y = yy + 2;
+      return it;
+    }
+
+    // style 0 — دو ستونه کادردار
+    var half = w / 2 - 1.5;
+    var p0 = [
+      ["نام و نام خانوادگی:", "{full}", true], ["کد ملی:", "{nid}", false],
+      ["تاریخ تولد:", "{birth}", false], ["سن:", "{age}", false],
+      ["جنسیت:", "{gender}", false], ["نوع بیمار:", "{ptype}", false],
+      ["تلفن همراه:", "{mobile}", false], ["تلفن ثابت:", "{landline}", false]
+    ];
+    var rowsN = Math.ceil(p0.length / 2), bh = rowsN * 6.6 + 2.4;
+    it.push(R(x, y, w, bh, { bw: 0.35 }));
+    it.push(VL(x + w / 2, y, bh, { bw: 0.25, rc: RULE_DIM }));
+    for (var q = 0; q < p0.length; q++) {
+      var col = q % 2, row = Math.floor(q / 2);
+      var qx = x + (col === 0 ? w / 2 + 1.5 : 1.5);
+      it.push(PV(qx, y + 1.4 + row * 6.6, half - 1.5, p0[q][0], p0[q][1], { pt: 9, bold: p0[q][2] }));
+    }
+    c.y = y + bh + 3;
+    return it;
+  }
+
+  /* ---- بیمه (پایه + مکمل با درصد کنار آن) ------------------------------ */
+  //  style: 0 = دو سلول کادردار، 1 = نوار خاکستری، 2 = سطری
+  function T_INS(c, style) {
+    var x = c.x, w = c.w, y = c.y, it = [];
+    if (style === 1) {
+      it.push(BANDBOX(x, y, w, 15, BAND));
+      it.push(L(x + 2, y + 0.8, w - 4, 4.4, "پوشش بیمه‌ای", { pt: 8.6, bold: true, textColor: INK_SOFT }));
+      it.push(PV(x + w / 2 + 1.5, y + 5.4, w / 2 - 3.5, "بیمهٔ پایه:", "{ins_full}", { pt: 9.4, bold: true }));
+      it.push(PV(x + 2, y + 5.4, w / 2 - 3.5, "بیمهٔ مکمل:", "{supp_full}", { pt: 9.4, bold: true }));
+      it.push(PV(x + w / 2 + 1.5, y + 10.4, w / 2 - 3.5, "شماره دفترچه:", "{insno}", { pt: 8.4 }));
+      it.push(PV(x + 2, y + 10.4, w / 2 - 3.5, "اعتبار:", "{insexp}", { pt: 8.4 }));
+      c.y = y + 19;
+      return it;
+    }
+    if (style === 2) {
+      it.push(PV(x + w * 0.5, y, w * 0.5 - 2, "بیمهٔ پایه:", "{ins}", { pt: 9.2, bold: true }));
+      it.push(PV(x + w * 0.34, y, w * 0.14, "درصد:", "{ins_percent}", { pt: 9.2 }));
+      it.push(PV(x, y, w * 0.32, "دفترچه:", "{insno}", { pt: 9.2 }));
+      it.push(HL(x, y + 6.6, w, { bw: 0.2, rc: RULE_DIM }));
+      it.push(PV(x + w * 0.5, y + 8, w * 0.5 - 2, "بیمهٔ مکمل:", "{supp}", { pt: 9.2, bold: true }));
+      it.push(PV(x + w * 0.34, y + 8, w * 0.14, "درصد:", "{supp_percent}", { pt: 9.2 }));
+      it.push(PV(x, y + 8, w * 0.32, "اعتبار:", "{insexp}", { pt: 9.2 }));
+      it.push(HL(x, y + 14.6, w, { bw: 0.2, rc: RULE_DIM }));
+      c.y = y + 18;
+      return it;
+    }
+    // style 0
+    var cw = w / 2 - 1.5;
+    it.push(R(x + w - cw, y, cw, 20, { bw: 0.35 }));
+    it.push(BANDBOX(x + w - cw, y, cw, 5.6, BAND));
+    it.push(L(x + w - cw, y + 0.7, cw, 4.4, "بیمهٔ پایه", { pt: 8.4, bold: true, align: 1, dir: 2 }));
+    it.push(PV(x + w - cw + 2, y + 6.4, cw - 4, "سازمان:", "{ins}", { pt: 9, bold: true }));
+    it.push(PV(x + w - cw + 2, y + 11.4, cw - 4, "درصد پوشش:", "{ins_percent}", { pt: 9 }));
+    it.push(PV(x + w - cw + 2, y + 15.6, cw - 4, "دفترچه:", "{insno}", { pt: 8.4 }));
+    it.push(R(x, y, cw, 20, { bw: 0.35 }));
+    it.push(BANDBOX(x, y, cw, 5.6, BAND));
+    it.push(L(x, y + 0.7, cw, 4.4, "بیمهٔ مکمل", { pt: 8.4, bold: true, align: 1, dir: 2 }));
+    it.push(PV(x + 2, y + 6.4, cw - 4, "سازمان:", "{supp}", { pt: 9, bold: true }));
+    it.push(PV(x + 2, y + 11.4, cw - 4, "درصد پوشش:", "{supp_percent}", { pt: 9 }));
+    it.push(PV(x + 2, y + 15.6, cw - 4, "اعتبار:", "{insexp}", { pt: 8.4 }));
+    c.y = y + 23;
+    return it;
+  }
+
+  /* ---- پزشک / تخصص / نوع خدمت ------------------------------------------ */
+  //  style: 0 = چهار سلول، 1 = نوار خاکستری، 2 = سطری با خط‌چین
+  function T_DOCTOR(c, style) {
+    var x = c.x, w = c.w, y = c.y, it = [];
+    if (style === 1) {
+      it.push(BANDBOX(x, y, w, 15.5, BAND));
+      it.push(PV(x + w / 2 + 1.5, y + 1.2, w / 2 - 3.5, "پزشک معالج:", "{doctor}", { pt: 9.6, bold: true }));
+      it.push(PV(x + 2, y + 1.2, w / 2 - 3.5, "کد پزشک:", "{doctorcode}", { pt: 9.2 }));
+      it.push(PV(x + w / 2 + 1.5, y + 6.4, w / 2 - 3.5, "شرح تخصص:", "{specialty}", { pt: 9.2 }));
+      it.push(PV(x + 2, y + 6.4, w / 2 - 3.5, "نوع خدمت:", "{servicetype}", { pt: 9.2 }));
+      it.push(PV(x + w / 2 + 1.5, y + 11, w / 2 - 3.5, "انجام‌دهنده:", "{performer}", { pt: 8.6 }));
+      it.push(PV(x + 2, y + 11, w / 2 - 3.5, "بخش:", "{dept}", { pt: 8.6 }));
+      c.y = y + 19;
+      return it;
+    }
+    if (style === 2) {
+      it.push(PV(x + w * 0.52, y, w * 0.48 - 2, "پزشک معالج:", "{doctor}", { pt: 9.6, bold: true }));
+      it.push(PV(x + w * 0.26, y, w * 0.24, "کد پزشک:", "{doctorcode}", { pt: 9.2 }));
+      it.push(PV(x, y, w * 0.24, "بخش:", "{dept}", { pt: 9.2 }));
+      it.push(HL(x, y + 6.6, w, { bw: 0.2, rc: RULE_DIM }));
+      it.push(PV(x + w * 0.52, y + 8, w * 0.48 - 2, "شرح تخصص:", "{specialty}", { pt: 9.2 }));
+      it.push(PV(x + w * 0.26, y + 8, w * 0.24, "نوع خدمت:", "{servicetype}", { pt: 9.2 }));
+      it.push(PV(x, y + 8, w * 0.24, "کد تخصص:", "{specialtycode}", { pt: 9.2 }));
+      it.push(HL(x, y + 14.6, w, { bw: 0.2, rc: RULE_DIM }));
+      c.y = y + 18;
+      return it;
+    }
+    var n = 4, cw = w / n;
+    var g = [["پزشک معالج", "{doctor}"], ["کد پزشک", "{doctorcode}"],
+             ["شرح تخصص", "{specialty}"], ["نوع خدمت", "{servicetype}"]];
+    for (var i = 0; i < n; i++) {
+      var bx = x + (n - 1 - i) * cw;
+      it.push(R(bx, y, cw, 12, { bw: 0.3, rc: RULE_DIM }));
+      it.push(L(bx + 1.6, y + 1, cw - 3.2, 3.8, g[i][0], { pt: 6.8, textColor: INK_DIM }));
+      it.push(F(bx + 1.6, y + 4.8, cw - 3.2, 6.4, g[i][1], { pt: 9.2, bold: i === 0 }));
+    }
+    it.push(PV(x + w * 0.52, y + 13.4, w * 0.48, "انجام‌دهنده:", "{performer}", { pt: 8.4, color: INK_DIM }));
+    it.push(PV(x, y + 13.4, w * 0.48, "بخش / واحد:", "{dept}", { pt: 8.4, color: INK_DIM }));
+    c.y = y + 22;
+    return it;
+  }
+
+  /* ---- جدول خدمات ------------------------------------------------------- */
+  //  همیشه «نام خدمت | شرح خدمت | تعداد». style فقط ظاهر خط‌کشی را عوض می‌کند:
+  //    0 = سربرگ خاکستری + خط‌کشی کامل
+  //    1 = تمام‌خط‌کشی بدون سایه (خالص تک‌رنگ)
+  //    2 = سربرگ خاکستری تیره‌تر + کادر بیرونی ضخیم
+  function T_SERVICES(c, style, o) {
+    o = o || {};
+    var x = c.x, w = c.w, y = c.y, it = [];
+    var h = o.h || 62;
+    it.push(L(x, y, w * 0.6, 5.6, o.title || "خدمات ارائه‌شده", { pt: 9.6, bold: true }));
+    it.push(PV(x + w * 0.6, y, w * 0.4, "تعداد ردیف:", "{servicescount}", { pt: 8.4, color: INK_DIM }));
+    y += 7;
+    var so = { pt: o.pt || 9, rowH: o.rowH || 6.5, headerH: o.headerH || 7.5 };
+    if (style === 1) { so.band = false; so.bw = 0.3; }
+    else if (style === 2) { so.band = BAND_DK; so.bw = 0.6; }
+    else { so.band = BAND; so.bw = 0.35; }
+    it.push(SERVICES(x, y, w, h, so));
+    c.y = y + h + 3.5;
+    return it;
+  }
+
+  /* ---- مالی / صورتحساب -------------------------------------------------- */
+  //  style: 0 = جدول دو ستونه راست‌چین، 1 = نوار خاکستری سه‌ستونه،
+  //         2 = ستون باریک سمت چپ، 3 = فشرده تک‌سطری
+  function T_FINANCE(c, style) {
+    var x = c.x, w = c.w, y = c.y, it = [];
+    var rows = [
+      ["جمع کل خدمات", "{total}", false],
+      ["سهم پایه (بیمهٔ اصلی)", "{basepay}", false],
+      ["سهم مکمل", "{supppay}", false],
+      ["تخفیف", "{discount_from}", false],
+      ["نقدی (صندوق)", "{cash}", false],
+      ["کارتخوان (POS)", "{pos}", false],
+      ["سهم بیمار", "{patientshare}", false],
+      ["مبلغ نهایی قابل پرداخت", "{finaltotal}", true]
+    ];
+
+    if (style === 3) {
+      it.push(BANDBOX(x, y, w, 10, BAND_DK));
+      it.push(PV(x + w * 0.66, y + 1.4, w * 0.32, "جمع کل:", "{total}", { pt: 9.4, bold: true }));
+      it.push(PV(x + w * 0.34, y + 1.4, w * 0.3, "سهم بیمار:", "{patientshare}", { pt: 9.4 }));
+      it.push(PV(x + 2, y + 1.4, w * 0.3, "پرداختی:", "{finaltotal}", { pt: 9.4, bold: true }));
+      it.push(PV(x + w * 0.5, y + 11, w * 0.5 - 2, "نقدی:", "{cash}", { pt: 8.2, color: INK_DIM }));
+      it.push(PV(x, y + 11, w * 0.48, "کارتخوان:", "{pos}", { pt: 8.2, color: INK_DIM }));
+      c.y = y + 20;
+      return it;
+    }
+
+    if (style === 2) {
+      var cw = w * 0.44, bx = x;                     // ستون باریک، سمت چپ برگ
+      it.push(R(bx, y, cw, rows.length * 6.4 + 2.4, { bw: 0.4 }));
+      for (var i = 0; i < rows.length; i++) {
+        var yy = y + 1.4 + i * 6.4;
+        it.push(L(bx + cw * 0.4, yy, cw * 0.58, 5.6, rows[i][0], { pt: 8.2, bold: rows[i][2], textColor: rows[i][2] ? INK : INK_SOFT }));
+        it.push(F(bx + 1.6, yy, cw * 0.4 - 2, 5.6, rows[i][1], { pt: 8.6, bold: rows[i][2], align: 2, dir: 0 }));
+        if (i < rows.length - 1) it.push(HL(bx, yy + 6.1, cw, { bw: 0.15, rc: RULE_DIM }));
+      }
+      c.y = y + rows.length * 6.4 + 6;
+      return it;
+    }
+
+    if (style === 1) {
+      var n = 4, cwx = w / n, r2 = Math.ceil(rows.length / n);
+      it.push(BANDBOX(x, y, w, r2 * 12.2, BAND));
+      for (var k = 0; k < rows.length; k++) {
+        var rr = Math.floor(k / n), cc = k % n;
+        var px = x + (n - 1 - cc) * cwx;
+        it.push(L(px + 1.6, y + rr * 12.2 + 1, cwx - 3.2, 4, rows[k][0], { pt: 6.8, textColor: INK_DIM }));
+        it.push(F(px + 1.6, y + rr * 12.2 + 5, cwx - 3.2, 6.4, rows[k][1], { pt: 9, bold: rows[k][2] }));
+        if (cc > 0) it.push(VL(px + cwx, y + rr * 12.2 + 1.5, 9.5, { bw: 0.2, rc: RULE_DIM }));
+      }
+      c.y = y + r2 * 12.2 + 4;
+      return it;
+    }
+
+    // style 0 — جدول دو ستونه (برچسب راست، مبلغ چپ)
+    var bh = rows.length * 6.4 + 2.4;
+    it.push(R(x, y, w, bh, { bw: 0.4 }));
+    it.push(VL(x + w * 0.42, y, bh, { bw: 0.25, rc: RULE_DIM }));
+    for (var m = 0; m < rows.length; m++) {
+      var my = y + 1.4 + m * 6.4;
+      var isLast = (m === rows.length - 1);
+      if (isLast) it.push(BANDBOX(x + 0.3, my - 0.8, w - 0.6, 6.8, BAND));
+      it.push(L(x + w * 0.44, my, w * 0.54, 5.6, rows[m][0], { pt: 8.6, bold: rows[m][2] }));
+      it.push(F(x + 1.6, my, w * 0.4, 5.6, rows[m][1], { pt: 9, bold: rows[m][2], align: 2, dir: 0 }));
+      if (!isLast) it.push(HL(x, my + 6.1, w, { bw: 0.15, rc: RULE_DIM }));
+    }
+    c.y = y + bh + 4;
+    return it;
+  }
+
+  /* ---- پانویس: پذیرش‌گر، رهگیری، معرفی‌نامه، بارکد ---------------------- */
+  //  style: 0 = بارکد سمت چپ + اطلاعات راست، 1 = بارکد وسط، 2 = QR + بارکد،
+  //         3 = بدون بارکد (فقط امضا)، 4 = نوار خاکستری + بارکد
+  function T_FOOTER(c, style, W, H) {
+    var x = c.x, w = c.w, y = c.y, it = [];
+    var bcW = 56, bcH = 15;
+
+    if (style === 4) it.push(BANDBOX(x, y, w, 22, BAND));
+    else it.push(HL(x, y, w, { bw: 0.5 }));
+    var iy = y + (style === 4 ? 1.6 : 2.2);
+
+    var infoW = (style === 3) ? w : w - bcW - 4;
+    it.push(PV(x + w - infoW, iy, infoW * 0.55, "پذیرشگر:", "{receptionist}", { pt: 8.4 }));
+    it.push(PV(x + w - infoW * 0.44, iy, infoW * 0.42, "صندوق‌دار:", "{cashier_name}", { pt: 8.4 }));
+    it.push(PV(x + w - infoW, iy + 5, infoW * 0.55, "کد رهگیری نسخه:", "{eprescription}", { pt: 8.2, visibility: 1 }));
+    it.push(PV(x + w - infoW * 0.44, iy + 5, infoW * 0.42, "ش. معرفی‌نامه:", "{referralno}", { pt: 8.2, visibility: 1 }));
+    it.push(PV(x + w - infoW, iy + 10, infoW * 0.55, "ش.ص:", "{scnum}", { pt: 8.2 }));
+    it.push(PV(x + w - infoW * 0.44, iy + 10, infoW * 0.42, "کد رسید:", "{receiptcode}", { pt: 8.2 }));
+
+    // EVERY footer carries exactly one real, scannable barcode — it is the
+    // machine-readable key to the reception record, so no style may omit it.
+    if (style === 0 || style === 4) {
+      it.push(BARCODE(x, iy + 0.5, bcW, bcH));
+      it.push(L(x, iy + bcH + 1, bcW, 3.6, "بارکد رسید", { pt: 6.4, align: 1, dir: 2, textColor: INK_DIM }));
+    } else if (style === 1) {
+      it.push(BARCODE(x + (w - bcW) / 2, iy + 16, bcW, bcH));
+    } else if (style === 2) {
+      it.push(QR(x, iy + 0.5, 17));
+      it.push(BARCODE(x + 19, iy + 1.5, bcW - 12, 13));
+    } else if (style === 3) {
+      // style 3 spreads the clerk info full-width, so the barcode sits centred
+      // on its own line beneath it (and the signature band moves down to suit).
+      it.push(BARCODE(x + (w - bcW) / 2, iy + 16, bcW, bcH));
+      it.push(T(x, iy + 16 + bcH + 0.8, w, 3.6, "بارکد رسید", { pt: 6.4, textColor: INK_DIM }));
+    }
+
+    var fy = y + ((style === 1 || style === 3) ? 34 : 24);
+    it.push(L(x, fy, w * 0.42, 4.4, "امضا / مهر پذیرش", { pt: 7.6, textColor: INK_DIM }));
+    it.push(HL(x, fy + 5.4, w * 0.4, { bw: 0.25, rc: RULE_DIM }));
+    it.push(L(x + w * 0.58, fy, w * 0.42, 4.4, "امضای بیمار", { pt: 7.6, align: 2, dir: 0, textColor: INK_DIM }));
+    it.push(HL(x + w * 0.6, fy + 5.4, w * 0.4, { bw: 0.25, rc: RULE_DIM }));
+    it.push(T(x, fy + 7.4, w, 4, "این رسید سند پذیرش شماست؛ لطفاً تا پایان درمان نزد خود نگه دارید.",
+      { pt: 6.8, bold: false, textColor: INK_DIM }));
+    c.y = fy + 13;
+    return it;
+  }
+
+  /* ---- شرایط / یادداشت -------------------------------------------------- */
+  function T_NOTES(c, style) {
+    var x = c.x, w = c.w, y = c.y, it = [];
+    if (style === 1) it.push(BANDBOX(x, y, w, 17, BAND));
+    else it.push(R(x, y, w, 17, { bw: 0.3, rc: RULE_DIM }));
+    it.push(L(x + 2, y + 1, w - 4, 4.4, "توضیحات / تشخیص", { pt: 8.2, bold: true, textColor: INK_SOFT }));
+    it.push(PV(x + 2, y + 5.8, w - 4, "تشخیص:", "{diagnosis}", { pt: 8.4, visibility: 1 }));
+    it.push(PV(x + 2, y + 11, (w - 4) * 0.5, "حساسیت دارویی:", "{allergy}", { pt: 8.4, visibility: 1 }));
+    it.push(PV(x + 2 + (w - 4) * 0.52, y + 11, (w - 4) * 0.46, "مراجعهٔ بعدی:", "{nextvisit}", { pt: 8.4, visibility: 1 }));
+    c.y = y + 20;
+    return it;
+  }
+
+  /* ---- علائم حیاتی ------------------------------------------------------ */
+  function T_VITALS(c, style) {
+    var x = c.x, w = c.w, y = c.y, it = [];
+    var g = [["قد", "{height}"], ["وزن", "{weight}"], ["فشار خون", "{bp}"], ["دما", "{temp}"], ["نبض", "{pulse}"]];
+    var n = g.length, cw = w / n;
+    if (style === 1) it.push(BANDBOX(x, y, w, 11.5, BAND));
+    for (var i = 0; i < n; i++) {
+      var bx = x + (n - 1 - i) * cw;
+      if (style !== 1) it.push(R(bx, y, cw, 11.5, { bw: 0.3, rc: RULE_DIM }));
+      it.push(L(bx + 1.4, y + 0.9, cw - 2.8, 3.6, g[i][0], { pt: 6.6, align: 1, dir: 2, textColor: INK_DIM }));
+      it.push(F(bx + 1.4, y + 4.4, cw - 2.8, 6.2, g[i][1], { pt: 9, bold: true, align: 1, dir: 2 }));
+    }
+    c.y = y + 15;
+    return it;
+  }
+
+  /* ---- برگهٔ بیمه (نسخهٔ دوم رسید، با بارکد قابل اسکن) ------------------ */
+  function T_INSPAGE(c, style) {
+    var x = c.x, w = c.w, y = c.y, it = [];
+    it.push(HL(x, y, w, { bw: 0.8 }));
+    y += 2.5;
+    it.push(T(x, y, w, 7, "نسخهٔ سازمان بیمه‌گر", { pt: 11 }));
+    y += 9;
+    it.push(R(x, y, w, 30, { bw: 0.4 }));
+    it.push(PV(x + w * 0.52, y + 1.8, w * 0.46, "بیمار:", "{full}", { pt: 9.2, bold: true }));
+    it.push(PV(x + 2, y + 1.8, w * 0.46, "کد ملی:", "{nid}", { pt: 9.2 }));
+    it.push(PV(x + w * 0.52, y + 7.4, w * 0.46, "بیمهٔ پایه:", "{ins_full}", { pt: 8.8 }));
+    it.push(PV(x + 2, y + 7.4, w * 0.46, "بیمهٔ مکمل:", "{supp_full}", { pt: 8.8 }));
+    it.push(PV(x + w * 0.52, y + 12.8, w * 0.46, "سهم پایه:", "{basepay}", { pt: 8.8 }));
+    it.push(PV(x + 2, y + 12.8, w * 0.46, "سهم مکمل:", "{supppay}", { pt: 8.8 }));
+    it.push(PV(x + w * 0.52, y + 18.2, w * 0.46, "ش. معرفی‌نامه:", "{referralno}", { pt: 8.8, visibility: 1 }));
+    it.push(PV(x + 2, y + 18.2, w * 0.46, "کد رهگیری:", "{eprescription}", { pt: 8.8, visibility: 1 }));
+    it.push(PV(x + w * 0.52, y + 23.6, w * 0.46, "پزشک:", "{doctor}", { pt: 8.8 }));
+    it.push(PV(x + 2, y + 23.6, w * 0.46, "نوع خدمت:", "{servicetype}", { pt: 8.8 }));
+    // بارکد قابل اسکن + نمایش عدد آن (الزام برگهٔ بیمه)
+    var bw2 = style === 1 ? 70 : 58;
+    it.push(BARCODE(x + (w - bw2) / 2, y + 32, bw2, 17, { sym: "code128" }));
+    c.y = y + 53;
+    return it;
+  }
+
+  /* ======================================================================== *
+   *  THE 30 READY-MADE DESIGNS
+   *  همه در گروه reception، همه A4 عمودی، همه تک‌رنگ، همه با جدول خدمات
+   *  «نام خدمت | شرح خدمت | تعداد»، هیچ‌کدام «نام پدر» یا «آدرس» ندارند.
+   *  هر ردیف جدول زیر یک ترکیب یکتا از استایل بلوک‌ها است، بنابراین ۳۰ طرح
+   *  ظاهر کاملاً متفاوتی دارند و هیچ دو تایی شبیه هم نیستند.
+   * ======================================================================== */
+  var W = 210, H = 297, M = 10;              // A4 + حاشیه
+
+  //  فیلدهای هر ردیف:
+  //  name, header, title, appt, patient, ins, doctor, svc, fin, foot,
+  //  extras: {frame, notes, vitals, inspage, svcH}
+  var SPEC = [
+    ["۰۱) رسید پذیرش ثامن‌الائمه — استاندارد",      0, 0, 0, 0, 0, 0, 0, 0, 0, { frame: 1, svcH: 62 }],
+    ["۰۲) رسید پذیرش — سربرگ نواری",                1, 1, 1, 1, 1, 1, 0, 1, 4, { svcH: 58 }],
+    ["۰۳) رسید پذیرش — خط‌کشی خالص",                2, 2, 0, 1, 2, 2, 1, 0, 0, { frame: 1, svcH: 66 }],
+    ["۰۴) رسید پذیرش — شبکه‌ای فشرده",              0, 1, 1, 2, 1, 0, 0, 1, 1, { svcH: 55 }],
+    ["۰۵) رسید پذیرش — با عکس بیمار",               3, 0, 0, 3, 0, 0, 0, 0, 0, { frame: 1, svcH: 54 }],
+    ["۰۶) رسید پذیرش — جعبهٔ نوبت بزرگ",            1, 2, 2, 0, 1, 1, 2, 0, 2, { svcH: 56 }],
+    ["۰۷) رسید پذیرش + برگهٔ بیمه",                 0, 0, 1, 1, 2, 2, 0, 3, 3, { inspage: 1, svcH: 40 }],
+    ["۰۸) رسید پذیرش — کامل با علائم حیاتی",        2, 0, 0, 0, 0, 0, 0, 0, 0, { vitals: 1, svcH: 46 }],
+    ["۰۹) رسید پذیرش — با توضیحات و تشخیص",         1, 1, 1, 1, 1, 1, 0, 0, 1, { notes: 1, svcH: 44 }],
+    ["۱۰) رسید پذیرش — دو ستونهٔ مالی",             0, 2, 0, 0, 0, 2, 1, 2, 0, { frame: 1, svcH: 60 }],
+    ["۱۱) رسید پذیرش — مینیمال بی‌لوگو",            4, 0, 1, 1, 2, 2, 1, 3, 1, { svcH: 70 }],
+    ["۱۲) رسید پذیرش — کادر کامل رسمی",             3, 1, 0, 0, 0, 0, 2, 0, 0, { frame: 1, svcH: 58 }],
+    ["۱۳) رسید پذیرش — نواری تیره",                 1, 1, 1, 2, 1, 1, 2, 1, 4, { svcH: 52 }],
+    ["۱۴) رسید پذیرش — سطری کلاسیک",                2, 0, 0, 1, 2, 2, 0, 0, 0, { svcH: 64 }],
+    ["۱۵) رسید پذیرش — QR و بارکد",                 0, 2, 1, 0, 0, 0, 1, 0, 2, { frame: 1, svcH: 56 }],
+    ["۱۶) رسید پذیرش — جدول خدمات بلند",            1, 0, 1, 1, 1, 2, 0, 3, 1, { svcH: 92 }],
+    ["۱۷) رسید پذیرش — تخصصی (تخصص برجسته)",        0, 1, 0, 0, 2, 1, 0, 0, 0, { svcH: 58 }],
+    ["۱۸) رسید پذیرش — بیمه‌محور",                  2, 1, 1, 1, 0, 2, 2, 1, 0, { inspage: 1, svcH: 38 }],
+    ["۱۹) رسید پذیرش — فشردهٔ یک‌صفحه‌ای",          4, 2, 1, 2, 2, 2, 1, 3, 1, { svcH: 76 }],
+    ["۲۰) رسید پذیرش — رسمی با امضا",               3, 0, 0, 0, 0, 0, 0, 0, 3, { frame: 1, svcH: 62 }],
+    ["۲۱) رسید پذیرش — علائم حیاتی + توضیحات",      1, 1, 1, 1, 1, 1, 0, 3, 1, { vitals: 1, notes: 1, svcH: 40 }],
+    ["۲۲) رسید پذیرش — شبکهٔ سه‌ستونه",             0, 0, 0, 2, 0, 0, 2, 0, 0, { frame: 1, svcH: 50 }],
+    ["۲۳) رسید پذیرش — با عکس و بارکد",             1, 2, 1, 3, 1, 1, 0, 1, 0, { svcH: 48 }],
+    ["۲۴) رسید پذیرش — خط‌چین سبک",                 2, 2, 2, 1, 2, 2, 1, 2, 1, { svcH: 58 }],
+    ["۲۵) رسید پذیرش — مالی برجسته",                0, 1, 0, 0, 1, 0, 0, 0, 4, { svcH: 54 }],
+    ["۲۶) رسید پذیرش — دوبرگی (بیمار/بیمه)",        1, 0, 0, 1, 0, 1, 0, 3, 3, { inspage: 1, svcH: 42 }],
+    ["۲۷) رسید پذیرش — جدول تیرهٔ خدمات",           3, 1, 1, 0, 1, 2, 2, 1, 0, { svcH: 60 }],
+    ["۲۸) رسید پذیرش — بی‌قاب و سبک",               4, 0, 1, 1, 2, 0, 1, 0, 1, { svcH: 68 }],
+    ["۲۹) رسید پذیرش — کامل‌ترین (همه بخش‌ها)",     0, 1, 1, 2, 1, 1, 0, 1, 0, { vitals: 1, notes: 1, svcH: 34 }],
+    ["۳۰) رسید پذیرش — نسخهٔ شبانه‌روزی",           2, 2, 2, 0, 0, 1, 0, 0, 2, { frame: 1, svcH: 52 }]
+  ];
+
+  // ⚠️ طبق خواستهٔ کارفرما: تمام طرح‌های آمادهٔ قبلی حذف می‌شوند و فقط ۳۰
+  // طرح جدید زیر باقی می‌ماند.
+  ALL.length = 0;
+
+  // یک بار طرح را با ارتفاع دلخواهِ جدول خدمات می‌سازد و آخرین y را برمی‌گرداند.
+  function buildOne(s, svcH) {
+    var ex = s[10] || {};
+    var it = [];
+    var c = { x: M, y: M, w: W - 2 * M };
+
+    if (ex.frame) it.push(FRAME(W, H, 5));
+
+    it.push(T_HEADER(c, s[1]));
+    it.push(T_TITLE(c, "رسید پذیرش و صورتحساب", s[2]));
+    it.push(T_APPT(c, s[3]));
+    it.push(T_PATIENT(c, s[4], { headBand: s[2] === 1 }));
+    it.push(T_INS(c, s[5]));
+    it.push(T_DOCTOR(c, s[6]));
+    if (ex.vitals) it.push(T_VITALS(c, s[5] === 1 ? 1 : 0));
+    it.push(T_SERVICES(c, s[7], { h: svcH }));
+    if (ex.notes) it.push(T_NOTES(c, s[5] === 1 ? 1 : 0));
+    it.push(T_FINANCE(c, s[8]));
+    it.push(T_FOOTER(c, s[9], W, H));
+    if (ex.inspage) it.push(T_INSPAGE(c, s[9] === 3 ? 1 : 0));
+
+    return { items: it, bottom: c.y };
+  }
+
+  // ---- AUTO-FIT به یک برگ A4 --------------------------------------------
+  // جدول خدمات تنها بلوک «کشسان» طرح است، پس ارتفاع آن را طوری می‌گیریم که
+  // مجموع بلوک‌ها دقیقاً داخل کاغذ جا شود. حداقل ارتفاع ۲۲ میلی‌متر است
+  // (سرستون + دو سطر خدمت) و در صورت لزوم ابتدا از بلوک‌های اختیاری
+  // (علائم حیاتی / توضیحات / برگهٔ بیمه) عبور نمی‌کنیم — آن‌ها بخشی از
+  // هویت طرح‌اند — بلکه فقط جدول خدمات فشرده می‌شود.
+  var LIMIT = H - M;                 // پایین‌ترین مرز مجاز (۲۸۷ میلی‌متر)
+  var SVC_MIN = 22;
+
+  SPEC.forEach(function (s) {
+    var name = s[0], ex = s[10] || {};
+    var want = ex.svcH || 58;
+
+    // سرباری که مستقل از جدول خدمات است را با یک ساخت آزمایشی می‌سنجیم.
+    var probe = buildOne(s, SVC_MIN);
+    var overhead = probe.bottom - SVC_MIN;
+    var room = LIMIT - overhead;
+    var svcH = Math.min(want, room);
+    if (svcH < SVC_MIN) svcH = SVC_MIN;
+    // به نیم‌میلی‌متر گرد می‌کنیم تا هندسه تمیز بماند.
+    svcH = Math.round(svcH * 2) / 2;
+
+    var built = (svcH === SVC_MIN) ? probe : buildOne(s, svcH);
+
+    // اگر طرح بلوک‌های اختیاری زیادی دارد و با کوچک‌ترین جدول خدمات هم از برگ
+    // بیرون می‌زند، یک فشردگی عمودی یکنواخت (حداکثر ~۱۵٪) اعمال می‌شود تا کل
+    // سند در یک برگ A4 جا شود. اندازهٔ قلم دست‌نخورده می‌ماند، فقط فاصله‌ها و
+    // ارتفاع کادرها به یک نسبت کوچک می‌شوند، بنابراین چیدمان و هم‌ترازی حفظ
+    // می‌شود. این کار قطعی است و در هر بار بارگذاری عیناً یکسان تکرار می‌شود.
+    if (built.bottom > LIMIT) {
+      var k = (LIMIT - M) / (built.bottom - M);
+      if (k < 0.85) k = 0.85;
+      // آرایه‌ها تودرتو هستند؛ فشردگی را با پیمایش بازگشتی اعمال می‌کنیم.
+      (function walk(arr) {
+        for (var i = 0; i < arr.length; i++) {
+          if (Array.isArray(arr[i])) { walk(arr[i]); continue; }
+          var o = arr[i]; if (!o || o.isFrame) continue;
+          o.y = Math.round((M + (o.y - M) * k) * 10) / 10;
+          o.h = Math.round(Math.max(o.h * k, o.type === "hline" ? o.h : 3.2) * 10) / 10;
+          if (o.type === "services") {
+            o.rowH = Math.round(Math.max(o.rowH * k, 4.5) * 10) / 10;
+            o.headerH = Math.round(Math.max(o.headerH * k, 5.5) * 10) / 10;
+          }
+        }
+      })(built.items);
+    }
+
+    push("reception", name, "A4", 0, built.items);
+  });
 
   window.AZ_TEMPLATES = ALL;
 })();

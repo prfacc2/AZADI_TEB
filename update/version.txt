@@ -1,1 +1,2 @@
-1.40.0
+1.55.0
+https://github.com/prfacc2/AZADI_TEB/releases/download/v1.55.0/AzadiTeb.exe
