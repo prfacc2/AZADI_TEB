@@ -27,10 +27,12 @@
 #define ID_RC_CALC    501
 #define ID_RC_NEWTAB  502
 #define ID_RC_NEWPAT  503   // "پذیرش جدید" — clears the ACTIVE tab's form
-#define ID_RC_APPT    504   // "نوبت‌دهی" — focus (or open) the appointment tab
-//  v1.7.0: these three actions are now triggered from BUTTONS IN THE FRAME
+//  v1.60.0: «نوبت‌دهی» (appointment scheduling, formerly ID_RC_APPT=504 /
+//  TK_APPOINTMENT) has been REMOVED from the reception account completely —
+//  page, option, routing and code path.
+//  v1.7.0: these actions are triggered from BUTTONS IN THE FRAME
 //  HEADER (main.cpp) and routed to this window via WM_COMMAND, so the tab
-//  strip stays clean. The header sends ID_RC_NEWPAT / ID_RC_APPT / ID_RC_NEWTAB.
+//  strip stays clean. The header sends ID_RC_NEWPAT / ID_RC_NEWTAB.
 // per-tab form ids
 #define ID_F_FIRST    601   // base for sequential edits
 #define ID_F_GENDER   620
@@ -118,8 +120,8 @@ struct SvcRow {
 enum TabKind {
     TK_RECEPTION   = 0,   // the patient reception + billing form
     TK_PORTAL      = 1,   // پیام پرتابل — portal/admin message page (post-login)
-    TK_EMPTY       = 2,   // a fresh blank tab (new-tab button)
-    TK_APPOINTMENT = 3    // نوبت‌دهی — the appointment module (its own child page)
+    TK_EMPTY       = 2    // a fresh blank tab (new-tab button)
+    // v1.60.0: TK_APPOINTMENT (3) removed — نوبت‌دهی no longer exists.
 };
 struct TabPage {
     HWND page;                // container window (child of reception OR detached)
@@ -872,11 +874,6 @@ static void tabPageLayout(HWND h, TabPage* t){
     if(t->web){
         RECT rc; GetClientRect(h,&rc);
         MoveWindow(t->web,0,0,rc.right,rc.bottom,TRUE);
-        return;
-    }
-    if(t->kind==TK_APPOINTMENT){
-        if(t->appt){ RECT rc; GetClientRect(h,&rc);
-            MoveWindow(t->appt,0,0,rc.right,rc.bottom,TRUE); }
         return;
     }
     if(t->kind!=TK_RECEPTION) return;   // painted pages have no controls
@@ -2226,21 +2223,10 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         // validator / lifecycle owner; JS owns only layout + interaction. If the
         // renderer is unavailable or fails, we fall back to the classic native
         // appointment page so the app NEVER loses the feature.
-        if(t->kind==TK_APPOINTMENT){
-            //  v1.17.0: the HTML/CSS/JS (MSHTML) presentation layer has been
-            //  RETIRED. The appointment screen is now rendered 100% in native
-            //  C++ (Win32/GDI) — the same engine as the rest of the app — so
-            //  there is no embedded browser, no IE/Trident dependency and no
-            //  C++↔JS bridge that can drift or fail. This removes a whole class
-            //  of "تغییرات اعمال نشده" / "ارتباط مشکل دارد" failures and keeps
-            //  the product a single, light, self-contained EXE.
-            t->web = NULL;
-            t->appt = createAppointmentPage(h);
-            if(t->appt) ShowWindow(t->appt, SW_SHOW);
-            return 0;
-        }
         // Portal-message and empty tabs are pure painted pages with no form
         // controls — they own no edit boxes, combos or buttons.
+        //  v1.60.0: the appointment (نوبت‌دهی) child page branch was removed
+        //  together with the whole feature.
         if(t->kind!=TK_RECEPTION) return 0;
         //  v1.33.0: PREFERRED renderer — «پذیرش بیمار» is rendered by an
         //  embedded WebView2 (Chromium) surface loaded from the in-app loopback
@@ -3194,10 +3180,10 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         FillRect(dc,&rc,g_brBg);
         SetBkMode(dc,TRANSPARENT);
 
-        // -------- Hybrid HTML host / appointment child page: just clear bg ----
+        // -------- Hybrid HTML host: just clear the background ----------------
         // When the web surface is up it covers the whole tab, so the host only
         // needs to clear the background behind it (no native form is painted).
-        if(t && (t->web || t->kind==TK_APPOINTMENT)){
+        if(t && t->web){
             BitBlt(dc0,0,0,rc.right,rc.bottom,dc,0,0,SRCCOPY);
             SelectObject(dc,obm); DeleteObject(bmp); DeleteDC(dc);
             EndPaint(h,&ps);
@@ -3839,23 +3825,26 @@ static void detachTab(TabPage* t){
 static HWND recWnd(){ return s_rd?FindWindowExW(g_hFrame,NULL,RC_CLASS,NULL):NULL; }
 
 // v1.7.0: persist the user's preferred tab order. We store the sequence of the
-// permanent tab KINDS (نوبت‌دهی / پذیرش / کارتابل) as a CSV in the settings
+// permanent tab KINDS (پذیرش / کارتابل) as a CSV in the settings
 // file so a drag-reorder survives between runs. Reception (form) tabs the user
-// opened ad-hoc and detached tabs are not persisted (only the fixed trio).
+// opened ad-hoc and detached tabs are not persisted (only the fixed kinds).
+//  v1.60.0: the appointment kind (3) is gone — never persisted anymore.
 static void saveTabOrder(){
     if(!s_rd) return;
     std::wstring csv;
     for(auto* t : s_rd->tabs){
         if(t->detached) continue;
         // only the singleton/permanent kinds define a stable order
-        if(t->kind==TK_APPOINTMENT || t->kind==TK_RECEPTION || t->kind==TK_PORTAL){
+        if(t->kind==TK_RECEPTION || t->kind==TK_PORTAL){
             if(!csv.empty()) csv += L",";
             wchar_t b[8]; swprintf(b,8,L"%d",t->kind); csv += b;
         }
     }
     if(!csv.empty()) setSetting(L"tab_order", csv);
 }
-// return the persisted kind order (e.g. {3,0,1}); empty if none saved.
+// return the persisted kind order (e.g. {0,1}); empty if none saved.
+//  v1.60.0: kind 3 (appointment) was REMOVED — silently drop it from any
+//  persisted CSV written by an older build.
 static std::vector<int> loadTabOrder(){
     std::vector<int> out;
     std::wstring csv=getSetting(L"tab_order",L"");
@@ -3863,7 +3852,7 @@ static std::vector<int> loadTabOrder(){
     while(p<csv.size()){
         size_t e=csv.find(L',',p); if(e==std::wstring::npos) e=csv.size();
         std::wstring tok=csv.substr(p,e-p); p=e+1;
-        if(!tok.empty()) out.push_back(_wtoi(tok.c_str()));
+        if(!tok.empty()){ int k=_wtoi(tok.c_str()); if(k!=3) out.push_back(k); }
     }
     return out;
 }
@@ -3896,7 +3885,6 @@ static void addTabKind(HWND h, int kind){
     std::wstring dept=g_session.user.dept;
     if(kind==TK_PORTAL)         t->title=L"کارتابل";
     else if(kind==TK_EMPTY)     t->title=L"تب جدید";
-    else if(kind==TK_APPOINTMENT) t->title=L"نوبت‌دهی";
     else                        t->title=L"پذیرش بیمار";
     RECT rc; GetClientRect(h,&rc);
     // Only the reception form scrolls (it has the long right-side form); the
@@ -3916,20 +3904,6 @@ static void addTabKind(HWND h, int kind){
     else SetFocus(h);
 }
 static void addTab(HWND h){ addTabKind(h, TK_RECEPTION); }
-// v1.7.0: focus the appointment (نوبت‌دهی) tab if one already exists; otherwise
-// open a fresh one. Triggered by the header's «نوبت‌دهی» button.
-static void focusAppointmentTab(HWND h){
-    if(!s_rd) return;
-    for(size_t i=0;i<s_rd->tabs.size();i++){
-        if(s_rd->tabs[i]->kind==TK_APPOINTMENT && !s_rd->tabs[i]->detached){
-            s_rd->active=(int)i;
-            recLayoutTabs(h);
-            InvalidateRect(h,NULL,FALSE);
-            return;
-        }
-    }
-    addTabKind(h, TK_APPOINTMENT);
-}
 static void closeTab(TabPage* t){
     if(!s_rd) return;
     HWND h=recWnd();
@@ -4052,7 +4026,6 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
         int id=LOWORD(w);
         if(id==ID_RC_CALC) openCalculator(g_hFrame);
         else if(id==ID_RC_NEWTAB) addTabKind(h, TK_EMPTY);   // new-tab → empty
-        else if(id==ID_RC_APPT) focusAppointmentTab(h);      // نوبت‌دهی
         else if(id==ID_RC_NEWPAT){
             // "پذیرش جدید" (پذیرش جدید/New Admission) — always open a FRESH
             // reception tab so a new patient never overwrites the form the
@@ -4293,9 +4266,9 @@ HWND receptionWindow(){
 void receptionAction(RecAction a){
     HWND rec=receptionWindow();
     if(!rec || !IsWindow(rec)) return;
-    int id = a==RA_APPOINTMENT ? ID_RC_APPT
-           : a==RA_NEWTAB      ? ID_RC_NEWTAB
-           :                     ID_RC_NEWPAT;
+    //  v1.60.0: RA_APPOINTMENT no longer exists — only پذیرش جدید / تب جدید.
+    int id = a==RA_NEWTAB ? ID_RC_NEWTAB
+           :                ID_RC_NEWPAT;
     SendMessageW(rec, WM_COMMAND, MAKEWPARAM(id,0), 0);
 }
 
@@ -4344,7 +4317,6 @@ HWND createReceptionScreen(HWND frame){
         GetEnvironmentVariableW(L"AZ_DEBUG_TAB", dbg, 32);
         if(dbg[0]){
             if(!wcscmp(dbg,L"reception")) addTabKind(h, TK_RECEPTION);
-            else if(!wcscmp(dbg,L"appointment")) addTabKind(h, TK_APPOINTMENT);
             recLayoutTabs(h);
             InvalidateRect(h,NULL,TRUE);
             // optional initial scroll offset for screenshot verification

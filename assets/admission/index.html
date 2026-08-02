@@ -36,24 +36,7 @@
       <!-- ======================= RIGHT: ACTION RAIL ======================= -->
       <aside class="col col-action" id="colRight">
 
-        <!-- PRIMARY ACTION — visually placed beneath the patient profile. -->
-        <section class="card action-card">
-          <div class="action-kicker">عملیات پذیرش</div>
-          <label class="chk chk-block"><input type="checkbox" id="noPay" /><span>عدم پرداخت فعلی</span></label>
-          <button class="btn btn-submit btn-block" id="btnSave">
-            <span class="i"><svg viewBox="0 0 24 24" width="17" height="17"><path fill="currentColor" d="M9 16.2l-3.5-3.5L4 14.2 9 19.2 20 8.2l-1.5-1.5z"/></svg></span>
-            ثبت قبض و صدور
-          </button>
-          <div class="action-row">
-            <button class="btn btn-new-adm" id="btnNew">
-              <span class="i"><svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M11 5v6H5v2h6v6h2v-6h6v-2h-6V5z"/></svg></span>پذیرش جدید</button>
-            <button class="btn btn-danger" id="btnClear">
-              <span class="i"><svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M6 7h12l-1 14H7L6 7zm3-3h6l1 2H8l1-2z"/></svg></span>پاک کردن</button>
-          </div>
-          <button class="btn btn-ghost btn-block" id="btnCancel">انصراف</button>
-        </section>
-
-        <!-- Patient profile -->
+        <!-- Patient profile FIRST (v1.60.0): تصویر/نام بیمار + آمار امروز بالای ریل راست -->
         <section class="card profile-card">
           <div class="profile-top">
             <div class="avatar" id="pfAvatar">
@@ -87,10 +70,41 @@
               <span class="ps-unit">نفر</span>
             </div>
           </div>
-          <div class="view-tools">
-            <button type="button" class="btn btn-ghost" id="zoomOut" title="کوچک‌نمایی">−</button>
-            <span id="zoomValue">۱۰۰٪</span>
-            <button type="button" class="btn btn-ghost" id="zoomIn" title="بزرگ‌نمایی">+</button>
+          <!-- v1.60.0: zoom in/out controls REMOVED (fixed, readable scale). -->
+        </section>
+
+        <!-- PRIMARY ACTION — beneath the patient profile. -->
+        <section class="card action-card">
+          <div class="action-kicker">عملیات پذیرش</div>
+          <label class="chk chk-block"><input type="checkbox" id="noPay" /><span>عدم پرداخت فعلی</span></label>
+          <button class="btn btn-submit btn-block" id="btnSave">
+            <span class="i"><svg viewBox="0 0 24 24" width="17" height="17"><path fill="currentColor" d="M9 16.2l-3.5-3.5L4 14.2 9 19.2 20 8.2l-1.5-1.5z"/></svg></span>
+            ثبت قبض و صدور
+          </button>
+          <div class="action-row">
+            <button class="btn btn-new-adm" id="btnNew">
+              <span class="i"><svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M11 5v6H5v2h6v6h2v-6h6v-2h-6V5z"/></svg></span>پذیرش جدید</button>
+            <button class="btn btn-danger" id="btnClear">
+              <span class="i"><svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M6 7h12l-1 14H7L6 7zm3-3h6l1 2H8l1-2z"/></svg></span>پاک کردن</button>
+          </div>
+          <button class="btn btn-ghost btn-block" id="btnCancel">انصراف</button>
+        </section>
+
+        <!-- v1.60.0: چاپ‌ها از نوار نیتیو پایین به داخل صفحه آمدند — خوش‌چین پایین ریل راست -->
+        <section class="card print-card">
+          <div class="card-head"><span class="card-title">
+            <svg class="ct-ico" viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M6 3h12v4H6V3zm0 6h12a3 3 0 013 3v5h-3v4H6v-4H3v-5a3 3 0 013-3zm1 8v3h10v-3H7z"/></svg>
+            چاپ اسناد</span></div>
+          <div class="card-body print-grid">
+            <button class="btn btn-print btn-print-primary" id="btnPrtLast">
+              <span class="i"><svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M6 3h12v4H6V3zm0 6h12a3 3 0 013 3v5h-3v4H6v-4H3v-5a3 3 0 013-3zm1 8v3h10v-3H7z"/></svg></span>
+              چاپ آخرین قبض</button>
+            <button class="btn btn-print" id="btnPrtRx">
+              <span class="i"><svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M6 2a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6H6zm7 1.5L18.5 9H13V3.5zM8 13h8v2H8v-2zm0 4h8v2H8v-2z"/></svg></span>
+              چاپ نسخه</button>
+            <button class="btn btn-print" id="btnPrtIns">
+              <span class="i"><svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M12 1L3 5v6c0 5 3.8 9.7 9 11 5.2-1.3 9-6 9-11V5l-9-4z"/></svg></span>
+              رسید بیمه</button>
           </div>
         </section>
 
@@ -142,8 +156,6 @@
               <label class="fld"><span>نوع بیمه</span><select id="insType" class="inp" data-nav><option>خدمات درمانی</option><option>تأمین اجتماعی</option><option>نیروهای مسلح</option><option>آزاد</option></select></label>
               <label class="fld"><span>نوع پذیرش</span><select id="ptype" class="inp" data-nav><option>عادی</option><option>سرپایی</option><option>بستری</option></select></label>
               <label class="fld"><span>درصد بیمه تکمیلی</span><select id="insSuppPct" class="inp" data-nav><option value="0">۰٪</option><option value="5">۵٪</option><option value="10">۱۰٪</option><option value="20">۲۰٪</option><option value="30">۳۰٪</option><option value="40">۴۰٪</option><option value="50">۵۰٪</option><option value="60">۶۰٪</option><option value="70">۷۰٪</option><option value="80">۸۰٪</option><option value="90">۹۰٪</option><option value="100">۱۰۰٪</option></select></label>
-              <label class="fld"><span>تاریخ پذیرش (خودکار)</span><input type="text" id="apptDate" class="inp" data-nav readonly /></label>
-              <label class="fld"><span>شیفت (خودکار)</span><select id="apptShift" class="inp" data-nav disabled><option>صبح</option><option>عصر</option><option>شب</option></select></label>
             </div>
           </section>
 
@@ -181,6 +193,18 @@
             </div>
           </section>
         </div>
+
+        <!-- v1.60.0: تاریخ پذیرش و شیفت خودکار در کارت مستقل، کنار هم و واکنش‌گرا -->
+        <section class="card datetime-card">
+          <div class="dt-half">
+            <span class="dt-ico"><svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M7 2v2H5a2 2 0 00-2 2v13a2 2 0 002 2h14a2 2 0 002-2V6a2 2 0 00-2-2h-2V2h-2v2H9V2H7zm12 7v10H5V9h14z"/></svg></span>
+            <label class="fld dt-fld"><span>تاریخ پذیرش (خودکار)</span><input type="text" id="apptDate" class="inp" data-nav readonly /></label>
+          </div>
+          <div class="dt-half">
+            <span class="dt-ico"><svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M12 2a10 10 0 100 20 10 10 0 000-20zm1 5h-2v6l5 3 1-1.7-4-2.3V7z"/></svg></span>
+            <label class="fld dt-fld"><span>شیفت (خودکار)</span><select id="apptShift" class="inp" data-nav disabled><option>صبح</option><option>عصر</option><option>شب</option></select></label>
+          </div>
+        </section>
 
         <!-- Services -->
         <section class="card svc-card">
@@ -272,22 +296,15 @@
       <!-- ============================ LEFT PANEL ============================ -->
       <aside class="col col-left" id="colLeft">
 
-        <section class="card compact-insurance">
-          <div class="card-head">
-            <span class="card-title">
-              <svg class="ct-ico" viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M12 1L3 5v6c0 5 3.8 9.7 9 11 5.2-1.3 9-6 9-11V5l-9-4z"/></svg>
-              اطلاعات تکمیلی بیمه</span>
-            <label class="chk"><input type="checkbox" id="hasIns" checked /><span>فعال</span></label>
-          </div>
-          <div class="card-body ins-body">
-            <label class="fld"><span>شماره دفترچه</span><input type="text" id="insBooklet" class="inp" inputmode="numeric" /></label>
-            <div class="grid-2 tight">
-              <label class="fld"><span>تاریخ اعتبار</span><input type="text" id="insValid" class="inp" data-date /></label>
-              <label class="fld"><span>تاریخ نسخه</span><input type="text" id="rxDate" class="inp" data-date /></label>
-            </div>
-            <label class="fld"><span>بیمه تکمیلی</span><select id="insSupp" class="inp"></select></label>
-          </div>
-        </section>
+        <!-- v1.60.0: کارت «اطلاعات تکمیلی بیمه» حذف شد؛ فیلدهایش به‌صورت مخفی
+             نگه داشته می‌شوند تا منطق صورتحساب/ارسال رکورد دست‌نخورده بماند. -->
+        <div id="insExtraHidden" class="hidden-fields" aria-hidden="true">
+          <input type="checkbox" id="hasIns" checked />
+          <input type="text" id="insBooklet" inputmode="numeric" />
+          <input type="text" id="insValid" />
+          <input type="text" id="rxDate" />
+          <select id="insSupp"></select>
+        </div>
 
         <section class="card invoice-card" id="invoiceCard">
           <div class="card-head"><span class="card-title">
@@ -316,11 +333,10 @@
           </div>
         </section>
 
-        <!-- Final amount is intentionally below the invoice, at the lower-left. -->
+        <!-- مبلغ نهایی بلافاصله زیر صورت‌حساب (v1.60.0: متن توضیح حذف شد). -->
         <section class="card payable-card" id="payableCard">
           <div class="payable-caption">مبلغ نهایی قابل پرداخت</div>
           <div class="payable-value"><b id="tcVal">۰</b><span>ریال</span></div>
-          <div class="payable-note">محاسبه قطعی بر اساس خدمات، تخفیف و پوشش بیمه</div>
         </section>
 
         <!-- Queue and cashier are consolidated in one lower-left launcher. -->

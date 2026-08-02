@@ -1,11 +1,13 @@
 // ============================================================================
-//  print_designer_templates.inc — 30 built-in A4 reception templates (§1.52.0)
+//  print_designer_templates.inc — 30 built-in A4 reception templates
+//  (v1.60.0 — FULL REBUILD around the LIVE SERVICES TABLE)
 //  Included into print_designer.cpp. Every template is authored in A4 mm
-//  coordinates (210×297) and includes the dynamic services table. If the
-//  operator switches the paper size to A5, printPrintDesign / pcPaintDesign
-//  auto-scale the whole design proportionally (see the pscale logic), so the
-//  layout relocates and shrinks to fit A5 perfectly — no per-template work.
-//  Seeded on first run; existing installs are migrated once.
+//  coordinates (210×297) and EVERY template carries the dynamic services
+//  table (PIT_SERVICES) bound to the live ReceptionRecord.services vector —
+//  نام خدمت / شرح خدمت / تعداد، per-row, straight from Management → خدمات.
+//  If the operator switches the paper size (A5/A6/receipt) the print engine
+//  auto-scales the whole design proportionally (pscale), so nothing is
+//  clipped. Seeded on first run; existing installs are migrated once.
 // ============================================================================
 
 // --- small builder helpers --------------------------------------------------
@@ -29,9 +31,18 @@ static PrintItem mkHLine(double x,double y,double w,double bw){
     PrintItem it; it.id=nid(); it.type=PIT_HLINE; it.x=x; it.y=y; it.w=w; it.h=0.2;
     it.borderWidth=bw; return it;
 }
+static PrintItem mkVLine(double x,double y,double h,double bw){
+    PrintItem it; it.id=nid(); it.type=PIT_VLINE; it.x=x; it.y=y; it.w=0.2; it.h=h;
+    it.borderWidth=bw; return it;
+}
 static PrintItem mkRect(double x,double y,double w,double h,double bw,double corner){
     PrintItem it; it.id=nid(); it.type=PIT_RECT; it.x=x; it.y=y; it.w=w; it.h=h;
     it.borderWidth=bw; it.corner=corner; it.fillTransparent=true; return it;
+}
+static PrintItem mkBand(double x,double y,double w,double h,unsigned fill,double bw){
+    PrintItem it; it.id=nid(); it.type=PIT_RECT; it.x=x; it.y=y; it.w=w; it.h=h;
+    it.fillColor=fill; it.fillTransparent=false; it.borderWidth=bw;
+    it.borderColor=fill; return it;
 }
 static PrintItem mkFrame(double pw,double ph,double margin,unsigned col,double bw){
     PrintItem it; it.id=nid(); it.type=PIT_FRAME; it.is_frame=true;
@@ -45,10 +56,8 @@ static PrintItem mkQR(double x,double y,double s){
     PrintItem it; it.id=nid(); it.type=PIT_QR; it.x=x; it.y=y; it.w=s; it.h=s;
     it.field=L"receiptNo"; return it;
 }
-// v1.58.0 — a REAL scannable 1-D barcode (Code128-B by default) bound to the
-// deterministic, patient-linked {receiptbarcode} token. Every template uses
-// mkBarcode (not mkQR) for its machine-readable identifier, so the printed code
-// always encodes live patient/receipt data and reprints are identical.
+// REAL scannable 1-D barcode (Code128-B) bound to the deterministic,
+// patient-linked {receiptbarcode} token — reprints are identical.
 static PrintItem mkBarcode(double x,double y,double w,double h){
     PrintItem it; it.id=nid(); it.type=PIT_BARCODE; it.x=x; it.y=y; it.w=w; it.h=h;
     it.field=L"receiptbarcode";
@@ -64,601 +73,263 @@ static PrintItem mkApptNo(double x,double y,double w,double h,double pt){
     it.fontPt=pt; it.bold=true; it.align=1; it.startValue=1; it.step=1; return it;
 }
 
-// v1.58.0 — dynamic services-list table CONNECTED to the live reception record.
-// The model JSON describes the header (cols/labels/widths); at print time the
-// engine (printer.cpp::pdDrawServices) fills ONE data row per entered service
-// straight from ReceptionRecord.services — real نام/تعداد/شرح، never test text.
-// The columns are exactly what the operator asked to print, RTL (col0 = right):
-//     col 0 = ردیف   (row number)
-//     col 1 = نام خدمت (ServiceLine.name)
-//     col 2 = تعداد   (ServiceLine.qty)
-//     col 3 = شرح خدمت (ServiceLine.desc / category)
-// headerH + rowH are pinned (mm) so up to ~10 services print without touching,
-// and the table auto-shrinks to fit its box when there are more.
-static PrintItem mkServices(double x,double y,double w,double h,double pt){
+// ---------------------------------------------------------------------------
+//  THE CORE: dynamic services table CONNECTED to the live reception record.
+//  The model JSON describes the header (cols/labels/widths); at print time
+//  printer.cpp::pdDrawServices fills ONE data row per entered service from
+//  ReceptionRecord.services — real نام/شرح/تعداد، never test text.
+//  Columns (RTL, col0 = RIGHTMOST):
+//      col 0 = نام خدمت  (ServiceLine.name)
+//      col 1 = شرح خدمت  (ServiceLine.desc / category)
+//      col 2 = تعداد     (ServiceLine.qty)
+//  headerH + rowH are pinned (mm) so ~10 services print cleanly; the table
+//  auto-shrinks uniformly if more rows must fit its box.
+// ---------------------------------------------------------------------------
+static PrintItem mkServices(double x,double y,double w,double h,double pt,
+                            bool banded,double bw){
     PrintItem it; it.id=nid(); it.type=PIT_SERVICES; it.x=x; it.y=y; it.w=w; it.h=h;
-    // ردیف=\u0631\u062f\u06cc\u0641  نام خدمت=\u0646\u0627\u0645 \u062e\u062f\u0645\u062a
-    // تعداد=\u062a\u0639\u062f\u0627\u062f  شرح خدمت=\u0634\u0631\u062d \u062e\u062f\u0645\u062a
-    it.text=L"{\"cols\":4,\"header\":true,\"widths\":[0.55,3.0,0.9,3.0],"
-            L"\"labels\":[\"\u0631\u062f\u06cc\u0641\",\"\u0646\u0627\u0645 \u062e\u062f\u0645\u062a\","
-            L"\"\u062a\u0639\u062f\u0627\u062f\",\"\u0634\u0631\u062d \u062e\u062f\u0645\u062a\"]}";
+    // نام خدمت=نام خدمت  شرح خدمت=شرح خدمت  تعداد=تعداد
+    it.text=L"{\"cols\":3,\"header\":true,\"widths\":[0.55,0.30,0.15],"
+            L"\"labels\":[\"\u0646\u0627\u0645 \u062e\u062f\u0645\u062a\","
+            L"\"\u0634\u0631\u062d \u062e\u062f\u0645\u062a\","
+            L"\"\u062a\u0639\u062f\u0627\u062f\"]}";
     it.fontPt=pt; it.bold=false; it.align=1;
-    it.borderColor=0x1F5FD6; it.borderWidth=0.35;
-    it.textColor=0x0D2144; it.fillTransparent=true;
+    it.borderColor=0x000000; it.borderWidth=bw;
+    it.textColor=0x000000;
+    it.fillColor=banded? 0xE9E9E9 : 0xFFFFFF;
+    it.fillTransparent=!banded;
     it.padding=0.8;
     it.headerH=7.5; it.rowH=7.0;   // pinned heights → room for many services
     return it;
 }
 
-// localized caption for the services section
-#define FA_SVCLIST  L"\u0644\u06cc\u0633\u062a \u062e\u062f\u0645\u0627\u062a"   // لیست خدمات
+// localized captions reused across templates
+#define FA_CLINIC   L"درمانگاه شبانه‌روزی آزادی طب"
+#define FA_SVCLIST  L"لیست خدمات"
+#define FA_NAME     L"نام: "
+#define FA_FAMILY   L"نام خانوادگی: "
+#define FA_FULL     L"نام بیمار: "
+#define FA_NID      L"کد ملی: "
+#define FA_DATE     L"تاریخ: "
+#define FA_TIME     L"ساعت: "
+#define FA_RECEIPT  L"شماره قبض: "
+#define FA_APPT     L"شماره نوبت"
+#define FA_TOTAL    L"جمع کل: "
+#define FA_PAID     L"پرداختی: "
+#define FA_PATIENT  L"سهم بیمار: "
+#define FA_INS      L"بیمه: "
+#define FA_DOCTOR   L"پزشک: "
+#define FA_PHONE    L"تلفن: "
+#define FA_SHIFT    L"شیفت: "
+#define FA_BARCODE_CAP L"بارکد رسید"
 
-// localized field captions reused across templates
-#define FA_CLINIC   L"\u062f\u0631\u0645\u0627\u0646\u06af\u0627\u0647 \u0622\u0632\u0627\u062f\u06cc \u0637\u0628"
-#define FA_NAME     L"\u0646\u0627\u0645: "
-#define FA_FAMILY   L"\u0646\u0627\u0645 \u062e\u0627\u0646\u0648\u0627\u062f\u06af\u06cc: "
-#define FA_NID      L"\u06a9\u062f \u0645\u0644\u06cc: "
-#define FA_DATE     L"\u062a\u0627\u0631\u06cc\u062e: "
-#define FA_TIME     L"\u0633\u0627\u0639\u062a: "
-#define FA_RECEIPT  L"\u0634\u0645\u0627\u0631\u0647 \u0642\u0628\u0636: "
-#define FA_APPT     L"\u0634\u0645\u0627\u0631\u0647 \u0646\u0648\u0628\u062a"
-#define FA_TOTAL    L"\u062c\u0645\u0639 \u06a9\u0644: "
-#define FA_PAID     L"\u067e\u0631\u062f\u0627\u062e\u062a\u06cc: "
-#define FA_INS      L"\u0628\u06cc\u0645\u0647: "
-#define FA_DOCTOR   L"\u067e\u0632\u0634\u06a9: "
-#define FA_PHONE    L"\u062a\u0644\u0641\u0646: "
+// ===========================================================================
+//  BLOCK BUILDERS — each appends to d.items and returns the next free y.
+//  Every body block ends in the services table, the centrepiece of the page.
+// ===========================================================================
 
-// section titles (Persian, \u-escaped for source safety)
-#define FA_INJECT   L"\u0628\u062e\u0634 \u062a\u0632\u0631\u06cc\u0642\u0627\u062a \u0648 \u067e\u0627\u0646\u0633\u0645\u0627\u0646"        // بخش تزریقات و پانسمان
-#define FA_LAB      L"\u0622\u0632\u0645\u0627\u06cc\u0634\u06af\u0627\u0647 \u062a\u0634\u062e\u06cc\u0635 \u0637\u0628\u06cc"               // آزمایشگاه تشخیص طبی
-#define FA_RADIO    L"\u0628\u062e\u0634 \u0631\u0627\u062f\u06cc\u0648\u0644\u0648\u0698\u06cc"                                              // بخش رادیولوژی
-#define FA_PHYSIO   L"\u0628\u062e\u0634 \u0641\u06cc\u0632\u06cc\u0648\u062a\u0631\u0627\u067e\u06cc"                                       // بخش فیزیوتراپی
-#define FA_DENTAL   L"\u0628\u062e\u0634 \u062f\u0646\u062f\u0627\u0646\u067e\u0632\u0634\u06a9\u06cc"                                       // بخش دندانپزشکی
-#define FA_SURG     L"\u0628\u062e\u0634 \u062c\u0631\u0627\u062d\u06cc"                                                                     // بخش جراحی
-#define FA_CARDIO   L"\u0628\u062e\u0634 \u0642\u0644\u0628 \u0648 \u0639\u0631\u0648\u0642"                                                 // بخش قلب و عروق
-#define FA_PED      L"\u0628\u062e\u0634 \u0627\u0637\u0641\u0627\u0644"                                                                     // بخش اطفال
-#define FA_GYN      L"\u0628\u062e\u0634 \u0632\u0646\u0627\u0646"                                                                           // بخش زنان
-#define FA_ORTHO    L"\u0628\u062e\u0634 \u0627\u0631\u062a\u0648\u067e\u062f\u06cc"                                                         // بخش ارتوپدی
-#define FA_EYE      L"\u0628\u062e\u0634 \u0686\u0634\u0645"                                                                                 // بخش چشم
-#define FA_ENT      L"\u0628\u062e\u0634 \u06af\u0648\u0634 \u06af\u0644\u0648 \u0628\u06cc\u0646\u06cc"                                    // بخش گوش گلو بینی
-#define FA_SKIN     L"\u0628\u062e\u0634 \u067e\u0648\u0633\u062a"                                                                           // بخش پوست
-
-// §1.53.0 — the canonical A4 reception body. Lays out a 2-column patient grid,
-// a centered "لیست خدمات" caption + dynamic services table, and a totals row.
-// RTL column order is fixed: the RIGHT cell (x) carries «نام» (firstName) and the
-// LEFT cell (x+col+gap) carries «نام خانوادگی» (lastName) — exactly how a Persian
-// reader scans a row, and how the HTML admission form orders them.
-// Returns the y-coordinate just below the totals so callers can place the
-// appointment-number counter / footer without overlap. svcH defaults to 42mm so
-// up to ~6 services print without compressing; it scales down cleanly to A5 via
-// the responsive pscale.
-static double addA4Body(PrintDesign& d,double m,double top,
-                        double cw,double pt,double svcH=78.0){
-    double x=m, y=top, rowH=8, col=cw/2-3;
-    // patient info grid (2 columns, RTL). §1.53.0 FIX: the RIGHT cell (x+col+6)
-    // carries the FIRST field of each pair so a Persian reader scans نام → نام
-    // خانوادگی → کد ملی → بیمه → پزشک → تلفن right-to-left, exactly like the
-    // admission form. The LEFT cell (x) carries the second field.
-    d.items.push_back(mkField(x+col+6,y,col,rowH,L"firstName",FA_NAME,pt,0));
-    d.items.push_back(mkField(x,y,col,rowH,L"lastName",FA_FAMILY,pt,0)); y+=rowH;
-    d.items.push_back(mkField(x+col+6,y,col,rowH,L"nationalCode",FA_NID,pt,0));
-    d.items.push_back(mkField(x,y,col,rowH,L"insurance",FA_INS,pt,0)); y+=rowH;
-    d.items.push_back(mkField(x+col+6,y,col,rowH,L"doctor",FA_DOCTOR,pt,0));
-    d.items.push_back(mkField(x,y,col,rowH,L"mobile",FA_PHONE,pt,0)); y+=rowH+2;
-    // services list — the centerpiece (present in EVERY template). The header band
-    // + first data row are always drawn even when the record has no services, so
-    // the table is never an invisible blank rectangle on the printed page.
-    d.items.push_back(mkLabel(x,y,cw,7,FA_SVCLIST,pt+1,true,1)); y+=8;
-    d.items.push_back(mkServices(x,y,cw,svcH,pt-0.5)); y+=svcH+3;
-    // totals row — RTL: «جمع کل» on the RIGHT (x+col+6), «پرداختی» on the LEFT (x)
-    d.items.push_back(mkHLine(x,y,cw,0.3)); y+=2;
-    d.items.push_back(mkField(x+col+6,y,col,rowH,L"total",FA_TOTAL,pt+0.5,0));
-    d.items.push_back(mkField(x,y,col,rowH,L"paid",FA_PAID,pt+0.5,0)); y+=rowH;
-    return y;
+// Header: clinic title + optional logo + rule. Returns y below the header.
+static double addHeader(PrintDesign& d,double m,double cw,int style){
+    double y=m;
+    if(style==1){           // logo at top-right, title beside it
+        d.items.push_back(mkLogo(m+cw-20,m,20,20));
+        d.items.push_back(mkLabel(m,m+3,cw-24,12,FA_CLINIC,17,true,0));
+        y=m+24;
+    } else if(style==2){    // centred logo above centred title
+        d.items.push_back(mkLogo((d.paperW-22)/2,m,22,22));
+        d.items.push_back(mkLabel(m,m+24,cw,12,FA_CLINIC,18,true,1));
+        y=m+40;
+    } else {                // plain centred title
+        d.items.push_back(mkLabel(m,m,cw,12,FA_CLINIC,18,true,1));
+        y=m+16;
+    }
+    d.items.push_back(mkHLine(m,y,cw,0.6));
+    return y+4;
 }
 
-// Add ONLY the services block (caption + table) at a given position; returns
-// the y just below it. The services block always renders (header + at least one
-// placeholder row) so it is never an invisible blank rectangle.
-static double addServicesBlock(PrintDesign& d,double x,double y,double w,double pt,double svcH=78.0){
-    d.items.push_back(mkLabel(x,y,w,7,FA_SVCLIST,pt+1,true,1)); y+=8;
-    d.items.push_back(mkServices(x,y,w,svcH,pt-0.5)); y += svcH + 2;
-    return y;
+// Receipt/date/shift strip. Returns y below it.
+static double addMetaStrip(PrintDesign& d,double m,double y,double cw,double pt){
+    d.items.push_back(mkField(m,y,cw/3,7,L"receiptNo",FA_RECEIPT,pt,2));
+    d.items.push_back(mkField(m+cw/3,y,cw/3,7,L"date",FA_DATE,pt,1));
+    d.items.push_back(mkField(m+2*cw/3,y,cw/3,7,L"shift",FA_SHIFT,pt,0));
+    return y+9;
 }
-// A footer band: a thin rule, then a barcode block on the RIGHT with a small
-// caption, and (optionally) the appointment-number counter on the LEFT. This is
-// the ONE machine-readable identifier per template — never doubled. Returns the
-// y below the footer.
-#define FA_BARCODE_CAP L"\u0628\u0627\u0631\u06a9\u062f \u0631\u0633\u06cc\u062f"   // بارکد رسید
-static double addFooter(PrintDesign& d,double m,double cw,double paperH,bool withAppt){
-    double y = paperH - 30;
+
+// Patient info block (2-col RTL grid). Returns y below it.
+static double addPatient(PrintDesign& d,double m,double y,double cw,double pt){
+    double col=cw/2-3;
+    d.items.push_back(mkField(m+col+6,y,col,7.5,L"firstName",FA_NAME,pt,0));
+    d.items.push_back(mkField(m,y,col,7.5,L"lastName",FA_FAMILY,pt,0)); y+=8.5;
+    d.items.push_back(mkField(m+col+6,y,col,7.5,L"nationalCode",FA_NID,pt,0));
+    d.items.push_back(mkField(m,y,col,7.5,L"insurance",FA_INS,pt,0)); y+=8.5;
+    d.items.push_back(mkField(m+col+6,y,col,7.5,L"doctor",FA_DOCTOR,pt,0));
+    d.items.push_back(mkField(m,y,col,7.5,L"mobile",FA_PHONE,pt,0)); y+=8.5;
+    return y+2;
+}
+
+// Services block: caption + live table. THE section the whole redesign is for.
+// Returns y below it. svcH is the table box height (mm).
+static double addServices(PrintDesign& d,double m,double y,double cw,double pt,
+                          double svcH,bool banded,double bw){
+    d.items.push_back(mkLabel(m,y,cw*0.6,6.5,FA_SVCLIST,pt+1,true,0));
+    d.items.push_back(mkField(m+cw*0.6,y,cw*0.4,6.5,L"servicescount",
+        L"تعداد ردیف: ",pt-0.5,2));
+    y+=8;
+    d.items.push_back(mkServices(m,y,cw,svcH,pt-0.5,banded,bw));
+    return y+svcH+4;
+}
+
+// Totals row: جمع کل / سهم بیمار / پرداختی. Returns y below it.
+static double addTotals(PrintDesign& d,double m,double y,double cw,double pt){
+    d.items.push_back(mkHLine(m,y,cw,0.3)); y+=2.5;
+    d.items.push_back(mkField(m+2*cw/3,y,cw/3,8,L"total",FA_TOTAL,pt+0.5,0));
+    d.items.push_back(mkField(m+cw/3,y,cw/3,8,L"patientshare",FA_PATIENT,pt+0.5,1));
+    d.items.push_back(mkField(m,y,cw/3,8,L"paid",FA_PAID,pt+0.5,2));
+    return y+10;
+}
+
+// Footer: rule + barcode on the RIGHT + optional appointment number on LEFT.
+static void addFooter(PrintDesign& d,double m,double cw,double paperH,bool withAppt){
+    double y = paperH - 32;
     d.items.push_back(mkHLine(m,y-3,cw,0.3));
-    // barcode on the RIGHT (RTL): right edge of the content column
     double bcW = cw*0.42, bcH = 16;
     double bcX = m + cw - bcW;
     d.items.push_back(mkBarcode(bcX,y,bcW,bcH));
+    d.items.push_back(mkLabel(bcX,y+bcH+0.5,bcW,4,FA_BARCODE_CAP,8,false,1));
     if(withAppt){
-        // appointment number on the LEFT
         d.items.push_back(mkApptNo(m,y-1,cw*0.4,12,22));
-        d.items.push_back(mkLabel(m,y+13,cw*0.4,6,FA_APPT,9,false,1));
+        d.items.push_back(mkLabel(m,y+13,cw*0.4,5,FA_APPT,9,false,1));
     }
-    return y+bcH;
 }
 
-// Build one template by index 0..29 (30 templates); returns the finished design.
-// All templates are A4 (210×297) and include the services table.
+// ===========================================================================
+//  buildTemplate — 30 DISTINCT layouts. `style` picks a header style, `svcH`
+//  the services-table height, `banded` the table shading, `extra` decorations.
+//  Every single case places the services table via addServices().
+// ===========================================================================
 static PrintDesign buildTemplate(int idx){
     g_tplItemId = 1;
     PrintDesign d; d.kind=L"builtin";
-    auto setPaper=[&](const wchar_t* p,int orient){
-        d.paper=p; d.orientation=orient; double w,h;
-        if(Paper_Dims(p,w,h)){ d.paperW=w; d.paperH=h; }
-        if(orient==1){ std::swap(d.paperW,d.paperH); }
+    d.paper=L"A4"; d.orientation=0; d.paperW=210; d.paperH=297;
+    double m=14, cw=d.paperW-2*m;   // 182mm content width
+    //            header, meta, svcH, banded, bw, frameCol(0=none), withAppt, photo, qr
+    struct Spec { int header; double svcH; bool banded; double bw;
+                  unsigned frame; bool appt; bool photo; bool qr; };
+    static const Spec SP[30] = {
+        {0, 96, true ,0.40,0        ,true ,false,false}, // 01 standard
+        {1, 92, true ,0.40,0        ,true ,false,false}, // 02 logo right
+        {2, 84, false,0.30,0        ,true ,false,false}, // 03 centred logo
+        {0, 90, false,0.30,0x1F6FEB ,true ,false,false}, // 04 blue frame
+        {1, 78, true ,0.40,0        ,true ,true ,false}, // 05 patient photo
+        {0, 88, false,0.35,0        ,false,false,true }, // 06 QR corner
+        {2, 72, true ,0.45,0x0B5ED7 ,true ,false,false}, // 07 logo+frame
+        {0,100, true ,0.50,0        ,true ,false,false}, // 08 tall table
+        {1, 86, false,0.30,0        ,false,false,false}, // 09 clean lines
+        {0, 82, true ,0.40,0x6A0DAD ,true ,false,false}, // 10 violet frame
+        {1, 90, true ,0.35,0        ,true ,false,false}, // 11 logo light band
+        {0, 74, false,0.30,0        ,true ,true ,false}, // 12 photo+lines
+        {2, 80, true ,0.40,0        ,false,false,false}, // 13 centred, no appt
+        {0, 94, false,0.45,0        ,true ,false,false}, // 14 bold lines
+        {1, 68, true ,0.50,0x0B5ED7 ,true ,true ,false}, // 15 compact photo
+        {0, 98, true ,0.40,0        ,true ,false,false}, // 16 tall banded
+        {2, 76, false,0.35,0        ,true ,false,true }, // 17 centred QR
+        {1, 88, false,0.30,0x1F6FEB ,false,false,false}, // 18 logo blue frame
+        {0, 84, true ,0.45,0        ,true ,false,false}, // 19 balanced
+        {1, 92, false,0.35,0        ,true ,false,false}, // 20 logo lines
+        {0, 70, true ,0.40,0        ,true ,true ,true }, // 21 photo+QR
+        {2, 90, true ,0.50,0x6A0DAD ,true ,false,false}, // 22 centred framed
+        {1, 78, false,0.30,0        ,false,false,false}, // 23 minimal
+        {0, 96, true ,0.40,0        ,true ,false,false}, // 24 standard banded
+        {1, 82, true ,0.45,0x0B5ED7 ,true ,false,false}, // 25 logo framed
+        {0, 86, false,0.35,0        ,true ,false,false}, // 26 clean
+        {2, 74, true ,0.40,0        ,true ,true ,false}, // 27 centred photo
+        {1, 90, false,0.30,0x1F6FEB ,true ,false,false}, // 28 logo blue
+        {0, 94, true ,0.45,0        ,true ,false,false}, // 29 bold banded
+        {1, 88, true ,0.40,0x6A0DAD ,true ,false,false}, // 30 logo violet
     };
-    // A4 portrait default geometry
-    auto a4p=[&](){ setPaper(L"A4",0); };   // 210×297
-    double m=14, cw;   // set per case after paper
-    switch(idx){
-    case 0: { // T01 پذیرش استاندارد A4 عمودی
-        a4p(); cw=d.paperW-2*m;
-        d.name=L"\u067e\u0630\u06cc\u0631\u0634 \u0627\u0633\u062a\u0627\u0646\u062f\u0627\u0631\u062f A4 \u0639\u0645\u0648\u062f\u06cc";
-        d.items.push_back(mkLabel(m,m,cw,12,FA_CLINIC,18,true,1));
-        d.items.push_back(mkHLine(m,m+14,cw,0.6));
-        d.items.push_back(mkField(m,m+18,cw/2,8,L"receiptNo",FA_RECEIPT,11,2));
-        d.items.push_back(mkField(m+cw/2,m+18,cw/2,8,L"date",FA_DATE,11,0));
-        addA4Body(d,m,m+30,cw,11);
-        addFooter(d,m,cw,d.paperH,true);
-        break; }
-    case 1: { // T02 پذیرش استاندارد A4 افقی
-        setPaper(L"A4",1); cw=d.paperW-2*m;
-        d.name=L"\u067e\u0630\u06cc\u0631\u0634 \u0627\u0633\u062a\u0627\u0646\u062f\u0627\u0631\u062f A4 \u0627\u0641\u0642\u06cc";
-        d.items.push_back(mkLabel(m,m,cw,12,FA_CLINIC,18,true,1));
-        d.items.push_back(mkHLine(m,m+14,cw,0.6));
-        d.items.push_back(mkField(m,m+18,cw/2,8,L"receiptNo",FA_RECEIPT,11,2));
-        d.items.push_back(mkField(m+cw/2,m+18,cw/2,8,L"date",FA_DATE,11,0));
-        addA4Body(d,m,m+30,cw,11,52.0);
-        addFooter(d,m,cw,d.paperH,true);
-        break; }
-    case 2: { // T03 پذیرش با لوگو در بالا
-        a4p(); cw=d.paperW-2*m;
-        d.name=L"\u067e\u0630\u06cc\u0631\u0634 \u0628\u0627 \u0644\u0648\u06af\u0648 \u062f\u0631 \u0628\u0627\u0644\u0627";
-        d.items.push_back(mkLogo((d.paperW-28)/2,m,28,28));
-        d.items.push_back(mkLabel(m,m+30,cw,12,FA_CLINIC,18,true,1));
-        d.items.push_back(mkHLine(m,m+43,cw,0.6));
-        d.items.push_back(mkField(m,m+47,cw/2,8,L"receiptNo",FA_RECEIPT,11,2));
-        d.items.push_back(mkField(m+cw/2,m+47,cw/2,8,L"date",FA_DATE,11,0));
-        addA4Body(d,m,m+59,cw,11,64.0);
-        addFooter(d,m,cw,d.paperH,true);
-        break; }
-    case 3: { // T04 پذیرش با QR کنار بارکد
-        a4p(); cw=d.paperW-2*m;
-        d.name=L"\u067e\u0630\u06cc\u0631\u0634 \u0628\u0627 QR \u06a9\u0646\u0627\u0631 \u0628\u0627\u0631\u06a9\u062f";
-        d.items.push_back(mkLabel(m,m,cw-30,12,FA_CLINIC,18,true,1));
-        d.items.push_back(mkQR(d.paperW-m-26,m+2,26));
-        d.items.push_back(mkHLine(m,m+30,cw,0.6));
-        d.items.push_back(mkField(m,m+34,cw/2,8,L"receiptNo",FA_RECEIPT,11,2));
-        d.items.push_back(mkField(m+cw/2,m+34,cw/2,8,L"nationalCode",FA_NID,11,0));
-        addA4Body(d,m,m+46,cw,11,70.0);
-        addFooter(d,m,cw,d.paperH,true);
-        break; }
-    case 4: { // T05 پذیرش با عکس پرسنلی
-        a4p(); cw=d.paperW-2*m;
-        d.name=L"\u067e\u0630\u06cc\u0631\u0634 \u0628\u0627 \u0639\u06a9\u0633 \u067e\u0631\u0633\u0646\u0644\u06cc";
-        d.items.push_back(mkLabel(m,m,cw-30,12,FA_CLINIC,18,true,1));
-        d.items.push_back(mkPhoto(d.paperW-m-26,m+2,26,32));
-        d.items.push_back(mkHLine(m,m+36,cw,0.6));
-        d.items.push_back(mkField(m,m+40,cw/2,8,L"receiptNo",FA_RECEIPT,11,2));
-        d.items.push_back(mkField(m+cw/2,m+40,cw/2,8,L"date",FA_DATE,11,0));
-        addA4Body(d,m,m+52,cw,11,66.0);
-        addFooter(d,m,cw,d.paperH,true);
-        break; }
-    case 5: { // T06 پذیرش لاکچری با حاشیه طلایی
-        a4p(); cw=d.paperW-2*m;
-        d.name=L"\u067e\u0630\u06cc\u0631\u0634 \u0644\u0627\u06a9\u0686\u0631\u06cc \u0628\u0627 \u062d\u0627\u0634\u06cc\u0647 \u0637\u0644\u0627\u06cc\u06cc";
-        d.items.push_back(mkFrame(d.paperW,d.paperH,9,0xC9A227,1.4));
-        d.items.push_back(mkLabel(m,m,cw,13,FA_CLINIC,20,true,1));
-        d.items.push_back(mkHLine(m,m+16,cw,0.7));
-        d.items.push_back(mkField(m,m+20,cw/2,8,L"receiptNo",FA_RECEIPT,12,2));
-        d.items.push_back(mkField(m+cw/2,m+20,cw/2,8,L"date",FA_DATE,12,0));
-        addA4Body(d,m,m+32,cw,12,64.0);
-        addFooter(d,m,cw,d.paperH,true);
-        break; }
-    case 6: { // T07 پذیرش مدرن مینیمال
-        a4p(); cw=d.paperW-2*m;
-        d.name=L"\u067e\u0630\u06cc\u0631\u0634 \u0645\u062f\u0631\u0646 \u0645\u06cc\u0646\u06cc\u0645\u0627\u0644";
-        d.items.push_back(mkLabel(m,m,cw,13,FA_CLINIC,19,true,2));
-        d.items.push_back(mkHLine(m,m+17,cw,1.1));
-        d.items.push_back(mkField(m,m+21,cw/2,8,L"receiptNo",FA_RECEIPT,11,2));
-        d.items.push_back(mkField(m+cw/2,m+21,cw/2,8,L"date",FA_DATE,11,0));
-        addA4Body(d,m,m+33,cw,11,64.0);
-        addFooter(d,m,cw,d.paperH,true);
-        break; }
-    case 7: { // T08 پذیرش بیمه پایه + تکمیلی
-        a4p(); cw=d.paperW-2*m;
-        d.name=L"\u067e\u0630\u06cc\u0631\u0634 \u0628\u06cc\u0645\u0647 \u067e\u0627\u06cc\u0647 + \u062a\u06a9\u0645\u06cc\u0644\u06cc";
-        double col=cw/2-3;
-        d.items.push_back(mkLabel(m,m,cw,12,FA_CLINIC,18,true,1));
-        d.items.push_back(mkHLine(m,m+14,cw,0.6));
-        d.items.push_back(mkField(m+col+6,m+18,col,8,L"firstName",FA_NAME,11,0));
-        d.items.push_back(mkField(m,m+18,col,8,L"lastName",FA_FAMILY,11,0));
-        d.items.push_back(mkRect(m,m+28,col,20,0.3,2));
-        d.items.push_back(mkLabel(m+2,m+29,col,7,L"\u0628\u06cc\u0645\u0647 \u067e\u0627\u06cc\u0647",11,true,1));
-        d.items.push_back(mkField(m+2,m+38,col-4,7,L"insurance",L"",10,2));
-        d.items.push_back(mkRect(m+col+6,m+28,col,20,0.3,2));
-        d.items.push_back(mkLabel(m+col+8,m+29,col,7,L"\u0628\u06cc\u0645\u0647 \u062a\u06a9\u0645\u06cc\u0644\u06cc",11,true,1));
-        d.items.push_back(mkField(m+col+8,m+38,col-4,7,L"suppInsurance",L"",10,2));
-        double yb=addServicesBlock(d,m,m+52,cw,11,74.0);
-        d.items.push_back(mkHLine(m,yb,cw,0.3)); yb+=2;
-        d.items.push_back(mkField(m+col+6,yb,col,8,L"total",FA_TOTAL,12,0));
-        d.items.push_back(mkField(m,yb,col,8,L"paid",FA_PAID,12,0));
-        addFooter(d,m,cw,d.paperH,true);
-        break; }
-    case 8: { // T09 تزریقات استاندارد A4
-        a4p(); cw=d.paperW-2*m;
-        d.name=L"\u062a\u0632\u0631\u06cc\u0642\u0627\u062a \u0627\u0633\u062a\u0627\u0646\u062f\u0627\u0631\u062f A4";
-        d.items.push_back(mkLabel(m,m,cw,12,FA_INJECT,18,true,1));
-        d.items.push_back(mkHLine(m,m+14,cw,0.6));
-        d.items.push_back(mkField(m,m+18,cw/2,8,L"receiptNo",FA_RECEIPT,11,2));
-        d.items.push_back(mkField(m+cw/2,m+18,cw/2,8,L"date",FA_DATE,11,0));
-        addA4Body(d,m,m+30,cw,11);
-        addFooter(d,m,cw,d.paperH,true);
-        break; }
-    case 9: { // T10 تزریقات با چک‌لیست دارو
-        a4p(); cw=d.paperW-2*m;
-        d.name=L"\u062a\u0632\u0631\u06cc\u0642\u0627\u062a \u0628\u0627 \u0686\u06a9\u200c\u0644\u06cc\u0633\u062a \u062f\u0627\u0631\u0648";
-        d.items.push_back(mkLabel(m,m,cw,12,FA_INJECT,18,true,1));
-        d.items.push_back(mkHLine(m,m+14,cw,0.6));
-        d.items.push_back(mkField(m+cw/2,m+18,cw/2,8,L"firstName",FA_NAME,11,0));
-        d.items.push_back(mkField(m,m+18,cw/2,8,L"lastName",FA_FAMILY,11,0));
-        d.items.push_back(mkField(m+cw/2,m+28,cw/2,8,L"nationalCode",FA_NID,11,0));
-        d.items.push_back(mkField(m,m+28,cw/2,8,L"insurance",FA_INS,11,0));
-        double yc=addServicesBlock(d,m,m+40,cw,11,62.0);
-        d.items.push_back(mkRect(m,yc+6,cw,34,0.3,2));
-        d.items.push_back(mkLabel(m+2,yc+1,cw-4,7,L"\u0686\u06a9\u200c\u0644\u06cc\u0633\u062a \u062f\u0627\u0631\u0648\u0647\u0627",11,true,2));
-        for(int i=0;i<4;i++) d.items.push_back(mkHLine(m+4,yc+13+i*7,cw-8,0.2));
-        addFooter(d,m,cw,d.paperH,true);
-        break; }
-    case 10: { // T11 آزمایشگاه رسید پذیرش A4
-        a4p(); cw=d.paperW-2*m;
-        d.name=L"\u0622\u0632\u0645\u0627\u06cc\u0634\u06af\u0627\u0647 \u0631\u0633\u06cc\u062f \u067e\u0630\u06cc\u0631\u0634 A4";
-        d.items.push_back(mkLabel(m,m,cw,12,FA_LAB,18,true,1));
-        d.items.push_back(mkHLine(m,m+14,cw,0.6));
-        d.items.push_back(mkField(m,m+18,cw/2,8,L"receiptNo",FA_RECEIPT,11,2));
-        d.items.push_back(mkField(m+cw/2,m+18,cw/2,8,L"date",FA_DATE,11,0));
-        addA4Body(d,m,m+30,cw,11);
-        addFooter(d,m,cw,d.paperH,true);
-        break; }
-    case 11: { // T12 آزمایشگاه با QR و کد ملی
-        a4p(); cw=d.paperW-2*m;
-        d.name=L"\u0622\u0632\u0645\u0627\u06cc\u0634\u06af\u0627\u0647 \u0628\u0627 QR \u0648 \u06a9\u062f \u0645\u0644\u06cc";
-        d.items.push_back(mkLabel(m,m,cw-30,12,FA_LAB,18,true,1));
-        d.items.push_back(mkQR(d.paperW-m-26,m+2,26));
-        d.items.push_back(mkHLine(m,m+30,cw,0.6));
-        d.items.push_back(mkField(m,m+34,cw/2,8,L"receiptNo",FA_RECEIPT,11,2));
-        d.items.push_back(mkField(m+cw/2,m+34,cw/2,8,L"nationalCode",FA_NID,11,0));
-        addA4Body(d,m,m+46,cw,11,70.0);
-        addFooter(d,m,cw,d.paperH,true);
-        break; }
-    case 12: { // T13 رادیولوژی برگه پذیرش A4
-        a4p(); cw=d.paperW-2*m;
-        d.name=L"\u0631\u0627\u062f\u06cc\u0648\u0644\u0648\u0698\u06cc \u0628\u0631\u06af\u0647 \u067e\u0630\u06cc\u0631\u0634 A4";
-        d.items.push_back(mkLabel(m,m,cw,12,FA_RADIO,18,true,1));
-        d.items.push_back(mkHLine(m,m+14,cw,0.6));
-        d.items.push_back(mkField(m,m+18,cw/2,8,L"receiptNo",FA_RECEIPT,11,2));
-        d.items.push_back(mkField(m+cw/2,m+18,cw/2,8,L"date",FA_DATE,11,0));
-        addA4Body(d,m,m+30,cw,11);
-        addFooter(d,m,cw,d.paperH,true);
-        break; }
-    case 13: { // T14 رادیولوژی با عکس پرسنلی
-        a4p(); cw=d.paperW-2*m;
-        d.name=L"\u0631\u0627\u062f\u06cc\u0648\u0644\u0648\u0698\u06cc \u0628\u0627 \u0639\u06a9\u0633 \u067e\u0631\u0633\u0646\u0644\u06cc";
-        d.items.push_back(mkLabel(m,m,cw-30,12,FA_RADIO,18,true,1));
-        d.items.push_back(mkPhoto(d.paperW-m-26,m+2,26,32));
-        d.items.push_back(mkHLine(m,m+36,cw,0.6));
-        d.items.push_back(mkField(m,m+40,cw/2,8,L"receiptNo",FA_RECEIPT,11,2));
-        d.items.push_back(mkField(m+cw/2,m+40,cw/2,8,L"date",FA_DATE,11,0));
-        addA4Body(d,m,m+52,cw,11,66.0);
-        addFooter(d,m,cw,d.paperH,true);
-        break; }
-    case 14: { // T15 فیزیوتراپی رسید جلسه A4
-        a4p(); cw=d.paperW-2*m;
-        d.name=L"\u0641\u06cc\u0632\u06cc\u0648\u062a\u0631\u0627\u067e\u06cc \u0631\u0633\u06cc\u062f \u062c\u0644\u0633\u0647 A4";
-        d.items.push_back(mkLabel(m,m,cw,12,FA_PHYSIO,18,true,1));
-        d.items.push_back(mkHLine(m,m+14,cw,0.6));
-        d.items.push_back(mkField(m,m+18,cw/2,8,L"receiptNo",FA_RECEIPT,11,2));
-        d.items.push_back(mkField(m+cw/2,m+18,cw/2,8,L"date",FA_DATE,11,0));
-        addA4Body(d,m,m+30,cw,11);
-        addFooter(d,m,cw,d.paperH,true);
-        break; }
-    case 15: { // T16 فیزیوتراپی کارت ۱۰ جلسه
-        a4p(); cw=d.paperW-2*m;
-        d.name=L"\u0641\u06cc\u0632\u06cc\u0648\u062a\u0631\u0627\u067e\u06cc \u06a9\u0627\u0631\u062a \u06f1\u06f0 \u062c\u0644\u0633\u0647";
-        d.items.push_back(mkFrame(d.paperW,d.paperH,9,0x1F6FEB,0.8));
-        d.items.push_back(mkLabel(m,m,cw,11,FA_PHYSIO,17,true,1));
-        d.items.push_back(mkField(m+cw/2,m+14,cw/2,8,L"firstName",FA_NAME,11,0));
-        d.items.push_back(mkField(m,m+14,cw/2,8,L"lastName",FA_FAMILY,11,0));
-        double ys=addServicesBlock(d,m,m+26,cw,11,56.0);
-        for(int i=0;i<10;i++){
-            double bx=m+(i%5)*((cw)/5);
-            double by=ys+6+(i/5)*20;
-            d.items.push_back(mkRect(bx+1,by,((cw)/5)-2,15,0.3,1));
-            wchar_t b[8]; swprintf(b,8,L"%d",i+1);
-            d.items.push_back(mkLabel(bx+1,by+4,((cw)/5)-2,7,b,11,true,1));
-        }
-        addFooter(d,m,cw,d.paperH,false);
-        break; }
-    case 16: { // T17 دندانپزشکی پذیرش A4
-        a4p(); cw=d.paperW-2*m;
-        d.name=L"\u062f\u0646\u062f\u0627\u0646\u067e\u0632\u0634\u06a9\u06cc \u067e\u0630\u06cc\u0631\u0634 A4";
-        PrintItem hd=mkRect(m,m,cw,15,0,1.5); hd.fillTransparent=false; hd.fillColor=0x0E7C86;
-        d.items.push_back(hd);
-        PrintItem ht=mkLabel(m,m+2,cw,11,FA_DENTAL,18,true,1); ht.textColor=0xFFFFFF;
-        d.items.push_back(ht);
-        d.items.push_back(mkField(m,m+19,cw/2,8,L"receiptNo",FA_RECEIPT,11,2));
-        d.items.push_back(mkField(m+cw/2,m+19,cw/2,8,L"date",FA_DATE,11,0));
-        addA4Body(d,m,m+31,cw,11,66.0);
-        addFooter(d,m,cw,d.paperH,true);
-        break; }
-    case 17: { // T18 جراحی پذیرش A4
-        a4p(); cw=d.paperW-2*m;
-        d.name=L"\u062c\u0631\u0627\u062d\u06cc \u067e\u0630\u06cc\u0631\u0634 A4";
-        PrintItem hd=mkRect(m,m,cw,15,0,1.5); hd.fillTransparent=false; hd.fillColor=0xB4413C;
-        d.items.push_back(hd);
-        PrintItem ht=mkLabel(m,m+2,cw,11,FA_SURG,18,true,1); ht.textColor=0xFFFFFF;
-        d.items.push_back(ht);
-        d.items.push_back(mkField(m,m+19,cw/2,8,L"receiptNo",FA_RECEIPT,11,2));
-        d.items.push_back(mkField(m+cw/2,m+19,cw/2,8,L"date",FA_DATE,11,0));
-        addA4Body(d,m,m+31,cw,11,66.0);
-        addFooter(d,m,cw,d.paperH,true);
-        break; }
-    case 18: { // T19 قلب و عروق پذیرش A4
-        a4p(); cw=d.paperW-2*m;
-        d.name=L"\u0642\u0644\u0628 \u0648 \u0639\u0631\u0648\u0642 \u067e\u0630\u06cc\u0631\u0634 A4";
-        PrintItem hd=mkRect(m,m,cw,15,0,1.5); hd.fillTransparent=false; hd.fillColor=0xC02840;
-        d.items.push_back(hd);
-        PrintItem ht=mkLabel(m,m+2,cw,11,FA_CARDIO,18,true,1); ht.textColor=0xFFFFFF;
-        d.items.push_back(ht);
-        d.items.push_back(mkField(m,m+19,cw/2,8,L"receiptNo",FA_RECEIPT,11,2));
-        d.items.push_back(mkField(m+cw/2,m+19,cw/2,8,L"date",FA_DATE,11,0));
-        addA4Body(d,m,m+31,cw,11,66.0);
-        addFooter(d,m,cw,d.paperH,true);
-        break; }
-    case 19: { // T20 اطفال پذیرش A4
-        a4p(); cw=d.paperW-2*m;
-        d.name=L"\u0627\u0637\u0641\u0627\u0644 \u067e\u0630\u06cc\u0631\u0634 A4";
-        PrintItem hd=mkRect(m,m,cw,15,0,1.5); hd.fillTransparent=false; hd.fillColor=0xE08A1E;
-        d.items.push_back(hd);
-        PrintItem ht=mkLabel(m,m+2,cw,11,FA_PED,18,true,1); ht.textColor=0xFFFFFF;
-        d.items.push_back(ht);
-        d.items.push_back(mkField(m,m+19,cw/2,8,L"receiptNo",FA_RECEIPT,11,2));
-        d.items.push_back(mkField(m+cw/2,m+19,cw/2,8,L"date",FA_DATE,11,0));
-        addA4Body(d,m,m+31,cw,11,66.0);
-        addFooter(d,m,cw,d.paperH,true);
-        break; }
-    case 20: { // T21 زنان پذیرش A4
-        a4p(); cw=d.paperW-2*m;
-        d.name=L"\u0632\u0646\u0627\u0646 \u067e\u0630\u06cc\u0631\u0634 A4";
-        PrintItem hd=mkRect(m,m,cw,15,0,1.5); hd.fillTransparent=false; hd.fillColor=0xC0396B;
-        d.items.push_back(hd);
-        PrintItem ht=mkLabel(m,m+2,cw,11,FA_GYN,18,true,1); ht.textColor=0xFFFFFF;
-        d.items.push_back(ht);
-        d.items.push_back(mkField(m,m+19,cw/2,8,L"receiptNo",FA_RECEIPT,11,2));
-        d.items.push_back(mkField(m+cw/2,m+19,cw/2,8,L"date",FA_DATE,11,0));
-        addA4Body(d,m,m+31,cw,11,66.0);
-        addFooter(d,m,cw,d.paperH,true);
-        break; }
-    case 21: { // T22 ارتوپدی پذیرش A4
-        a4p(); cw=d.paperW-2*m;
-        d.name=L"\u0627\u0631\u062a\u0648\u067e\u062f\u06cc \u067e\u0630\u06cc\u0631\u0634 A4";
-        PrintItem hd=mkRect(m,m,cw,15,0,1.5); hd.fillTransparent=false; hd.fillColor=0x2E6F4E;
-        d.items.push_back(hd);
-        PrintItem ht=mkLabel(m,m+2,cw,11,FA_ORTHO,18,true,1); ht.textColor=0xFFFFFF;
-        d.items.push_back(ht);
-        d.items.push_back(mkField(m,m+19,cw/2,8,L"receiptNo",FA_RECEIPT,11,2));
-        d.items.push_back(mkField(m+cw/2,m+19,cw/2,8,L"date",FA_DATE,11,0));
-        addA4Body(d,m,m+31,cw,11,66.0);
-        addFooter(d,m,cw,d.paperH,true);
-        break; }
-    case 22: { // T23 چشم پذیرش A4
-        a4p(); cw=d.paperW-2*m;
-        d.name=L"\u0686\u0634\u0645 \u067e\u0630\u06cc\u0631\u0634 A4";
-        PrintItem hd=mkRect(m,m,cw,15,0,1.5); hd.fillTransparent=false; hd.fillColor=0x2A6FD6;
-        d.items.push_back(hd);
-        PrintItem ht=mkLabel(m,m+2,cw,11,FA_EYE,18,true,1); ht.textColor=0xFFFFFF;
-        d.items.push_back(ht);
-        d.items.push_back(mkField(m,m+19,cw/2,8,L"receiptNo",FA_RECEIPT,11,2));
-        d.items.push_back(mkField(m+cw/2,m+19,cw/2,8,L"date",FA_DATE,11,0));
-        addA4Body(d,m,m+31,cw,11,66.0);
-        addFooter(d,m,cw,d.paperH,true);
-        break; }
-    case 23: { // T24 گوش گلو بینی پذیرش A4
-        a4p(); cw=d.paperW-2*m;
-        d.name=L"\u06af\u0648\u0634 \u06af\u0644\u0648 \u0628\u06cc\u0646\u06cc \u067e\u0630\u06cc\u0631\u0634 A4";
-        PrintItem hd=mkRect(m,m,cw,15,0,1.5); hd.fillTransparent=false; hd.fillColor=0x7A5FCF;
-        d.items.push_back(hd);
-        PrintItem ht=mkLabel(m,m+2,cw,11,FA_ENT,18,true,1); ht.textColor=0xFFFFFF;
-        d.items.push_back(ht);
-        d.items.push_back(mkField(m,m+19,cw/2,8,L"receiptNo",FA_RECEIPT,11,2));
-        d.items.push_back(mkField(m+cw/2,m+19,cw/2,8,L"date",FA_DATE,11,0));
-        addA4Body(d,m,m+31,cw,11,66.0);
-        addFooter(d,m,cw,d.paperH,true);
-        break; }
-    case 24: { // T25 پوست پذیرش A4
-        a4p(); cw=d.paperW-2*m;
-        d.name=L"\u067e\u0648\u0633\u062a \u067e\u0630\u06cc\u0631\u0634 A4";
-        PrintItem hd=mkRect(m,m,cw,15,0,1.5); hd.fillTransparent=false; hd.fillColor=0xA6572B;
-        d.items.push_back(hd);
-        PrintItem ht=mkLabel(m,m+2,cw,11,FA_SKIN,18,true,1); ht.textColor=0xFFFFFF;
-        d.items.push_back(ht);
-        d.items.push_back(mkField(m,m+19,cw/2,8,L"receiptNo",FA_RECEIPT,11,2));
-        d.items.push_back(mkField(m+cw/2,m+19,cw/2,8,L"date",FA_DATE,11,0));
-        addA4Body(d,m,m+31,cw,11,66.0);
-        addFooter(d,m,cw,d.paperH,true);
-        break; }
-    case 25: { // T26 پذیرش با لوگو و QR
-        a4p(); cw=d.paperW-2*m;
-        d.name=L"\u067e\u0630\u06cc\u0631\u0634 \u0628\u0627 \u0644\u0648\u06af\u0648 \u0648 QR";
-        d.items.push_back(mkLogo(m,m,26,26));
-        d.items.push_back(mkLabel(m+30,m+4,cw-58,12,FA_CLINIC,17,true,1));
-        d.items.push_back(mkQR(d.paperW-m-26,m,26));
-        d.items.push_back(mkHLine(m,m+30,cw,0.6));
-        d.items.push_back(mkField(m,m+34,cw/2,8,L"receiptNo",FA_RECEIPT,11,2));
-        d.items.push_back(mkField(m+cw/2,m+34,cw/2,8,L"date",FA_DATE,11,0));
-        addA4Body(d,m,m+46,cw,11,66.0);
-        addFooter(d,m,cw,d.paperH,true);
-        break; }
-    case 26: { // T27 پذیرش با قاب آبی
-        a4p(); cw=d.paperW-2*m;
-        d.name=L"\u067e\u0630\u06cc\u0631\u0634 \u0628\u0627 \u0642\u0627\u0628 \u0622\u0628\u06cc";
-        d.items.push_back(mkFrame(d.paperW,d.paperH,9,0x1F5FD6,1.0));
-        d.items.push_back(mkLabel(m,m,cw,12,FA_CLINIC,18,true,1));
-        d.items.push_back(mkHLine(m,m+14,cw,0.6));
-        d.items.push_back(mkField(m,m+18,cw/2,8,L"receiptNo",FA_RECEIPT,11,2));
-        d.items.push_back(mkField(m+cw/2,m+18,cw/2,8,L"date",FA_DATE,11,0));
-        addA4Body(d,m,m+30,cw,11,64.0);
-        addFooter(d,m,cw,d.paperH,true);
-        break; }
-    case 27: { // T28 پذیرش فشرده سه ستونی
-        a4p(); cw=d.paperW-2*m;
-        d.name=L"\u067e\u0630\u06cc\u0631\u0634 \u0641\u0634\u0631\u062f\u0647 \u0633\u0647 \u0633\u062a\u0648\u0646\u06cc";
-        double col=cw/3-2;
-        d.items.push_back(mkLabel(m,m,cw,11,FA_CLINIC,17,true,1));
-        d.items.push_back(mkHLine(m,m+13,cw,0.5));
-        d.items.push_back(mkField(m+2*(col+3),m+16,col,7,L"receiptNo",FA_RECEIPT,10,2));
-        d.items.push_back(mkField(m+col+3,m+16,col,7,L"date",FA_DATE,10,2));
-        d.items.push_back(mkField(m,m+16,col,7,L"insurance",FA_INS,10,2));
-        d.items.push_back(mkField(m+2*(col+3),m+24,col,7,L"firstName",FA_NAME,10,2));
-        d.items.push_back(mkField(m+col+3,m+24,col,7,L"lastName",FA_FAMILY,10,2));
-        d.items.push_back(mkField(m,m+24,col,7,L"nationalCode",FA_NID,10,2));
-        d.items.push_back(mkField(m+2*(col+3),m+32,col,7,L"doctor",FA_DOCTOR,10,2));
-        d.items.push_back(mkField(m+col+3,m+32,col,7,L"mobile",FA_PHONE,10,2));
-        d.items.push_back(mkField(m,m+32,col,7,L"paid",FA_PAID,10,2));
-        double yk=addServicesBlock(d,m,m+42,cw,11,74.0);
-        d.items.push_back(mkHLine(m,yk,cw,0.3)); yk+=2;
-        d.items.push_back(mkField(m+cw/2,yk,cw/2,8,L"total",FA_TOTAL,12,0));
-        d.items.push_back(mkField(m,yk,cw/2,8,L"paid",FA_PAID,12,0));
-        addFooter(d,m,cw,d.paperH,true);
-        break; }
-    case 28: { // T29 پذیرش با عنوان رنگی
-        a4p(); cw=d.paperW-2*m;
-        d.name=L"\u067e\u0630\u06cc\u0631\u0634 \u0628\u0627 \u0639\u0646\u0648\u0627\u0646 \u0631\u0646\u06af\u06cc";
-        PrintItem hd=mkRect(m,m,cw,16,0,0); hd.fillTransparent=false; hd.fillColor=0x1F5FD6;
-        d.items.push_back(hd);
-        PrintItem ht=mkLabel(m,m+2,cw,12,FA_CLINIC,19,true,1); ht.textColor=0xFFFFFF;
-        d.items.push_back(ht);
-        d.items.push_back(mkField(m,m+20,cw/2,8,L"receiptNo",FA_RECEIPT,11,2));
-        d.items.push_back(mkField(m+cw/2,m+20,cw/2,8,L"date",FA_DATE,11,0));
-        addA4Body(d,m,m+32,cw,11,64.0);
-        addFooter(d,m,cw,d.paperH,true);
-        break; }
-    case 29: { // T30 پذیرش جامع با همه فیلدها
-        a4p(); cw=d.paperW-2*m;
-        d.name=L"\u067e\u0630\u06cc\u0631\u0634 \u062c\u0627\u0645\u0639 \u0628\u0627 \u0647\u0645\u0647 \u0641\u06cc\u0644\u062f\u0647\u0627";
-        double col=cw/2-3;
-        d.items.push_back(mkLabel(m,m,cw,13,FA_CLINIC,20,true,1));
-        d.items.push_back(mkHLine(m,m+16,cw,0.7));
-        d.items.push_back(mkField(m+col+6,m+20,col,8,L"receiptNo",FA_RECEIPT,11,2));
-        d.items.push_back(mkField(m,m+20,col,8,L"date",FA_DATE,11,0));
-        d.items.push_back(mkField(m+col+6,m+29,col,8,L"firstName",FA_NAME,11,0));
-        d.items.push_back(mkField(m,m+29,col,8,L"lastName",FA_FAMILY,11,0));
-        d.items.push_back(mkField(m+col+6,m+38,col,8,L"nationalCode",FA_NID,11,0));
-        d.items.push_back(mkField(m,m+38,col,8,L"insurance",FA_INS,11,0));
-        d.items.push_back(mkField(m+col+6,m+47,col,8,L"doctor",FA_DOCTOR,11,0));
-        d.items.push_back(mkField(m,m+47,col,8,L"mobile",FA_PHONE,11,0));
-        double yg=addServicesBlock(d,m,m+58,cw,11,72.0);
-        d.items.push_back(mkHLine(m,yg,cw,0.3)); yg+=2;
-        d.items.push_back(mkField(m+col+6,yg,col,8,L"total",FA_TOTAL,12,0));
-        d.items.push_back(mkField(m,yg,col,8,L"paid",FA_PAID,12,0));
-        addFooter(d,m,cw,d.paperH,true);
-        break; }
-    }
+    const Spec& sp=SP[idx];
+    double pt=11.0;
+    if(sp.frame) d.items.push_back(mkFrame(d.paperW,d.paperH,9,sp.frame,0.9));
+    double y=addHeader(d,m,cw,sp.header);
+    y=addMetaStrip(d,m,y,cw,pt-0.5);
+    if(sp.photo){ d.items.push_back(mkPhoto(d.paperW-m-24,y,24,30)); }
+    if(sp.qr){    d.items.push_back(mkQR(d.paperW-m-24,y,24)); }
+    y=addPatient(d,m,y,cw,pt);
+    y=addServices(d,m,y,cw,pt,sp.svcH,sp.banded,sp.bw);
+    y=addTotals(d,m,y,cw,pt);
+    addFooter(d,m,cw,d.paperH,sp.appt);
     return d;
 }
 
 } // namespace
 
-// Resolve just the NAME of template idx (so migration can match by name without
-// rebuilding the whole design). Mirrors the names hardcoded in buildTemplate().
+// Resolve just the NAME of template idx (migration matches by name).
 static std::wstring buildTemplateName(int idx){
-    switch(idx){
-    case 0: return L"\u067e\u0630\u06cc\u0631\u0634 \u0627\u0633\u062a\u0627\u0646\u062f\u0627\u0631\u062f A4 \u0639\u0645\u0648\u062f\u06cc";
-    case 1: return L"\u067e\u0630\u06cc\u0631\u0634 \u0627\u0633\u062a\u0627\u0646\u062f\u0627\u0631\u062f A4 \u0627\u0641\u0642\u06cc";
-    case 2: return L"\u067e\u0630\u06cc\u0631\u0634 \u0628\u0627 \u0644\u0648\u06af\u0648 \u062f\u0631 \u0628\u0627\u0644\u0627";
-    case 3: return L"\u067e\u0630\u06cc\u0631\u0634 \u0628\u0627 QR \u06a9\u0646\u0627\u0631 \u0628\u0627\u0631\u06a9\u062f";
-    case 4: return L"\u067e\u0630\u06cc\u0631\u0634 \u0628\u0627 \u0639\u06a9\u0633 \u067e\u0631\u0633\u0646\u0644\u06cc";
-    case 5: return L"\u067e\u0630\u06cc\u0631\u0634 \u0644\u0627\u06a9\u0686\u0631\u06cc \u0628\u0627 \u062d\u0627\u0634\u06cc\u0647 \u0637\u0644\u0627\u06cc\u06cc";
-    case 6: return L"\u067e\u0630\u06cc\u0631\u0634 \u0645\u062f\u0631\u0646 \u0645\u06cc\u0646\u06cc\u0645\u0627\u0644";
-    case 7: return L"\u067e\u0630\u06cc\u0631\u0634 \u0628\u06cc\u0645\u0647 \u067e\u0627\u06cc\u0647 + \u062a\u06a9\u0645\u06cc\u0644\u06cc";
-    case 8: return L"\u062a\u0632\u0631\u06cc\u0642\u0627\u062a \u0627\u0633\u062a\u0627\u0646\u062f\u0627\u0631\u062f A4";
-    case 9: return L"\u062a\u0632\u0631\u06cc\u0642\u0627\u062a \u0628\u0627 \u0686\u06a9\u200c\u0644\u06cc\u0633\u062a \u062f\u0627\u0631\u0648";
-    case 10: return L"\u0622\u0632\u0645\u0627\u06cc\u0634\u06af\u0627\u0647 \u0631\u0633\u06cc\u062f \u067e\u0630\u06cc\u0631\u0634 A4";
-    case 11: return L"\u0622\u0632\u0645\u0627\u06cc\u0634\u06af\u0627\u0647 \u0628\u0627 QR \u0648 \u06a9\u062f \u0645\u0644\u06cc";
-    case 12: return L"\u0631\u0627\u062f\u06cc\u0648\u0644\u0648\u0698\u06cc \u0628\u0631\u06af\u0647 \u067e\u0630\u06cc\u0631\u0634 A4";
-    case 13: return L"\u0631\u0627\u062f\u06cc\u0648\u0644\u0648\u0698\u06cc \u0628\u0627 \u0639\u06a9\u0633 \u067e\u0631\u0633\u0646\u0644\u06cc";
-    case 14: return L"\u0641\u06cc\u0632\u06cc\u0648\u062a\u0631\u0627\u067e\u06cc \u0631\u0633\u06cc\u062f \u062c\u0644\u0633\u0647 A4";
-    case 15: return L"\u0641\u06cc\u0632\u06cc\u0648\u062a\u0631\u0627\u067e\u06cc \u06a9\u0627\u0631\u062a \u06f1\u06f0 \u062c\u0644\u0633\u0647";
-    case 16: return L"\u062f\u0646\u062f\u0627\u0646\u067e\u0632\u0634\u06a9\u06cc \u067e\u0630\u06cc\u0631\u0634 A4";
-    case 17: return L"\u062c\u0631\u0627\u062d\u06cc \u067e\u0630\u06cc\u0631\u0634 A4";
-    case 18: return L"\u0642\u0644\u0628 \u0648 \u0639\u0631\u0648\u0642 \u067e\u0630\u06cc\u0631\u0634 A4";
-    case 19: return L"\u0627\u0637\u0641\u0627\u0644 \u067e\u0630\u06cc\u0631\u0634 A4";
-    case 20: return L"\u0632\u0646\u0627\u0646 \u067e\u0630\u06cc\u0631\u0634 A4";
-    case 21: return L"\u0627\u0631\u062a\u0648\u067e\u062f\u06cc \u067e\u0630\u06cc\u0631\u0634 A4";
-    case 22: return L"\u0686\u0634\u0645 \u067e\u0630\u06cc\u0631\u0634 A4";
-    case 23: return L"\u06af\u0648\u0634 \u06af\u0644\u0648 \u0628\u06cc\u0646\u06cc \u067e\u0630\u06cc\u0631\u0634 A4";
-    case 24: return L"\u067e\u0648\u0633\u062a \u067e\u0630\u06cc\u0631\u0634 A4";
-    case 25: return L"\u067e\u0630\u06cc\u0631\u0634 \u0628\u0627 \u0644\u0648\u06af\u0648 \u0648 QR";
-    case 26: return L"\u067e\u0630\u06cc\u0631\u0634 \u0628\u0627 \u0642\u0627\u0628 \u0622\u0628\u06cc";
-    case 27: return L"\u067e\u0630\u06cc\u0631\u0634 \u0641\u0634\u0631\u062f\u0647 \u0633\u0647 \u0633\u062a\u0648\u0646\u06cc";
-    case 28: return L"\u067e\u0630\u06cc\u0631\u0634 \u0628\u0627 \u0639\u0646\u0648\u0627\u0646 \u0631\u0646\u06af\u06cc";
-    case 29: return L"\u067e\u0630\u06cc\u0631\u0634 \u062c\u0627\u0645\u0639 \u0628\u0627 \u0647\u0645\u0647 \u0641\u06cc\u0644\u062f\u0647\u0627";
-    default: return L"";
-    }
+    static const wchar_t* NAMES[30]={
+        L"۰۱) رسید پذیرش — استاندارد",
+        L"۰۲) رسید پذیرش — لوگو کنار عنوان",
+        L"۰۳) رسید پذیرش — لوگوی وسط",
+        L"۰۴) رسید پذیرش — قاب آبی",
+        L"۰۵) رسید پذیرش — عکس بیمار",
+        L"۰۶) رسید پذیرش — QR گوشه",
+        L"۰۷) رسید پذیرش — لوگو + قاب",
+        L"۰۸) رسید پذیرش — جدول بلند",
+        L"۰۹) رسید پذیرش — خط‌کشی ساده",
+        L"۱۰) رسید پذیرش — قاب بنفش",
+        L"۱۱) رسید پذیرش — لوگو باند روشن",
+        L"۱۲) رسید پذیرش — عکس + خط",
+        L"۱۳) رسید پذیرش — وسط‌چین",
+        L"۱۴) رسید پذیرش — خط ضخیم",
+        L"۱۵) رسید پذیرش — فشرده عکس‌دار",
+        L"۱۶) رسید پذیرش — جدول باند بلند",
+        L"۱۷) رسید پذیرش — وسط + QR",
+        L"۱۸) رسید پذیرش — قاب آبی لوگو",
+        L"۱۹) رسید پذیرش — متعادل",
+        L"۲۰) رسید پذیرش — لوگو خطی",
+        L"۲۱) رسید پذیرش — عکس + QR",
+        L"۲۲) رسید پذیرش — وسط قاب بنفش",
+        L"۲۳) رسید پذیرش — مینیمال",
+        L"۲۴) رسید پذیرش — استاندارد باند",
+        L"۲۵) رسید پذیرش — لوگو قاب‌دار",
+        L"۲۶) رسید پذیرش — تمیز",
+        L"۲۷) رسید پذیرش — وسط عکس‌دار",
+        L"۲۸) رسید پذیرش — لوگو آبی",
+        L"۲۹) رسید پذیرش — باند ضخیم",
+        L"۳۰) رسید پذیرش — لوگو بنفش",
+    };
+    if(idx<0||idx>=30) return L"";
+    return NAMES[idx];
 }
 
 // ----------------------------------------------------------------- seeding ---
-// §1.53.0: seed the 30 built-in A4 templates AND migrate any previously-seeded
-// builtins. The migration is idempotent: it ALWAYS rebuilds each builtin from
-// buildTemplate(idx) on every version bump — so an existing install picks up
-// the fixed RTL name/lastName order, taller services table, and prettier
-// layouts automatically. A per-version one-shot setting flag guards re-runs.
-// IMPORTANT: we preserve the stored design id and any section<->design bindings
-// (bindings are stored separately by id, so overwriting the design content but
-// keeping the id keeps every section's chosen template connected).
+// Seed the 30 built-in A4 templates AND migrate any previously-seeded
+// builtins. The migration is idempotent: it ALWAYS rebuilds each builtin
+// from buildTemplate(idx) on every version bump — so an existing install
+// picks up the rebuilt services-table layouts automatically. A per-version
+// one-shot setting flag guards re-runs. Stored design ids (and therefore
+// section<->design bindings) are preserved.
 void Designs_Init(){
     std::vector<PrintDesign> existing; Designs_Builtins(existing);
     const int N = 30;
-    // fresh install → seed all 30 A4 templates
     if(existing.empty()){
-        for(int i=0;i<N;i++){
-            PrintDesign d = buildTemplate(i);
-            Designs_Insert(d);
-        }
+        for(int i=0;i<N;i++){ PrintDesign d=buildTemplate(i); Designs_Insert(d); }
+        setSetting(L"tpl_migration_1_60", L"1");
         setSetting(L"tpl_migration_1_59", L"1");
         setSetting(L"tpl_migration_1_58", L"1");
         setSetting(L"tpl_migration_1_53", L"1");
         setSetting(L"tpl_migration_1_52", L"1");
         return;
     }
-    // v1.59.0 — one-time migration to the verified 30 A4 templates. Two template
-    // names changed in v1.58 (T04, T27), so a name-based rebuild would leave
-    // orphaned duplicates. We therefore rebuild by INDEX POSITION: overwrite the
-    // first N stored builtins in order (preserving their ids/bindings), insert
-    // any missing ones, and DELETE any surplus builtins beyond N — so the set is
-    // always exactly the 30 canonical templates with NO duplicates.
-    if(getSetting(L"tpl_migration_1_59", L"0") != L"1"){
-        // Overwrite / insert the 30 canonical templates in order.
+    if(getSetting(L"tpl_migration_1_60", L"0") != L"1"){
+        // Overwrite the first N stored builtins in order (preserving their
+        // ids/bindings), insert any missing, DELETE surplus beyond N.
         for(int i=0;i<N;i++){
-            PrintDesign fresh = buildTemplate(i);
-            if(i < (int)existing.size()){
-                fresh.id = existing[i].id;   // keep id → keep section bindings
-                Designs_Update(fresh);
-            } else {
-                Designs_Insert(fresh);
-            }
+            PrintDesign fresh=buildTemplate(i);
+            if(i<(int)existing.size()){ fresh.id=existing[i].id; Designs_Update(fresh); }
+            else Designs_Insert(fresh);
         }
-        // Remove any surplus builtins (e.g. duplicates seeded by older builds).
-        for(size_t i=N;i<existing.size();++i)
-            Designs_Delete(existing[i].id);
+        for(size_t i=N;i<existing.size();++i) Designs_Delete(existing[i].id);
+        setSetting(L"tpl_migration_1_60", L"1");
         setSetting(L"tpl_migration_1_59", L"1");
         setSetting(L"tpl_migration_1_58", L"1");
         setSetting(L"tpl_migration_1_53", L"1");

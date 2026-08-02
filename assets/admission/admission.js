@@ -1085,11 +1085,22 @@
       var c = $('invoiceCard'); if (!c) return;
       c.className = /collapsed/.test(c.className) ? c.className.replace(/\s*collapsed/, '') : c.className + ' collapsed';
     });
-    on($('queueLauncher'), 'click', function () { var p=$('queuePanel'); if(p){p.className=p.className.replace(/\s*open/, '')+' open'; refreshQueue();} });
+    on($('queueLauncher'), 'click', function () {
+      var p=$('queuePanel');
+      if(p){
+        p.className=p.className.replace(/\s*open/, '')+' open';
+        if(p._azDock) p._azDock();   /* v1.60.0: always opens fully inside the viewport */
+        refreshQueue();
+      }
+    });
     on($('queueClose'), 'click', function () { var p=$('queuePanel'); if(p)p.className=p.className.replace(/\s*open/, ''); });
     wireDrag($('queuePanel'), $('queueDrag'));
-    on($('zoomIn'), 'click', function () { applyZoom(state.zoom + 10); });
-    on($('zoomOut'), 'click', function () { applyZoom(state.zoom - 10); });
+    /* v1.60.0: zoom in/out buttons REMOVED — fixed, readable scale. */
+
+    /* v1.60.0: print cluster moved OUT of the native bottom bar INTO the page. */
+    on($('btnPrtLast'), 'click', function () { Bridge.call('print.last', {}); });
+    on($('btnPrtRx'),  'click', function () { Bridge.call('print.rx', collectRecord()); });
+    on($('btnPrtIns'), 'click', function () { Bridge.call('print.insurance', collectRecord()); });
 
     /* queue search / filter / add */
     on($('qSearch'), 'input', function () { renderQueue(state.queue); });
@@ -1124,20 +1135,52 @@
     });
   }
 
+  /* v1.60.0: zoom controls removed. applyZoom() is kept as a harmless no-op
+     (state/init still passes a value through it) but never scales the page. */
   function applyZoom(z) {
-    z = Math.max(80, Math.min(130, Number(z) || 100)); state.zoom = z;
-    var app=$('app'); if(app){ app.style.zoom = z + '%'; app.style.height = (10000/z) + 'vh'; }
-    setText($('zoomValue'), toFa(z) + '٪');
+    state.zoom = 100;
+    var app=$('app'); if(app){ app.style.zoom = ''; app.style.height = ''; }
   }
   function applyMode(mode) {
     state.mode = mode === 'full' ? 'full' : 'simple';
     document.body.className = (document.body.className || '').replace(/\bmode-(simple|full)\b/g, '') + ' mode-' + state.mode;
   }
+  /* v1.60.0 FIX (صندوق نرفته‌ها): the queue mini-page previously opened cut
+     off mid-page, could not be dragged freely and vanished under an invisible
+     layer. Now the drag is CLAMPED to the viewport so the panel can never be
+     pushed outside the visible area or under another surface, and opening it
+     recentres it inside the window. */
   function wireDrag(panel, handle) {
     if (!panel || !handle) return; var moving=false, sx=0, sy=0, left=0, top=0;
-    on(handle,'mousedown',function(e){e=e||window.event; moving=true;sx=e.clientX;sy=e.clientY;left=panel.offsetLeft;top=panel.offsetTop;if(e.preventDefault)e.preventDefault();});
-    on(document,'mousemove',function(e){if(!moving)return;e=e||window.event;panel.style.left=(left+e.clientX-sx)+'px';panel.style.top=(top+e.clientY-sy)+'px';panel.style.right='auto';panel.style.bottom='auto';});
+    function vw(){ return window.innerWidth  || document.documentElement.clientWidth  || 1024; }
+    function vh(){ return window.innerHeight || document.documentElement.clientHeight || 768;  }
+    function clamp(l, t){
+      var w=panel.offsetWidth||400, h=panel.offsetHeight||300;
+      var ml=Math.max(4, vw()-w-4), mt=Math.max(4, vh()-h-4);
+      if(l<4) l=4; if(l>ml) l=ml;
+      if(t<4) t=4; if(t>mt) t=mt;
+      return {l:l,t:t};
+    }
+    on(handle,'mousedown',function(e){
+      e=e||window.event; moving=true; sx=e.clientX; sy=e.clientY;
+      var r=panel.getBoundingClientRect(); left=r.left; top=r.top;
+      panel.style.left=left+'px'; panel.style.top=top+'px';
+      panel.style.right='auto'; panel.style.bottom='auto';
+      if(e.preventDefault) e.preventDefault();
+    });
+    on(document,'mousemove',function(e){
+      if(!moving) return; e=e||window.event;
+      var p=clamp(left+e.clientX-sx, top+e.clientY-sy);
+      panel.style.left=p.l+'px'; panel.style.top=p.t+'px';
+    });
     on(document,'mouseup',function(){moving=false;});
+    /* on open: place the panel fully INSIDE the viewport (bottom-centre). */
+    panel._azDock = function(){
+      panel.style.right='auto'; panel.style.bottom='auto';
+      var w=panel.offsetWidth||Math.min(820, vw()-40);
+      var p=clamp(Math.round((vw()-w)/2), Math.round(vh()-(panel.offsetHeight||360)-24));
+      panel.style.left=p.l+'px'; panel.style.top=p.t+'px';
+    };
   }
   function showBlock(block) {
     var m=$('blockModal'); if(!m)return;

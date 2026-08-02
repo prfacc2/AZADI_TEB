@@ -70,13 +70,21 @@ static bool loadRes(int id, std::string& out){
 // original type index.
 static const char* JS_TYPES[] = {
     "label","field","hline","vline","rect","frame","image","logo","qr","photo","apptno","table","services","barcode" };
+// v1.60.0 FIX: the enum is NOT contiguous — PIT_BARCODE=13 and PIT_SERVICES=14,
+// so positional indexing into JS_TYPES mis-mapped "services"→12 (PIT_TABLE) and
+// intToJsType(14)→out-of-bounds→"label". A saved/authored services table was
+// silently downgraded to a plain label — the direct cause of «خدمات چاپ نمی‌شود».
+// Map by NAME for the two out-of-range ids; index only 0..11.
 static int jsTypeToInt(const std::string& t){
-    for(int i=0;i<(int)(sizeof(JS_TYPES)/sizeof(JS_TYPES[0]));++i)
-        if(t==JS_TYPES[i]) return i;
+    if(t=="services") return PIT_SERVICES;
+    if(t=="barcode")  return PIT_BARCODE;
+    for(int i=0;i<12;++i) if(t==JS_TYPES[i]) return i;
     return PIT_LABEL;
 }
 static std::string intToJsType(int t){
-    if(t<0||t>=(int)(sizeof(JS_TYPES)/sizeof(JS_TYPES[0]))) return "label";
+    if(t==PIT_SERVICES) return "services";
+    if(t==PIT_BARCODE)  return "barcode";
+    if(t<0||t>11) return "label";
     return JS_TYPES[t];
 }
 static std::string hexColor(unsigned int c){

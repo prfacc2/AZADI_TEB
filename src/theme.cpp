@@ -544,8 +544,16 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
             COLORREF a = (dn||hv)?g_infoAccent2:g_infoAccent;
             gpGradRoundRect(dc, rr, rad, a, g_infoAccent2, CLR_INVALID);
         } else if(st==BS_CARD){
+            // v1.60.0 modern card: soft elevation shadow, then a gentle
+            // surface gradient; hover lifts the card with an accent halo.
+            gpShadow(dc, rr, rad, hv?S(12):S(7), hv?90:50);
             gpGradRoundRect(dc, rr, rad, g_theme.surfaceTop,
                 hv?g_theme.hover:g_theme.surface, bord);
+            if(hv){
+                // accent glow ring just outside the border (drawn under text)
+                RECT halo=rr; InflateRect(&halo,S(1),S(1));
+                gpRoundRect(dc, halo, rad+S(1), CLR_INVALID, g_theme.accent);
+            }
         } else {
             gpRoundRect(dc, rr, rad, fill, bord);
         }
@@ -562,20 +570,30 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
         if(!enabled) txt = g_theme.textDim;
         SetTextColor(dc, txt);
         if(st==BS_CARD){
-            // big card: icon centered upper, title, subtitle
+            // v1.60.0: icon sits inside a circular accent-tinted badge —
+            // a professional "app icon" look instead of a bare glyph.
             if(d && d->icon){
-                int isz=S(34);
-                RECT ir={rc.right/2-isz/2, rr.top+S(22), rc.right/2+isz/2, rr.top+S(22)+isz};
-                drawIcon(dc, d->icon, ir, hv?g_theme.accent:g_theme.accent, S(2)+1);
+                int bd=S(52);
+                RECT br={rc.right/2-bd/2, rr.top+S(16), rc.right/2+bd/2, rr.top+S(16)+bd};
+                COLORREF badgeBg = blendColor(g_theme.surface,
+                    hv?g_theme.accentHover:g_theme.accent, hv?30:16);
+                gpGradRoundRect(dc, br, bd/2,
+                    blendColor(g_theme.surfaceTop, badgeBg, 55), badgeBg,
+                    hv?g_theme.accent:CLR_INVALID);
+                int isz=S(26);
+                RECT ir={rc.right/2-isz/2, br.top+(bd-isz)/2,
+                         rc.right/2+isz/2, br.top+(bd-isz)/2+isz};
+                drawIcon(dc, d->icon, ir,
+                    hv?g_theme.accentHover:g_theme.accent, S(2));
             }
             SelectObject(dc, g_fTitle);
-            RECT tr = rr; tr.top += S(64); tr.bottom = tr.top+S(34);
+            RECT tr = rr; tr.top += S(78); tr.bottom = tr.top+S(32);
             DrawTextW(dc, d?d->text.c_str():L"", -1, &tr,
                 DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
             if(d && !d->sub.empty()){
                 SelectObject(dc, g_fSmall);
                 SetTextColor(dc, g_theme.textDim);
-                RECT sr = rr; sr.top += S(100); sr.bottom = sr.top+S(24);
+                RECT sr = rr; sr.top += S(112); sr.bottom = sr.top+S(22);
                 DrawTextW(dc, d->sub.c_str(), -1, &sr,
                     DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
             }
