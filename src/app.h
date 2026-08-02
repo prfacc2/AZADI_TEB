@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.59.0"
+#define APP_VERSION_W   L"1.60.0"
 
 // ----------------------------------------------------------- logging policy -
 //  RELEASE 1.2.0 (Section A): all general user-behavior logging is gated behind
@@ -424,9 +424,10 @@ HWND createAdminScreen(HWND frame);      // admin.cpp
 HWND createManageScreen(HWND frame);     // admin.cpp
 
 // v1.7.0: header→reception action routing. The frame header (main.cpp) owns
-// the «پذیرش جدید» / «نوبت‌دهی» / «تب جدید» buttons and routes them to the
+// the «پذیرش جدید» / «تب جدید» buttons and routes them to the
 // active reception screen via these helpers. RA_* names the requested action.
-enum RecAction { RA_NEWPAT=0, RA_APPOINTMENT=1, RA_NEWTAB=2 };
+//  v1.60.0: «نوبت‌دهی» (RA_APPOINTMENT) removed — the feature no longer exists.
+enum RecAction { RA_NEWPAT=0, RA_NEWTAB=2 };
 enum RecPrintAction { RPA_INSURANCE=0, RPA_RX=1, RPA_LAST=2 };
 HWND receptionWindow();                  // the live reception HWND (or NULL)
 void receptionAction(RecAction a);       // route a header action to reception
@@ -672,11 +673,10 @@ struct BackupInfo {
 void  openBackupManager(HWND owner);
 
 // ----------------------------------------------------------- appointment ----
-//  v1.6.0: the نوبت‌دهی (appointment) module lives as a tab inside the reception
-//  workspace. It owns its own page window with a search panel, an appointment-
-//  details panel, a patient-details panel (enabled only when a citizen is
-//  found) and a read-only DataGridView of the day's appointments.
-HWND createAppointmentPage(HWND parent);   // appointment.cpp
+//  v1.60.0: the نوبت‌دهی (appointment) module has been REMOVED entirely from
+//  the reception account — tab, page, routing and its appointment.cpp module
+//  are gone. The reception date/shift fields on the admission form are kept
+//  (they are part of the reception record itself).
 
 // edit subclass: Enter / Tab => next field
 void enableEnterNavigation(HWND ctl);

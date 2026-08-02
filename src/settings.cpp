@@ -440,13 +440,26 @@ static void paintPanel(HWND h, HDC dc0, const RECT* dirty){
         buildBgCache(h,dc0);
     if(!s_bgDC) return;
 
-    HDC dc=CreateCompatibleDC(dc0);
-    HBITMAP bmp=CreateCompatibleBitmap(dc0,rc.right,rc.bottom);
-    HGDIOBJ obm=SelectObject(dc,bmp);
-
     RECT d = (dirty && dirty->right>dirty->left && dirty->bottom>dirty->top)
              ? *dirty : rc;
+    // clamp to the client area (invalidation rects can overhang by 1px)
+    if(d.left<0) d.left=0; if(d.top<0) d.top=0;
+    if(d.right>rc.right) d.right=rc.right;
+    if(d.bottom>rc.bottom) d.bottom=rc.bottom;
     int dw=d.right-d.left, dh=d.bottom-d.top;
+    if(dw<=0||dh<=0) return;
+
+    // v1.60.0 FPS FIX: the double buffer is now sized to the DIRTY STRIP only
+    // (one row ≈ 460×54px) instead of the whole 1920×1080 screen. The old code
+    // allocated + destroyed a full-screen 8MB bitmap on EVERY mouse move — that
+    // allocation churn was the cause of the visible FPS drop while the panel
+    // was open. The strip DC uses SetViewportOrgEx so paintRows can keep its
+    // absolute coordinates unchanged.
+    HDC dc=CreateCompatibleDC(dc0);
+    HBITMAP bmp=CreateCompatibleBitmap(dc0,dw,dh);
+    HGDIOBJ obm=SelectObject(dc,bmp);
+    SetViewportOrgEx(dc,-d.left,-d.top,NULL);
+
     // 1) bring back the cached static layers for the dirty region only
     BitBlt(dc,d.left,d.top,dw,dh,s_bgDC,d.left,d.top,SRCCOPY);
     // 2) draw the interactive rows on top (GDI clip keeps this to the strip)
@@ -454,8 +467,9 @@ static void paintPanel(HWND h, HDC dc0, const RECT* dirty){
     SelectClipRgn(dc,clip);
     paintRows(h,dc);
     SelectClipRgn(dc,NULL); DeleteObject(clip);
+    SetViewportOrgEx(dc,0,0,NULL);
     // 3) copy the composited strip to the screen
-    BitBlt(dc0,d.left,d.top,dw,dh,dc,d.left,d.top,SRCCOPY);
+    BitBlt(dc0,d.left,d.top,dw,dh,dc,0,0,SRCCOPY);
 
     SelectObject(dc,obm); DeleteObject(bmp); DeleteDC(dc);
 }
@@ -572,7 +586,9 @@ static void buildRows(SetState* st){
     // reception-user "settings/profile" entry point requested for this release.
     st->rows.push_back({ROW_PROFILE, L"پروفایل من",        ICO_USER,
                         L"تغییر نام و عکس — ارسال درخواست برای تأیید مدیریت",false,false});
-    st->rows.push_back({ROW_ABOUT,  L"درباره برنامه",     ICO_BELL,
+    // v1.60.0: professional icon — the about row used ICO_BELL (notification
+    // bell) which made no semantic sense; ICO_INFO (circle + i) is correct.
+    st->rows.push_back({ROW_ABOUT,  L"درباره برنامه",     ICO_INFO,
                         L"نسخه و اطلاعات",false,false});
     st->rows.push_back({ROW_LOGOUT, L"خروج از حساب",      ICO_LOGOUT,NULL,false,false});
 }

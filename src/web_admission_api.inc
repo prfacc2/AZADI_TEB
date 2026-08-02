@@ -107,8 +107,15 @@ static std::string adBlockJson(const BlacklistEntry& b){
     return "{\"nid\":"+jstr(b.nid)+",\"reason\":"+jstr(b.reason)+
            ",\"remaining\":"+jstr(adBlockRemaining(b))+"}";
 }
+// v1.60.0 — the catalogue lookup now also RETURNS the matched ServiceDef so
+// callers can enrich every printed service line with the real نام/شرح/دسته
+// defined in Management → خدمات. This is the hard link the user kept asking
+// for: the reception service row is bound to the catalogue entry BY CODE, and
+// whatever the HTML form sent (or failed to send) is replaced with the
+// authoritative catalogue text before the record reaches the print engine.
 static bool adCatalogPrice(const std::vector<ServiceDef>& catalog,
-                           const std::string& obj,long long& price){
+                           const std::string& obj,long long& price,
+                           const ServiceDef** defOut=nullptr){
     bool freeRate=jsonGetBool(obj,"freeRate",false);
     double n=0;
     if(freeRate){
@@ -117,8 +124,22 @@ static bool adCatalogPrice(const std::vector<ServiceDef>& catalog,
     }
     std::string codeU; jsonGetString(obj,"code",codeU);
     std::wstring want=normDigits(trim(u82w(codeU)));
+    // exact code match first
     for(const auto& s:catalog){
-        if(s.status!=0 && normDigits(trim(s.code))==want){ price=s.price; return price>0; }
+        if(s.status!=0 && normDigits(trim(s.code))==want){
+            price=s.price; if(defOut) *defOut=&s; return price>0;
+        }
+    }
+    // v1.60.0 fallback — match by NAME so a row whose code was cleared in the
+    // form still binds to its catalogue entry and prints with real data.
+    std::string nameU; jsonGetString(obj,"name",nameU);
+    std::wstring wantName=trim(u82w(nameU));
+    if(!wantName.empty()){
+        for(const auto& s:catalog){
+            if(s.status!=0 && trim(s.name)==wantName){
+                price=s.price; if(defOut) *defOut=&s; return price>0;
+            }
+        }
     }
     return false;
 }
@@ -382,7 +403,18 @@ static ReceptionRecord adBuildRecord(const std::string& body){
             if(jsonGetString(obj,"desc",desc))     ln.desc=u82w(desc);
             long long unitPrice=0;
             double qty=1, discount=0;
-            if(!adCatalogPrice(catalog,obj,unitPrice)) continue;
+            const ServiceDef* def=nullptr;
+            if(!adCatalogPrice(catalog,obj,unitPrice,&def)) continue;
+            // v1.60.0 — HARD BIND to the Management catalogue. نام/شرح/دسته/کد
+            // of the printed line ALWAYS come from the catalogue entry that
+            // priced the row; the HTML form is never trusted for these fields.
+            // This is what finally puts «تزریقات + تعداد + شرح» on EVERY print.
+            if(def){
+                ln.name     = def->name;
+                ln.category = def->category;
+                ln.desc     = def->desc.empty()? def->category : def->desc;
+                if(ln.code.empty()) ln.code=normDigits(def->code);
+            }
             jsonGetNumber(obj,"qty",qty);
             jsonGetNumber(obj,"discount",discount);
             if(qty<1) qty=1; if(qty>999) qty=999;

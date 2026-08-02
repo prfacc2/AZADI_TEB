@@ -27,11 +27,13 @@ HFONT g_fCode=0;   // §G: fixed-pitch code font (Consolas → Courier New)
 //  settings button (left). Theme-toggle and check-for-update were removed from
 //  the header and moved INTO the settings panel per the redesign brief.
 static HWND s_bExit=0, s_bSettings=0, s_bCalc=0;
-//  v1.7.0: the «پذیرش جدید» / «نوبت‌دهی» / «تب جدید» actions were moved out of
+//  v1.7.0: the «پذیرش جدید» / «تب جدید» actions were moved out of
 //  the reception tab strip and INTO this header so the navigation is clean and
 //  professional. They are shown only while the reception screen is active and
 //  are routed to it via receptionAction().
-static HWND s_bNewPat=0, s_bAppt=0, s_bNewTab=0;
+//  v1.60.0: «نوبت‌دهی» (appointment scheduling) has been REMOVED from the
+//  reception account entirely — page, option and code path.
+static HWND s_bNewPat=0, s_bNewTab=0;
 // v1.56.0: print actions belong to the native bottom bar. Keeping them outside
 // the embedded page makes keyboard/mouse printing available on both WebView2
 // and MSHTML while receptionPrintAction targets only the active tab.
@@ -43,7 +45,6 @@ static ScreenId s_curScreen = SC_HOME;
 #define ID_FR_SETTINGS 104
 #define ID_FR_CALC     105
 #define ID_FR_NEWPAT   106
-#define ID_FR_APPT     107
 #define ID_FR_NEWTAB   108
 #define ID_FR_PRINT_INS  109
 #define ID_FR_PRINT_RX   110
@@ -342,7 +343,6 @@ HWND createHomeScreen(HWND frame){
 static void updateHeaderButtons(HWND h){
     bool show = headerHasActionBar();
     ShowWindow(s_bNewPat,   show?SW_SHOW:SW_HIDE);
-    ShowWindow(s_bAppt,     show?SW_SHOW:SW_HIDE);
     ShowWindow(s_bNewTab,   show?SW_SHOW:SW_HIDE);
     ShowWindow(s_bPrintIns, show?SW_SHOW:SW_HIDE);
     ShowWindow(s_bPrintRx,  show?SW_SHOW:SW_HIDE);
@@ -352,17 +352,14 @@ static void updateHeaderButtons(HWND h){
     int bh=S(38), pad=S(16), g=S(10);
     // LAYER 2 (action bar) sits directly under LAYER 1.
     int y = mainBarH() + (actionBarH()-bh)/2;
-    // RIGHT-aligned cluster, order requested by the brief (right → left as the
-    // RTL reading order, so the FIRST item «نوبت‌دهی» is the right-most):
-    //     نوبت‌دهی  |  پذیرش جدید  |  تب جدید
-    int wAppt=S(120), wNew=S(134), wTab=S(112);
-    int x = rc.right - pad - wAppt;            // appointment (right-most)
-    MoveWindow(s_bAppt,   x,                          y, wAppt, bh, TRUE);
-    MoveWindow(s_bNewPat, x-g-wNew,                   y, wNew,  bh, TRUE);
-    MoveWindow(s_bNewTab, x-g-wNew-g-wTab,            y, wTab,  bh, TRUE);
+    // RIGHT-aligned cluster (v1.60.0 — «نوبت‌دهی» removed; right → left):
+    //     پذیرش جدید  |  تب جدید
+    int wNew=S(134), wTab=S(112);
+    int x = rc.right - pad - wNew;             // پذیرش (right-most)
+    MoveWindow(s_bNewPat, x,                          y, wNew,  bh, TRUE);
+    MoveWindow(s_bNewTab, x-g-wTab,                   y, wTab,  bh, TRUE);
     // blend the buttons' rounded corners into the LAYER 2 surface colour.
     setFlatButtonBg(s_bNewPat, g_theme.surface2);
-    setFlatButtonBg(s_bAppt,   g_theme.surface2);
     setFlatButtonBg(s_bNewTab, g_theme.surface2);
 
     // Native bottom-bar print cluster (left to right). «چاپ نسخه» is primary.
@@ -414,10 +411,8 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         // updateHeaderButtons() when the reception screen becomes active.
         s_bNewPat   = createFlatButton(h, ID_FR_NEWPAT, L"پذیرش جدید", ICO_PLUS, BS_PRIMARY,0,0,10,10,
                           L"ثبت پذیرش بیمار جدید");
-        // v1.9.0: appointment + new-tab buttons are also blue (BS_PRIMARY) for
-        // a consistent header action style alongside «پذیرش جدید».
-        s_bAppt     = createFlatButton(h, ID_FR_APPT,   L"نوبت‌دهی",   ICO_CAL,  BS_PRIMARY,0,0,10,10,
-                          L"باز کردن صفحهٔ نوبت‌دهی");
+        // v1.60.0: «نوبت‌دهی» removed completely; the new-tab button stays blue
+        // (BS_PRIMARY) for a consistent header action style.
         s_bNewTab   = createFlatButton(h, ID_FR_NEWTAB, L"تب جدید",    ICO_TAB,  BS_PRIMARY,0,0,10,10,
                           L"باز کردن یک تب خالی");
         s_bPrintIns = createFlatButton(h, ID_FR_PRINT_INS, L"رسید بیمه", ICO_PRINT,
@@ -427,7 +422,6 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         s_bPrintLast= createFlatButton(h, ID_FR_PRINT_LAST, L"آخرین قبض", ICO_PRINT,
                           BS_OUTLINE,0,0,10,10,L"چاپ آخرین قبض ثبت‌شده");
         ShowWindow(s_bNewPat,SW_HIDE);
-        ShowWindow(s_bAppt,  SW_HIDE);
         ShowWindow(s_bNewTab,SW_HIDE);
         ShowWindow(s_bPrintIns,SW_HIDE);
         ShowWindow(s_bPrintRx,SW_HIDE);
@@ -436,7 +430,6 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         setFlatButtonBg(s_bSettings, g_theme.headerTop);
         setFlatButtonBg(s_bCalc,     g_theme.headerTop);
         setFlatButtonBg(s_bNewPat,   g_theme.headerTop);
-        setFlatButtonBg(s_bAppt,     g_theme.headerTop);
         setFlatButtonBg(s_bNewTab,   g_theme.headerTop);
         setFlatButtonBg(s_bPrintIns, g_theme.surface2);
         setFlatButtonBg(s_bPrintRx,  g_theme.surface2);
@@ -451,7 +444,6 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         setFlatButtonBg(s_bSettings, g_theme.headerTop);
         setFlatButtonBg(s_bCalc,     g_theme.headerTop);
         setFlatButtonBg(s_bNewPat,   g_theme.headerTop);
-        setFlatButtonBg(s_bAppt,     g_theme.headerTop);
         setFlatButtonBg(s_bNewTab,   g_theme.headerTop);
         setFlatButtonBg(s_bPrintIns, g_theme.surface2);
         setFlatButtonBg(s_bPrintRx,  g_theme.surface2);
@@ -517,7 +509,6 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         else if(id==ID_FR_CALC) openCalculator(h);
         // v1.7.0: header reception-action buttons → route to reception screen
         else if(id==ID_FR_NEWPAT) receptionAction(RA_NEWPAT);
-        else if(id==ID_FR_APPT)   receptionAction(RA_APPOINTMENT);
         else if(id==ID_FR_NEWTAB) receptionAction(RA_NEWTAB);
         else if(id==ID_FR_PRINT_INS)  receptionPrintAction(RPA_INSURANCE);
         else if(id==ID_FR_PRINT_RX)   receptionPrintAction(RPA_RX);

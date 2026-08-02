@@ -322,10 +322,21 @@ select.inp#perfname::-webkit-scrollbar{display:none;width:0 !important;height:0 
 .btn-icon:hover{border-color:#1f5fd6;color:#1f5fd6;}
 .btn-icon-only{width:36px;padding:0;}
 
-/* header-level submit / new buttons — submit is the confirming action (GREEN),
-   so it reads as "commit & print" and is unmistakable at the top-right. */
-.btn-submit{background:#16a34a;color:#fff;height:46px;font-size:15px;font-weight:800;padding:0 22px;}
-.btn-submit:hover{background:#12833c;}
+/* header-level submit / new buttons — v1.60.0: ثبت قبض دیگر سبز نیست؛ آبی
+   حرفه‌ای با گرادیان ملایم تا با هویت بصری سامانه هم‌خوان باشد. */
+.btn-submit{
+  background:#1f5fd6;
+  background:-webkit-linear-gradient(top,#2f6fe4 0%,#1a51bd 100%);
+  background:linear-gradient(180deg,#2f6fe4 0%,#1a51bd 100%);
+  color:#fff;height:46px;font-size:15px;font-weight:800;padding:0 22px;
+  border:1px solid #17469f;border-radius:10px;
+  -webkit-box-shadow:0 3px 10px rgba(31,95,214,.28);box-shadow:0 3px 10px rgba(31,95,214,.28);
+}
+.btn-submit:hover{
+  background:#184dae;
+  background:-webkit-linear-gradient(top,#2560d0 0%,#1548a8 100%);
+  background:linear-gradient(180deg,#2560d0 0%,#1548a8 100%);
+}
 .btn-new-adm{background:#eaf1fe;color:#1c3f86;border-color:#c7dbfb;height:40px;padding:0 12px;font-size:13.5px;font-weight:700;}
 .btn-new-adm:hover{background:#dbe7fd;}
 
@@ -352,7 +363,7 @@ select.inp#perfname::-webkit-scrollbar{display:none;width:0 !important;height:0 
 .action-card .btn-block{height:46px;font-size:15px;margin-bottom:10px;}
 .action-card .btn-block:last-child{margin-bottom:0;}
 .action-card .btn-submit{
-  -webkit-box-shadow:0 4px 12px rgba(22,163,74,.30);box-shadow:0 4px 12px rgba(22,163,74,.30);
+  -webkit-box-shadow:0 4px 12px rgba(31,95,214,.32);box-shadow:0 4px 12px rgba(31,95,214,.32);
 }
 /* new + clear share one row so the rail stays compact */
 .action-row{display:-ms-flexbox;display:flex;-ms-flex-align:center;align-items:center;margin-bottom:10px;}
@@ -837,8 +848,11 @@ body{background:#eef3fa;background:linear-gradient(180deg,#f7fafe 0%,#e3ecf7 100
 .free-rate{display:block;white-space:nowrap;font-size:11px;}
 .free-rate input{vertical-align:middle;margin-left:4px;}
 
-/* Draggable queue mini-page. It replaces the permanent bottom card. */
-.mini-page{display:none;position:fixed;z-index:800;left:28px;bottom:28px;width:780px;max-width:calc(100% - 56px);max-height:72vh;background:#fff;box-shadow:0 18px 55px rgba(15,35,65,.28);}
+/* Draggable queue mini-page (صندوق نرفته‌ها).
+   v1.60.0 FIX: raised above every column/layer (was 800 and slid UNDER the
+   invoice/queue surfaces — the "invisible layer" bug) and the JS now docks
+   it fully INSIDE the viewport with clamped dragging. */
+.mini-page{display:none;position:fixed;z-index:1500;left:28px;bottom:28px;width:780px;max-width:calc(100% - 56px);max-height:72vh;background:#fff;box-shadow:0 18px 55px rgba(15,35,65,.28);}
 .mini-page.open{display:block;}
 .mini-drag{height:42px;padding:0 12px;display:-ms-flexbox;display:flex;-ms-flex-align:center;align-items:center;-ms-flex-pack:justify;justify-content:space-between;background:#173b70;color:#fff;font-weight:800;cursor:move;}
 .mini-drag .btn{color:#fff;border-color:rgba(255,255,255,.4);background:transparent;}
@@ -935,7 +949,7 @@ body.theme-dark{background:#111827;color:#e5edf7;}
 .payable-value{direction:rtl;margin:5px 0 4px;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .payable-value b{font-size:25px;font-weight:900;color:#fff;}
 .payable-value span{font-size:11px;font-weight:800;color:#cfe0ff;margin-right:5px;}
-.payable-note{font-size:10.5px;font-weight:600;color:#d7e6ff;line-height:1.5;}
+
 .queue-hub-btn{
   -ms-flex:0 0 auto;flex:0 0 auto;width:100%;height:45px;margin-top:0;
   color:#153c73;background:#f8fbff;border:1px solid #8eaad0;
@@ -974,3 +988,68 @@ body.theme-warm{background:#f4f0ea;}
   .col-action,.col-left,.col-center{margin:0 0 10px 0;padding:8px;}
   .payable-card{margin-top:0;}
 }
+
+/* ============================================================================
+   v1.60.0 — admission page redesign additions
+   ============================================================================ */
+
+/* hidden store for the removed «اطلاعات تکمیلی بیمه» card fields — the card
+   UI is gone but invoice math + record collection still read these inputs. */
+.hidden-fields{display:none;width:0;height:0;overflow:hidden;}
+
+/* --- date + shift: own separate card, side-by-side, responsive/flexible --- */
+.datetime-card{
+  display:-ms-flexbox;display:flex;
+  -ms-flex-direction:row;flex-direction:row;
+  padding:12px 14px;
+  background:-webkit-linear-gradient(top,#ffffff 0%,#f4f8fe 100%);
+  background:linear-gradient(180deg,#ffffff 0%,#f4f8fe 100%);
+}
+.datetime-card .dt-half{
+  -ms-flex:1 1 0;flex:1 1 0;min-width:0;
+  display:-ms-flexbox;display:flex;-ms-flex-align:center;align-items:center;
+}
+.datetime-card .dt-half + .dt-half{margin-right:14px;}
+.datetime-card .dt-ico{
+  -ms-flex:0 0 auto;flex:0 0 auto;
+  width:38px;height:38px;border-radius:10px;margin-left:10px;
+  background:#e8f0fe;color:#1f5fd6;
+  display:-ms-flexbox;display:flex;-ms-flex-align:center;align-items:center;
+  -ms-flex-pack:center;justify-content:center;
+}
+.datetime-card .dt-fld{-ms-flex:1 1 auto;flex:1 1 auto;margin:0;}
+.datetime-card .dt-fld > span{margin-bottom:4px;color:#4a5f7d;font-size:12px;}
+.datetime-card .inp{background:#eef3fa;border-style:dashed;color:#173a6b;font-weight:800;}
+@media (max-width:760px){
+  .datetime-card{-ms-flex-direction:column;flex-direction:column;}
+  .datetime-card .dt-half + .dt-half{margin-right:0;margin-top:10px;}
+}
+
+/* --- in-page print cluster (moved OUT of the native bottom bar) --- */
+.print-card .card-body{padding:12px 14px;}
+.print-grid{display:-ms-flexbox;display:flex;-ms-flex-direction:column;flex-direction:column;}
+.print-grid .btn-print{
+  width:100%;height:42px;margin-bottom:9px;font-size:13.5px;font-weight:800;
+  background:#ffffff;border:1.5px solid #b7c6da;color:#1c3050;border-radius:10px;
+}
+.print-grid .btn-print:last-child{margin-bottom:0;}
+.print-grid .btn-print:hover{border-color:#1f5fd6;color:#1f5fd6;background:#f2f7fe;}
+.print-grid .btn-print-primary{
+  background:#1f5fd6;
+  background:-webkit-linear-gradient(top,#2f6fe4 0%,#1a51bd 100%);
+  background:linear-gradient(180deg,#2f6fe4 0%,#1a51bd 100%);
+  color:#ffffff;border-color:#17469f;
+  -webkit-box-shadow:0 3px 10px rgba(31,95,214,.24);box-shadow:0 3px 10px rgba(31,95,214,.24);
+}
+.print-grid .btn-print-primary:hover{
+  background:#184dae;color:#ffffff;
+  background:-webkit-linear-gradient(top,#2560d0 0%,#1548a8 100%);
+  background:linear-gradient(180deg,#2560d0 0%,#1548a8 100%);
+}
+.theme-dark .print-grid .btn-print{background:#1d2735;border-color:#526a88;color:#e9f2ff;}
+.theme-dark .print-grid .btn-print:hover{border-color:#5792de;color:#cfe4ff;background:#213047;}
+.theme-dark .print-grid .btn-print-primary{background:#2456c4;color:#fff;border-color:#4a8de7;}
+.theme-dark .datetime-card{background:#1d2735;border-color:#344357;}
+.theme-dark .datetime-card .dt-ico{background:#213047;color:#7fb0f5;}
+.theme-dark .datetime-card .dt-fld > span{color:#c0ccdc;}
+.theme-dark .datetime-card .inp{background:#151e2a;border-color:#46566c;color:#dceafe;}
