@@ -86,6 +86,58 @@ window.AZ_FIELD_CATS = [
     { key:"{shiftuser}",  label:"شیفت و کاربر", sample:"صبح — پذیرش ۱" },
     { key:"{issued}",     label:"چاپ توسط پذیرش", sample:"چاپ توسط: پذیرش ۱" },
   ]},
+
+  /* =====================================================================
+     v1.55.0 — «فیلدهای رسید واقعی» (بازطراحی بر اساس رسید کاغذی درمانگاه
+     شبانه‌روزی ثامن‌الائمه). همهٔ کلیدهای زیر در printer.cpp → pdFieldValue()
+     پاسخ داده می‌شوند و مقدارشان از رکورد زندهٔ پذیرش، نشست جاری یا
+     جداول مرجع می‌آید. هیچ‌کدام هرگز تصادفی نیست: اگر کاربر مقداری را وارد
+     نکرده باشد، توکن خالی چاپ می‌شود (نه یک عدد ساختگی).
+     ⚠️ هیچ فیلد قدیمی حذف نشده است — فقط افزوده شده.
+     ===================================================================== */
+  { title:"زمان‌بندی رسید (v1.55)", items:[
+    { key:"{apptdatetime}", label:"تاریخ و ساعت نوبت", sample:"۱۴۰۵/۰۴/۰۶  ۱۰:۳۰" },
+    { key:"{apptsec}",      label:"ساعت نوبت (با ثانیه)", sample:"۱۰:۳۰:۴۵" },
+    { key:"{reg_ts}",       label:"تاریخ و ساعت ثبت پذیرش", sample:"۱۴۰۵/۰۴/۰۶  ۱۰:۳۱" },
+    { key:"{regdate}",      label:"تاریخ ثبت", sample:"۱۴۰۵/۰۴/۰۶" },
+    { key:"{regtime}",      label:"ساعت ثبت", sample:"۱۰:۳۱" },
+  ]},
+  { title:"شناسهٔ رسید و بارکد (v1.55)", items:[
+    { key:"{receiptbarcode}", label:"بارکد رسید (عدد قابل اسکن)", sample:"۴۶۴۹۰۰۱" },
+    { key:"{receiptcode}",    label:"کد کوتاه رسید", sample:"۵۶Y" },
+    { key:"{eprescription}",  label:"کد رهگیری نسخهٔ الکترونیک", sample:"۸۸۷۷۶۶۵" },
+    { key:"{referralno}",     label:"شماره معرفی‌نامه", sample:"۱۴۲۵۳۶" },
+    { key:"{scnum}",          label:"ش.ص (شمارهٔ صندوق)", sample:"۱" },
+  ]},
+  { title:"بیمه + درصد (v1.55)", items:[
+    { key:"{ins_percent}",  label:"درصد بیمهٔ پایه", sample:"۷۰٪" },
+    { key:"{supp_percent}", label:"درصد بیمهٔ مکمل", sample:"۹۰٪" },
+    { key:"{ins_full}",     label:"بیمهٔ پایه + درصد", sample:"تأمین اجتماعی (۷۰٪)" },
+    { key:"{supp_full}",    label:"بیمهٔ مکمل + درصد", sample:"دانا (۹۰٪)" },
+  ]},
+  { title:"پزشک، تخصص و انجام‌دهنده (v1.55)", items:[
+    { key:"{doctorcode}",    label:"کد پزشک معالج", sample:"۱۲" },
+    { key:"{performer}",     label:"نام انجام‌دهنده", sample:"دکتر احمدی" },
+    { key:"{performercode}", label:"کد انجام‌دهنده", sample:"۱۲" },
+    { key:"{specialty}",     label:"شرح تخصص", sample:"داخلی" },
+    { key:"{specialtycode}", label:"کد تخصص", sample:"۱۲" },
+  ]},
+  { title:"خدمت — نام/شرح/نوع (v1.55)", items:[
+    { key:"{servicename}", label:"نام خدمت", sample:"ویزیت پزشک عمومی" },
+    { key:"{servicedesc}", label:"شرح خدمت", sample:"معاینهٔ سرپایی" },
+    { key:"{servicetype}", label:"نوع خدمت", sample:"عمومی" },
+  ]},
+  { title:"مالی تفصیلی رسید (v1.55)", items:[
+    { key:"{basepay}",       label:"سهم پایه (بیمهٔ اصلی)", sample:"۱٬۰۰۰٬۰۰۰ ریال" },
+    { key:"{supppay}",       label:"سهم مکمل (سازمان)", sample:"۳۰۰٬۰۰۰ ریال" },
+    { key:"{cash}",          label:"نقدی (صندوق)", sample:"۵۰۰٬۰۰۰ ریال" },
+    { key:"{pos}",           label:"کارتخوان / POS", sample:"۸۰۰٬۰۰۰ ریال" },
+    { key:"{discount_from}", label:"تخفیف (خالی اگر صفر)", sample:"۲۰۰٬۰۰۰ ریال" },
+  ]},
+  { title:"کارکنان پذیرش (v1.55)", items:[
+    { key:"{receptionist}",  label:"نام اکانت پذیرشگر", sample:"پذیرش ۱" },
+    { key:"{cashier_name}",  label:"نام صندوق‌دار", sample:"پذیرش ۱" },
+  ]},
 ];
 
 /* flat lookup by key -> {label,sample} */

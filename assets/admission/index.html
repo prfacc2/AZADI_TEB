@@ -25,22 +25,39 @@
 
   <div id="app" class="app">
 
-    <!-- NOTE: The top header bar is intentionally REMOVED here. The native C++
-         application already renders its own header/toolbar around this embedded
-         view, so duplicating it inside the HTML wasted vertical space and pushed
-         content out of the frame. This page now starts directly at the body. -->
-
-    <!-- ======================= BODY (3 columns) ======================= -->
+    <!-- v1.59 CLINICAL WORKSPACE — three visibly separated zones.
+         Column order (RTL, right → left):
+           col-action  (RIGHT)  → patient profile first, submit directly beneath it
+           col-center  (MIDDLE) → patient info · doctor/insurance · services
+           col-left    (LEFT)   → invoice breakdown, final payable total and queue hub
+         The side rails are deliberately calmer than the focused middle workspace. -->
     <div class="body">
 
-      <!-- ============================ RIGHT PANEL ============================ -->
-      <aside class="col col-right" id="colRight">
+      <!-- ======================= RIGHT: ACTION RAIL ======================= -->
+      <aside class="col col-action" id="colRight">
+
+        <!-- PRIMARY ACTION — visually placed beneath the patient profile. -->
+        <section class="card action-card">
+          <div class="action-kicker">عملیات پذیرش</div>
+          <label class="chk chk-block"><input type="checkbox" id="noPay" /><span>عدم پرداخت فعلی</span></label>
+          <button class="btn btn-submit btn-block" id="btnSave">
+            <span class="i"><svg viewBox="0 0 24 24" width="17" height="17"><path fill="currentColor" d="M9 16.2l-3.5-3.5L4 14.2 9 19.2 20 8.2l-1.5-1.5z"/></svg></span>
+            ثبت قبض و صدور
+          </button>
+          <div class="action-row">
+            <button class="btn btn-new-adm" id="btnNew">
+              <span class="i"><svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M11 5v6H5v2h6v6h2v-6h6v-2h-6V5z"/></svg></span>پذیرش جدید</button>
+            <button class="btn btn-danger" id="btnClear">
+              <span class="i"><svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M6 7h12l-1 14H7L6 7zm3-3h6l1 2H8l1-2z"/></svg></span>پاک کردن</button>
+          </div>
+          <button class="btn btn-ghost btn-block" id="btnCancel">انصراف</button>
+        </section>
 
         <!-- Patient profile -->
         <section class="card profile-card">
           <div class="profile-top">
             <div class="avatar" id="pfAvatar">
-              <svg viewBox="0 0 24 24" width="30" height="30"><path fill="currentColor" d="M12 12a5 5 0 100-10 5 5 0 000 10zm0 2c-4 0-9 2-9 6v2h18v-2c0-4-5-6-9-6z"/></svg>
+              <svg viewBox="0 0 24 24" width="28" height="28"><path fill="currentColor" d="M12 12a5 5 0 100-10 5 5 0 000 10zm0 2c-4 0-9 2-9 6v2h18v-2c0-4-5-6-9-6z"/></svg>
             </div>
             <div class="profile-meta">
               <div class="pf-name" id="pfName">بیمار جدید</div>
@@ -52,91 +69,34 @@
             نسخه الکترونیک
           </button>
           <div class="rx-row">
-            <div class="rx-box"><span class="rx-lbl">نسخه (الکترونیکی)</span><span class="rx-val" id="rxElec">۰</span></div>
-            <div class="rx-box"><span class="rx-lbl">نسخه (سریالی)</span><span class="rx-val" id="rxSerial">۰</span></div>
+            <div class="rx-box"><span class="rx-lbl">نسخه الکترونیکی</span><span class="rx-val" id="rxElec">۰</span></div>
+            <div class="rx-box"><span class="rx-lbl">نسخه سریالی</span><span class="rx-val" id="rxSerial">۰</span></div>
           </div>
-          <!-- Two SEPARATE lines (not one row). Only the P / S badge letter
-               carries the coloured background; the caption + count sit on a
-               clean surface. These are 24-hour PERSON COUNTS, not amounts. -->
-          <div class="ps-list">
-            <div class="ps-line">
-              <span class="ps-key ps-key-p">P</span>
-              <span class="ps-cap">پرداختی</span>
-              <span class="ps-val" id="psPVal">۰</span>
-              <span class="ps-unit">نفر</span>
-            </div>
-            <div class="ps-line">
-              <span class="ps-key ps-key-s">S</span>
-              <span class="ps-cap">صندوق</span>
+          <!-- 24-hour PERSON COUNTS for the selected doctor. -->
+          <div class="ps-list doctor-preview" title="آمار امروز پزشک انتخاب‌شده">
+            <div class="ps-line ps-total">
+              <span class="ps-key ps-key-s">T</span>
+              <span class="ps-cap">کل بیماران امروز</span>
               <span class="ps-val" id="psSVal">۰</span>
               <span class="ps-unit">نفر</span>
             </div>
-          </div>
-        </section>
-
-        <!-- ===== PRIMARY ACTIONS — on the RIGHT side panel, top & prominent ===== -->
-        <section class="card action-card">
-          <label class="chk chk-block"><input type="checkbox" id="noPay" /><span>عدم پرداخت فعلی</span></label>
-          <button class="btn btn-submit btn-block" id="btnSave">
-            <span class="i"><svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M17 3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V7l-4-4zm-5 16a3 3 0 110-6 3 3 0 010 6zm3-10H5V5h10v4z"/></svg></span>
-            ثبت پذیرش و صدور قبض</button>
-          <button class="btn btn-new-adm btn-block" id="btnNew">
-            <span class="i"><svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M11 5v6H5v2h6v6h2v-6h6v-2h-6V5z"/></svg></span>پذیرش جدید</button>
-        </section>
-
-        <!-- Quick search -->
-        <section class="card">
-          <div class="card-head"><span class="card-title">کلیدهای جستجو</span></div>
-          <div class="card-body">
-            <label class="fld"><span>شماره ملی / بارکد</span>
-              <div class="search-wrap">
-                <input type="text" id="qsNid" class="inp" placeholder="جستجو" inputmode="numeric" />
-                <button class="btn btn-ghost btn-icon-only" id="qsNidBtn" title="جستجو"><svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M10 2a8 8 0 105 14.3l5.3 5.4 1.4-1.4-5.4-5.3A8 8 0 0010 2zm0 2a6 6 0 110 12 6 6 0 010-12z"/></svg></button>
-              </div>
-            </label>
-            <label class="fld"><span>شماره پرونده</span>
-              <div class="search-wrap">
-                <input type="text" id="qsFile" class="inp" placeholder="جستجو" inputmode="numeric" />
-                <button class="btn btn-ghost btn-icon-only" id="qsFileBtn" title="جستجو"><svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M10 2a8 8 0 105 14.3l5.3 5.4 1.4-1.4-5.4-5.3A8 8 0 0010 2zm0 2a6 6 0 110 12 6 6 0 010-12z"/></svg></button>
-              </div>
-            </label>
-            <div class="mini-list" id="patResults"><div class="empty">نتیجه‌ای نیست</div></div>
-          </div>
-        </section>
-
-        <!-- Insurance -->
-        <section class="card">
-          <div class="card-head">
-            <span class="card-title">بیمه</span>
-            <label class="chk"><input type="checkbox" id="hasIns" checked /><span>فعال</span></label>
-          </div>
-          <div class="card-body ins-body">
-            <label class="fld"><span>شماره دفترچه</span><input type="text" id="insBooklet" class="inp" inputmode="numeric" /></label>
-            <div class="grid-2">
-              <label class="fld"><span>تاریخ اعتبار</span><input type="text" id="insValid" class="inp" placeholder="۱۴۰۵/۰۶/۱۵" /></label>
-              <label class="fld"><span>تاریخ نسخه</span><input type="text" id="rxDate" class="inp" placeholder="۱۴۰۵/۰۶/۱۵" /></label>
+            <div class="ps-line ps-paid">
+              <span class="ps-key ps-key-p">P</span>
+              <span class="ps-cap">پرداخت‌شده‌ها</span>
+              <span class="ps-val" id="psPVal">۰</span>
+              <span class="ps-unit">نفر</span>
             </div>
-            <label class="fld"><span>بیمه مکمل</span><select id="insSupp" class="inp"></select></label>
+          </div>
+          <div class="view-tools">
+            <button type="button" class="btn btn-ghost" id="zoomOut" title="کوچک‌نمایی">−</button>
+            <span id="zoomValue">۱۰۰٪</span>
+            <button type="button" class="btn btn-ghost" id="zoomIn" title="بزرگ‌نمایی">+</button>
           </div>
         </section>
 
-        <!-- Doctor search -->
-        <section class="card">
-          <div class="card-head"><span class="card-title">جستجوی پزشک معالج</span></div>
+        <section class="card status-card">
           <div class="card-body">
-            <label class="fld"><span>شماره نظام پزشکی</span>
-              <div class="search-wrap">
-                <input type="text" id="docCode" class="inp" inputmode="numeric" />
-                <button class="btn btn-ghost btn-icon-only" id="docCodeBtn" title="جستجو"><svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M10 2a8 8 0 105 14.3l5.3 5.4 1.4-1.4-5.4-5.3A8 8 0 0010 2zm0 2a6 6 0 110 12 6 6 0 010-12z"/></svg></button>
-              </div>
-            </label>
-            <label class="fld"><span>نام پزشک</span>
-              <div class="search-wrap">
-                <input type="text" id="docSearch" class="inp" placeholder="نام پزشک یا کد…" />
-                <button class="btn btn-ghost btn-icon-only" id="docSearchBtn" title="جستجو"><svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M10 2a8 8 0 105 14.3l5.3 5.4 1.4-1.4-5.4-5.3A8 8 0 0010 2zm0 2a6 6 0 110 12 6 6 0 010-12z"/></svg></button>
-              </div>
-            </label>
-            <div class="mini-list" id="docResults"><div class="empty">نتیجه‌ای نیست</div></div>
+            <div class="sync-badge" id="syncBadge"><span class="dot"></span><span id="syncText">در حال اتصال…</span></div>
           </div>
         </section>
       </aside>
@@ -146,11 +106,14 @@
 
         <!-- Patient information -->
         <section class="card">
+          <div class="card-head"><span class="card-title">
+            <svg class="ct-ico" viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M12 12a5 5 0 100-10 5 5 0 000 10zm0 2c-4 0-9 2-9 6v2h18v-2c0-4-5-6-9-6z"/></svg>
+            مشخصات بیمار</span></div>
           <div class="card-body grid-4 pt-grid">
             <label class="fld"><span>نام <i class="req">*</i></span><input type="text" id="first" class="inp" data-nav /></label>
             <label class="fld"><span>نام خانوادگی <i class="req">*</i></span><input type="text" id="last" class="inp" data-nav /></label>
             <label class="fld"><span>کد ملی <i class="req">*</i></span><input type="text" id="nid" class="inp" data-nav inputmode="numeric" placeholder="۱۰ رقم — Enter استعلام" /></label>
-            <label class="fld"><span>نام پدر</span><input type="text" id="father" class="inp" data-nav /></label>
+            <label class="fld advanced-field"><span>نام پدر</span><input type="text" id="father" class="inp" data-nav /></label>
 
             <label class="fld"><span>تاریخ تولد</span>
               <div class="with-ico">
@@ -162,9 +125,9 @@
               <select id="gender" class="inp" data-nav><option>مرد</option><option>زن</option></select>
             </label>
             <label class="fld"><span>شماره موبایل <i class="req">*</i></span><input type="text" id="mobile" class="inp" data-nav inputmode="numeric" /></label>
-            <label class="fld"><span>تلفن ثابت</span><input type="text" id="phone" class="inp" data-nav inputmode="numeric" /></label>
+            <label class="fld advanced-field"><span>تلفن ثابت</span><input type="text" id="phone" class="inp" data-nav inputmode="numeric" /></label>
 
-            <label class="fld fld-wide"><span>آدرس</span><input type="text" id="addr" class="inp" data-nav /></label>
+            <label class="fld fld-wide advanced-field"><span>آدرس</span><input type="text" id="addr" class="inp" data-nav /></label>
           </div>
         </section>
 
@@ -176,19 +139,11 @@
               بیمه و نوبت</span></div>
             <div class="card-body grid-2 tight">
               <label class="fld"><span>بیمه پایه</span><select id="insMain" class="inp" data-nav></select></label>
-              <label class="fld"><span>نوع پذیرش</span>
-                <select id="ptype" class="inp" data-nav><option>عادی</option><option>سرپایی</option><option>بستری</option></select>
-              </label>
-              <label class="fld"><span>نوع نوبت</span>
-                <select id="ntype" class="inp" data-nav><option>عادی</option><option>اورژانس</option><option>پرسنلی</option></select>
-              </label>
-              <label class="fld"><span>درصد بیمه تکمیلی</span>
-                <div class="with-suffix"><input type="text" id="insSuppPct" class="inp" value="۰" data-nav /><span class="suffix">٪</span></div>
-              </label>
-              <label class="fld"><span>تاریخ نوبت</span><input type="text" id="apptDate" class="inp" data-nav data-date placeholder="۱۴۰۵/۰۶/۱۵" /></label>
-              <label class="fld"><span>شیفت نوبت</span>
-                <select id="apptShift" class="inp" data-nav><option>صبح</option><option>عصر</option><option>شب</option></select>
-              </label>
+              <label class="fld"><span>نوع بیمه</span><select id="insType" class="inp" data-nav><option>خدمات درمانی</option><option>تأمین اجتماعی</option><option>نیروهای مسلح</option><option>آزاد</option></select></label>
+              <label class="fld"><span>نوع پذیرش</span><select id="ptype" class="inp" data-nav><option>عادی</option><option>سرپایی</option><option>بستری</option></select></label>
+              <label class="fld"><span>درصد بیمه تکمیلی</span><select id="insSuppPct" class="inp" data-nav><option value="0">۰٪</option><option value="5">۵٪</option><option value="10">۱۰٪</option><option value="20">۲۰٪</option><option value="30">۳۰٪</option><option value="40">۴۰٪</option><option value="50">۵۰٪</option><option value="60">۶۰٪</option><option value="70">۷۰٪</option><option value="80">۸۰٪</option><option value="90">۹۰٪</option><option value="100">۱۰۰٪</option></select></label>
+              <label class="fld"><span>تاریخ پذیرش (خودکار)</span><input type="text" id="apptDate" class="inp" data-nav readonly /></label>
+              <label class="fld"><span>شیفت (خودکار)</span><select id="apptShift" class="inp" data-nav disabled><option>صبح</option><option>عصر</option><option>شب</option></select></label>
             </div>
           </section>
 
@@ -230,7 +185,9 @@
         <!-- Services -->
         <section class="card svc-card">
           <div class="card-head">
-            <span class="card-title">خدمات</span>
+            <span class="card-title">
+              <svg class="ct-ico" viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M4 4h16v3H4V4zm0 6h16v3H4v-3zm0 6h10v3H4v-3z"/></svg>
+              خدمات پذیرش</span>
             <div class="head-tools">
               <div class="with-ico svc-search-wrap">
                 <input type="text" id="svcSearch" class="inp inp-sm" placeholder="جستجوی خدمت (کد یا نام)…" />
@@ -250,7 +207,9 @@
                     <th class="c-row">ردیف</th>
                     <th class="c-name">نام خدمت</th>
                     <th class="c-code">کد خدمت</th>
+                    <th class="c-desc">شرح خدمت</th>
                     <th class="c-qty">تعداد</th>
+                    <th class="c-free">نرخ آزاد</th>
                     <th class="c-price">مبلغ واحد</th>
                     <th class="c-disc">تخفیف (ریال)</th>
                     <th class="c-ins">سهم بیمه</th>
@@ -270,8 +229,9 @@
           </div>
         </section>
 
-        <!-- Queue / صندوق نرفته‌ها -->
-        <section class="card queue-card">
+        <!-- Queue mini-page: hidden by default, opened from the action rail. -->
+        <section class="card queue-card mini-page" id="queuePanel">
+          <div class="mini-drag" id="queueDrag"><span>صندوق و صف پذیرش</span><button type="button" id="queueClose" class="btn btn-icon">×</button></div>
           <div class="card-head queue-head">
             <div class="tabs">
               <button class="tab active" id="tabQueue">صندوق نرفته‌ها</button>
@@ -312,10 +272,27 @@
       <!-- ============================ LEFT PANEL ============================ -->
       <aside class="col col-left" id="colLeft">
 
-        <section class="card invoice-card">
+        <section class="card compact-insurance">
+          <div class="card-head">
+            <span class="card-title">
+              <svg class="ct-ico" viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M12 1L3 5v6c0 5 3.8 9.7 9 11 5.2-1.3 9-6 9-11V5l-9-4z"/></svg>
+              اطلاعات تکمیلی بیمه</span>
+            <label class="chk"><input type="checkbox" id="hasIns" checked /><span>فعال</span></label>
+          </div>
+          <div class="card-body ins-body">
+            <label class="fld"><span>شماره دفترچه</span><input type="text" id="insBooklet" class="inp" inputmode="numeric" /></label>
+            <div class="grid-2 tight">
+              <label class="fld"><span>تاریخ اعتبار</span><input type="text" id="insValid" class="inp" data-date /></label>
+              <label class="fld"><span>تاریخ نسخه</span><input type="text" id="rxDate" class="inp" data-date /></label>
+            </div>
+            <label class="fld"><span>بیمه تکمیلی</span><select id="insSupp" class="inp"></select></label>
+          </div>
+        </section>
+
+        <section class="card invoice-card" id="invoiceCard">
           <div class="card-head"><span class="card-title">
             <svg class="ct-ico" viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M6 2a2 2 0 00-2 2v18l3-2 3 2 3-2 3 2 3-2V4a2 2 0 00-2-2H6zm2 5h8v2H8V7zm0 4h8v2H8v-2z"/></svg>
-            صورت حساب</span></div>
+            صورت حساب</span><button type="button" class="btn btn-icon" id="invoiceToggle" title="باز/بسته صورتحساب">⌄</button></div>
           <div class="card-body invoice-body">
             <div class="inv-group">
               <div class="inv-gtitle">بیمه اصلی</div>
@@ -339,42 +316,30 @@
           </div>
         </section>
 
-        <section class="card total-card">
-          <div class="tc-ico"><svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M21 7H5a1 1 0 010-2h15V3H5a3 3 0 00-3 3v12a3 3 0 003 3h16a1 1 0 001-1V8a1 1 0 00-1-1zm-4 8a2 2 0 110-4 2 2 0 010 4z"/></svg></div>
-          <div class="tc-body">
-            <div class="tc-lbl">جمع مبلغ نهایی</div>
-            <div class="tc-val"><b id="tcVal">۰</b> ریال</div>
-          </div>
+        <!-- Final amount is intentionally below the invoice, at the lower-left. -->
+        <section class="card payable-card" id="payableCard">
+          <div class="payable-caption">مبلغ نهایی قابل پرداخت</div>
+          <div class="payable-value"><b id="tcVal">۰</b><span>ریال</span></div>
+          <div class="payable-note">محاسبه قطعی بر اساس خدمات، تخفیف و پوشش بیمه</div>
         </section>
 
-        <section class="card">
-          <div class="card-head"><span class="card-title">چاپ</span></div>
-          <div class="card-body print-body">
-            <button class="btn btn-outline btn-block" id="prtIns">
-              <span class="i"><svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M12 1L3 5v6c0 5 3.8 9.7 9 11 5.2-1.3 9-6 9-11V5l-9-4z"/></svg></span>رسید بیمه</button>
-            <button class="btn btn-outline btn-block" id="prtRx">
-              <span class="i"><svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M6 2a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6H6zm7 1.5L18.5 9H13V3.5zM8 13h8v2H8v-2zm0 4h8v2H8v-2z"/></svg></span>چاپ نسخه</button>
-            <button class="btn btn-outline btn-block" id="prtLast">
-              <span class="i"><svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M19 8H5a3 3 0 00-3 3v6h4v4h12v-4h4v-6a3 3 0 00-3-3zm-3 11H8v-5h8v5zm3-7a1 1 0 110-2 1 1 0 010 2zM18 3H6v4h12V3z"/></svg></span>چاپ آخرین قبض (F8)</button>
-          </div>
-        </section>
-
-        <section class="card status-card">
-          <div class="card-body">
-            <div class="sync-badge" id="syncBadge"><span class="dot"></span><span id="syncText">در حال اتصال…</span></div>
-          </div>
-        </section>
-
-        <div class="foot-actions">
-          <button class="btn btn-danger" id="btnClear">
-            <span class="i"><svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M6 7h12l-1 14H7L6 7zm3-3h6l1 2H8l1-2z"/></svg></span>پاک کردن</button>
-          <button class="btn btn-outline" id="btnCancel">
-            <span class="i"><svg viewBox="0 0 24 24" width="13" height="13"><path fill="currentColor" d="M18.3 5.7L12 12l6.3 6.3-1.4 1.4L10.6 13.4 4.3 19.7 2.9 18.3 9.2 12 2.9 5.7 4.3 4.3l6.3 6.3 6.3-6.3z"/></svg></span>انصراف</button>
-        </div>
+        <!-- Queue and cashier are consolidated in one lower-left launcher. -->
+        <button class="btn queue-hub-btn" id="queueLauncher">
+          <span class="i"><svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h10v2H4v-2z"/></svg></span>
+          صندوق نرفته‌ها و صف پذیرش
+        </button>
       </aside>
     </div>
   </div>
 
+  <div id="blockModal" class="modal-overlay" aria-hidden="true">
+    <div class="modal-card">
+      <div class="modal-title">پذیرش این بیمار مسدود است</div>
+      <div id="blockReason" class="block-reason"></div>
+      <div id="blockRemaining" class="block-remaining"></div>
+      <div class="modal-actions"><button type="button" class="btn btn-outline" id="blockClose">بستن</button><button type="button" class="btn btn-danger" id="blockOverride">گذشت اضطراری همین نوبت</button></div>
+    </div>
+  </div>
   <div id="toast" class="toast"></div>
   <!-- v1.40.0: SHARED shell runtime FIRST — defines AzBoot/AzBridge/AzUi/AzNav/
        AzPerf. bridge.js still owns the admission page's `Bridge` transport

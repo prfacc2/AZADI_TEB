@@ -219,5 +219,11 @@
   /* auto-init: prefer WebView2, fall back to HTTP (MSHTML uses this) */
   if (!initWebView()) initHttp();
 
+  /* Native host can target one embedded admission view without broadcasting to
+     every open tab. The payload uses the same inbound envelope as WebView2. */
+  global.azAdmissionReceive = function (msg) {
+    if (typeof msg === 'string') msg = parseJson(msg);
+    handleInbound(msg);
+  };
   global.Bridge = Bridge;
 })(window);

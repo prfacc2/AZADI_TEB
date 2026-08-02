@@ -124,9 +124,12 @@ svg{display:inline-block;vertical-align:middle;}
   min-height:0;height:100%;
   overflow-y:auto;overflow-x:hidden;
 }
-.col-right { -ms-flex:0 0 272px;flex:0 0 272px;width:272px; }
+/* v1.58 REDESIGN — action rail on the RIGHT (col-action), profile beneath it;
+   centre workspace flexes; invoice/extra-insurance on the LEFT. */
+.col-action{ -ms-flex:0 0 264px;flex:0 0 264px;width:264px; }
+.col-right { -ms-flex:0 0 264px;flex:0 0 264px;width:264px; }
 .col-center{ -ms-flex:1 1 auto; flex:1 1 auto; margin:0 12px; }
-.col-left  { -ms-flex:0 0 250px;flex:0 0 250px;width:250px; }
+.col-left  { -ms-flex:0 0 256px;flex:0 0 256px;width:256px; }
 
 /* ── ALL scrollbars HIDDEN on the Patient-Admission page (scroll still works) ──
    · Chromium/WebView2 → ::-webkit-scrollbar{display:none;width:0;height:0}
@@ -319,21 +322,46 @@ select.inp#perfname::-webkit-scrollbar{display:none;width:0 !important;height:0 
 .btn-icon:hover{border-color:#1f5fd6;color:#1f5fd6;}
 .btn-icon-only{width:36px;padding:0;}
 
-/* header-level submit / new buttons in the bottom bar */
-.btn-submit{background:#1f5fd6;color:#fff;height:42px;font-size:14.5px;font-weight:800;padding:0 22px;-ms-flex:0 0 auto;flex:0 0 auto;}
-.btn-submit:hover{background:#184dae;}
-.btn-new-adm{background:#e4ebf4;color:#233549;border-color:#c4d2e3;height:42px;padding:0 16px;font-size:14px;}
-.btn-new-adm:hover{background:#d5e0ee;}
+/* header-level submit / new buttons — submit is the confirming action (GREEN),
+   so it reads as "commit & print" and is unmistakable at the top-right. */
+.btn-submit{background:#16a34a;color:#fff;height:46px;font-size:15px;font-weight:800;padding:0 22px;}
+.btn-submit:hover{background:#12833c;}
+.btn-new-adm{background:#eaf1fe;color:#1c3f86;border-color:#c7dbfb;height:40px;padding:0 12px;font-size:13.5px;font-weight:700;}
+.btn-new-adm:hover{background:#dbe7fd;}
 
-/* right-side primary actions card (moved out of the old bottom bar) */
-.action-card{padding:13px;}
-.action-card .btn-block{height:44px;font-size:15px;margin-bottom:10px;}
+/* ============================================================================
+   v1.58 — RIGHT ACTION RAIL (submit moved here, top-right).
+   The action card holds: total strip · no-pay toggle · big submit · new/clear
+   row · queue launcher · cancel. It is the first thing the eye meets in RTL.
+   ============================================================================ */
+.action-card{padding:14px;border-color:#9db8e6;
+  -webkit-box-shadow:0 2px 4px rgba(31,95,214,.10),0 8px 22px rgba(31,95,214,.12);
+  box-shadow:0 2px 4px rgba(31,95,214,.10),0 8px 22px rgba(31,95,214,.12);}
+/* headline total strip inside the action card — blue, high-contrast */
+.tc-strip{
+  background:#1f5fd6;
+  background:-webkit-linear-gradient(top,#2a6ae6 0%,#1a51bd 100%);
+  background:linear-gradient(180deg,#2a6ae6 0%,#1a51bd 100%);
+  border-radius:10px;padding:11px 14px;margin-bottom:12px;text-align:center;
+  -webkit-box-shadow:0 3px 10px rgba(31,95,214,.30);box-shadow:0 3px 10px rgba(31,95,214,.30);
+}
+.tc-strip .tc-lbl{font-size:12px;color:#dbe7fd;font-weight:700;margin-bottom:2px;}
+.tc-strip .tc-val{font-size:23px;font-weight:900;color:#ffffff;line-height:1.15;word-break:break-all;}
+.tc-strip .tc-val b{font-weight:900;}
+.tc-strip .tc-unit{font-size:12px;color:#cfe0fb;font-weight:700;}
+.action-card .btn-block{height:46px;font-size:15px;margin-bottom:10px;}
 .action-card .btn-block:last-child{margin-bottom:0;}
-.action-card .btn-submit{-webkit-box-shadow:0 3px 10px rgba(31,95,214,.35);box-shadow:0 3px 10px rgba(31,95,214,.35);}
+.action-card .btn-submit{
+  -webkit-box-shadow:0 4px 12px rgba(22,163,74,.30);box-shadow:0 4px 12px rgba(22,163,74,.30);
+}
+/* new + clear share one row so the rail stays compact */
+.action-row{display:-ms-flexbox;display:flex;-ms-flex-align:center;align-items:center;margin-bottom:10px;}
+.action-row > .btn{-ms-flex:1 1 0;flex:1 1 0;height:40px;margin:0;font-size:13px;}
+.action-row > .btn + .btn{margin-right:8px;}
 .chk-block{
   display:-ms-flexbox;display:flex;-ms-flex-align:center;align-items:center;
   font-size:13px;color:#33465f;font-weight:700;cursor:pointer;
-  padding:8px 10px;margin-bottom:11px;border-radius:8px;background:#f3f7fc;border:1px solid #c4d2e3;
+  padding:9px 11px;margin-bottom:11px;border-radius:8px;background:#f3f7fc;border:1px solid #c4d2e3;
 }
 .chk-block input{width:17px;height:17px;margin:0 0 0 8px;}
 
@@ -765,8 +793,8 @@ select.inp#perfname::-webkit-scrollbar{display:none;width:0 !important;height:0 
    RESPONSIVE (Chromium honours; IE ignores gracefully → stays wide)
    ============================================================================ */
 @media (max-width:1500px){
-  .col-right{-ms-flex:0 0 244px;flex:0 0 244px;width:244px;}
-  .col-left {-ms-flex:0 0 220px;flex:0 0 220px;width:220px;}
+  .col-action,.col-right{-ms-flex:0 0 244px;flex:0 0 244px;width:244px;}
+  .col-left {-ms-flex:0 0 232px;flex:0 0 232px;width:232px;}
   .col-center{margin:0 10px;}
   .svc-search-wrap{width:190px;}
   .q-search-wrap{width:220px;}
@@ -774,4 +802,175 @@ select.inp#perfname::-webkit-scrollbar{display:none;width:0 !important;height:0 
 @media (max-width:1360px){
   .grid-4 > .fld{width:33.3333%;}
   .grid-4 > .fld.fld-wide{width:100%;}
+}
+
+/* ============================================================================
+   v1.56 — modern reception workspace, simple/full modes and floating tools.
+   The declarations remain IE11-safe: no CSS variables, grid or logical props.
+   ============================================================================ */
+/* v1.58 — clean white/blue workspace: brighter page, crisper cards, denser
+   spacing so the surface no longer feels empty. */
+body{background:#eef3fa;background:linear-gradient(180deg,#f7fafe 0%,#e3ecf7 100%);font-weight:500;color:#12233d;}
+.body{padding:12px;}
+.card{border-color:#cdd9e9;border-radius:11px;box-shadow:0 1px 2px rgba(24,45,75,.05),0 4px 14px rgba(24,45,75,.07);margin-bottom:12px;}
+.card-head{background:-webkit-linear-gradient(top,#f6f9fe 0%,#eaf1fb 100%);background:linear-gradient(180deg,#f6f9fe 0%,#eaf1fb 100%);border-bottom-color:#dbe5f2;box-shadow:inset 0 2.5px 0 #1f5fd6;padding:10px 14px;}
+.card-title{font-size:13.5px;color:#0f2547;}
+.card-body{padding:13px;}
+.mode-simple .advanced-field{display:none !important;}
+.mode-full .advanced-field{display:-ms-flexbox;display:flex;}
+.view-tools{display:-ms-flexbox;display:flex;-ms-flex-align:center;align-items:center;-ms-flex-pack:center;justify-content:center;padding:0 13px 12px;}
+.view-tools .btn{width:36px;padding:0;font-size:20px;}
+.view-tools span{min-width:58px;text-align:center;color:#52657a;font-size:12px;font-weight:800;}
+.doctor-preview{background:#eef5ff;border-top:1px solid #d4e1f3;padding-top:10px;}
+.ps-total{background:#fff8d9;border-color:#f2d363;}
+.ps-paid{background:#eaf9ef;border-color:#8bd2a2;}
+.invoice-card.collapsed .invoice-body{display:none;}
+.invoice-card.collapsed .card-head{border-bottom:none;}
+
+/* The services table is always visible at the lower part of the workspace. */
+.svc-card{position:relative;min-height:230px;}
+.svc-card .tbl-wrap{max-height:230px;}
+.svc-tbl .c-desc{min-width:150px;width:20%;}
+.svc-tbl .c-free{width:70px;}
+.svc-tbl .desc-inp{min-width:130px;height:30px;}
+.svc-tbl .free-inp{width:92px;height:30px;text-align:center;padding:0 5px;}
+.free-rate{display:block;white-space:nowrap;font-size:11px;}
+.free-rate input{vertical-align:middle;margin-left:4px;}
+
+/* Draggable queue mini-page. It replaces the permanent bottom card. */
+.mini-page{display:none;position:fixed;z-index:800;left:28px;bottom:28px;width:780px;max-width:calc(100% - 56px);max-height:72vh;background:#fff;box-shadow:0 18px 55px rgba(15,35,65,.28);}
+.mini-page.open{display:block;}
+.mini-drag{height:42px;padding:0 12px;display:-ms-flexbox;display:flex;-ms-flex-align:center;align-items:center;-ms-flex-pack:justify;justify-content:space-between;background:#173b70;color:#fff;font-weight:800;cursor:move;}
+.mini-drag .btn{color:#fff;border-color:rgba(255,255,255,.4);background:transparent;}
+.queue-card .tbl-wrap{max-height:330px;}
+
+/* Blacklist warning dialog. */
+.modal-overlay{display:none;position:fixed;z-index:2000;top:0;right:0;bottom:0;left:0;background:rgba(10,20,35,.58);-ms-flex-align:center;align-items:center;-ms-flex-pack:center;justify-content:center;}
+.modal-overlay.open{display:-ms-flexbox;display:flex;}
+.modal-card{width:520px;max-width:90%;background:#fff;border-radius:14px;border:1px solid #d7dfeb;padding:24px;box-shadow:0 20px 70px rgba(0,0,0,.3);}
+.modal-title{font-size:19px;font-weight:900;color:#b42318;margin-bottom:14px;}
+.block-reason{font-size:15px;font-weight:900;white-space:pre-wrap;background:#fff1f0;border:1px solid #f2aaa4;border-radius:9px;padding:13px;}
+.block-remaining{margin-top:10px;color:#475569;font-weight:700;}
+.modal-actions{display:-ms-flexbox;display:flex;-ms-flex-pack:end;justify-content:flex-end;margin-top:18px;}
+.modal-actions .btn+.btn{margin-right:9px;}
+
+/* Complete dark palette for the embedded surface. */
+body.theme-dark{background:#111827;color:#e5edf7;}
+.theme-dark .card,.theme-dark .modal-card,.theme-dark .mini-page{background:#1d2735;border-color:#344357;color:#e5edf7;}
+.theme-dark .card-head{background:#253246;border-color:#3b4a5e;}
+.theme-dark .card-title,.theme-dark .pf-name,.theme-dark .inv-line b,.theme-dark .sf-cell b,.theme-dark .q-count b{color:#f3f7fc;}
+.theme-dark .fld>span,.theme-dark .inv-line span,.theme-dark .chk,.theme-dark .ps-cap{color:#c0ccdc;}
+.theme-dark .inp{background:#151e2a;border-color:#46566c;color:#f4f7fb;}
+.theme-dark .tbl thead th{background:#29384d;color:#edf4ff;border-color:#46566c;}
+.theme-dark .tbl tbody tr:nth-child(even){background:#202c3c;}
+.theme-dark .tbl tbody td{color:#e5edf7;border-color:#344357;}
+.theme-dark .svc-foot,.theme-dark .queue-foot{background:#253246;border-color:#46566c;}
+.theme-dark .ps-total{background:#453c18;}.theme-dark .ps-paid{background:#173b2a;}
+
+@media (max-width:1120px){
+  .body{-ms-flex-wrap:wrap;flex-wrap:wrap;overflow:auto;}
+  .col{height:auto;overflow:visible;}
+  .col-action,.col-right{width:26%;-ms-flex:0 0 26%;flex:0 0 26%;}
+  .col-center{width:71%;-ms-flex:0 0 71%;flex:0 0 71%;margin:0 3%;}
+  .col-left{width:100%;-ms-flex:0 0 100%;flex:0 0 100%;display:-ms-flexbox;display:flex;-ms-flex-direction:row;flex-direction:row;-ms-flex-wrap:wrap;flex-wrap:wrap;}
+  .col-left>.card{width:48%;-ms-flex:1 1 48%;flex:1 1 48%;margin-left:2%;}
+  .row-3{-ms-flex-wrap:wrap;flex-wrap:wrap;}.row-3>.card{width:48%;-ms-flex:1 1 48%;flex:1 1 48%;margin-bottom:10px;}
+}
+@media (max-width:760px){
+  .col-action,.col-right,.col-center,.col-left{width:100%;-ms-flex:0 0 100%;flex:0 0 100%;margin:0;}
+  .col-left{-ms-flex-direction:column;flex-direction:column;}.col-left>.card{width:100%;margin-left:0;}
+  .grid-4>.fld,.grid-2>.fld,.row-3>.card{width:100%;-ms-flex:0 0 100%;flex:0 0 100%;}
+  .mini-page{left:10px;bottom:10px;max-width:calc(100% - 20px);width:calc(100% - 20px);}
+}
+
+/* ============================================================================
+   v1.59 — professional three-zone clinical workspace.
+   Right/left rails use a slightly deeper blue-grey surface than the central
+   work area. The active zone receives only a restrained elevation/outline, so
+   the operator always knows where focus lives without a distracting glow.
+   ============================================================================ */
+.body{background:#e3ebf5;border-top:1px solid #ccd8e7;}
+.col-action,.col-left,.col-center{
+  position:relative;border:1px solid #c3d0e1;border-radius:15px;padding:11px;
+  -webkit-transition:border-color .16s,box-shadow .16s,background .16s;
+  transition:border-color .16s,box-shadow .16s,background .16s;
+}
+.col-action,.col-left{background:#d9e4f1;}
+.col-center{background:#edf3fa;margin-right:12px;margin-left:12px;}
+.col.is-active{
+  border-color:#7ca6df;background:#f4f8fd;
+  -webkit-box-shadow:0 0 0 2px rgba(31,95,214,.10),0 10px 28px rgba(20,45,80,.13);
+  box-shadow:0 0 0 2px rgba(31,95,214,.10),0 10px 28px rgba(20,45,80,.13);
+}
+.col.is-active .card-title{font-weight:900;color:#0b326d;}
+.col.is-active .card{border-color:#b5c9e3;}
+
+/* Right rail visual order: profile → submit/issue → connection status. */
+.profile-card{-ms-flex-order:1;order:1;}
+.action-card{-ms-flex-order:2;order:2;}
+.status-card{-ms-flex-order:3;order:3;}
+.action-kicker{
+  color:#153c73;font-size:13px;font-weight:900;padding:0 2px 9px;margin-bottom:10px;
+  border-bottom:1px solid #ccdae9;
+}
+.action-card{padding:13px;background:#fdfefe;border-color:#aebfda;}
+.action-card .btn-submit{height:48px;letter-spacing:.1px;text-shadow:0 1px 0 rgba(0,0,0,.12);}
+.btn,.inp{border-radius:9px;}
+.btn{font-weight:800;}
+.inp{font-weight:700;border-color:#9fb2ca;background:#fbfdff;color:#0b1f3a;}
+.inp:focus{border-width:2px;font-weight:800;box-shadow:0 0 0 3px rgba(31,95,214,.14);}
+.fld>span{color:#263d59;font-weight:800;}
+.card{box-shadow:0 2px 5px rgba(23,45,75,.08),0 8px 20px rgba(23,45,75,.07);}
+.card-head{min-height:43px;}
+.card-title{font-size:14px;font-weight:900;}
+
+/* Final payable card and the consolidated queue hub live at lower-left. */
+.payable-card{
+  margin-top:auto;padding:15px 14px;text-align:center;color:#fff;border-color:#174daa;
+  background:#1f5fd6;background:-webkit-linear-gradient(top,#2f73e6,#174da9);
+  background:linear-gradient(180deg,#2f73e6,#174da9);
+  -webkit-box-shadow:0 8px 22px rgba(31,95,214,.28);box-shadow:0 8px 22px rgba(31,95,214,.28);
+}
+.payable-caption{font-size:13px;font-weight:800;color:#dce9ff;}
+.payable-value{direction:rtl;margin:5px 0 4px;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.payable-value b{font-size:25px;font-weight:900;color:#fff;}
+.payable-value span{font-size:11px;font-weight:800;color:#cfe0ff;margin-right:5px;}
+.payable-note{font-size:10.5px;font-weight:600;color:#d7e6ff;line-height:1.5;}
+.queue-hub-btn{
+  -ms-flex:0 0 auto;flex:0 0 auto;width:100%;height:45px;margin-top:0;
+  color:#153c73;background:#f8fbff;border:1px solid #8eaad0;
+  -webkit-box-shadow:0 3px 10px rgba(23,59,112,.12);box-shadow:0 3px 10px rgba(23,59,112,.12);
+}
+.queue-hub-btn:hover{background:#e9f2ff;border-color:#1f5fd6;color:#154ea5;}
+
+/* Optional light palettes selected from Settings. */
+body.theme-calm{background:#e8f2f3;}
+.theme-calm .body{background:#dcebed;}
+.theme-calm .col-action,.theme-calm .col-left{background:#d0e3e5;}
+.theme-calm .col-center{background:#ebf4f5;}
+.theme-calm .card-head{box-shadow:inset 0 3px 0 #157a86;}
+.theme-calm .btn-primary,.theme-calm .tc-strip{background:#157a86;}
+body.theme-warm{background:#f4f0ea;}
+.theme-warm .body{background:#eae4dc;}
+.theme-warm .col-action,.theme-warm .col-left{background:#dfd8cf;}
+.theme-warm .col-center{background:#f5f1ec;}
+.theme-warm .card-head{box-shadow:inset 0 3px 0 #815b3a;}
+.theme-warm .btn-primary{background:#815b3a;}
+
+.theme-dark .body{background:#111a27;border-color:#314054;}
+.theme-dark .col-action,.theme-dark .col-left{background:#172231;border-color:#3a4a60;}
+.theme-dark .col-center{background:#1b2737;border-color:#3a4a60;}
+.theme-dark .col.is-active{background:#213047;border-color:#5792de;}
+.theme-dark .action-card{background:#1d2735;border-color:#46566c;}
+.theme-dark .action-kicker{color:#d7e7ff;border-color:#3b4a5e;}
+.theme-dark .payable-card{background:#174c9f;border-color:#4a8de7;}
+.theme-dark .queue-hub-btn{background:#253246;border-color:#526a88;color:#e9f2ff;}
+
+@media (max-width:1120px){
+  .col-action,.col-left,.col-center{border-radius:12px;padding:8px;}
+  .col-center{margin-right:8px;margin-left:8px;}
+}
+@media (max-width:760px){
+  .col-action,.col-left,.col-center{margin:0 0 10px 0;padding:8px;}
+  .payable-card{margin-top:0;}
 }

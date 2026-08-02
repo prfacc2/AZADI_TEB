@@ -32,6 +32,10 @@ static HWND s_bExit=0, s_bSettings=0, s_bCalc=0;
 //  professional. They are shown only while the reception screen is active and
 //  are routed to it via receptionAction().
 static HWND s_bNewPat=0, s_bAppt=0, s_bNewTab=0;
+// v1.56.0: print actions belong to the native bottom bar. Keeping them outside
+// the embedded page makes keyboard/mouse printing available on both WebView2
+// and MSHTML while receptionPrintAction targets only the active tab.
+static HWND s_bPrintIns=0, s_bPrintRx=0, s_bPrintLast=0;
 static HWND s_screen=0;
 static ScreenId s_curScreen = SC_HOME;
 
@@ -41,6 +45,9 @@ static ScreenId s_curScreen = SC_HOME;
 #define ID_FR_NEWPAT   106
 #define ID_FR_APPT     107
 #define ID_FR_NEWTAB   108
+#define ID_FR_PRINT_INS  109
+#define ID_FR_PRINT_RX   110
+#define ID_FR_PRINT_LAST 113
 #define TIMER_CLOCK  1
 
 // ------------------------------------------------------------------ fonts --
@@ -334,9 +341,12 @@ HWND createHomeScreen(HWND frame){
 //  is active (RTL: laid out left→right since they sit on the LEFT side).
 static void updateHeaderButtons(HWND h){
     bool show = headerHasActionBar();
-    ShowWindow(s_bNewPat, show?SW_SHOW:SW_HIDE);
-    ShowWindow(s_bAppt,   show?SW_SHOW:SW_HIDE);
-    ShowWindow(s_bNewTab, show?SW_SHOW:SW_HIDE);
+    ShowWindow(s_bNewPat,   show?SW_SHOW:SW_HIDE);
+    ShowWindow(s_bAppt,     show?SW_SHOW:SW_HIDE);
+    ShowWindow(s_bNewTab,   show?SW_SHOW:SW_HIDE);
+    ShowWindow(s_bPrintIns, show?SW_SHOW:SW_HIDE);
+    ShowWindow(s_bPrintRx,  show?SW_SHOW:SW_HIDE);
+    ShowWindow(s_bPrintLast,show?SW_SHOW:SW_HIDE);
     if(!show) return;
     RECT rc; GetClientRect(h,&rc);
     int bh=S(38), pad=S(16), g=S(10);
@@ -354,6 +364,16 @@ static void updateHeaderButtons(HWND h){
     setFlatButtonBg(s_bNewPat, g_theme.surface2);
     setFlatButtonBg(s_bAppt,   g_theme.surface2);
     setFlatButtonBg(s_bNewTab, g_theme.surface2);
+
+    // Native bottom-bar print cluster (left to right). «چاپ نسخه» is primary.
+    int py=rc.bottom-botBarH()+(botBarH()-S(32))/2;
+    int px=S(14);
+    MoveWindow(s_bPrintIns, px, py, S(112), S(32), TRUE); px+=S(120);
+    MoveWindow(s_bPrintRx, px, py, S(122), S(32), TRUE); px+=S(130);
+    MoveWindow(s_bPrintLast,px, py, S(122), S(32), TRUE);
+    setFlatButtonBg(s_bPrintIns, g_theme.surface2);
+    setFlatButtonBg(s_bPrintRx,  g_theme.surface2);
+    setFlatButtonBg(s_bPrintLast,g_theme.surface2);
 }
 static void frameLayout(HWND h){
     RECT rc; GetClientRect(h,&rc);
@@ -400,15 +420,27 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
                           L"باز کردن صفحهٔ نوبت‌دهی");
         s_bNewTab   = createFlatButton(h, ID_FR_NEWTAB, L"تب جدید",    ICO_TAB,  BS_PRIMARY,0,0,10,10,
                           L"باز کردن یک تب خالی");
+        s_bPrintIns = createFlatButton(h, ID_FR_PRINT_INS, L"رسید بیمه", ICO_PRINT,
+                          BS_OUTLINE,0,0,10,10,L"چاپ رسید بیمه تب فعال");
+        s_bPrintRx  = createFlatButton(h, ID_FR_PRINT_RX, L"چاپ نسخه", ICO_RECEIPT,
+                          BS_PRIMARY,0,0,10,10,L"چاپ نسخه تب فعال");
+        s_bPrintLast= createFlatButton(h, ID_FR_PRINT_LAST, L"آخرین قبض", ICO_PRINT,
+                          BS_OUTLINE,0,0,10,10,L"چاپ آخرین قبض ثبت‌شده");
         ShowWindow(s_bNewPat,SW_HIDE);
         ShowWindow(s_bAppt,  SW_HIDE);
         ShowWindow(s_bNewTab,SW_HIDE);
+        ShowWindow(s_bPrintIns,SW_HIDE);
+        ShowWindow(s_bPrintRx,SW_HIDE);
+        ShowWindow(s_bPrintLast,SW_HIDE);
         setFlatButtonBg(s_bExit,     g_theme.headerTop);
         setFlatButtonBg(s_bSettings, g_theme.headerTop);
         setFlatButtonBg(s_bCalc,     g_theme.headerTop);
         setFlatButtonBg(s_bNewPat,   g_theme.headerTop);
         setFlatButtonBg(s_bAppt,     g_theme.headerTop);
         setFlatButtonBg(s_bNewTab,   g_theme.headerTop);
+        setFlatButtonBg(s_bPrintIns, g_theme.surface2);
+        setFlatButtonBg(s_bPrintRx,  g_theme.surface2);
+        setFlatButtonBg(s_bPrintLast,g_theme.surface2);
         SetTimer(h, TIMER_CLOCK, g_lowSpec?1000:500, NULL);
         return 0;
     case WM_SIZE: frameLayout(h); return 0;
@@ -421,6 +453,9 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         setFlatButtonBg(s_bNewPat,   g_theme.headerTop);
         setFlatButtonBg(s_bAppt,     g_theme.headerTop);
         setFlatButtonBg(s_bNewTab,   g_theme.headerTop);
+        setFlatButtonBg(s_bPrintIns, g_theme.surface2);
+        setFlatButtonBg(s_bPrintRx,  g_theme.surface2);
+        setFlatButtonBg(s_bPrintLast,g_theme.surface2);
         InvalidateRect(h,NULL,TRUE);
         return 0;
     case WM_APP_UI_TASK:
@@ -484,6 +519,9 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         else if(id==ID_FR_NEWPAT) receptionAction(RA_NEWPAT);
         else if(id==ID_FR_APPT)   receptionAction(RA_APPOINTMENT);
         else if(id==ID_FR_NEWTAB) receptionAction(RA_NEWTAB);
+        else if(id==ID_FR_PRINT_INS)  receptionPrintAction(RPA_INSURANCE);
+        else if(id==ID_FR_PRINT_RX)   receptionPrintAction(RPA_RX);
+        else if(id==ID_FR_PRINT_LAST) receptionPrintAction(RPA_LAST);
         return 0; }
     case WM_KEYDOWN: {
         // hidden admin: Ctrl + P + N held together (home screen only)
@@ -627,7 +665,8 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         // ===== bottom status bar: shift indicator (left) =====
         SetTextColor(dc,g_theme.textDim);
         SelectObject(dc,g_fSmall);
-        RECT shf={S(16),rc.bottom-botBarH(),S(560),rc.bottom};
+        int shiftLeft=(loggedIn && s_curScreen==SC_RECEPTION)?S(520):S(16);
+        RECT shf={shiftLeft,rc.bottom-botBarH(),S(820),rc.bottom};
         std::wstring sf = L"شیفت جاری: " + shiftName(detectShift());
         if(loggedIn && s_curScreen==SC_RECEPTION)
             sf += L"   |   شیفت ورود: " + shiftName(g_session.shift);

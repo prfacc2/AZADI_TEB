@@ -35,9 +35,13 @@
     supp: [],              /* supplementary list */
     patient: null,         /* current loaded patient (or null) */
     catalog: [],           /* last service search results */
-    queue: [],             /* صندوق نرفته‌ها rows */
+    queue: [],             /* active صندوق/پذیرش queue rows */
+    queueKind: 'unpaid',   /* independent file-backed queue selected by tabs */
     doctors: [],
     ps: { P: 0, S: 0 },
+    mode: 'simple',
+    zoom: 100,
+    overrideBlock: false,
     ready: false
   };
 
@@ -119,6 +123,50 @@
     setText($('syncText'), text);
   }
 
+  /* The three reception zones are deliberately distinct. Whichever zone owns
+     keyboard/mouse focus gets a restrained stronger outline and typography. */
+  function setActiveZone(zone) {
+    var ids = ['colRight', 'colCenter', 'colLeft'], i, el;
+    for (i = 0; i < ids.length; i++) {
+      el = $(ids[i]);
+      if (!el) continue;
+      el.className = String(el.className || '').replace(/\s*is-active/g, '');
+      if (el === zone) el.className += ' is-active';
+    }
+  }
+  function wireZoneFocus() {
+    var ids = ['colRight', 'colCenter', 'colLeft'], i, zone;
+    for (i = 0; i < ids.length; i++) {
+      zone = $(ids[i]);
+      if (!zone) continue;
+      (function (z) {
+        on(z, 'focusin', function () { setActiveZone(z); });
+        on(z, 'mousedown', function () { setActiveZone(z); });
+      })(zone);
+    }
+    setActiveZone($('colCenter'));
+  }
+
+  function applyPalette(name) {
+    var body = document.body;
+    if (!body) return;
+    body.className = String(body.className || '')
+      .replace(/\btheme-(calm|warm)\b/g, '').replace(/\s+/g, ' ');
+    /* Light palettes must never override the dark surface selectors. Old
+       settings.ini files can legitimately contain theme=dark + palette=warm. */
+    if (/\btheme-dark\b/.test(body.className)) return;
+    if (name === 'calm') body.className += ' theme-calm';
+    else if (name === 'warm') body.className += ' theme-warm';
+  }
+
+  function clampPct(value) {
+    var pct = Number(value);
+    if (!isFinite(pct)) return 0;
+    if (pct < 0) return 0;
+    if (pct > 100) return 100;
+    return pct;
+  }
+
   /* ==========================================================================
      BILLING — computed entirely here from Management-defined prices.
      Base insurance pct is the organisation share of the covered amount;
@@ -131,35 +179,80 @@
     if (!hasIns()) return 0;
     var sel = $('insMain');
     var idx = sel ? sel.selectedIndex : -1;
-    return (state.insurances[idx] && state.insurances[idx].pct) || 0;
+    return clampPct((state.insurances[idx] && state.insurances[idx].pct) || 0);
   }
   function suppInsPct() {
     /* explicit percentage box wins; else the selected supplementary plan pct */
     var box = $('insSuppPct');
     if (box) {
       var v = parseInt(toEn(box.value), 10);
-      if (!isNaN(v) && v > 0) return v;
+      if (!isNaN(v) && v > 0) return clampPct(v);
     }
     var sel = $('insSupp');
     var idx = sel ? sel.selectedIndex : -1;
-    return (state.supp[idx] && state.supp[idx].pct) || 0;
+    return clampPct((state.supp[idx] && state.supp[idx].pct) || 0);
   }
 
   /* per-row computation using current insurance selection */
   function computeRow(s) {
-    var qty = s.qty || 1;
-    var gross = (s.price || 0) * qty;
-    var disc = s.discount || 0;
-    var net = gross - disc; if (net < 0) net = 0;
+    var qty = Number(s.qty) || 1;
+    if (qty < 1) qty = 1; else if (qty > 999) qty = 999;
+    var unitPrice = s.freeRate ? (Number(s.freePrice) || 0) : (Number(s.price) || 0);
+    if (unitPrice < 0) unitPrice = 0;
+    var gross = unitPrice * qty;
+    var disc = Number(s.discount) || 0;
+    if (disc < 0) disc = 0; else if (disc > gross) disc = gross;
+    var net = gross - disc;
     var bPct = baseInsPct();
     var orgShare = Math.round(net * bPct / 100);      /* base insurer share */
+    if (orgShare < 0) orgShare = 0; else if (orgShare > net) orgShare = net;
     var afterBase = net - orgShare;                    /* patient remainder  */
     var sPct = suppInsPct();
     var suppShare = Math.round(afterBase * sPct / 100);/* supplementary share */
+    if (suppShare < 0) suppShare = 0; else if (suppShare > afterBase) suppShare = afterBase;
     var patShare = afterBase - suppShare;
     s._gross = gross; s._disc = disc; s._net = net;
     s._org = orgShare; s._supp = suppShare; s._pat = patShare;
     return s;
+  }
+
+  var _billSyncTimer = null;
+  function authoritativeBillPayload() {
+    return {
+      hasIns: hasIns(),
+      insMain: $('insMain') ? $('insMain').selectedIndex : -1,
+      insSupp: $('insSupp') ? $('insSupp').selectedIndex : -1,
+      insSuppPct: suppInsPct(),
+      noPay: $('noPay') ? $('noPay').checked : false,
+      services: state.services
+    };
+  }
+  function applyAuthoritativeBill(b) {
+    if (!b) return;
+    var afterBase = (Number(b.gross) || 0) - (Number(b.disc) || 0) - (Number(b.org) || 0);
+    if (afterBase < 0) afterBase = 0;
+    setText($('sfTotal'), money(b.gross));
+    setText($('sfDisc'), money(b.disc));
+    setText($('sfIns'), money((Number(b.org) || 0) + (Number(b.supp) || 0)));
+    setText($('sfPat'), money(b.pat));
+    setText($('invMainTotal'), money(b.gross));
+    setText($('invMainPat'), money(afterBase));
+    setText($('invMainOrg'), money(b.org));
+    setText($('invSuppTotal'), money(afterBase));
+    setText($('invSuppShare'), money(b.supp));
+    setText($('invSuppPat'), money(b.pat));
+    setText($('invFinTotal'), money(b.gross));
+    setText($('invFinDisc'), money(b.disc));
+    setText($('invFinPaid'), money(b.paid));
+    setText($('invRemain'), money((Number(b.pat) || 0) - (Number(b.paid) || 0)));
+    setText($('tcVal'), money(b.pat));
+  }
+  function scheduleBillSync() {
+    if (!state.ready || _billSyncTimer) return;
+    _billSyncTimer = setTimeout(function () {
+      _billSyncTimer = null;
+      Bridge.call('bill.compute', authoritativeBillPayload()).then(applyAuthoritativeBill);
+    }, 100);
   }
 
   function recompute() {
@@ -196,6 +289,7 @@
 
     /* total card */
     setText($('tcVal'), money(sumPat));
+    scheduleBillSync();
     return { gross: sumGross, disc: sumDisc, org: sumOrg, supp: sumSupp, pat: sumPat, paid: paid };
   }
 
@@ -224,8 +318,8 @@
   function addServiceRow(svc) {
     /* price ALWAYS from the catalog — never typed by the operator */
     state.services.push({
-      code: svc.code || '', name: svc.name || '',
-      qty: 1, price: Number(svc.price) || 0, discount: 0
+      code: svc.code || '', name: svc.name || '', desc: svc.desc || '', category: svc.category || '',
+      qty: 1, price: Number(svc.price) || 0, discount: 0, freeRate: false, freePrice: 0
     });
     scheduleRender();
   }
@@ -234,7 +328,7 @@
     var body = $('svcBody');
     if (!body) return;
     if (!state.services.length) {
-      body.innerHTML = '<tr><td colspan="9" class="empty">خدمتی افزوده نشده است</td></tr>';
+      body.innerHTML = '<tr><td colspan="11" class="empty">خدمتی افزوده نشده است</td></tr>';
       return;
     }
     var html = '', i, s;
@@ -245,9 +339,11 @@
         '<td>' + toFa(i + 1) + '</td>' +
         '<td class="td-name">' + esc(s.name || '') + '</td>' +
         '<td>' + toFa(s.code || '—') + '</td>' +
+        '<td><input class="inp desc-inp" type="text" value="' + esc(s.desc || '') + '" data-desc="' + i + '"/></td>' +
         '<td><input class="inp qty-inp" type="text" value="' + toFa(s.qty) + '" data-i="' + i + '"/></td>' +
-        '<td>' + money(s.price) + '</td>' +
-        '<td>' + money(s._disc) + '</td>' +
+        '<td><label class="free-rate"><input type="checkbox" data-free="' + i + '"' + (s.freeRate ? ' checked="checked"' : '') + '/><span>آزاد</span></label></td>' +
+        '<td><input class="inp free-inp" type="text" value="' + money(s.freeRate ? s.freePrice : s.price) + '" data-free-price="' + i + '"' + (s.freeRate ? '' : ' disabled="disabled"') + '/></td>' +
+        '<td><input class="inp disc-inp" type="text" value="' + money(s._disc) + '" data-discount="' + i + '" inputmode="numeric"/></td>' +
         '<td>' + money(s._org + s._supp) + '</td>' +
         '<td>' + money(s._pat) + '</td>' +
         '<td>' +
@@ -267,10 +363,11 @@
     var s = computeRow(state.services[idx]);
     var tr = inputEl;
     while (tr && String(tr.tagName || '').toLowerCase() !== 'tr') tr = tr.parentNode;
-    if (!tr || !tr.cells || tr.cells.length < 9) return;
-    setText(tr.cells[5], money(s._disc));
-    setText(tr.cells[6], money(s._org + s._supp));
-    setText(tr.cells[7], money(s._pat));
+    if (!tr || !tr.cells || tr.cells.length < 11) return;
+    /* cell 7 contains the live discount INPUT; never replace it while the user
+       is typing. Only refresh the computed, read-only insurance/patient cells. */
+    setText(tr.cells[8], money(s._org + s._supp));
+    setText(tr.cells[9], money(s._pat));
   }
 
   /* ==========================================================================
@@ -313,6 +410,7 @@
       }
       if (!matched) sel.selectedIndex = 0;
     }
+    var full = trimStr((p.first || '') + ' ' + (p.last || ''));
     setText($('pfName'), full || 'بیمار جدید');
     setText($('pfFile'), toFa(p.file || p.nid || '----'));
 
@@ -380,6 +478,14 @@
       sel.selectedIndex = 0;
     }
     if ($('doc2code') && doc.code) $('doc2code').value = toFa(doc.code);
+    refreshDoctorStats(doc.name || '');
+  }
+  function refreshDoctorStats(name) {
+    name = name || val('doc2name');
+    if (!name) { updatePS({ P: 0, S: 0 }); return; }
+    Bridge.call('doctor.stats', { name: name }).then(function (r) {
+      updatePS(r || { P: 0, S: 0 });
+    });
   }
 
   function renderSvcSuggest(rows) {
@@ -413,7 +519,8 @@
     state.queueView = filter;             /* v1.50.0: delegated handlers read this */
     setText($('qCount'), toFa(state.queue.length));
     if (!filter.length) {
-      body.innerHTML = '<tr><td colspan="7" class="empty">موردی در صندوق نیست</td></tr>';
+      body.innerHTML = '<tr><td colspan="7" class="empty">' +
+        (state.queueKind === 'admission' ? 'موردی در صف پذیرش نیست' : 'موردی در صندوق نیست') + '</td></tr>';
       return;
     }
     var html = '', i, q, lim = Math.min(filter.length, 60);
@@ -452,7 +559,7 @@
     return out;
   }
   function refreshQueue() {
-    Bridge.call('queue.list', {}).then(function (r) { renderQueue(r.rows || []); });
+    Bridge.call('queue.list', { kind: state.queueKind }).then(function (r) { renderQueue(r.rows || []); });
   }
 
   /* ==========================================================================
@@ -465,7 +572,7 @@
   var NAV_ORDER = [
     'nid', 'first', 'last', 'father',
     'birth', 'gender', 'mobile', 'phone', 'addr',
-    'insMain', 'ptype', 'ntype', 'insSuppPct',
+    'insMain', 'insType', 'ptype', 'insSuppPct',
     'apptDate', 'apptShift',
     'doc2code', 'doc2name', 'perfcode', 'perfname',
     'insBooklet', 'insValid', 'rxDate', 'insSupp'
@@ -589,6 +696,7 @@
      WIRING
      ========================================================================== */
   function wire() {
+    wireZoneFocus();
     /* --- B1: canonical Enter/Tab/Shift+Tab/Ctrl+A handler wired by id over
        NAV_ORDER (NOT a CSS selector). Direct per-element binding is the
        engine-reliable path (event delegation is unreliable on WebView2/MSHTML).
@@ -879,6 +987,40 @@
       if (!tgt || !/(^|\s)qty-inp(\s|$)/.test(tgt.className || '')) return;
       try { tgt.focus(); tgt.select(); } catch (er) {}
     });
+    /* Description, per-service discount and optional free-rate amount are
+       explicit. The normal catalog rate stays read-only until «نرخ آزاد» is
+       checked. Discount is bounded by C++ authoritatively and mirrored here for
+       immediate feedback without rebuilding the row under the caret. */
+    on($('svcBody'), 'input', function (e) {
+      e = e || window.event; var t = e.target || e.srcElement, i, row;
+      if (!t || !t.getAttribute) return;
+      if (t.getAttribute('data-desc') != null) {
+        i = +t.getAttribute('data-desc'); if (state.services[i]) state.services[i].desc = t.value;
+      } else if (t.getAttribute('data-free-price') != null) {
+        i = +t.getAttribute('data-free-price');
+        if (state.services[i]) {
+          state.services[i].freePrice = Math.max(0, parseInt(toEn(t.value).replace(/[^0-9]/g, ''), 10) || 0);
+          refreshRowCells(t, i); recompute();
+        }
+      } else if (t.getAttribute('data-discount') != null) {
+        i = +t.getAttribute('data-discount'); row = state.services[i];
+        if (row) {
+          var maxDiscount = (row.freeRate ? (Number(row.freePrice) || 0) : (Number(row.price) || 0)) * (row.qty || 1);
+          row.discount = Math.min(maxDiscount, Math.max(0, parseInt(toEn(t.value).replace(/[^0-9]/g, ''), 10) || 0));
+          refreshRowCells(t, i); recompute();
+        }
+      }
+    });
+    on($('svcBody'), 'change', function (e) {
+      e = e || window.event; var t = e.target || e.srcElement;
+      if (t && t.getAttribute && t.getAttribute('data-discount') != null) scheduleRender();
+    });
+    on($('svcBody'), 'change', function (e) {
+      e = e || window.event; var t = e.target || e.srcElement;
+      if (!t || !t.getAttribute || t.getAttribute('data-free') == null) return;
+      var i = +t.getAttribute('data-free');
+      if (state.services[i]) { state.services[i].freeRate = !!t.checked; if (!state.services[i].freePrice) state.services[i].freePrice = state.services[i].price; scheduleRender(); }
+    });
 
     /* patient results list → load patient (delegated, deferred) */
     on($('patResults'), 'click', function (e) {
@@ -922,7 +1064,7 @@
       if (del) {
         var qd = (state.queueView || [])[+del.getAttribute('data-qdel')];
         if (qd) defer(function () {
-          Bridge.call('queue.remove', { id: qd.id }).then(function () { refreshQueue(); });
+          Bridge.call('queue.remove', { id: qd.id, kind: state.queueKind }).then(function () { refreshQueue(); });
         });
       }
     });
@@ -930,6 +1072,7 @@
     /* insurance changes → recompute (never blanks patient fields) */
     on($('insMain'), 'change', function () { scheduleRender(); });
     on($('insSupp'), 'change', function () { scheduleRender(); });
+    on($('doc2name'), 'change', function () { refreshDoctorStats(val('doc2name')); });
     on($('insSuppPct'), 'input', function () { scheduleRender(); });
     on($('insSuppPct'), 'keyup', function () { scheduleRender(); });
     on($('hasIns'), 'change', function () { scheduleRender(); });
@@ -938,14 +1081,29 @@
     /* collapse / expand lists */
     on($('svcToggle'), 'click', function () { toggleWrap('svcTblWrap', this); });
     on($('queueToggle'), 'click', function () { toggleWrap('queueWrap', this); });
+    on($('invoiceToggle'), 'click', function () {
+      var c = $('invoiceCard'); if (!c) return;
+      c.className = /collapsed/.test(c.className) ? c.className.replace(/\s*collapsed/, '') : c.className + ' collapsed';
+    });
+    on($('queueLauncher'), 'click', function () { var p=$('queuePanel'); if(p){p.className=p.className.replace(/\s*open/, '')+' open'; refreshQueue();} });
+    on($('queueClose'), 'click', function () { var p=$('queuePanel'); if(p)p.className=p.className.replace(/\s*open/, ''); });
+    wireDrag($('queuePanel'), $('queueDrag'));
+    on($('zoomIn'), 'click', function () { applyZoom(state.zoom + 10); });
+    on($('zoomOut'), 'click', function () { applyZoom(state.zoom - 10); });
 
     /* queue search / filter / add */
     on($('qSearch'), 'input', function () { renderQueue(state.queue); });
     on($('qSearch'), 'keyup', function () { renderQueue(state.queue); });
     on($('qMinutes'), 'change', function () { renderQueue(state.queue); });
     on($('addToQueue'), 'click', addCurrentToQueue);
-    on($('tabQueue'), 'click', function () { setActiveTab('tabQueue'); refreshQueue(); });
-    on($('tabAdmQ'), 'click', function () { setActiveTab('tabAdmQ'); refreshQueue(); });
+    on($('tabQueue'), 'click', function () {
+      state.queueKind = 'unpaid'; setActiveTab('tabQueue');
+      setText($('addToQueue'), 'افزودن به صندوق نرفته‌ها'); refreshQueue();
+    });
+    on($('tabAdmQ'), 'click', function () {
+      state.queueKind = 'admission'; setActiveTab('tabAdmQ');
+      setText($('addToQueue'), 'افزودن به صف پذیرش'); refreshQueue();
+    });
 
     /* save / clear / new */
     on($('btnSave'), 'click', saveAdmission);
@@ -955,11 +1113,7 @@
     on($('btnClear'), 'click', function () { clearForm(); Bridge.call('admission.clear', {}); });
     on($('btnCancel'), 'click', function () { clearForm(); });
 
-    /* print buttons */
-    on($('prtIns'), 'click', function () { Bridge.call('print.insurance', collectRecord()); toast('در حال چاپ رسید بیمه…'); });
-    on($('prtRx'), 'click', function () { Bridge.call('print.rx', collectRecord()); toast('در حال چاپ نسخه…'); });
-    on($('prtLast'), 'click', function () { Bridge.call('print.last', {}); toast('چاپ آخرین قبض…'); });
-    on($('hdrPrint'), 'click', function () { Bridge.call('print.last', {}); });
+    /* Printing is intentionally native-only; F8 remains a convenience shortcut. */
     on($('hdrSettings'), 'click', function () { Bridge.call('ui.settings', {}); });
     on($('btnErx'), 'click', function () { Bridge.call('rx.electronic', collectRecord()); });
 
@@ -969,6 +1123,29 @@
       if (key === 119) { Bridge.call('print.last', {}); }        /* F8 */
     });
   }
+
+  function applyZoom(z) {
+    z = Math.max(80, Math.min(130, Number(z) || 100)); state.zoom = z;
+    var app=$('app'); if(app){ app.style.zoom = z + '%'; app.style.height = (10000/z) + 'vh'; }
+    setText($('zoomValue'), toFa(z) + '٪');
+  }
+  function applyMode(mode) {
+    state.mode = mode === 'full' ? 'full' : 'simple';
+    document.body.className = (document.body.className || '').replace(/\bmode-(simple|full)\b/g, '') + ' mode-' + state.mode;
+  }
+  function wireDrag(panel, handle) {
+    if (!panel || !handle) return; var moving=false, sx=0, sy=0, left=0, top=0;
+    on(handle,'mousedown',function(e){e=e||window.event; moving=true;sx=e.clientX;sy=e.clientY;left=panel.offsetLeft;top=panel.offsetTop;if(e.preventDefault)e.preventDefault();});
+    on(document,'mousemove',function(e){if(!moving)return;e=e||window.event;panel.style.left=(left+e.clientX-sx)+'px';panel.style.top=(top+e.clientY-sy)+'px';panel.style.right='auto';panel.style.bottom='auto';});
+    on(document,'mouseup',function(){moving=false;});
+  }
+  function showBlock(block) {
+    var m=$('blockModal'); if(!m)return;
+    setText($('blockReason'), (block && block.reason) || 'علت مسدودی ثبت نشده است');
+    setText($('blockRemaining'), (block && block.remaining) || 'برای همیشه');
+    m.className='modal-overlay open'; m.setAttribute('aria-hidden','false');
+  }
+  function closeBlock(){var m=$('blockModal');if(m){m.className='modal-overlay';m.setAttribute('aria-hidden','true');}}
 
   function toggleWrap(id, btn) {
     var w = $(id);
@@ -1028,8 +1205,12 @@
   function addCurrentToQueue() {
     var rec = collectRecord();
     if (!rec.patient.nid) { toast('ابتدا کد ملی بیمار را وارد کنید', 'err'); return; }
+    rec.kind = state.queueKind;
     Bridge.call('queue.add', rec).then(function (r) {
-      if (r && r.ok) { toast('به صندوق نرفته‌ها افزوده شد', 'ok'); refreshQueue(); }
+      if (r && r.ok) {
+        toast(state.queueKind === 'admission' ? 'به صف پذیرش افزوده شد' : 'به صندوق نرفته‌ها افزوده شد', 'ok');
+        refreshQueue();
+      }
       else toast('افزودن ناموفق بود', 'err');
     })['catch'](function () { toast('خطا در افزودن به صندوق', 'err'); });
   }
@@ -1042,6 +1223,7 @@
     if (!state.services.length) { toast('حداقل یک خدمت باید افزوده شود', 'err'); return; }
     setSync('', 'در حال ثبت…');
     Bridge.call('admission.save', rec).then(function (r) {
+      if (r && r.blocked) { state.pendingBlockedRecord=rec; showBlock(r.block); setSync('err','بیمار مسدود'); return; }
       if (r && r.ok) {
         toast('پذیرش ثبت و قبض چاپ شد' + (r.queueNo ? ' — نوبت ' + toFa(r.queueNo) : ''), 'ok');
         /* B5: warn when the classic-GDI fallback template was used because no
@@ -1080,12 +1262,13 @@
       insSuppPct: suppInsPct(),
       insBooklet: trimEn('insBooklet'),
       insValid: trimEn('insValid'),
-      ptype: val('ptype'), ntype: val('ntype'),
+      ptype: val('ptype'), insType: val('insType'),
       doc2code: trimEn('doc2code'), doc2name: trimFa('doc2name'),
       perfcode: trimEn('perfcode'), perfname: trimFa('perfname'),
       apptDate: trimEn('apptDate'), apptShift: val('apptShift'),
       rxDate: trimEn('rxDate'),
       noPay: $('noPay') ? $('noPay').checked : false,
+      overrideBlock: state.overrideBlock,
       services: state.services,
       totals: totals
     };
@@ -1099,11 +1282,11 @@
     for (i = 0; i < ids.length; i++) { if ($(ids[i])) $(ids[i]).value = ''; }
     if ($('doc2name')) $('doc2name').innerHTML = '<option value="">— انتخاب —</option>';
     if ($('perfname')) $('perfname').innerHTML = '<option value="">— انتخاب —</option>';
-    if ($('insSuppPct')) $('insSuppPct').value = toFa('0');
+    if ($('insSuppPct')) $('insSuppPct').value = '0';
     if ($('insMain')) $('insMain').selectedIndex = 0;
     if ($('hasIns')) $('hasIns').checked = false;
     if ($('noPay')) $('noPay').checked = false;
-    state.services = []; state.patient = null; state.catalog = [];
+    state.services = []; state.patient = null; state.catalog = []; state.overrideBlock = false;
     setText($('pfName'), 'بیمار جدید');
     setText($('pfFile'), '----');
     if ($('patResults')) $('patResults').innerHTML = '<div class="empty">نتیجه‌ای نیست</div>';
@@ -1128,6 +1311,24 @@
     });
     Bridge.on('queue.update', function (d) { renderQueue(d.rows || []); });
     Bridge.on('ps.update', function (d) { updatePS(d); });
+    Bridge.on('reception.settings', function (d) {
+      var root = document.documentElement;
+      var mode = d && d.mode === 'full' ? 'full' : 'simple';
+      var zoom = Number(d && d.zoom) || 100;
+      if (zoom < 80 || zoom > 130) zoom = 100;
+      state.mode = mode; state.zoom = zoom;
+      if (root) root.className = root.className.replace(/\bmode-(simple|full)\b/g, '') + ' mode-' + mode;
+      if (document.body) {
+        document.body.className = document.body.className.replace(/\bmode-(simple|full)\b/g, '') + ' mode-' + mode;
+        document.body.style.zoom = zoom + '%';
+      }
+      toast('تنظیمات نمایش پذیرش اعمال شد', 'ok');
+    });
+    Bridge.on('native.print', function (d) {
+      var kind=d && d.kind;
+      if(kind==='insurance') Bridge.call('print.insurance',collectRecord());
+      else if(kind==='rx') Bridge.call('print.rx',collectRecord());
+    });
     Bridge.on('clock.update', function (d) {
       if (d.time) setText($('tbClock'), toFa(d.time));
       if (d.date) setText($('tbDate'), toFa(d.date));
@@ -1214,6 +1415,15 @@
       if (r.patient) fillPatient(r.patient);
       if (r.services) { state.services = r.services; }
       if (r.ps) updatePS(r.ps);
+      applyMode(r.mode || 'simple');
+      applyZoom(r.zoom || 100);
+      document.body.className = String(document.body.className || '')
+        .replace(/\btheme-(dark|calm|warm)\b/g, '').replace(/\s+/g, ' ');
+      if (r.theme === 'dark') document.body.className += ' theme-dark';
+      else applyPalette(r.palette || 'blue');
+      if ($('apptDate')) $('apptDate').value = toFa(r.date || '');
+      if ($('rxDate') && !$('rxDate').value) $('rxDate').value = toFa(r.date || '');
+      if ($('apptShift') && r.shift) { var si; for(si=0;si<$('apptShift').options.length;si++) if($('apptShift').options[si].text===r.shift){$('apptShift').selectedIndex=si;break;} }
       /* invoice starts at ZERO until a service is added */
       renderServices(); recompute();
       refreshQueue();
@@ -1244,6 +1454,8 @@
     _wired = true;
     wire();
     subscribeEvents();
+    on($('blockClose'),'click',closeBlock);
+    on($('blockOverride'),'click',function(){closeBlock();state.overrideBlock=true;saveAdmission();});
     setActiveTab('tabQueue');
     renderServices();
     recompute();               /* zero invoice on open */

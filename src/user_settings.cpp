@@ -31,6 +31,7 @@
 #include "print_designer.h"
 #include "net_sync.h"
 #include "backup_log.h"
+#include "web_admission.h"
 #include <objbase.h>
 #include <vector>
 #include <string>
@@ -53,6 +54,9 @@ enum SettingsMode { SM_GUEST=0, SM_RECEPTION=1, SM_ADMIN=2 };
 enum SettingsRow {
     ROW_PROFILE = 0,   // edit profile sub-page
     ROW_THEME,         // theme picker (light/dark)
+    ROW_RECEPTION,     // per-user reception interface settings
+    ROW_BLACKLIST,     // v1.58: patient blacklist — now its OWN page (moved
+                       //         out of the reception/appearance settings)
     ROW_DESIGNER,      // print designer hub
     ROW_BACKUP,        // backup & restore
     ROW_EMP_SECT,      // employees / sections (admin)
@@ -75,6 +79,8 @@ static bool canAccess(int row, int mode){
     switch(row){
     case ROW_PROFILE:   return true;
     case ROW_THEME:     return true;
+    case ROW_RECEPTION: return true;
+    case ROW_BLACKLIST: return true;
     case ROW_DESIGNER:  return true;
     case ROW_BACKUP:    return true;
     case ROW_EMP_SECT:  return mode==SM_ADMIN;   // admin-only
@@ -112,7 +118,8 @@ static void selfCheckMatrix(){
 // dedicated sub-pages. (Some map 1:1 onto a SettingsRow; others are leaf pages.)
 enum PageId {
     PAGE_HOME = 0,
-    PAGE_PROFILE, PAGE_THEME, PAGE_DESIGNER, PAGE_BACKUP, PAGE_EMP_SECT,
+    PAGE_PROFILE, PAGE_THEME, PAGE_RECEPTION, PAGE_BLACKLIST,
+    PAGE_DESIGNER, PAGE_BACKUP, PAGE_EMP_SECT,
     PAGE_SAVED_MSG, PAGE_UPDATE, PAGE_CONTACT, PAGE_ABOUT
 };
 
@@ -163,6 +170,12 @@ static std::vector<RowDef> homeRows(int mode){
         { ROW_THEME,     PAGE_THEME,     ICO_PALETTE,
           L"\u062a\u063a\u06cc\u06cc\u0631 \u067e\u0648\u0633\u062a\u0647",                            // تغییر پوسته
           L"\u0631\u0648\u0634\u0646 \u06cc\u0627 \u062a\u06cc\u0631\u0647" },                          // روشن یا تیره
+        { ROW_RECEPTION, PAGE_RECEPTION, ICO_GEAR,
+          L"\u062a\u0646\u0638\u06cc\u0645\u0627\u062a \u067e\u0630\u06cc\u0631\u0634",
+          L"\u062d\u0627\u0644\u062a \u0646\u0645\u0627\u06cc\u0634 \u0648 \u0628\u0632\u0631\u06af\u200c\u0646\u0645\u0627\u06cc\u06cc \u0641\u0631\u0645 \u067e\u0630\u06cc\u0631\u0634" },
+        { ROW_BLACKLIST, PAGE_BLACKLIST, ICO_ID,
+          L"\u0644\u06cc\u0633\u062a \u0633\u06cc\u0627\u0647 \u0628\u06cc\u0645\u0627\u0631\u0627\u0646",                    // لیست سیاه بیماران
+          L"\u0645\u0633\u062f\u0648\u062f\u0633\u0627\u0632\u06cc \u067e\u0630\u06cc\u0631\u0634 \u0648 \u062a\u0627\u0631\u06cc\u062e\u0686\u0647" }, // مسدودسازی پذیرش و تاریخچه
         { ROW_DESIGNER,  PAGE_DESIGNER,  ICO_PRINT,
           L"\u0637\u0631\u0627\u062d\u06cc \u0686\u0627\u067e",                                        // طراحی چاپ
           L"\u0637\u0631\u0627\u062d\u06cc \u0642\u0627\u0644\u0628 \u0686\u0627\u067e \u0628\u0631\u0627\u06cc \u0647\u0631 \u0628\u062e\u0634" },
@@ -208,7 +221,7 @@ static int avatarTopDrop(){ return S(22); }
 // bleed from the screen behind — this is a top-level opaque window). The column
 // also carries the vertical scroll offset (sw->scrollY) so both the owner-drawn
 // rows AND the HWND child controls move together when scrolling.
-static int colW(){ return S(620); }
+static int colW(){ return S(720); }
 static RECT contentRect(SettingsWin* sw){
     RECT rc; GetClientRect(sw->hwnd,&rc);
     int w = colW(); if(w > rc.right - S(24)) w = rc.right - S(24);
@@ -227,8 +240,8 @@ static RECT contentRectUnscrolled(SettingsWin* sw){
     if(sw) c.top += sw->scrollY;
     return c;
 }
-static int rowH(){ return S(64); }
-static int rowGap(){ return S(8); }
+static int rowH(){ return S(70); }
+static int rowGap(){ return S(10); }
 // y of the first card-row on the home page (below the avatar + identity block).
 // §2: recomputed for the lower + smaller circle so the option rows keep a clean,
 // consistent gap below the identity block (avatar drop + diameter + name + role).
@@ -305,14 +318,167 @@ static void buildProfilePage(SettingsWin* sw){
 
 static void buildThemePage(SettingsWin* sw){
     RECT c=contentRect(sw);
-    int x=c.left+S(20), y=subTop(sw), w=c.right-c.left-S(40);
-    // §E: ONLY Light + Dark. Big, clear hover/active card buttons.
+    int x=c.left+S(20), y=subTop(sw), w=c.right-c.left-S(40), gap=S(10), half=(w-gap)/2;
+    // v1.59: four legible, restrained palettes. The two additional light
+    // palettes preserve clinical contrast while reducing eye fatigue.
     HWND bLight=createFlatButton(sw->hwnd,IDC_PANEL_BASE+10,
-        L"\u0631\u0648\u0634\u0646",ICO_SUN,BS_OUTLINE,x,y,w,S(48));
-    sw->ctrls.push_back(bLight);
+        L"\u0633\u0641\u06cc\u062f \u067e\u0632\u0634\u06a9\u06cc",ICO_SUN,BS_OUTLINE,x+half+gap,y,half,S(52));
     HWND bDark=createFlatButton(sw->hwnd,IDC_PANEL_BASE+11,
-        L"\u062a\u06cc\u0631\u0647",ICO_MOON,BS_OUTLINE,x,y+S(58),w,S(48));
-    sw->ctrls.push_back(bDark);
+        L"\u062a\u06cc\u0631\u0647 \u062d\u0631\u0641\u0647\u200c\u0627\u06cc",ICO_MOON,BS_OUTLINE,x,y,half,S(52));
+    HWND bCalm=createFlatButton(sw->hwnd,IDC_PANEL_BASE+12,
+        L"\u0622\u0631\u0627\u0645 \u0641\u06cc\u0631\u0648\u0632\u0647\u200c\u0627\u06cc",ICO_PALETTE,BS_OUTLINE,x+half+gap,y+S(64),half,S(52));
+    HWND bWarm=createFlatButton(sw->hwnd,IDC_PANEL_BASE+13,
+        L"\u06af\u0631\u0645 \u0635\u062f\u0641\u06cc",ICO_PALETTE,BS_OUTLINE,x,y+S(64),half,S(52));
+    sw->ctrls.push_back(bLight); sw->ctrls.push_back(bDark);
+    sw->ctrls.push_back(bCalm); sw->ctrls.push_back(bWarm);
+}
+
+static HWND addSettingsLabel(SettingsWin* sw,const wchar_t* text,int x,int y,int w){
+    HWND h=CreateWindowExW(0,L"STATIC",text,
+        WS_CHILD|WS_VISIBLE|SS_RIGHT|WS_CLIPSIBLINGS,x,y,w,S(20),sw->hwnd,NULL,g_hInst,NULL);
+    SendMessageW(h,WM_SETFONT,(WPARAM)g_fSmall,TRUE);
+    sw->ctrls.push_back(h); return h;
+}
+
+static std::wstring settingsText(HWND parent,int id){
+    HWND h=GetDlgItem(parent,id); if(!h) return L"";
+    int n=GetWindowTextLengthW(h); std::vector<wchar_t> b((size_t)n+1,0);
+    GetWindowTextW(h,b.data(),n+1); return trim(b.data());
+}
+static std::wstring settingsDigits(const std::wstring& s){
+    std::wstring out;
+    for(wchar_t c:s){
+        if(c>=L'0'&&c<=L'9') out+=c;
+        else if(c>=L'۰'&&c<=L'۹') out+=(wchar_t)(L'0'+c-L'۰');
+        else if(c>=L'٠'&&c<=L'٩') out+=(wchar_t)(L'0'+c-L'٠');
+    }
+    return out;
+}
+static void refreshBlacklistHistory(SettingsWin* sw){
+    HWND list=GetDlgItem(sw->hwnd,IDC_PANEL_BASE+94); if(!list) return;
+    SendMessageW(list,LB_RESETCONTENT,0,0);
+    std::vector<BlacklistEntry> rows=Blacklist_Search(settingsText(sw->hwnd,IDC_PANEL_BASE+93));
+    long long now=Blacklist_NowEpochMinutes();
+    for(const auto& r:rows){
+        bool active=r.expiresEpochMin==0||r.expiresEpochMin>now;
+        std::wstring line=(active?L"فعال | ":L"منقضی | ")+toFaDigits(r.nid)+L" | "+
+            r.first+L" "+r.last+L" | "+r.reason+L" | "+r.durationLabel;
+        SendMessageW(list,LB_ADDSTRING,0,(LPARAM)line.c_str());
+    }
+    if(rows.empty()) SendMessageW(list,LB_ADDSTRING,0,(LPARAM)L"موردی یافت نشد.");
+}
+static void lookupBlacklistPatient(SettingsWin* sw,bool quiet){
+    std::wstring nid=settingsDigits(settingsText(sw->hwnd,IDC_PANEL_BASE+84));
+    if(nid.empty()) return;
+    for(const auto& p:loadAllPatients()){
+        if(settingsDigits(p.nid)!=nid) continue;
+        SetDlgItemTextW(sw->hwnd,IDC_PANEL_BASE+85,p.first.c_str());
+        SetDlgItemTextW(sw->hwnd,IDC_PANEL_BASE+86,p.last.c_str());
+        SetDlgItemTextW(sw->hwnd,IDC_PANEL_BASE+87,p.father.c_str());
+        SetDlgItemTextW(sw->hwnd,IDC_PANEL_BASE+88,p.mobile.c_str());
+        return;
+    }
+    if(!quiet) MessageBoxW(sw->hwnd,
+        L"بیمار در سوابق محلی پیدا نشد؛ اطلاعات را دستی وارد کنید.",
+        L"جستجوی بیمار",MB_OK|MB_ICONINFORMATION);
+}
+
+static void buildReceptionPage(SettingsWin* sw){
+    RECT c=contentRect(sw);
+    int x=c.left+S(20), y=subTop(sw), w=c.right-c.left-S(40);
+    std::wstring suffix=sw->user.username.empty()?L"":L"."+sw->user.username;
+    std::wstring mode=getSetting(L"reception.mode"+suffix,
+                      getSetting(L"reception.mode",L"simple"));
+    addSettingsLabel(sw,L"حالت نمایش فرم پذیرش",x,y,w);
+    HWND simple=CreateWindowExW(0,L"BUTTON",L"ساده (پیشنهادی)",
+        WS_CHILD|WS_VISIBLE|BS_AUTORADIOBUTTON,x+w/2,y+S(24),w/2,S(28),sw->hwnd,
+        (HMENU)(INT_PTR)(IDC_PANEL_BASE+80),g_hInst,NULL);
+    HWND full=CreateWindowExW(0,L"BUTTON",L"کامل",
+        WS_CHILD|WS_VISIBLE|BS_AUTORADIOBUTTON,x,y+S(24),w/2,S(28),sw->hwnd,
+        (HMENU)(INT_PTR)(IDC_PANEL_BASE+81),g_hInst,NULL);
+    SendMessageW(simple,WM_SETFONT,(WPARAM)g_fUI,TRUE);
+    SendMessageW(full,WM_SETFONT,(WPARAM)g_fUI,TRUE);
+    sw->ctrls.push_back(simple); sw->ctrls.push_back(full);
+    CheckRadioButton(sw->hwnd,IDC_PANEL_BASE+80,IDC_PANEL_BASE+81,
+        mode==L"full"?IDC_PANEL_BASE+81:IDC_PANEL_BASE+80);
+
+    addSettingsLabel(sw,L"بزرگ‌نمایی فرم (۸۰ تا ۱۳۰ درصد)",x,y+S(66),w);
+    HWND zoom=CreateWindowExW(0,L"COMBOBOX",L"",
+        WS_CHILD|WS_VISIBLE|CBS_DROPDOWNLIST|WS_VSCROLL,x,y+S(90),w,S(180),sw->hwnd,
+        (HMENU)(INT_PTR)(IDC_PANEL_BASE+82),g_hInst,NULL);
+    SendMessageW(zoom,WM_SETFONT,(WPARAM)g_fUI,TRUE); sw->ctrls.push_back(zoom);
+    int current=_wtoi(getSetting(L"reception.zoom"+suffix,
+                       getSetting(L"reception.zoom",L"100")).c_str());
+    const int levels[]={80,90,100,110,120,130}; int selected=2;
+    for(int i=0;i<6;i++){
+        std::wstring label=toFaDigits(std::to_wstring(levels[i])+L"٪");
+        SendMessageW(zoom,CB_ADDSTRING,0,(LPARAM)label.c_str());
+        if(levels[i]==current) selected=i;
+    }
+    SendMessageW(zoom,CB_SETCURSEL,selected,0);
+    HWND save=createFlatButton(sw->hwnd,IDC_PANEL_BASE+83,L"ذخیره تنظیمات نمایش",
+        ICO_CHECK,BS_PRIMARY,x,y+S(132),w,S(38));
+    sw->ctrls.push_back(save);
+}
+
+// v1.58 — the patient BLACKLIST is now a STANDALONE settings page (moved out of
+// the reception / appearance settings, per request). Same controls & control
+// ids as before, re-based to the top of its own page so it reads as a fully
+// independent feature. WM_COMMAND handlers (add/lookup/search) are unchanged.
+static void buildBlacklistPage(SettingsWin* sw){
+    RECT c=contentRect(sw);
+    int x=c.left+S(20), y=subTop(sw), w=c.right-c.left-S(40);
+    addSettingsLabel(sw,L"ثبت مسدودی جدید",x,y,w);
+    addSettingsLabel(sw,L"کد ملی",x+w*2/3,y+S(28),w/3-S(6));
+    addSettingsLabel(sw,L"نام",x+w/3,y+S(28),w/3-S(6));
+    addSettingsLabel(sw,L"نام خانوادگی",x,y+S(28),w/3-S(6));
+    HWND nid=CreateWindowExW(WS_EX_CLIENTEDGE|WS_EX_RTLREADING,L"EDIT",L"",
+        WS_CHILD|WS_VISIBLE|ES_RIGHT|ES_AUTOHSCROLL,x+w*2/3,y+S(50),w/3-S(6),S(30),sw->hwnd,
+        (HMENU)(INT_PTR)(IDC_PANEL_BASE+84),g_hInst,NULL);
+    HWND first=CreateWindowExW(WS_EX_CLIENTEDGE|WS_EX_RTLREADING,L"EDIT",L"",
+        WS_CHILD|WS_VISIBLE|ES_RIGHT|ES_AUTOHSCROLL,x+w/3,y+S(50),w/3-S(6),S(30),sw->hwnd,
+        (HMENU)(INT_PTR)(IDC_PANEL_BASE+85),g_hInst,NULL);
+    HWND last=CreateWindowExW(WS_EX_CLIENTEDGE|WS_EX_RTLREADING,L"EDIT",L"",
+        WS_CHILD|WS_VISIBLE|ES_RIGHT|ES_AUTOHSCROLL,x,y+S(50),w/3-S(6),S(30),sw->hwnd,
+        (HMENU)(INT_PTR)(IDC_PANEL_BASE+86),g_hInst,NULL);
+    addSettingsLabel(sw,L"نام پدر",x+w*2/3,y+S(86),w/3-S(6));
+    addSettingsLabel(sw,L"موبایل",x+w/3,y+S(86),w/3-S(6));
+    addSettingsLabel(sw,L"مدت مسدودی",x,y+S(86),w/3-S(6));
+    HWND father=CreateWindowExW(WS_EX_CLIENTEDGE|WS_EX_RTLREADING,L"EDIT",L"",
+        WS_CHILD|WS_VISIBLE|ES_RIGHT|ES_AUTOHSCROLL,x+w*2/3,y+S(108),w/3-S(6),S(30),sw->hwnd,
+        (HMENU)(INT_PTR)(IDC_PANEL_BASE+87),g_hInst,NULL);
+    HWND mobile=CreateWindowExW(WS_EX_CLIENTEDGE|WS_EX_RTLREADING,L"EDIT",L"",
+        WS_CHILD|WS_VISIBLE|ES_RIGHT|ES_AUTOHSCROLL,x+w/3,y+S(108),w/3-S(6),S(30),sw->hwnd,
+        (HMENU)(INT_PTR)(IDC_PANEL_BASE+88),g_hInst,NULL);
+    HWND duration=CreateWindowExW(0,L"COMBOBOX",L"",
+        WS_CHILD|WS_VISIBLE|CBS_DROPDOWNLIST|WS_VSCROLL,x,y+S(108),w/3-S(6),S(180),sw->hwnd,
+        (HMENU)(INT_PTR)(IDC_PANEL_BASE+90),g_hInst,NULL);
+    const wchar_t* durations[]={L"۲۴ ساعت",L"یک هفته",L"یک ماه",L"یک سال",L"دائم"};
+    for(int i=0;i<5;i++) SendMessageW(duration,CB_ADDSTRING,0,(LPARAM)durations[i]);
+    SendMessageW(duration,CB_SETCURSEL,0,0);
+    HWND fields[]={nid,first,last,father,mobile,duration};
+    for(HWND ctl:fields){ SendMessageW(ctl,WM_SETFONT,(WPARAM)g_fUI,TRUE); sw->ctrls.push_back(ctl); }
+    addSettingsLabel(sw,L"علت مسدودی (الزامی)",x,y+S(144),w);
+    HWND reason=CreateWindowExW(WS_EX_CLIENTEDGE|WS_EX_RTLREADING,L"EDIT",L"",
+        WS_CHILD|WS_VISIBLE|ES_RIGHT|ES_MULTILINE|ES_AUTOVSCROLL|WS_VSCROLL,
+        x,y+S(166),w,S(72),sw->hwnd,(HMENU)(INT_PTR)(IDC_PANEL_BASE+89),g_hInst,NULL);
+    SendMessageW(reason,WM_SETFONT,(WPARAM)g_fUIB,TRUE); sw->ctrls.push_back(reason);
+    HWND lookup=createFlatButton(sw->hwnd,IDC_PANEL_BASE+92,L"تکمیل خودکار با کد ملی",
+        ICO_USER,BS_OUTLINE,x+w/2+S(4),y+S(246),w/2-S(4),S(34));
+    HWND add=createFlatButton(sw->hwnd,IDC_PANEL_BASE+91,L"ثبت مسدودی",
+        ICO_SHIELD,BS_PRIMARY,x,y+S(246),w/2-S(4),S(34));
+    sw->ctrls.push_back(lookup); sw->ctrls.push_back(add);
+    addSettingsLabel(sw,L"جستجوی لحظه‌ای تاریخچه",x,y+S(292),w);
+    HWND search=CreateWindowExW(WS_EX_CLIENTEDGE|WS_EX_RTLREADING,L"EDIT",L"",
+        WS_CHILD|WS_VISIBLE|ES_RIGHT|ES_AUTOHSCROLL,x,y+S(314),w,S(30),sw->hwnd,
+        (HMENU)(INT_PTR)(IDC_PANEL_BASE+93),g_hInst,NULL);
+    HWND list=CreateWindowExW(WS_EX_CLIENTEDGE|WS_EX_RTLREADING,L"LISTBOX",L"",
+        WS_CHILD|WS_VISIBLE|WS_VSCROLL|LBS_NOINTEGRALHEIGHT|LBS_NOTIFY,
+        x,y+S(352),w,S(210),sw->hwnd,(HMENU)(INT_PTR)(IDC_PANEL_BASE+94),g_hInst,NULL);
+    SendMessageW(search,WM_SETFONT,(WPARAM)g_fUI,TRUE);
+    SendMessageW(list,WM_SETFONT,(WPARAM)g_fSmall,TRUE);
+    sw->ctrls.push_back(search); sw->ctrls.push_back(list);
+    refreshBlacklistHistory(sw);
 }
 
 static void buildContactPage(SettingsWin* sw){
@@ -464,6 +630,8 @@ static void buildPage(SettingsWin* sw){
     case PAGE_HOME:    break;   // owner-drawn rows
     case PAGE_PROFILE: buildProfilePage(sw); break;
     case PAGE_THEME:   buildThemePage(sw);   break;
+    case PAGE_RECEPTION: buildReceptionPage(sw); break;
+    case PAGE_BLACKLIST: buildBlacklistPage(sw); break;
     case PAGE_CONTACT: buildContactPage(sw); break;
     case PAGE_ABOUT:   buildAboutPage(sw);   break;
     case PAGE_DESIGNER:
@@ -566,7 +734,7 @@ static void paintCloseBtn(HDC dc, SettingsWin* sw){
     RECT b=closeBtnRect(sw);
     COLORREF fill = sw->closeDown? g_theme.surface2 : sw->closeHot? g_theme.hover : g_theme.surface;
     COLORREF brd  = sw->closeHot ? g_theme.danger : g_theme.border;
-    gpRoundRectBg(dc,b,S(8),fill,brd,g_theme.bg);
+    gpRoundRectBg(dc,b,S(8),fill,brd,g_theme.surface);
     // ✕ drawn as two crossing strokes (no glyph-font dependency)
     COLORREF ix = sw->closeHot? g_theme.danger : g_theme.textDim;
     int pad=S(11);
@@ -587,7 +755,8 @@ static void paintHome(HDC dc, SettingsWin* sw, RECT c){
         RECT r=homeRowRect(sw,(int)i);
         bool hot=((int)i==sw->hotRow), down=((int)i==sw->downRow);
         COLORREF fill = down? g_theme.surface2 : hot? g_theme.hover : g_theme.surface;
-        gpRoundRectBg(dc,r,S(12),fill,g_theme.border,g_theme.bg);
+        gpShadow(dc,r,S(12),S(3),hot?22:12);
+        gpRoundRectBg(dc,r,S(12),fill,g_theme.border,g_theme.surface);
         // icon (right side for RTL)
         bool danger=(rows[i].row==ROW_LOGOUT);
         COLORREF ic = danger? g_theme.danger : g_theme.accent;
@@ -621,6 +790,8 @@ static const wchar_t* pageTitle(int page){
     switch(page){
     case PAGE_PROFILE:  return L"\u0648\u06cc\u0631\u0627\u06cc\u0634 \u067e\u0631\u0648\u0641\u0627\u06cc\u0644";
     case PAGE_THEME:    return L"\u062a\u063a\u06cc\u06cc\u0631 \u067e\u0648\u0633\u062a\u0647";
+    case PAGE_RECEPTION:return L"\u062a\u0646\u0638\u06cc\u0645\u0627\u062a \u067e\u0630\u06cc\u0631\u0634";
+    case PAGE_BLACKLIST:return L"\u0644\u06cc\u0633\u062a \u0633\u06cc\u0627\u0647 \u0628\u06cc\u0645\u0627\u0631\u0627\u0646"; // لیست سیاه بیماران
     case PAGE_DESIGNER: return L"\u0637\u0631\u0627\u062d\u06cc \u0686\u0627\u067e";
     case PAGE_BACKUP:   return L"\u067e\u0634\u062a\u06cc\u0628\u0627\u0646\u200c\u06af\u06cc\u0631\u06cc \u0648 \u0628\u0627\u0632\u06cc\u0627\u0628\u06cc";
     case PAGE_EMP_SECT: return L"\u06a9\u0627\u0631\u0645\u0646\u062f\u0627\u0646 \u0648 \u0628\u062e\u0634\u200c\u0647\u0627";
@@ -637,12 +808,15 @@ static void paintSubHeader(HDC dc, SettingsWin* sw, RECT /*c*/){
     // UNSCROLLED column rect so it never moves while the content below scrolls.
     RECT cu=contentRectUnscrolled(sw);
     // opaque header band so scrolled content never shows through behind it
-    RECT band={cu.left-S(8), 0, cu.right+S(8), S(14)+S(36)+S(6)};
-    HBRUSH bg=CreateSolidBrush(g_theme.bg); FillRect(dc,&band,bg); DeleteObject(bg);
+    RECT band={cu.left, 0, cu.right, S(14)+S(36)+S(8)};
+    HBRUSH bg=CreateSolidBrush(g_theme.surface); FillRect(dc,&band,bg); DeleteObject(bg);
+    HPEN sep=CreatePen(PS_SOLID,1,g_theme.border); HGDIOBJ old=SelectObject(dc,sep);
+    MoveToEx(dc,band.left,band.bottom-1,NULL); LineTo(dc,band.right,band.bottom-1);
+    SelectObject(dc,old); DeleteObject(sep);
     // back button (top-left) — animation-free, just hover/pressed fill.
     RECT b=backBtnRect(sw);
     COLORREF fill = sw->backDown? g_theme.surface2 : sw->backHot? g_theme.hover : g_theme.surface;
-    gpRoundRectBg(dc,b,S(8),fill,g_theme.border,g_theme.bg);
+    gpRoundRectBg(dc,b,S(8),fill,g_theme.border,g_theme.surface);
     drawIcon(dc,ICO_BACK,b,g_theme.accent,S(2));
     // §2: pinned top-right close button (same on every page).
     paintCloseBtn(dc,sw);
@@ -658,11 +832,19 @@ static void paintSubHeader(HDC dc, SettingsWin* sw, RECT /*c*/){
 static void paintWin(SettingsWin* sw, HDC dc0){
     RECT rc; GetClientRect(sw->hwnd,&rc);
     uikit::MemDC mem(dc0,rc.right,rc.bottom);
-    // page background (#bg)
-    HBRUSH bg=CreateSolidBrush(g_theme.bg); FillRect(mem.dc,&rc,bg); DeleteObject(bg);
-    RECT c=contentRect(sw);
-    if(curPage(sw)==PAGE_HOME) paintHome(mem.dc,sw,c);
-    else                        paintSubHeader(mem.dc,sw,c);
+    // v1.59 messenger-style frame: darker side rails define the settings bounds,
+    // while the central sheet stays calm and readable (never black in light mode).
+    HBRUSH outer=CreateSolidBrush(g_theme.bg2); FillRect(mem.dc,&rc,outer); DeleteObject(outer);
+    RECT c=contentRectUnscrolled(sw); c.top=0; c.bottom=rc.bottom;
+    RECT shadow=c; InflateRect(&shadow,S(3),0); gpShadow(mem.dc,shadow,S(18),S(10),g_dark?55:24);
+    HBRUSH sheet=CreateSolidBrush(g_theme.surface); FillRect(mem.dc,&c,sheet); DeleteObject(sheet);
+    HPEN edge=CreatePen(PS_SOLID,1,g_theme.border); HGDIOBJ old=SelectObject(mem.dc,edge);
+    MoveToEx(mem.dc,c.left,0,NULL); LineTo(mem.dc,c.left,rc.bottom);
+    MoveToEx(mem.dc,c.right-1,0,NULL); LineTo(mem.dc,c.right-1,rc.bottom);
+    SelectObject(mem.dc,old); DeleteObject(edge);
+    RECT content=contentRect(sw);
+    if(curPage(sw)==PAGE_HOME) paintHome(mem.dc,sw,content);
+    else                        paintSubHeader(mem.dc,sw,content);
     mem.blitTo(dc0);
 }
 
@@ -691,7 +873,16 @@ static int homeRowHit(SettingsWin* sw, int mx, int my){
 
 static void applyThemeByName(SettingsWin* sw, bool dark){
     setSetting(L"theme", dark?L"dark":L"light");
+    if(dark) setSetting(L"theme.palette",L"blue");
     applyTheme(dark);
+    broadcastThemeChange();
+    if(g_hFrame) PostMessageW(g_hFrame,WM_APP_THEME_CHANGED,1,0);
+    RedrawWindow(sw->hwnd,NULL,NULL,RDW_INVALIDATE|RDW_UPDATENOW|RDW_ALLCHILDREN|RDW_ERASE);
+}
+static void applyLightPalette(SettingsWin* sw,const wchar_t* palette){
+    setSetting(L"theme",L"light");
+    setSetting(L"theme.palette",palette);
+    applyTheme(false);
     broadcastThemeChange();
     if(g_hFrame) PostMessageW(g_hFrame,WM_APP_THEME_CHANGED,1,0);
     RedrawWindow(sw->hwnd,NULL,NULL,RDW_INVALIDATE|RDW_UPDATENOW|RDW_ALLCHILDREN|RDW_ERASE);
@@ -808,16 +999,63 @@ static LRESULT CALLBACK SettingsProc(HWND h,UINT m,WPARAM w,LPARAM l){
             if(onBack && wasDown) popPage(sw);
         }
         return 0; }
-    case WM_CTLCOLORSTATIC:{ HDC dc=(HDC)w; SetBkColor(dc,g_theme.bg);
-        SetTextColor(dc,g_theme.text); return (LRESULT)g_brBg; }
+    case WM_CTLCOLORSTATIC:{ HDC dc=(HDC)w; SetBkColor(dc,g_theme.surface);
+        SetTextColor(dc,g_theme.text); return (LRESULT)g_brSurface; }
     case WM_CTLCOLOREDIT:{ HDC dc=(HDC)w; SetBkColor(dc,g_theme.inputBg);
         SetTextColor(dc,g_theme.inputText); return (LRESULT)g_brInput; }
     case WM_COMMAND:{
         if(!sw) break;
         int id=LOWORD(w);
+        if(id==IDC_PANEL_BASE+93 && HIWORD(w)==EN_CHANGE){
+            refreshBlacklistHistory(sw); return 0;
+        }
+        if(id==IDC_PANEL_BASE+84 && HIWORD(w)==EN_CHANGE &&
+           settingsDigits(settingsText(h,IDC_PANEL_BASE+84)).size()==10){
+            lookupBlacklistPatient(sw,true);
+        }
         switch(id){
-        case IDC_PANEL_BASE+10: applyThemeByName(sw,false); return 0;   // light
-        case IDC_PANEL_BASE+11: applyThemeByName(sw,true);  return 0;   // dark
+        case IDC_PANEL_BASE+10: applyLightPalette(sw,L"blue"); return 0; // medical white
+        case IDC_PANEL_BASE+11: applyThemeByName(sw,true); return 0;      // dark
+        case IDC_PANEL_BASE+12: applyLightPalette(sw,L"calm"); return 0; // teal calm
+        case IDC_PANEL_BASE+13: applyLightPalette(sw,L"warm"); return 0; // pearl warm
+        case IDC_PANEL_BASE+83: {
+            std::wstring suffix=sw->user.username.empty()?L"":L"."+sw->user.username;
+            bool full=SendMessageW(GetDlgItem(h,IDC_PANEL_BASE+81),BM_GETCHECK,0,0)==BST_CHECKED;
+            int zi=(int)SendMessageW(GetDlgItem(h,IDC_PANEL_BASE+82),CB_GETCURSEL,0,0);
+            const int levels[]={80,90,100,110,120,130}; if(zi<0||zi>5) zi=2;
+            setSetting(L"reception.mode"+suffix,full?L"full":L"simple");
+            setSetting(L"reception.zoom"+suffix,std::to_wstring(levels[zi]));
+            std::string payload=std::string("{\"mode\":\"")+(full?"full":"simple")+
+                "\",\"zoom\":"+std::to_string(levels[zi])+"}";
+            WebAdmission_PushEvent("reception.settings",payload);
+            MessageBoxW(h,L"تنظیمات پذیرش برای این کاربر ذخیره شد.",
+                L"تنظیمات پذیرش",MB_OK|MB_ICONINFORMATION);
+            return 0; }
+        case IDC_PANEL_BASE+92: lookupBlacklistPatient(sw,false); return 0;
+        case IDC_PANEL_BASE+91: {
+            BlacklistEntry r;
+            r.nid=settingsDigits(settingsText(h,IDC_PANEL_BASE+84));
+            r.first=settingsText(h,IDC_PANEL_BASE+85);
+            r.last=settingsText(h,IDC_PANEL_BASE+86);
+            r.father=settingsText(h,IDC_PANEL_BASE+87);
+            r.mobile=settingsDigits(settingsText(h,IDC_PANEL_BASE+88));
+            r.reason=settingsText(h,IDC_PANEL_BASE+89);
+            r.createdBy=sw->user.username;
+            int di=(int)SendMessageW(GetDlgItem(h,IDC_PANEL_BASE+90),CB_GETCURSEL,0,0);
+            const long long mins[]={1440,10080,43200,525600,0};
+            const wchar_t* labels[]={L"۲۴ ساعت",L"یک هفته",L"یک ماه",L"یک سال",L"دائم"};
+            if(di<0||di>4) di=0;
+            r.durationLabel=labels[di]; r.createdEpochMin=Blacklist_NowEpochMinutes();
+            r.expiresEpochMin=mins[di]?r.createdEpochMin+mins[di]:0;
+            std::wstring err;
+            if(!Blacklist_Add(r,err)){
+                MessageBoxW(h,err.c_str(),L"لیست سیاه",MB_OK|MB_ICONWARNING); return 0;
+            }
+            const int clearIds[]={84,85,86,87,88,89};
+            for(int cid:clearIds) SetDlgItemTextW(h,IDC_PANEL_BASE+cid,L"");
+            refreshBlacklistHistory(sw);
+            MessageBoxW(h,L"مسدودی بیمار ثبت شد.",L"لیست سیاه",MB_OK|MB_ICONINFORMATION);
+            return 0; }
         case IDC_PANEL_BASE+4: {   // profile submit
             wchar_t nm[128]={0}; GetDlgItemTextW(h,IDC_PANEL_BASE+1,nm,127);
             wchar_t ph[64]={0};  GetDlgItemTextW(h,IDC_PANEL_BASE+5,ph,63);

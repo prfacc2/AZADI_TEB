@@ -104,11 +104,48 @@ code{background:#eef2f8;border-radius:4px;padding:1px 5px;font-family:Consolas,m
   white-space:nowrap;text-overflow:ellipsis;text-align:center;vertical-align:middle}
 .pi-table td.th{font-weight:700;background:#eef2fb}
 /* §1.53.0 (Bug A): live services list — same grid look, coloured header band */
-.pi-services{background:#fff;overflow:hidden}
-.pi-services table.svc-tbl{width:100%;height:100%;border-collapse:collapse;table-layout:fixed}
-.pi-services td{border:0.5px solid #345;padding:1px 3px;overflow:hidden;
-  white-space:nowrap;text-overflow:ellipsis;text-align:center;vertical-align:middle}
+/* §1.55.0: monochrome + genuinely RTL. Text flows right→left and prose columns
+   anchor to the RIGHT edge of their cell, exactly like the GDI print engine
+   (DT_RIGHT|DT_RTLREADING). Numeric columns stay centred.                     */
+.pi-services{background:#fff;overflow:hidden;direction:rtl}
+.pi-services table.svc-tbl{width:100%;height:100%;border-collapse:collapse;
+  table-layout:fixed;direction:rtl;unicode-bidi:plaintext}
+.pi-services td{border:0.5px solid #000;padding:1px 3px;overflow:hidden;
+  white-space:nowrap;text-overflow:ellipsis;text-align:center;vertical-align:middle;
+  direction:rtl;unicode-bidi:plaintext}
 .pi-services td.th{font-weight:700}
+/* §1.55.0: static tables are RTL too — column 0 is the RIGHT-most column */
+.pi-table table{direction:rtl}
+.pi-table td{unicode-bidi:plaintext}
+
+/* ---------------------------------------- §1.55.0 linear barcode item ----- */
+.pi-barcode{background:#fff;overflow:hidden}
+.pi-barcode .bc-wrap{width:100%;height:100%;display:flex;flex-direction:column;
+  align-items:stretch;justify-content:center;direction:ltr}
+.pi-barcode .bc-bars{position:relative;flex:1 1 auto;min-height:4px}
+.pi-barcode .bc-bars > i{position:absolute;top:0;bottom:0;display:block}
+.pi-barcode .bc-hri{flex:0 0 auto;text-align:center;letter-spacing:.09em;
+  font-family:"Consolas","Courier New",monospace;line-height:1.15;
+  white-space:nowrap;overflow:hidden;direction:ltr}
+
+/* ------------------------- §1.55.0 live table grips (column / row sizing) - *
+ * Thin drag handles on the SELECTED table / services item. They let the user
+ * resize column widths and row heights directly on the page, in real time.    */
+.tbl-grips{position:absolute;inset:0;pointer-events:none;z-index:60}
+.tbl-grips .col-grip,
+.tbl-grips .row-grip{position:absolute;pointer-events:auto;background:transparent;
+  transition:background .12s ease}
+.tbl-grips .col-grip{top:0;bottom:0;width:9px;margin-right:-4.5px;cursor:col-resize}
+.tbl-grips .row-grip{left:0;right:0;height:9px;margin-top:-4.5px;cursor:row-resize}
+.tbl-grips .col-grip::after{content:"";position:absolute;top:0;bottom:0;
+  right:3.5px;width:2px;background:var(--accent);opacity:0;transition:opacity .12s ease}
+.tbl-grips .row-grip::after{content:"";position:absolute;left:0;right:0;
+  top:3.5px;height:2px;background:var(--accent);opacity:0;transition:opacity .12s ease}
+.pi.sel .tbl-grips .col-grip::after,
+.pi.sel .tbl-grips .row-grip::after{opacity:.34}
+.tbl-grips .col-grip:hover::after,
+.tbl-grips .row-grip:hover::after{opacity:1;box-shadow:0 0 5px rgba(31,95,214,.55)}
+.tbl-grips .row-grip-head::after{background:#c2410c}
 
 /* selection box + handles */
 .sel-box{position:absolute;border:1.5px solid var(--accent);pointer-events:none;z-index:9999}
@@ -204,9 +241,12 @@ code{background:#eef2f8;border-radius:4px;padding:1px 5px;font-family:Consolas,m
 .tbl-body{flex:1;display:flex;overflow:hidden}
 .tbl-controls{width:280px;padding:18px;border-inline-end:1px solid var(--line);background:#f8fafd}
 .tbl-grid-wrap{flex:1;overflow:auto;padding:18px}
-#tblEditor table{border-collapse:collapse}
+/* §1.55.0: the table builder grid is RTL — column ۱ sits on the RIGHT, which is
+   how the printed table reads, so the editor matches the paper.               */
+#tblEditor table{border-collapse:collapse;direction:rtl}
 #tblEditor td{border:1px solid var(--line);padding:2px}
-#tblEditor input{border:none;outline:none;width:140px;padding:6px 7px;font-family:inherit;font-size:12.5px;text-align:center}
+#tblEditor input{border:none;outline:none;width:140px;padding:6px 7px;font-family:inherit;
+  font-size:12.5px;text-align:center;direction:rtl;unicode-bidi:plaintext}
 #tblEditor input.hd{font-weight:700;background:#eef2fb}
 #tblEditor input.cellsel{background:#dbeafe;box-shadow:inset 0 0 0 2px var(--accent)}
 .tbl-quickbtns{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}

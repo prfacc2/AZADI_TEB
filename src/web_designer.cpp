@@ -65,8 +65,11 @@ static bool loadRes(int id, std::string& out){
 // label on load, and the browser designer had no way to author a live services
 // list. Order below == PIT_LABEL,PIT_FIELD,PIT_HLINE,PIT_VLINE,PIT_RECT,
 // PIT_FRAME,PIT_IMAGE,PIT_LOGO,PIT_QR,PIT_PHOTO,PIT_APPTNO,PIT_TABLE,PIT_SERVICES.
+// v1.55.0: appended "barcode" (index 13 = PIT_BARCODE) — the real 1-D barcode
+// generator item. It MUST stay last so every previously-saved design keeps its
+// original type index.
 static const char* JS_TYPES[] = {
-    "label","field","hline","vline","rect","frame","image","logo","qr","photo","apptno","table","services" };
+    "label","field","hline","vline","rect","frame","image","logo","qr","photo","apptno","table","services","barcode" };
 static int jsTypeToInt(const std::string& t){
     for(int i=0;i<(int)(sizeof(JS_TYPES)/sizeof(JS_TYPES[0]));++i)
         if(t==JS_TYPES[i]) return i;
@@ -130,6 +133,8 @@ static std::string designToWebJson(const PrintDesign& d){
         o+="\"corner\":"+jnum(it.corner)+",\"padding\":"+jnum(it.padding)+",";
         o+="\"opacity\":"+jnum(it.opacity)+",\"visibility\":"+jint(it.visibility)+",";
         o+="\"startValue\":"+jint(it.startValue)+",\"step\":"+jint(it.step)+",";
+        // v1.55.0 table/services row geometry (mm; 0 = automatic)
+        o+="\"rowH\":"+jnum(it.rowH)+",\"headerH\":"+jnum(it.headerH)+",";
         o+="\"imgPath\":"+jstr(it.imgPath);
         o+="}";
     }
@@ -218,6 +223,9 @@ static bool webJsonToDesign(const std::string& json, PrintDesign& out){
                     else if(ik=="visibility") it.visibility=(int)j.dbl();
                     else if(ik=="startValue") it.startValue=(int)j.dbl();
                     else if(ik=="step") it.step=(int)j.dbl();
+                    // v1.55.0: explicit row / header heights for table+services
+                    else if(ik=="rowH") it.rowH=j.dbl();
+                    else if(ik=="headerH") it.headerH=j.dbl();
                     else if(ik=="imgPath") it.imgPath=u82w(j.str());
                     else j.skip();
                     if(!j.eat(',')){ j.eat('}'); break; } if(!j.ok)break; }

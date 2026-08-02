@@ -104,6 +104,13 @@
         it.corner = Math.round(it.corner * sf * 100) / 100;
       if (typeof it.borderWidth === "number" && it.borderWidth > 0)
         it.borderWidth = Math.max(0.1, Math.round(it.borderWidth * sf * 100) / 100);
+      // v1.55.0: explicit row / header heights are VERTICAL measures — they must
+      // follow the page's vertical scale, otherwise a resized table keeps its
+      // old row pitch and either overflows or leaves a big gap at the bottom.
+      if (typeof it.rowH === "number" && it.rowH > 0)
+        it.rowH = Math.max(3, Math.round(it.rowH * sy * 100) / 100);
+      if (typeof it.headerH === "number" && it.headerH > 0)
+        it.headerH = Math.max(3, Math.round(it.headerH * sy * 100) / 100);
       // keep inside new page
       if (it.w > toW) it.w = toW;
       if (it.h > toH) it.h = toH;
@@ -179,12 +186,12 @@
     label: "متن ثابت", field: "فیلد داده", hline: "خط افقی", vline: "خط عمودی",
     rect: "کادر", frame: "حاشیه صفحه", logo: "لوگو", photo: "عکس بیمار",
     qr: "بارکد / QR", apptno: "شماره نوبت", image: "تصویر", table: "جدول",
-    services: "لیست خدمات"
+    services: "لیست خدمات", barcode: "بارکد خطی (قابل اسکن)"
   };
   var ITEM_ICONS = {
     label: "T", field: "{}", hline: "—", vline: "│", rect: "▭", frame: "⬚",
     logo: "★", photo: "👤", qr: "▦", apptno: "#", image: "🖼", table: "▦",
-    services: "☰"
+    services: "☰", barcode: "|||"
   };
 
   function mm(v) { return v * S.pxPerMM * S.scale; }
@@ -209,6 +216,15 @@
       var f = window.AZ_FIELDS[it.field];
       var lbl = f ? f.label : (it.field || "فیلد");
       return (it.prefix || "") + "［" + lbl + "］" + (it.suffix || "");
+    }
+    // v1.55.0: a barcode item keeps its symbology model (JSON) in it.text — never
+    // show that raw JSON on the canvas; show the bound field / literal payload.
+    if (it.type === "barcode") {
+      if (it.field) {
+        var bf = window.AZ_FIELDS[it.field];
+        return bf ? bf.label : it.field;
+      }
+      return it.prefix || "";
     }
     return it.text || "";
   }
@@ -275,44 +291,409 @@
         return m;
       }
     } catch (e) {}
-    return { cols: 4, header: true, widths: [0.1, 0.5, 0.15, 0.25],
-      labels: ["ردیف", "نام خدمت", "کد", "مبلغ (ریال)"] };
+    // v1.55.0: the real paper receipt has EXACTLY three columns, right→left:
+    //   نام خدمت | شرح خدمت | تعداد      (0.55 / 0.30 / 0.15)
+    return { cols: 3, header: true, widths: SVC_DEF_WIDTHS.slice(),
+      labels: SVC_DEF_LABELS.slice() };
   }
-  // preview: header row (from labels) + 3 sample rows so the designer looks real
+
+  // v1.55.0 canonical 3-column services model (mirrors printer.cpp defaults)
+  var SVC_DEF_LABELS = ["نام خدمت", "شرح خدمت", "تعداد"];
+  var SVC_DEF_WIDTHS = [0.55, 0.30, 0.15];
+
+  /* --- label-driven column resolution (mirrors C++ pdSvcColOf) ------------ *
+   * The CAPTION decides which live datum a column shows — never the index.
+   * That way a user can reorder / rename columns in the designer and the print
+   * engine and this preview stay in perfect agreement.                       */
+  var PSC = { NAME: 0, DESC: 1, QTY: 2, CODE: 3, ROW: 4, PRICE: 5, LINE: 6,
+              DISC: 7, INS: 8, PAT: 9, CAT: 10, NONE: 11 };
+  function svcNormLabel(s) {
+    return String(s == null ? "" : s)
+      .replace(/[\s\u200c\u200f\u200e\t]/g, "")
+      .replace(/\u064a/g, "\u06cc").replace(/\u0643/g, "\u06a9");
+  }
+  function svcColOf(label, idx) {
+    var L = svcNormLabel(label);
+    if (!L) return (idx === 0) ? PSC.NAME : (idx === 1) ? PSC.DESC : (idx === 2) ? PSC.QTY : PSC.NONE;
+    function has(x) { return L.indexOf(x) >= 0; }
+    if (has("ردیف") || has("شماره") || L === "ر") return PSC.ROW;
+    if (has("شرح") || has("توضیح")) return PSC.DESC;
+    if (has("نوع")) return PSC.CAT;
+    if (has("تعداد") || has("مقدار") || L === "تع") return PSC.QTY;
+    if (has("کد")) return PSC.CODE;
+    if (has("تخفیف")) return PSC.DISC;
+    if (has("بیمه") || has("سهم‌بیمه") || has("سهمبیمه")) return PSC.INS;
+    if (has("بیمار") || has("پرداختی") || has("سهمبیمار")) return PSC.PAT;
+    if (has("جمع") || has("کل") || has("مبلغکل")) return PSC.LINE;
+    if (has("مبلغ") || has("قیمت") || has("تعرفه") || has("ریال")) return PSC.PRICE;
+    if (has("نام") || has("خدمت") || has("عنوان")) return PSC.NAME;
+    return PSC.NONE;
+  }
+  // sample cell values for the DESIGN-TIME preview only. These are fixed,
+  // deterministic demo strings (never random); at print time every cell comes
+  // from the live ReceptionRecord.services vector.
+  var SVC_SAMPLES = [
+    { name: "ویزیت پزشک عمومی", desc: "معاینه و شرح حال", cat: "ویزیت", qty: "۱",
+      code: "۹۰۱", price: "۸۵۰٬۰۰۰", line: "۸۵۰٬۰۰۰", disc: "۰", ins: "۵۹۵٬۰۰۰", pat: "۲۵۵٬۰۰۰" },
+    { name: "نوار قلب", desc: "الکتروکاردیوگرام ۱۲ لید", cat: "تشخیصی", qty: "۱",
+      code: "۹۰۳", price: "۴۵۰٬۰۰۰", line: "۴۵۰٬۰۰۰", disc: "۰", ins: "۳۱۵٬۰۰۰", pat: "۱۳۵٬۰۰۰" },
+    { name: "تزریق عضلانی", desc: "تزریقات و پانسمان", cat: "درمانی", qty: "۲",
+      code: "۹۱۲", price: "۲۰۰٬۰۰۰", line: "۴۰۰٬۰۰۰", disc: "۰", ins: "۲۸۰٬۰۰۰", pat: "۱۲۰٬۰۰۰" }
+  ];
+  function svcSample(kind, rowIdx) {
+    var s = SVC_SAMPLES[rowIdx % SVC_SAMPLES.length];
+    switch (kind) {
+      case PSC.NAME:  return s.name;
+      case PSC.DESC:  return s.desc;
+      case PSC.CAT:   return s.cat;
+      case PSC.QTY:   return s.qty;
+      case PSC.CODE:  return s.code;
+      case PSC.ROW:   return faDigits(String(rowIdx + 1));
+      case PSC.PRICE: return s.price;
+      case PSC.LINE:  return s.line;
+      case PSC.DISC:  return s.disc;
+      case PSC.INS:   return s.ins;
+      case PSC.PAT:   return s.pat;
+      default:        return "";
+    }
+  }
+  // preview: header row (from labels) + sample rows so the designer looks real.
+  // v1.55.0: monochrome, RTL, label-driven, and it honours rowH / headerH (mm)
+  // exactly like the GDI engine so what you design is what prints.
   function servicesHtml(it) {
     var m = parseServices(it);
     var sum = 0; m.widths.forEach(function (w) { sum += (w || 0); }); if (sum <= 0) sum = m.cols;
-    var accent = it.fillColor || "#1f5fd6";
+    var ink = it.textColor || "#000000";
+    var rule = it.borderColor || "#000000";
+    // header band: only when the item actually has a fill (monochrome designs
+    // use a light grey band; a transparent item stays plain white).
+    var band = (!it.fillTransparent && it.fillColor) ? it.fillColor : "";
+    var headTxt = ink;
+    if (band) {
+      var h = band.replace("#", "");
+      if (h.length === 6) {
+        var lum = (parseInt(h.substr(0, 2), 16) * 30 + parseInt(h.substr(2, 2), 16) * 59 +
+                   parseInt(h.substr(4, 2), 16) * 11) / 100;
+        if (lum < 140) headTxt = "#ffffff";
+      }
+    }
+    var kinds = [];
+    for (var k = 0; k < m.cols; k++) kinds.push(svcColOf(m.labels[k], k));
+
+    var hHpx = (it.headerH > 0) ? mm(it.headerH) : 0;
+    var rHpx = (it.rowH > 0) ? mm(it.rowH) : 0;
+    // how many sample rows fit in the box when a fixed row height is set
+    var nRows = SVC_SAMPLES.length;
+    if (rHpx > 0) {
+      var avail = mm(it.h || 0) - hHpx;
+      var fit = Math.floor(avail / rHpx);
+      if (fit >= 1) nRows = Math.min(6, Math.max(1, fit));
+    }
+
     var html = "<table class='svc-tbl' style='font-size:" + ptPx(it.pt || 8.5) +
-      "px;color:" + (it.textColor || "#16233a") + ";direction:rtl'>";
+      "px;color:" + ink + ";direction:rtl;table-layout:fixed;width:100%'>";
     if (m.header) {
-      html += "<tr>";
+      html += "<tr" + (hHpx > 0 ? " style='height:" + hHpx.toFixed(2) + "px'" : "") + ">";
       for (var c = 0; c < m.cols; c++) {
         var wpc = ((m.widths[c] || 1) / sum * 100).toFixed(3);
         var lb = m.labels[c] != null ? m.labels[c] : "";
-        html += "<td class='th' style='width:" + wpc + "%;background:" + accent +
-          ";color:#fff;border-color:" + (it.borderColor || "#345") + "'>" + escapeHtml(faDigits(lb)) + "</td>";
+        html += "<td class='th' style='width:" + wpc + "%;" +
+          (band ? "background:" + band + ";" : "") + "color:" + headTxt +
+          ";border-color:" + rule + ";text-align:center'>" +
+          escapeHtml(faDigits(lb)) + "</td>";
       }
       html += "</tr>";
     }
-    var sample = [
-      ["۱", "ویزیت پزشک عمومی", "۹۰۱", "۸۵۰٬۰۰۰"],
-      ["۲", "نوار قلب", "۹۰۳", "۴۵۰٬۰۰۰"],
-      ["۳", "تزریقات", "۹۱۲", "۲۰۰٬۰۰۰"]
-    ];
-    for (var r = 0; r < sample.length; r++) {
-      html += "<tr>";
+    for (var r = 0; r < nRows; r++) {
+      // subtle zebra banding only when the item is not transparent (monochrome tint)
+      var bg = (band && (r % 2 === 1)) ? svcTint(band, 0.78) : "";
+      html += "<tr" + (rHpx > 0 ? " style='height:" + rHpx.toFixed(2) + "px'" : "") + ">";
       for (var cc = 0; cc < m.cols; cc++) {
         var wpc2 = ((m.widths[cc] || 1) / sum * 100).toFixed(3);
-        var v = (cc < 4) ? sample[r][cc] : "";
-        var bg = (r % 2 === 1) ? "#f3f7fe" : "#fff";
-        html += "<td style='width:" + wpc2 + "%;background:" + bg + ";border-color:" +
-          (it.borderColor || "#345") + "'>" + escapeHtml(v) + "</td>";
+        var v = svcSample(kinds[cc], r);
+        if (kinds[cc] === PSC.NAME && !v) v = "—";
+        var prose = (kinds[cc] === PSC.NAME || kinds[cc] === PSC.DESC || kinds[cc] === PSC.CAT);
+        html += "<td style='width:" + wpc2 + "%;" + (bg ? "background:" + bg + ";" : "") +
+          "border-color:" + rule + ";text-align:" + (prose ? "right" : "center") + "'>" +
+          escapeHtml(v) + "</td>";
       }
       html += "</tr>";
     }
     html += "</table>";
     return html;
+  }
+  // mix a colour toward white by `k` (0..1) — used for the monochrome zebra band
+  function svcTint(hex, k) {
+    var h = String(hex).replace("#", "");
+    if (h.length !== 6) return "#ffffff";
+    function ch(i) {
+      var v = parseInt(h.substr(i, 2), 16);
+      v = Math.round(v + (255 - v) * k);
+      return ("0" + v.toString(16)).slice(-2);
+    }
+    return "#" + ch(0) + ch(2) + ch(4);
+  }
+
+  /* ------------------------------------------------- barcode helpers ------ *
+   * v1.55.0: a REAL scannable linear barcode. The model lives in it.text:
+   *   {"sym":"code128"|"code39"|"ean13","hri":bool,"quiet":mm}
+   * The canvas preview draws a faithful Code128-B / Code39 / EAN-13 module
+   * pattern computed from the payload — the same algorithm the C++ engine uses,
+   * so nothing here is decorative or random.                                  */
+  function parseBarcode(it) {
+    var m = { sym: "code128", hri: true, quiet: 2 };
+    try {
+      var o = JSON.parse(it.text || "");
+      if (o && typeof o === "object") {
+        if (o.sym) m.sym = String(o.sym).toLowerCase();
+        if (typeof o.hri === "boolean") m.hri = o.hri;
+        if (o.quiet != null && isFinite(o.quiet)) m.quiet = Math.max(0, +o.quiet);
+      }
+    } catch (e) {}
+    if (m.sym !== "code39" && m.sym !== "ean13") m.sym = "code128";
+    return m;
+  }
+  // ---- Code128 (subset B) -------------------------------------------------
+  var C128_PAT = [
+    "11011001100","11001101100","11001100110","10010011000","10010001100","10001001100",
+    "10011001000","10011000100","10001100100","11001001000","11001000100","11000100100",
+    "10110011100","10011011100","10011001110","10111001100","10011101100","10011100110",
+    "11001110010","11001011100","11001001110","11011100100","11001110100","11101101110",
+    "11101001100","11100101100","11100100110","11101100100","11100110100","11100110010",
+    "11011011000","11011000110","11000110110","10100011000","10001011000","10001000110",
+    "10110001000","10001101000","10001100010","11010001000","11000101000","11000100010",
+    "10110111000","10110001110","10001101110","10111011000","10111000110","10001110110",
+    "11101110110","11010001110","11000101110","11011101000","11011100010","11011101110",
+    "11101011000","11101000110","11100010110","11101101000","11101100010","11100011010",
+    "11101111010","11001000010","11110001010","10100110000","10100001100","10010110000",
+    "10010000110","10000101100","10000100110","10110010000","10110000100","10011010000",
+    "10011000010","10000110100","10000110010","11000010010","11001010000","11110111010",
+    "11000010100","10001111010","10100111100","10010111100","10010011110","10111100100",
+    "10011110100","10011110010","11110100100","11110010100","11110010010","11011011110",
+    "11011110110","11110110110","10101111000","10100011110","10001011110","10111101000",
+    "10111100010","11110101000","11110100010","10111011110","10111101110","11101011110",
+    "11110101110","11010000100","11010010000","11010011100","1100011101011"
+  ];   // index 106 = STOP (13 modules) — identical to PD_C128[106] in printer.cpp
+  function bc128Modules(data) {
+    var s = "", sum = 104, n = 0, i;   // 104 = START B
+    s += C128_PAT[104];
+    for (i = 0; i < data.length; i++) {
+      var v = data.charCodeAt(i) - 32;
+      if (v < 0 || v > 94) v = 0;      // unsupported → space
+      s += C128_PAT[v]; n++; sum += v * n;
+    }
+    s += C128_PAT[sum % 103];
+    s += C128_PAT[106];                // STOP
+    return s;
+  }
+  // ---- Code39 -------------------------------------------------------------
+  var C39_SET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-. $/+%*";
+  var C39_PAT = [
+    "101001101101","110100101011","101100101011","110110010101","101001101011",
+    "110100110101","101100110101","101001011011","110100101101","101100101101",
+    "110101001011","101101001011","110110100101","101011001011","110101100101",
+    "101101100101","101010011011","110101001101","101101001101","101011001101",
+    "110101010011","101101010011","110110101001","101011010011","110101101001",
+    "101101101001","101010110011","110101011001","101101011001","101011011001",
+    "110010101011","100110101011","110011010101","100101101011","110010110101",
+    "100110110101","100101011011","110010101101","100110101101","100100100101",
+    "100100101001","100101001001","101001001001","100101101101"
+  ];
+  function bc39Modules(data) {
+    var s = "", i;
+    var chars = "*" + data.toUpperCase() + "*";
+    for (i = 0; i < chars.length; i++) {
+      var idx = C39_SET.indexOf(chars[i]);
+      if (idx < 0) idx = C39_SET.indexOf(" ");
+      s += C39_PAT[idx];
+      if (i + 1 < chars.length) s += "0";   // inter-character gap
+    }
+    return s;
+  }
+  // ---- EAN-13 -------------------------------------------------------------
+  var EAN_A = ["0001101","0011001","0010011","0111101","0100011","0110001","0101111","0111011","0110111","0001011"];
+  var EAN_B = ["0100111","0110011","0011011","0100001","0011101","0111001","0000101","0010001","0001001","0010111"];
+  var EAN_C = ["1110010","1100110","1101100","1000010","1011100","1001110","1010000","1000100","1001000","1110100"];
+  var EAN_PAR = ["AAAAAA","AABABB","AABBAB","AABBBA","ABAABB","ABBAAB","ABBBAA","ABABAB","ABABBA","ABBABA"];
+  function bcEan13Modules(digits) {
+    var d = digits.replace(/\D/g, "");
+    while (d.length < 12) d = "0" + d;
+    d = d.substr(0, 12);
+    var sum = 0, i;
+    for (i = 0; i < 12; i++) sum += (+d[i]) * ((i % 2) ? 3 : 1);
+    var chk = (10 - (sum % 10)) % 10;
+    var full = d + String(chk);
+    var par = EAN_PAR[+full[0]];
+    var s = "101";
+    for (i = 1; i <= 6; i++) s += (par[i - 1] === "A" ? EAN_A : EAN_B)[+full[i]];
+    s += "01010";
+    for (i = 7; i <= 12; i++) s += EAN_C[+full[i]];
+    s += "101";
+    return { modules: s, text: full };
+  }
+  // normalize a payload: fold Persian/Arabic digits to ASCII, drop separators
+  function bcNormPayload(s) {
+    var out = "", i;
+    s = String(s == null ? "" : s);
+    for (i = 0; i < s.length; i++) {
+      var ch = s[i], cc = s.charCodeAt(i);
+      if (cc >= 0x06f0 && cc <= 0x06f9) out += String.fromCharCode(48 + cc - 0x06f0);
+      else if (cc >= 0x0660 && cc <= 0x0669) out += String.fromCharCode(48 + cc - 0x0660);
+      else if (cc === 0x066c || cc === 0x060c) continue;     // ٬ ، separators
+      else if (cc >= 32 && cc <= 126) out += ch;
+    }
+    return out;
+  }
+  function barcodeHtml(it) {
+    var m = parseBarcode(it);
+    // design-time payload: the bound field's demo value, else the literal prefix
+    var bf = it.field ? window.AZ_FIELDS[it.field] : null;
+    var pay = bcNormPayload(bf ? (bf.sample || "") : (it.prefix || ""));
+    if (!pay) pay = "2500410037";        // fixed placeholder (deterministic)
+    var mods = "", hri = pay;
+    if (m.sym === "ean13") { var e = bcEan13Modules(pay); mods = e.modules; hri = e.text; }
+    else if (m.sym === "code39") { mods = bc39Modules(pay); hri = pay.toUpperCase(); }
+    else { mods = bc128Modules(pay); }
+
+    var ink = it.textColor || "#000000";
+    var quietPc = 0, total = mods.length;
+    var qmm = m.quiet || 0;
+    var wmm = it.w || 40;
+    if (wmm > 0 && qmm > 0) quietPc = Math.min(20, (qmm / wmm) * 100);
+    var barsPc = 100 - quietPc * 2;
+    var barsH = m.hri ? "76%" : "100%";
+
+    // group consecutive '1' modules into single bars (fewer DOM nodes)
+    var html = "<div class='bc-wrap' style='direction:ltr'>";
+    html += "<div class='bc-bars' style='height:" + barsH + ";margin:0 " + quietPc.toFixed(3) + "%'>";
+    var i2 = 0;
+    while (i2 < total) {
+      if (mods[i2] === "1") {
+        var j = i2; while (j < total && mods[j] === "1") j++;
+        var left = (i2 / total * 100).toFixed(4), wdt = ((j - i2) / total * 100).toFixed(4);
+        html += "<i style='left:" + left + "%;width:" + wdt + "%;background:" + ink + "'></i>";
+        i2 = j;
+      } else i2++;
+    }
+    html += "</div>";
+    if (m.hri) {
+      html += "<div class='bc-hri' style='color:" + ink + ";font-size:" + ptPx(it.pt || 8) +
+        "px'>" + escapeHtml(hri) + "</div>";
+    }
+    html += "</div>";
+    // remember the effective total for the width grid (harmless metadata)
+    void barsPc;
+    return html;
+  }
+
+  /* ------------------------------------------- live table grips (v1.55.0) -- *
+   * Professional, interactive editing: thin drag handles overlaid on the
+   * selected table / services item let the user resize COLUMN WIDTHS and ROW
+   * HEIGHTS directly on the canvas, in real time. Everything is written back
+   * into the item's JSON model, so the print engine renders exactly what the
+   * designer shows. Numeric entry for the same values lives in the inspector.  */
+  function svcWriteModel(it, m) {
+    it.text = JSON.stringify(m);
+  }
+  function gripModelOf(it) {
+    return (it.type === "services") ? parseServices(it) : parseTable(it);
+  }
+  function addTableGrips(el, it) {
+    if (it.id !== S.selId) return;               // only the selected item
+    var m = gripModelOf(it);
+    var cols = m.cols || 1;
+    var sum = 0; (m.widths || []).forEach(function (w) { sum += (w || 0); });
+    if (sum <= 0) return;
+    var Wpx = mm(it.w), Hpx = mm(it.h);
+    if (Wpx < 12 || Hpx < 8) return;             // too small to grab safely
+
+    var host = document.createElement("div");
+    host.className = "tbl-grips";
+
+    // ---- column boundaries (RTL: col 0 is the RIGHT-most column) ----------
+    var acc = 0;
+    for (var c = 0; c < cols - 1; c++) {
+      acc += (m.widths[c] || 0);
+      var g = document.createElement("div");
+      g.className = "col-grip";
+      g.style.right = (acc / sum * Wpx).toFixed(2) + "px";
+      g.dataset.col = String(c);
+      g.title = "کشیدن برای تغییر عرض ستون";
+      host.appendChild(g);
+    }
+
+    // ---- header height + row height ---------------------------------------
+    var hasHeader = (it.type === "services") ? (m.header !== false) : (m.header !== false);
+    var hHpx = (it.headerH > 0) ? mm(it.headerH) : (hasHeader ? Hpx * 0.16 : 0);
+    if (hasHeader && hHpx > 3 && hHpx < Hpx - 3) {
+      var gh = document.createElement("div");
+      gh.className = "row-grip row-grip-head";
+      gh.style.top = hHpx.toFixed(2) + "px";
+      gh.dataset.kind = "headerH";
+      gh.title = "کشیدن برای تغییر ارتفاع سرستون";
+      host.appendChild(gh);
+    }
+    var nData = (it.type === "services") ? SVC_SAMPLES.length
+                                         : Math.max(1, (m.rows || 1) - (hasHeader ? 1 : 0));
+    var rHpx = (it.rowH > 0) ? mm(it.rowH) : Math.max(3, (Hpx - hHpx) / Math.max(1, nData));
+    var rowY = hHpx + rHpx;
+    if (rowY > 4 && rowY < Hpx - 2) {
+      var gr = document.createElement("div");
+      gr.className = "row-grip";
+      gr.style.top = rowY.toFixed(2) + "px";
+      gr.dataset.kind = "rowH";
+      gr.title = "کشیدن برای تغییر ارتفاع سطر";
+      host.appendChild(gr);
+    }
+
+    host.addEventListener("mousedown", function (e) {
+      var g2 = e.target.closest(".col-grip, .row-grip");
+      if (!g2) return;
+      e.preventDefault(); e.stopPropagation();
+      pushUndo();
+      var isCol = g2.classList.contains("col-grip");
+      var col = +g2.dataset.col;
+      var kind = g2.dataset.kind;
+      var startX = e.clientX, startY = e.clientY;
+      var mm0 = gripModelOf(it);
+      var w0 = (mm0.widths || []).slice();
+      var s0 = 0; w0.forEach(function (w) { s0 += (w || 0); });
+      var head0 = (it.headerH > 0) ? it.headerH : +( (it.h * 0.16).toFixed(2) );
+      var row0 = (it.rowH > 0) ? it.rowH
+        : +(Math.max(3, (it.h - head0) / Math.max(1, nData)).toFixed(2));
+
+      function onMove(ev) {
+        var pxmm = S.pxPerMM * S.scale;
+        if (isCol) {
+          // RTL: dragging LEFT widens the column on the right of the boundary
+          var df = (-(ev.clientX - startX) / pxmm) / it.w * s0;
+          var minW = s0 * 0.04;
+          var a = w0[col] + df, b = w0[col + 1] - df;
+          if (a < minW) { b -= (minW - a); a = minW; }
+          if (b < minW) { a -= (minW - b); b = minW; }
+          if (a < minW || b < minW) return;
+          var mm2 = gripModelOf(it);
+          mm2.widths = w0.slice();
+          mm2.widths[col] = Math.round(a * 1000) / 1000;
+          mm2.widths[col + 1] = Math.round(b * 1000) / 1000;
+          svcWriteModel(it, mm2);
+        } else {
+          var dmm = (ev.clientY - startY) / pxmm;
+          if (kind === "headerH") it.headerH = Math.max(3, Math.round((head0 + dmm) * 2) / 2);
+          else it.rowH = Math.max(3, Math.round((row0 + dmm) * 2) / 2);
+        }
+        renderAll();
+      }
+      function onUp() {
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        renderInspector();
+      }
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    });
+
+    el.appendChild(host);
   }
 
   function buildItemEl(it) {
@@ -352,8 +733,12 @@
       el.appendChild(t);
     } else if (it.type === "table") {
       el.innerHTML = tableHtml(it, false);
+      if (!it.locked) addTableGrips(el, it);
     } else if (it.type === "services") {
       el.innerHTML = servicesHtml(it);
+      if (!it.locked) addTableGrips(el, it);
+    } else if (it.type === "barcode") {
+      el.innerHTML = barcodeHtml(it);
     } else if (it.type === "hline") {
       el.style.height = Math.max(1, mm(it.borderWidth || 0.4)) + "px";
       el.style.background = it.borderColor || "#222";
@@ -457,7 +842,9 @@
       font: "Vazirmatn", pt: 11, bold: false, italic: false, align: 0, dir: 0, lineSpacing: 1.25,
       textColor: "#111111", fillColor: "#ffffff", fillTransparent: true,
       borderColor: "#333333", borderWidth: 0.4, corner: 0, padding: 1, opacity: 1,
-      visibility: 0, startValue: 1, step: 1, imgPath: ""
+      visibility: 0, startValue: 1, step: 1, imgPath: "",
+      // v1.55.0: explicit row / header heights in mm (0 = auto-distribute)
+      rowH: 0, headerH: 0
     };
     if (type === "label") { it.text = "متن"; it.w = 40; it.h = 8; }
     else if (type === "field") { it.w = 50; it.h = 8; }
@@ -472,6 +859,13 @@
     else if (type === "photo") { it.w = 25; it.h = 32; }
     else if (type === "image") { it.w = 40; it.h = 25; }
     else if (type === "qr") { it.w = 24; it.h = 24; }
+    else if (type === "barcode") {
+      // v1.55.0: real scannable Code128-B with the numeric code printed below
+      it.w = 52; it.h = 16; it.pt = 8; it.align = 1; it.dir = 1;
+      it.textColor = "#000000"; it.fillTransparent = true; it.borderWidth = 0;
+      it.field = "{receiptbarcode}";
+      it.text = JSON.stringify({ sym: "code128", hri: true, quiet: 2 });
+    }
     else if (type === "apptno") { it.w = 30; it.h = 14; it.pt = 22; it.bold = true; it.align = 1; }
     else if (type === "table") {
       it.w = 90; it.h = 30; it.pt = 9; it.borderWidth = 0.4;
@@ -485,9 +879,13 @@
       var narrow = dm2[0] < 90;
       it.w = narrow ? 60 : 130; it.h = narrow ? 30 : 40;
       it.pt = narrow ? 7.5 : 8.5; it.borderWidth = 0.4;
-      it.borderColor = "#2b5f9e"; it.fillColor = "#1f5fd6"; it.textColor = "#16233a";
-      it.text = JSON.stringify({ cols: 4, header: true, widths: [0.1, 0.5, 0.15, 0.25],
-        labels: ["ردیف", "نام خدمت", "کد", "مبلغ (ریال)"] });
+      // v1.55.0: monochrome + the real receipt's three columns, anchored RTL
+      it.borderColor = "#000000"; it.fillColor = "#e9e9e9"; it.textColor = "#000000";
+      it.fillTransparent = false;
+      it.align = 0; it.dir = 0;
+      it.headerH = narrow ? 6 : 7.5; it.rowH = narrow ? 5.5 : 6.5;
+      it.text = JSON.stringify({ cols: 3, header: true, widths: SVC_DEF_WIDTHS.slice(),
+        labels: SVC_DEF_LABELS.slice() });
     }
     return it;
   }
@@ -528,7 +926,8 @@
       ["label", "متن ثابت"], ["field", "فیلد داده"], ["services", "لیست خدمات"], ["table", "جدول"],
       ["hline", "خط افقی"], ["vline", "خط عمودی"], ["rect", "کادر"],
       ["frame", "حاشیه صفحه"], ["logo", "لوگو"], ["photo", "عکس بیمار"],
-      ["image", "تصویر"], ["qr", "بارکد / QR"], ["apptno", "شماره نوبت"]
+      ["image", "تصویر"], ["qr", "بارکد / QR"], ["barcode", "بارکد خطی"],
+      ["apptno", "شماره نوبت"]
     ];
     var sec = document.createElement("div"); sec.className = "pl-cat";
     sec.innerHTML = "<div class='pl-cat-h'>عناصر طراحی</div>";
@@ -660,6 +1059,38 @@
       edit.textContent = "ویرایش محتوای جدول…";
       edit.addEventListener("click", function () { openTableBuilder(it); });
       gtb.appendChild(edit);
+      // v1.55.0: live row / header heights for static tables too
+      gtb.appendChild(row("ارتفاع سرستون (mm)", numInput(it.headerH || 0, 0, 40, 0.5, function (v) {
+        it.headerH = Math.max(0, v); up(); })));
+      gtb.appendChild(row("ارتفاع سطر (mm)", numInput(it.rowH || 0, 0, 40, 0.5, function (v) {
+        it.rowH = Math.max(0, v); up(); })));
+      var tnote = document.createElement("div");
+      tnote.style.cssText = "font-size:11px;color:#7a879c;margin:4px 0 0;line-height:1.5";
+      tnote.textContent = "۰ = توزیع خودکار در ارتفاع کادر. لبهٔ ستون/سطر را روی صفحه بکشید.";
+      gtb.appendChild(tnote);
+    }
+    if (it.type === "barcode") {
+      // v1.55.0: a REAL scannable linear barcode — never decorative, never random
+      var gbc = grp("بارکد خطی (قابل اسکن)");
+      var bm = parseBarcode(it);
+      function commitBc() { it.text = JSON.stringify(bm); up(true); renderInspector(); }
+      var bopts = [];
+      (window.AZ_FIELD_CATS || []).forEach(function (c) {
+        c.items.forEach(function (f) { bopts.push([f.key, c.title + " › " + f.label]); });
+      });
+      gbc.appendChild(row("دادهٔ بارکد", selectInput(bopts, it.field, function (v) { it.field = v; up(); })));
+      gbc.appendChild(row("نوع بارکد", selectInput([
+        ["code128", "Code 128 (پیشنهادی — عدد و حروف)"],
+        ["code39", "Code 39 (عدد و حروف بزرگ)"],
+        ["ean13", "EAN-13 (۱۳ رقمی)"]
+      ], bm.sym, function (v) { bm.sym = v; commitBc(); })));
+      gbc.appendChild(row("نمایش عدد زیر بارکد", checkInput(bm.hri, function (v) { bm.hri = !!v; commitBc(); })));
+      gbc.appendChild(row("حاشیهٔ سفید (mm)", numInput(bm.quiet, 0, 10, 0.5, function (v) { bm.quiet = Math.max(0, v); commitBc(); })));
+      gbc.appendChild(row("متن جایگزین (اختیاری)", textInput(it.prefix, function (v) { it.prefix = v; up(true); }, "وقتی فیلد خالی باشد")));
+      var bnote = document.createElement("div");
+      bnote.style.cssText = "font-size:11px;color:#7a879c;margin:4px 0 0;line-height:1.5";
+      bnote.textContent = "بارکد از دادهٔ واقعی پرونده ساخته می‌شود و با اسکنر خوانده می‌شود. برای برگهٔ بیمه از Code 128 استفاده کنید.";
+      gbc.appendChild(bnote);
     }
     if (it.type === "services") {
       // §1.53.0 (Bug A): live-services inspector — columns, header, widths, labels.
@@ -676,8 +1107,28 @@
         m.cols = v; m.widths = nw; m.labels = nl; commitSvc();
       })));
       gsv.appendChild(row("سطر عنوان", checkInput(m.header, function (v) { m.header = !!v; commitSvc(); })));
+      // v1.55.0: live, numeric row / header heights (mm). 0 = توزیع خودکار.
+      gsv.appendChild(row("ارتفاع سرستون (mm)", numInput(it.headerH || 0, 0, 40, 0.5, function (v) {
+        it.headerH = Math.max(0, v); up(); })));
+      gsv.appendChild(row("ارتفاع سطر (mm)", numInput(it.rowH || 0, 0, 40, 0.5, function (v) {
+        it.rowH = Math.max(0, v); up(); })));
+      // one-click return to the real receipt's canonical monochrome layout
+      var rst = document.createElement("button");
+      rst.className = "btn btn-sm btn-outline"; rst.style.cssText = "width:100%;margin:6px 0 2px";
+      rst.textContent = "بازگردانی به ستون‌های استاندارد رسید";
+      rst.title = "نام خدمت | شرح خدمت | تعداد";
+      rst.addEventListener("click", function () {
+        pushUndo();
+        m.cols = 3; m.header = true;
+        m.widths = SVC_DEF_WIDTHS.slice(); m.labels = SVC_DEF_LABELS.slice();
+        it.align = 0; it.dir = 0;
+        it.text = JSON.stringify(m);
+        up(true); renderInspector();
+        toast("ستون‌ها بازگردانی شد", "ok");
+      });
+      gsv.appendChild(rst);
       var note = document.createElement("div"); note.style.cssText = "font-size:11px;color:#7a879c;margin:4px 0 6px;line-height:1.5";
-      note.textContent = "عنوان و عرض هر ستون را تنظیم کنید. سطرهای داده هنگام چاپ به‌صورت خودکار از خدمات پذیرش پر می‌شوند.";
+      note.textContent = "عنوان و عرض هر ستون را تنظیم کنید — عنوانِ ستون تعیین می‌کند چه داده‌ای در آن چاپ شود. سطرهای داده هنگام چاپ به‌صورت خودکار از خدمات واقعی پذیرش پر می‌شوند. برای تغییر سریع، لبهٔ ستون‌ها و سطرها را روی صفحه بکشید.";
       gsv.appendChild(note);
       for (var ci = 0; ci < m.cols; ci++) {
         (function (idx) {
@@ -705,14 +1156,17 @@
       }
     }
 
-    if (it.type === "label" || it.type === "field" || it.type === "apptno" || it.type === "table" || it.type === "services") {
+    if (it.type === "label" || it.type === "field" || it.type === "apptno" || it.type === "table" ||
+        it.type === "services" || it.type === "barcode") {
       var gt = grp("قلم و متن");
-      if (it.type !== "table" && it.type !== "services")
+      if (it.type !== "table" && it.type !== "services" && it.type !== "barcode")
         gt.appendChild(row("فونت", selectInput([["Vazirmatn", "وزیر"], ["Tahoma", "تاهوما"], ["IRANSans", "ایران‌سنس"]], it.font, function (v) { it.font = v; up(); })));
       gt.appendChild(row("اندازه (pt)", numInput(it.pt, 5, 96, 0.5, function (v) { it.pt = v; up(); })));
-      if (it.type === "services")
-        gt.appendChild(row("رنگ سرستون", colorInput(it.fillColor, function (v) { it.fillColor = v; up(); })));
-      if (it.type !== "table" && it.type !== "services") {
+      if (it.type === "services") {
+        gt.appendChild(row("بدون سایهٔ سرستون", checkInput(it.fillTransparent, function (v) { it.fillTransparent = v; up(); })));
+        gt.appendChild(row("سایهٔ سرستون", colorInput(it.fillColor, function (v) { it.fillColor = v; it.fillTransparent = false; up(); renderInspector(); })));
+      }
+      if (it.type !== "table" && it.type !== "services" && it.type !== "barcode") {
         gt.appendChild(row("ضخیم", checkInput(it.bold, function (v) { it.bold = v; up(); })));
         gt.appendChild(row("کج", checkInput(it.italic, function (v) { it.italic = v; up(); })));
         gt.appendChild(row("چینش", selectInput([["0", "راست"], ["1", "وسط"], ["2", "چپ"]], it.align, function (v) { it.align = +v; up(); })));
@@ -728,8 +1182,9 @@
           up(); renderInspector();
         })));
       }
-      gt.appendChild(row("رنگ متن", colorInput(it.textColor, function (v) { it.textColor = v; up(); })));
-      if (it.type !== "table" && it.type !== "services")
+      gt.appendChild(row(it.type === "barcode" ? "رنگ بارکد" : "رنگ متن",
+        colorInput(it.textColor, function (v) { it.textColor = v; up(); })));
+      if (it.type !== "table" && it.type !== "services" && it.type !== "barcode")
         gt.appendChild(row("فاصله خطوط", numInput(it.lineSpacing, 1, 3, 0.05, function (v) { it.lineSpacing = v; up(); })));
     }
 
@@ -956,9 +1411,17 @@
     document.getElementById("tblCols").value = model.cols;
     document.getElementById("tblRows").value = model.rows;
     document.getElementById("tblHeader").checked = !!model.header;
+    // v1.55.0: live row / header heights (mm). 0 = distribute over the box height.
+    var hh = document.getElementById("tblHeaderH"), rh = document.getElementById("tblRowH");
+    if (hh) hh.value = (it && it.headerH > 0) ? it.headerH : 0;
+    if (rh) rh.value = (it && it.rowH > 0) ? it.rowH : 0;
+    // v1.55.0: keep the column widths the user set with the on-canvas grips
+    tblWidths = (model.widths || []).slice();
     renderTableEditor(model);
     document.getElementById("tblOverlay").classList.remove("hidden");
   }
+  // v1.55.0: column widths survive a rebuild / add / delete round-trip
+  var tblWidths = [];
   // v1.22.0: track the currently selected cell (row,col) in the table editor.
   var tblSel = { r: -1, c: -1 };
   function readTableModel() {
@@ -969,7 +1432,8 @@
     var inputs = document.querySelectorAll("#tblEditor input.cell");
     var k = 0;
     for (var r = 0; r < rows; r++) { cells[r] = []; for (var c = 0; c < cols; c++) { cells[r][c] = inputs[k] ? inputs[k].value : ""; k++; } }
-    for (var c2 = 0; c2 < cols; c2++) widths[c2] = 1;
+    // v1.55.0: preserve any custom column widths instead of flattening them to 1
+    for (var c2 = 0; c2 < cols; c2++) widths[c2] = (tblWidths[c2] > 0) ? tblWidths[c2] : 1;
     return { cols: cols, rows: rows, header: header, widths: widths, cells: cells };
   }
   function renderTableEditor(model) {
@@ -1042,7 +1506,7 @@
       var m = readTableModel();
       var at = (tblSel.c >= 0 ? tblSel.c + 1 : m.cols);
       for (var r = 0; r < m.rows; r++) m.cells[r].splice(at, 0, "");
-      m.cols++; m.widths.splice(at, 0, 1);
+      m.cols++; m.widths.splice(at, 0, 1); tblWidths = m.widths.slice();
       tblSel = { r: 0, c: at }; rebuild(m);
     });
     document.getElementById("tblDelRow").addEventListener("click", function () {
@@ -1055,7 +1519,7 @@
       var m = readTableModel(); if (m.cols <= 1) { toast("حداقل یک ستون لازم است", "err"); return; }
       var at = (tblSel.c >= 0 ? tblSel.c : m.cols - 1);
       for (var r = 0; r < m.rows; r++) m.cells[r].splice(at, 1);
-      m.cols--; m.widths.splice(at, 1);
+      m.cols--; m.widths.splice(at, 1); tblWidths = m.widths.slice();
       tblSel = { r: tblSel.r, c: Math.min(at, m.cols - 1) }; rebuild(m);
     });
     // ---- v1.22.0 insert a {field} token into the selected cell ----
@@ -1071,17 +1535,26 @@
     });
     document.getElementById("tblInsert").addEventListener("click", function () {
       var model = readTableModel();
+      var hhEl = document.getElementById("tblHeaderH"), rhEl = document.getElementById("tblRowH");
+      var newHH = hhEl ? Math.max(0, +hhEl.value || 0) : 0;
+      var newRH = rhEl ? Math.max(0, +rhEl.value || 0) : 0;
       if (tblTarget) {
         pushUndo();
         tblTarget.text = JSON.stringify(model);
+        tblTarget.headerH = newHH; tblTarget.rowH = newRH;
         renderAll(); renderInspector();
       } else {
         pushUndo();
         var it = defaultItem("table");
         it.text = JSON.stringify(model);
+        it.headerH = newHH; it.rowH = newRH;
         var dm = paperDims(S.design.paper, S.design.orientation);
         it.w = Math.min(dm[0] - 16, 120); it.x = 8; it.y = 40;
-        it.h = Math.min(dm[1] - 50, model.rows * 8 + 2);
+        // size the box from the explicit heights when the user supplied them
+        var autoH = newRH > 0
+          ? (newHH > 0 ? newHH : newRH) + newRH * Math.max(0, model.rows - (model.header ? 1 : 0)) + 1
+          : model.rows * 8 + 2;
+        it.h = Math.min(dm[1] - 50, autoH);
         S.design.items.push(it); renderAll(); select(it.id);
       }
       document.getElementById("tblOverlay").classList.add("hidden");
@@ -1203,8 +1676,15 @@
         if (!it.fillTransparent && it.fillColor && it.type === "rect") e.style.background = it.fillColor;
       }
       else if (it.type === "services") {
-        e.style.border = "0.6px solid " + (it.borderColor || "#2b5f9e");
-        e.style.background = "linear-gradient(" + (it.fillColor || "#1f5fd6") + " 0 22%, #fff 22% 100%)";
+        var band = (!it.fillTransparent && it.fillColor) ? it.fillColor : "#e9e9e9";
+        e.style.border = "0.6px solid " + (it.borderColor || "#000");
+        e.style.background = "linear-gradient(" + band + " 0 22%, #fff 22% 100%)";
+      }
+      else if (it.type === "barcode") {
+        // v1.55.0: miniature bar pattern so the thumbnail reads as a barcode
+        e.style.background = "repeating-linear-gradient(90deg," +
+          (it.textColor || "#000") + " 0 0.7px, transparent 0.7px 1.9px," +
+          (it.textColor || "#000") + " 1.9px 2.6px, transparent 2.6px 4.2px)";
       }
       else if (it.type === "logo" || it.type === "photo" || it.type === "image" || it.type === "qr") {
         e.style.border = "0.6px dashed #9aa7c2"; e.style.background = "#f3f6fb";
@@ -1234,12 +1714,35 @@
     var pw = dm[0], ph = dm[1];
     if (pw >= 80) return;                    // only compact truly narrow rolls
     var items = d.items || [];
-    // drop decorative media that eats precious width on a thin roll
+    // drop decorative media that eats precious width on a thin roll.
+    // v1.55.0: a `barcode` is NOT decorative — it carries the scannable receipt
+    // identifier, so it always survives (it is merely narrowed by the clamp).
     if (pw < 80) {
       d.items = items = items.filter(function (it) {
         return !(it.type === "qr" || it.type === "logo" || it.type === "photo");
       });
     }
+    // v1.55.0 RESPONSIVE TABLES: on a thin roll a three-column services table
+    // becomes unreadable, so drop the widest prose column (شرح خدمت) and give
+    // its width to the service name. The remaining columns keep their meaning
+    // because the print engine resolves data by column CAPTION, not by index.
+    items.forEach(function (it) {
+      if (it.type !== "services") return;
+      var m = parseServices(it);
+      if (m.cols <= 2) return;
+      var keepIdx = [], i2;
+      for (i2 = 0; i2 < m.cols; i2++) {
+        var kind = svcColOf(m.labels[i2], i2);
+        if (kind !== PSC.DESC && kind !== PSC.CAT && kind !== PSC.ROW) keepIdx.push(i2);
+      }
+      if (!keepIdx.length || keepIdx.length === m.cols) return;
+      var nl = [], nw = [], s2 = 0;
+      keepIdx.forEach(function (ix) { nl.push(m.labels[ix] || ""); nw.push(m.widths[ix] || 0); });
+      nw.forEach(function (x) { s2 += x; });
+      if (s2 > 0) nw = nw.map(function (x) { return Math.round(x / s2 * 1000) / 1000; });
+      m.cols = keepIdx.length; m.labels = nl; m.widths = nw;
+      it.text = JSON.stringify(m);
+    });
     // group items into rows by their y band, then detect side-by-side pairs and
     // stack them vertically (single column) so nothing runs off the edge.
     items.sort(function (a, b) { return (a.y - b.y) || (b.x - a.x); });
@@ -1467,5 +1970,23 @@
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
   else boot();
 
-  window.AZDesigner = { S: S, render: renderAll, save: saveDesign };
+  // Public surface. The v1.55.0 additions expose the pure model/encoder helpers
+  // so the print contract (3-column services, label-driven columns, real
+  // barcode symbologies) can be asserted automatically against the C++ engine.
+  window.AZDesigner = {
+    S: S, render: renderAll, save: saveDesign,
+    // services model
+    parseServices: parseServices, servicesHtml: servicesHtml,
+    svcColOf: svcColOf, svcSample: svcSample, PSC: PSC,
+    SVC_DEF_LABELS: SVC_DEF_LABELS, SVC_DEF_WIDTHS: SVC_DEF_WIDTHS,
+    // barcode engine (must stay bit-identical to printer.cpp)
+    parseBarcode: parseBarcode, barcodeHtml: barcodeHtml,
+    bc128Modules: bc128Modules, bc39Modules: bc39Modules,
+    bcEan13Modules: bcEan13Modules, bcNormPayload: bcNormPayload,
+    C128_PAT: C128_PAT, C39_PAT: C39_PAT, C39_SET: C39_SET,
+    EAN_A: EAN_A, EAN_B: EAN_B, EAN_C: EAN_C, EAN_PAR: EAN_PAR,
+    // items / tables
+    defaultItem: defaultItem, parseTable: parseTable, tableHtml: tableHtml,
+    reflowItems: reflowItems, compactForNarrow: compactForNarrow
+  };
 })();

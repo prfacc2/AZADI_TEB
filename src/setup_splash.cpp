@@ -80,6 +80,40 @@ static bool ssDetectLowSpec(){
     return (ramMB>0 && ramMB<=2200) || (cores>0 && cores<=2);
 }
 
+// Configure the system MSHTML fallback for modern standards. WebView2 remains
+// the preferred engine when available, but Windows 7 and clean/offline systems
+// must work without downloading any runtime. Per-user registry writes need no
+// elevation and are safe/idempotent on every launch.
+static bool ssConfigureBrowserFeatures(){
+    wchar_t exePath[MAX_PATH]={0};
+    if(!GetModuleFileNameW(NULL,exePath,MAX_PATH)) return false;
+    const wchar_t* exeName=exePath;
+    for(const wchar_t* p=exePath; *p; ++p) if(*p==L'\\'||*p==L'/') exeName=p+1;
+    if(!*exeName) return false;
+
+    struct Feature { const wchar_t* name; DWORD value; } features[]={
+        {L"FEATURE_BROWSER_EMULATION",11001}, // IE11 Edge/standards mode
+        {L"FEATURE_GPU_RENDERING",1},
+        {L"FEATURE_DISABLE_NAVIGATION_SOUNDS",1}
+    };
+    bool ok=true;
+    for(const auto& f:features){
+        std::wstring path=L"Software\\Microsoft\\Internet Explorer\\Main\\FeatureControl\\";
+        path+=f.name;
+        HKEY key=NULL; DWORD disposition=0;
+        LONG rc=RegCreateKeyExW(HKEY_CURRENT_USER,path.c_str(),0,NULL,0,
+                                KEY_SET_VALUE,NULL,&key,&disposition);
+        (void)disposition;
+        if(rc==ERROR_SUCCESS){
+            rc=RegSetValueExW(key,exeName,0,REG_DWORD,
+                              reinterpret_cast<const BYTE*>(&f.value),sizeof(f.value));
+            RegCloseKey(key);
+        }
+        if(rc!=ERROR_SUCCESS) ok=false;
+    }
+    return ok;
+}
+
 static DWORD WINAPI ssWorker(LPVOID p){
     SetupState* s = (SetupState*)p;
     // weak machines: shave the deliberate pacing so the bar isn't slow on the
@@ -131,14 +165,17 @@ static DWORD WINAPI ssWorker(LPVOID p){
     }
     Sleep(s->lowSpec?60:160);
 
-    ssSet(s, 82, L"ثبت اجزای رابط کاربری…");
+    ssSet(s, 82, L"ثبت اجزای رابط و موتور نمایش…");
     // §1.18.1: register ALL custom control window classes (spinner / color /
     // switch / dropdown) up-front. This guarantees every screen — including the
     // print designer opened from Management — can create its controls, and is
     // the belt-and-braces companion to the in-flow registration that fixed the
     // print-designer ACCESS_VIOLATION. Idempotent (internal done-guard).
     uikit::Az_RegisterControls();
-    s->webOk = false;
+    s->webOk = ssConfigureBrowserFeatures();
+    setSetting(L"sys_mshtml_configured",s->webOk?L"1":L"0");
+    logLine(s->webOk ? L"setup: MSHTML IE11 standards + GPU features configured"
+                     : L"setup: warning: MSHTML feature registry configuration failed");
     Sleep(s->lowSpec?50:200);
 
     ssSet(s, 94, L"تکمیل پیکربندی برای این سیستم…");

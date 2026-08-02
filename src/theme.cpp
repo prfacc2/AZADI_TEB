@@ -88,6 +88,24 @@ void applyTheme(bool dark){
         g_theme.headerBot   = RGB(0xEA, 0xF4, 0xFF); // header reads as its own layer
         g_infoAccent  = RGB(0x7C, 0x56, 0xE4);    // violet (distinct, non-red)
         g_infoAccent2 = RGB(0x5E, 0x42, 0xD0);
+
+        // v1.59: two additional eye-comfort light palettes. They retain the same
+        // high contrast and elevation ladder; only the neutral temperature and
+        // accent family change. `blue` remains the default medical-white theme.
+        std::wstring palette=getSetting(L"theme.palette",L"blue");
+        if(palette==L"calm"){
+            g_theme.bg=RGB(0xEE,0xF6,0xF6); g_theme.bg2=RGB(0xD7,0xE8,0xE9);
+            g_theme.surface2=RGB(0xE2,0xF0,0xF1); g_theme.border=RGB(0xBE,0xD3,0xD5);
+            g_theme.accent=RGB(0x15,0x7A,0x86); g_theme.accent2=RGB(0x20,0x95,0xA2);
+            g_theme.accentHover=RGB(0x20,0x95,0xA2); g_theme.hover=RGB(0xE1,0xF0,0xF1);
+            g_theme.headerBot=RGB(0xE0,0xEF,0xF0); g_theme.inputBg=RGB(0xF7,0xFB,0xFB);
+        } else if(palette==L"warm"){
+            g_theme.bg=RGB(0xF7,0xF4,0xEF); g_theme.bg2=RGB(0xE8,0xE1,0xD8);
+            g_theme.surface2=RGB(0xF0,0xE9,0xE1); g_theme.border=RGB(0xD8,0xCB,0xBD);
+            g_theme.accent=RGB(0x81,0x5B,0x3A); g_theme.accent2=RGB(0xA3,0x74,0x4A);
+            g_theme.accentHover=RGB(0xA3,0x74,0x4A); g_theme.hover=RGB(0xF0,0xE9,0xE1);
+            g_theme.headerBot=RGB(0xEF,0xE8,0xDF); g_theme.inputBg=RGB(0xFD,0xFB,0xF8);
+        }
     }
     if(g_brBg)       DeleteObject(g_brBg);
     if(g_brSurface)  DeleteObject(g_brSurface);
