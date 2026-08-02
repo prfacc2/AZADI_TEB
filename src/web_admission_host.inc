@@ -309,6 +309,17 @@ static void WV2_PushEvent(const char* eventName, const std::string& jsonData){
     }
 }
 
+// Native frame actions must target only the active admission tab. Broadcasting a
+// print event would print once for every open tab, so this path deliberately does
+// not enqueue into the shared HTTP fallback queue.
+static bool WV2_PushEventTo(HWND view, const char* eventName, const std::string& jsonData){
+    AdView* v=adViewFor(view);
+    if(!v || !v->web) return false;
+    std::string msg="{\"event\":"+jstr(u82w(eventName))+",\"data\":"+
+        (jsonData.empty()?std::string("{}"):jsonData)+"}";
+    return SUCCEEDED(v->web->PostWebMessageAsJson(u82w(msg).c_str()));
+}
+
 static bool WV2_DestroyView(HWND view){
     AdView* v=nullptr;
     { std::lock_guard<std::mutex> lk(g_adViewsMx);

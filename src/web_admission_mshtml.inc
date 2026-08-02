@@ -308,6 +308,33 @@ static HWND MshtmlAdmission_CreateView(HWND parent){
 
 static void MshtmlAdmission_Resize(HWND host, int, int){ mshtmlResize(host); }
 
+// Deliver a native event directly into one Trident document. This avoids the
+// shared /api/poll queue, which cannot distinguish multiple admission tabs.
+static bool MshtmlAdmission_PushEvent(HWND host, const char* eventName,
+                                      const std::string& jsonData){
+    MshtmlView* v=mshtmlViewFor(host);
+    if(!v || !v->wb) return false;
+    IDispatch* disp=nullptr;
+    if(FAILED(v->wb->get_Document(&disp)) || !disp) return false;
+    IHTMLDocument2* doc=nullptr;
+    HRESULT hr=disp->QueryInterface(IID_IHTMLDocument2,(void**)&doc);
+    disp->Release();
+    if(FAILED(hr) || !doc) return false;
+    IHTMLWindow2* win=nullptr;
+    hr=doc->get_parentWindow(&win); doc->Release();
+    if(FAILED(hr) || !win) return false;
+    std::string msg="{\"event\":"+jstr(u82w(eventName))+",\"data\":"+
+        (jsonData.empty()?std::string("{}"):jsonData)+"}";
+    std::wstring script=L"if(window.azAdmissionReceive){window.azAdmissionReceive("+
+        u82w(msg)+L");}";
+    BSTR code=SysAllocString(script.c_str());
+    BSTR lang=SysAllocString(L"JavaScript");
+    VARIANT ret; VariantInit(&ret);
+    hr=win->execScript(code,lang,&ret);
+    VariantClear(&ret); SysFreeString(code); SysFreeString(lang); win->Release();
+    return SUCCEEDED(hr);
+}
+
 static void MshtmlAdmission_Destroy(HWND host){
     MshtmlView* v=nullptr;
     { std::lock_guard<std::mutex> lk(g_mshtmlMx);

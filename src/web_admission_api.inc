@@ -45,6 +45,8 @@ static std::string serviceJson(const ServiceDef& s){
     o+="\"name\":"+jstr(s.name)+",";
     o+="\"category\":"+jstr(s.category)+",";
     o+="\"dept\":"+jstr(s.dept)+",";
+    o+="\"desc\":"+jstr(s.desc)+",";
+    o+="\"insType\":"+jstr(s.insType)+",";
     o+="\"price\":"+jnum(s.price)+",";
     o+="\"status\":"+jnum(s.status);
     o+="}";
@@ -88,6 +90,38 @@ static std::wstring adNowTime(){
     wchar_t b[16]; swprintf(b,16,L"%02d:%02d:%02d",st.wHour,st.wMinute,st.wSecond);
     return b;
 }
+static std::string adDoctorStatsJson(const std::wstring& doctor){
+    int total=countTodayDoctorReceptions(doctor,false);
+    int paid=countTodayDoctorReceptions(doctor,true);
+    return "{\"P\":"+jnum(total)+",\"S\":"+jnum(paid)+"}";
+}
+static std::wstring adBlockRemaining(const BlacklistEntry& b){
+    if(b.expiresEpochMin==0) return L"مسدودی دائم";
+    long long mins=b.expiresEpochMin-Blacklist_NowEpochMinutes();
+    if(mins<1) mins=1;
+    if(mins<60) return std::to_wstring(mins)+L" دقیقه باقی‌مانده";
+    if(mins<1440) return std::to_wstring((mins+59)/60)+L" ساعت باقی‌مانده";
+    return std::to_wstring((mins+1439)/1440)+L" روز باقی‌مانده";
+}
+static std::string adBlockJson(const BlacklistEntry& b){
+    return "{\"nid\":"+jstr(b.nid)+",\"reason\":"+jstr(b.reason)+
+           ",\"remaining\":"+jstr(adBlockRemaining(b))+"}";
+}
+static bool adCatalogPrice(const std::vector<ServiceDef>& catalog,
+                           const std::string& obj,long long& price){
+    bool freeRate=jsonGetBool(obj,"freeRate",false);
+    double n=0;
+    if(freeRate){
+        if(!jsonGetNumber(obj,"freePrice",n) || n<=0) return false;
+        price=(long long)llround(n); return true;
+    }
+    std::string codeU; jsonGetString(obj,"code",codeU);
+    std::wstring want=normDigits(trim(u82w(codeU)));
+    for(const auto& s:catalog){
+        if(s.status!=0 && normDigits(trim(s.code))==want){ price=s.price; return price>0; }
+    }
+    return false;
+}
 
 // ---- resolve the operator's print-design SECTION (mirrors reception.cpp) ----
 static int adResolveSectionId(){
@@ -112,7 +146,9 @@ static int adResolveSectionId(){
 //  single static EXE. One pipe-delimited line per entry:
 //    id|nid|first|last|mobile|barcode|jdate|time|epochMin|amount
 // ============================================================================
-static std::wstring adQueuePath(){ return dataDir()+L"\\unpaid_queue.dat"; }
+static std::wstring adQueuePath(bool admissionQueue){
+    return dataDir()+(admissionQueue?L"\\recept_queue_web.dat":L"\\unpaid_queue.dat");
+}
 
 static long long adEpochMinutes(){
     // minutes since a fixed epoch, from Iran-local wall clock (stable ordering)
@@ -137,9 +173,9 @@ static std::wstring adEscPipe(const std::wstring& s){
     std::wstring o=s; for(auto&c:o){ if(c==L'|') c=L'¦'; if(c==L'\n'||c==L'\r') c=L' '; } return o;
 }
 
-static std::vector<AdQueueRow> adQueueLoad(){
+static std::vector<AdQueueRow> adQueueLoad(bool admissionQueue){
     std::vector<AdQueueRow> out;
-    std::wstring all=readFileUtf8(adQueuePath());
+    std::wstring all=readFileUtf8(adQueuePath(admissionQueue));
     size_t pos=0;
     while(pos<all.size()){
         size_t e=all.find(L'\n',pos); if(e==std::wstring::npos) e=all.size();
@@ -156,7 +192,7 @@ static std::vector<AdQueueRow> adQueueLoad(){
     }
     return out;
 }
-static void adQueueSave(const std::vector<AdQueueRow>& rows){
+static void adQueueSave(const std::vector<AdQueueRow>& rows,bool admissionQueue){
     std::wstring all;
     for(const auto& r:rows){
         wchar_t em[32],am[32];
@@ -165,10 +201,10 @@ static void adQueueSave(const std::vector<AdQueueRow>& rows){
                adEscPipe(r.last)+L"|"+adEscPipe(r.mobile)+L"|"+adEscPipe(r.barcode)+L"|"+
                adEscPipe(r.jdate)+L"|"+adEscPipe(r.time)+L"|"+em+L"|"+am+L"\r\n";
     }
-    writeFileUtf8(adQueuePath(),all,false);
+    writeFileUtf8(adQueuePath(admissionQueue),all,false);
 }
-static std::string adQueueJson(){
-    auto rows=adQueueLoad();
+static std::string adQueueJson(bool admissionQueue){
+    auto rows=adQueueLoad(admissionQueue);
     long long now=adEpochMinutes();
     // newest first
     std::string o="{\"rows\":[";
@@ -220,18 +256,27 @@ struct AdBill {
     long long gross=0, disc=0, org=0, supp=0, pat=0, paid=0;
     int insIdx=0, suppIdx=0, basePct=0, suppPct=0;
 };
-static AdBill adComputeBill(const std::string& body){
+static AdBill adComputeBill(const std::string& body,
+                            const std::vector<ServiceDef>& catalog){
     AdBill b;
     bool hasIns=jsonGetBool(body,"hasIns",false);
     double d;
     if(jsonGetNumber(body,"insMain",d)) b.insIdx=(int)d;
     if(jsonGetNumber(body,"insSupp",d)) b.suppIdx=(int)d;
-    if(jsonGetNumber(body,"insSuppPct",d)) b.suppPct=(int)d;
-    if(b.insIdx>=0 && b.insIdx<N_INSURANCES && hasIns) b.basePct=INSURANCES[b.insIdx].pct;
-    if(b.suppPct<=0 && b.suppIdx>=0 && b.suppIdx<N_SUPP) b.suppPct=SUPP_INSURANCES[b.suppIdx].pct;
-    if(!hasIns){ b.basePct=0; }
+    if(jsonGetNumber(body,"insSuppPct",d)) b.suppPct=(int)llround(d);
+    if(b.insIdx<0 || b.insIdx>=N_INSURANCES) b.insIdx=0;
+    if(b.suppIdx<0 || b.suppIdx>=N_SUPP) b.suppIdx=0;
+    if(hasIns) b.basePct=INSURANCES[b.insIdx].pct;
+    if(b.suppPct<=0) b.suppPct=SUPP_INSURANCES[b.suppIdx].pct;
+    // Never permit malformed client percentages to create a negative patient
+    // share or an insurer share above the net invoice.
+    if(b.basePct<0) b.basePct=0; if(b.basePct>100) b.basePct=100;
+    if(b.suppPct<0) b.suppPct=0; if(b.suppPct>100) b.suppPct=100;
+    if(!hasIns){ b.basePct=0; b.insIdx=0; }
 
-    // walk the services array
+    // Walk the services array. Normal rates are always resolved from the live
+    // Management catalog; only an explicitly enabled free-rate row may carry a
+    // manual freePrice. This is the authoritative C++ pricing boundary.
     std::string arr; jsonGetRaw(body,"services",arr);
     // iterate objects inside arr
     size_t p=0;
@@ -247,16 +292,22 @@ static AdBill adComputeBill(const std::string& body){
         }
         std::string obj=arr.substr(o,q-o);
         p=q;
-        double price=0, qty=1, discount=0;
-        jsonGetNumber(obj,"price",price);
+        long long unitPrice=0;
+        double qty=1, discount=0;
+        if(!adCatalogPrice(catalog,obj,unitPrice)) continue;
         jsonGetNumber(obj,"qty",qty);
         jsonGetNumber(obj,"discount",discount);
-        long long g=(long long)llround(price*(qty>0?qty:1));
+        if(qty<1) qty=1; if(qty>999) qty=999;
+        long long g=unitPrice*(long long)qty;
         long long ds=(long long)llround(discount);
+        if(ds<0) ds=0; if(ds>g) ds=g;
         long long net=g-ds; if(net<0) net=0;
         long long org=(long long)llround((double)net*b.basePct/100.0);
         long long afterBase=net-org;
         long long sup=(long long)llround((double)afterBase*b.suppPct/100.0);
+        if(org<0) org=0; if(org>net) org=net;
+        afterBase=net-org;
+        if(sup<0) sup=0; if(sup>afterBase) sup=afterBase;
         long long patShare=afterBase-sup;
         b.gross+=g; b.disc+=ds; b.org+=org; b.supp+=sup; b.pat+=patShare;
     }
@@ -264,28 +315,44 @@ static AdBill adComputeBill(const std::string& body){
     b.paid = noPay ? 0 : b.pat;
     return b;
 }
+static AdBill adComputeBill(const std::string& body){
+    return adComputeBill(body,loadServices());
+}
 
 // ---- build a ReceptionRecord from a record body ---------------------------
 static ReceptionRecord adBuildRecord(const std::string& body){
     AdPatient p=adReadPatient(body);
-    AdBill b=adComputeBill(body);
+    const std::vector<ServiceDef> catalog=loadServices();
+    AdBill b=adComputeBill(body,catalog);
     ReceptionRecord r;
     r.firstName=p.first; r.lastName=p.last; r.nationalId=p.nid;
     r.fatherName=p.father; r.birthDate=p.birth; r.gender=p.gender;
     r.mobile=p.mobile; r.landline=p.phone; r.address=p.addr;
     std::string s;
     if(jsonGetString(body,"ptype",s)) r.patientType=u82w(s);
-    if(jsonGetString(body,"apptDate",s)) r.apptDate=normDigits(u82w(s));
-    if(jsonGetString(body,"apptShift",s)) r.shift=u82w(s);
-    if(jsonGetString(body,"doc2name",s)) r.dept=u82w(s); // treating doctor label
+    if(jsonGetString(body,"insType",s)) r.insuranceType=u82w(s);
+    // Date and shift are assigned from the trusted native session, not HTML.
+    r.apptDate=adTodayJalali();
+    r.shift=shiftName(g_session.shift);
+    r.dept=g_session.user.dept;
+    if(jsonGetString(body,"doc2name",s)) r.treatingDoctor=u82w(s);
+    if(jsonGetString(body,"doc2code",s)) r.doctorCode=normDigits(u82w(s));
+    if(jsonGetString(body,"perfcode",s)) r.performerCode=normDigits(u82w(s));
+    if(jsonGetString(body,"perfname",s)) r.performer=u82w(s);
+    if(jsonGetString(body,"insBooklet",s)) r.insNo=normDigits(u82w(s));
+    if(jsonGetString(body,"insValid",s)) r.insExp=normDigits(u82w(s));
     r.apptTime=adNowTime();
     r.userName=g_session.user.username;
+    r.receptionist=g_session.user.fullname.empty()?g_session.user.username:g_session.user.fullname;
     r.insIdx=b.insIdx; r.suppIdx=b.suppIdx;
     if(r.insIdx>=0 && r.insIdx<N_INSURANCES) r.insurance=INSURANCES[r.insIdx].name;
     if(r.suppIdx>=0 && r.suppIdx<N_SUPP) r.suppInsurance=SUPP_INSURANCES[r.suppIdx].name;
-    r.total=b.gross; r.discount=b.disc; r.orgShare=b.org+b.supp;
-    r.mainShare=b.org; r.patientShare=b.pat; r.finalTotal=b.gross;
+    r.total=b.gross; r.discount=b.disc; r.orgShare=b.supp;
+    r.mainShare=b.org; r.baseDiff=b.gross-b.disc-b.org;
+    if(r.baseDiff<0) r.baseDiff=0;
+    r.patientShare=b.pat; r.finalTotal=b.paid;
     r.paid=b.paid;
+    r.insPercent=b.basePct; r.suppPercent=b.suppPct;
 
     // §1.51.0: capture the services list so the print pipeline (PIT_SERVICES)
     // can render a dynamic services table. We re-walk the same JSON array the
@@ -308,22 +375,31 @@ static ReceptionRecord adBuildRecord(const std::string& body){
             std::string obj=arr.substr(o,q-o);
             pos=q;
             ServiceLine ln;
-            std::string cs, ns, cats;
-            if(jsonGetString(obj,"code",cs))     ln.code=normDigits(u82w(cs));
-            if(jsonGetString(obj,"name",ns))     ln.name=u82w(ns);
+            std::string cs, ns, cats, desc;
+            if(jsonGetString(obj,"code",cs))       ln.code=normDigits(u82w(cs));
+            if(jsonGetString(obj,"name",ns))       ln.name=u82w(ns);
             if(jsonGetString(obj,"category",cats)) ln.category=u82w(cats);
-            double price=0, qty=1, discount=0;
-            jsonGetNumber(obj,"price",price);
+            if(jsonGetString(obj,"desc",desc))     ln.desc=u82w(desc);
+            long long unitPrice=0;
+            double qty=1, discount=0;
+            if(!adCatalogPrice(catalog,obj,unitPrice)) continue;
             jsonGetNumber(obj,"qty",qty);
             jsonGetNumber(obj,"discount",discount);
-            ln.price=(long long)llround(price);
-            ln.qty=(qty>0?(int)qty:1);
+            if(qty<1) qty=1; if(qty>999) qty=999;
+            ln.price=unitPrice;
+            ln.qty=(int)qty;
             ln.discount=(long long)llround(discount);
+            long long maxDisc=ln.price*(long long)ln.qty;
+            if(ln.discount<0) ln.discount=0;
+            if(ln.discount>maxDisc) ln.discount=maxDisc;
             long long g=ln.price*(long long)ln.qty;
             long long net=g-ln.discount; if(net<0) net=0;
             long long org=(long long)llround((double)net*basePct/100.0);
             long long afterBase=net-org;
             long long sup=(long long)llround((double)afterBase*suppPct/100.0);
+            if(org<0) org=0; if(org>net) org=net;
+            afterBase=net-org;
+            if(sup<0) sup=0; if(sup>afterBase) sup=afterBase;
             ln.insShare=org+sup;
             ln.patShare=afterBase-sup;
             r.services.push_back(ln);
@@ -342,8 +418,21 @@ static std::string admissionApi(const std::string& verb, const std::string& body
         o+="\"ok\":true,";
         o+="\"insurances\":"+insurancesJson()+",";
         o+="\"supp\":"+suppInsurancesJson()+",";
+        std::wstring user=g_session.user.username;
+        std::wstring suffix=user.empty()?L"":L"."+user;
+        std::wstring mode=getSetting(L"reception.mode"+suffix,
+                           getSetting(L"reception.mode",L"simple"));
+        if(mode!=L"full") mode=L"simple";
+        int zoom=_wtoi(getSetting(L"reception.zoom"+suffix,
+                       getSetting(L"reception.zoom",L"100")).c_str());
+        if(zoom<80||zoom>130) zoom=100;
         o+="\"date\":"+jstr(adTodayJalali())+",";
         o+="\"time\":"+jstr(adNowTime())+",";
+        o+="\"shift\":"+jstr(shiftName(g_session.shift))+",";
+        o+="\"mode\":"+jstr(mode)+",";
+        o+="\"zoom\":"+jnum(zoom)+",";
+        o+="\"theme\":"+jstr(getSetting(L"theme",L"light"))+",";
+        o+="\"palette\":"+jstr(getSetting(L"theme.palette",L"blue"))+",";
         o+="\"ps\":{\"P\":0,\"S\":0}";
         o+="}";
         return o;
@@ -465,6 +554,12 @@ static std::string admissionApi(const std::string& verb, const std::string& body
         o+="]}"; return o;
     }
 
+    // ---- doctor.stats: today's total + paid reception counts ---------------
+    if(verb=="doctor.stats"){
+        std::string nameU; jsonGetString(body,"name",nameU);
+        return adDoctorStatsJson(u82w(nameU));
+    }
+
     // ---- bill.compute: server-authoritative recompute (optional) -----------
     if(verb=="bill.compute"){
         AdBill b=adComputeBill(body);
@@ -481,7 +576,8 @@ static std::string admissionApi(const std::string& verb, const std::string& body
 
     // ---- queue.list: صندوق نرفته‌ها -----------------------------------------
     if(verb=="queue.list"){
-        return adQueueJson();
+        std::string kind; jsonGetString(body,"kind",kind);
+        return adQueueJson(kind=="admission");
     }
 
     // ---- queue.add: push current admission into صندوق نرفته‌ها --------------
@@ -489,7 +585,9 @@ static std::string admissionApi(const std::string& verb, const std::string& body
         AdPatient p=adReadPatient(body);
         if(p.nid.empty()) return "{\"ok\":false,\"err\":\"کد ملی خالی است\"}";
         AdBill b=adComputeBill(body);
-        auto rows=adQueueLoad();
+        std::string kind; jsonGetString(body,"kind",kind);
+        bool admissionQueue=kind=="admission";
+        auto rows=adQueueLoad(admissionQueue);
         AdQueueRow r;
         wchar_t idb[32]; swprintf(idb,32,L"%lld",adEpochMinutes());
         r.id=idb; r.nid=p.nid; r.first=p.first; r.last=p.last; r.mobile=p.mobile;
@@ -498,8 +596,8 @@ static std::string admissionApi(const std::string& verb, const std::string& body
         r.jdate=adTodayJalali(); r.time=adNowTime();
         r.epochMin=adEpochMinutes(); r.amount=b.pat;
         rows.push_back(r);
-        adQueueSave(rows);
-        logLine(L"unpaid-queue add: "+p.nid);
+        adQueueSave(rows,admissionQueue);
+        logLine((admissionQueue?L"reception-queue add: ":L"unpaid-queue add: ")+p.nid);
         return "{\"ok\":true}";
     }
 
@@ -507,10 +605,12 @@ static std::string admissionApi(const std::string& verb, const std::string& body
     if(verb=="queue.remove"){
         std::string idU; jsonGetString(body,"id",idU);
         std::wstring id=u82w(idU);
-        auto rows=adQueueLoad();
+        std::string kind; jsonGetString(body,"kind",kind);
+        bool admissionQueue=kind=="admission";
+        auto rows=adQueueLoad(admissionQueue);
         std::vector<AdQueueRow> keep;
         for(const auto& r:rows) if(r.id!=id) keep.push_back(r);
-        adQueueSave(keep);
+        adQueueSave(keep,admissionQueue);
         return "{\"ok\":true}";
     }
 
@@ -519,6 +619,14 @@ static std::string admissionApi(const std::string& verb, const std::string& body
         AdPatient p=adReadPatient(body);
         if(p.nid.empty())
             return "{\"ok\":false,\"err\":\"کد ملی خالی است\"}";
+        BlacklistEntry blocked;
+        bool isBlocked=Blacklist_FindActive(p.nid,blocked);
+        bool overrideBlock=jsonGetBool(body,"overrideBlock",false);
+        if(isBlocked && !overrideBlock)
+            return "{\"ok\":false,\"blocked\":true,\"block\":"+adBlockJson(blocked)+"}";
+        if(isBlocked && overrideBlock)
+            Blacklist_AuditOverride(blocked,g_session.user.username);
+
         ReceptionRecord r=adBuildRecord(body);
         if(r.total<=0)
             return "{\"ok\":false,\"err\":\"حداقل یک خدمت با مبلغ لازم است\"}";
@@ -574,8 +682,7 @@ static std::string admissionApi(const std::string& verb, const std::string& body
 
         std::string o="{\"ok\":true,\"queueNo\":"+jnum(q)+
             ",\"printMode\":"+jstr(printMode)+
-            ",\"ps\":{\"P\":"+jnum(r.paid)+
-            ",\"S\":"+jnum(r.patientShare-r.paid)+"}}";
+            ",\"ps\":"+adDoctorStatsJson(r.treatingDoctor)+"}";
         return o;
     }
 

@@ -34,6 +34,8 @@ void WebAdmission_Resize(HWND view, int w, int h);
 
 // Push a C++ -> JS event with a JSON payload (e.g. "patient.load").
 void WebAdmission_PushEvent(const char* eventName, const std::string& jsonData);
+// Push to one active admission view only (used by native bottom-bar actions).
+void WebAdmission_PushEventTo(HWND view, const char* eventName, const std::string& jsonData);
 
 // LIVE SYNC from Management: call this whenever the service catalog or the
 // insurance tables change (add / edit / delete). It pushes a fresh catalog +

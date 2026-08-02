@@ -32,6 +32,23 @@ const InsuranceDef SUPP_INSURANCES[] = {
 };
 const int N_SUPP = sizeof(SUPP_INSURANCES)/sizeof(SUPP_INSURANCES[0]);
 
+// ---------------------------------------------------------------------------
+//  v1.55.0 — REAL coverage-percentage lookups used by the print designer's
+//  {ins_percent} / {supp_percent} tokens. These read the SAME authoritative
+//  tables the billing engine uses, so the printed percentage always equals the
+//  percentage the bill was actually computed with. Out-of-range indices return
+//  -1 (meaning «unknown») so the token prints an EMPTY string rather than a
+//  misleading «۰٪». Nothing here is ever randomised or guessed.
+// ---------------------------------------------------------------------------
+int Ins_Percent(int idx){
+    if(idx<0 || idx>=N_INSURANCES) return -1;
+    return INSURANCES[idx].pct;
+}
+int Supp_Percent(int idx){
+    if(idx<0 || idx>=N_SUPP) return -1;
+    return SUPP_INSURANCES[idx].pct;
+}
+
 // ------------------------------------------------------------- tariffs -----
 //  Base service tariff per visit type (Rial). Editable; can later be loaded
 //  from data\tariffs.ini for server-side configuration.
@@ -65,6 +82,28 @@ int countTodayReceptions(){
     for(wchar_t c : all) if(c==L'\n') n++;
     return n>0 ? n-1 : 0;   // minus header
 }
+int countTodayDoctorReceptions(const std::wstring& doctor, bool paidOnly){
+    std::wstring want=trim(doctor);
+    if(want.empty()) return 0;
+    std::wstring all=readFileUtf8(recPath());
+    int count=0; size_t pos=0; bool first=true;
+    while(pos<all.size()){
+        size_t e=all.find(L'\n',pos); if(e==std::wstring::npos) e=all.size();
+        std::wstring line=all.substr(pos,e-pos); pos=e+1;
+        if(first){ first=false; continue; }
+        while(!line.empty()&&line.back()==L'\r') line.pop_back();
+        if(line.empty()) continue;
+        std::vector<std::wstring> f; std::wstring cur;
+        for(wchar_t c:line){ if(c==L','){ f.push_back(cur); cur.clear(); } else cur+=c; }
+        f.push_back(cur);
+        // v1.56 appends treating doctor after the original 25 columns, preserving
+        // every legacy financial index (paid remains field 24).
+        if(f.size()<26 || trim(f[25])!=want) continue;
+        if(paidOnly && _wtoi64(f[24].c_str())<=0) continue;
+        count++;
+    }
+    return count;
+}
 static std::wstring csvEsc(const std::wstring& s){
     std::wstring o = s;
     for(auto& c : o) if(c==L',') c=L'،';
@@ -80,7 +119,7 @@ int saveReception(ReceptionRecord& r){
     if(isNew)
         row += L"\uFEFFنوبت,نام,نام خانوادگی,کد ملی,نام پدر,تاریخ تولد,جنسیت,تلفن,ثابت,آدرس,"
                L"نوع بیمار,بیمه,بیمه مکمل,تاریخ,ساعت,شیفت,بخش,کاربر,"
-               L"جمع کل,سهم بیمه,سهم بیمار,مابه‌التفاوت,سهم سازمان,تخفیف,پرداختی\r\n";
+               L"جمع کل,سهم بیمه,سهم بیمار,مابه‌التفاوت,سهم سازمان,تخفیف,پرداختی,پزشک معالج\r\n";
     wchar_t nums[256];
     swprintf(nums,256,L"%lld,%lld,%lld,%lld,%lld,%lld,%lld",
         r.total,r.mainShare,r.patientShare,r.baseDiff,r.orgShare,r.discount,r.paid);
@@ -90,7 +129,8 @@ int saveReception(ReceptionRecord& r){
         + csvEsc(r.gender)+L","+csvEsc(r.mobile)+L","+csvEsc(r.landline)+L","
         + csvEsc(r.address)+L","+csvEsc(r.patientType)+L","+csvEsc(r.insurance)+L","
         + csvEsc(r.suppInsurance)+L","+r.apptDate+L","+r.apptTime+L","
-        + csvEsc(r.shift)+L","+csvEsc(r.dept)+L","+csvEsc(r.userName)+L","+nums+L"\r\n";
+        + csvEsc(r.shift)+L","+csvEsc(r.dept)+L","+csvEsc(r.userName)+L","+nums+L","+
+        csvEsc(r.treatingDoctor)+L"\r\n";
     writeFileUtf8(recPath(), row, true);
     logLine(L"reception saved #" + std::wstring(qn) + L" " + r.firstName + L" " + r.lastName);
     saveLastReceipt(r);
@@ -108,7 +148,8 @@ void saveLastReceipt(const ReceptionRecord& r){
         +r.fatherName+L"\n"+r.birthDate+L"\n"+r.gender+L"\n"+r.mobile+L"\n"
         +r.landline+L"\n"+r.address+L"\n"+r.patientType+L"\n"+r.insurance+L"\n"
         +r.suppInsurance+L"\n"+r.apptDate+L"\n"+r.apptTime+L"\n"+r.shift+L"\n"
-        +r.dept+L"\n"+r.userName+L"\n"+nums;
+        +r.dept+L"\n"+r.userName+L"\n"+nums+L"\n"+r.insuranceType+L"\n"+
+        r.treatingDoctor+L"\n"+r.doctorCode;
     writeFileUtf8(lastPath(), s, false);
 }
 bool loadLastReceipt(ReceptionRecord& r){
@@ -130,6 +171,9 @@ bool loadLastReceipt(ReceptionRecord& r){
     r.orgShare=_wtoi64(f[21].c_str()); r.finalTotal=_wtoi64(f[22].c_str());
     r.discount=_wtoi64(f[23].c_str()); r.paid=_wtoi64(f[24].c_str());
     r.queueNo=_wtoi(f[25].c_str());
+    if(f.size()>26) r.insuranceType=f[26];
+    if(f.size()>27) r.treatingDoctor=f[27];
+    if(f.size()>28) r.doctorCode=f[28];
     return true;
 }
 

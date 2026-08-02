@@ -1289,8 +1289,95 @@ static std::wstring pdNormalizeField(const std::wstring& f){
     if(eq("refDoctor")||eq("refdoctor")||eq("referringDoctor")||eq("referring")) return L"{refdoctor}";
     if(eq("room"))                                                   return L"{room}";
     if(eq("service"))                                                return L"{service}";
+    // ---- v1.55.0: real-receipt aliases (ثامن‌الائمه redesign) ---------------
+    // Bare-name aliases for every token the 30 new ready-made designs bind, so
+    // a design saved either way (token or bare name) resolves identically.
+    if(eq("apptdatetime")||eq("appointmentdatetime")) return L"{apptdatetime}";
+    if(eq("apptsec")||eq("appttimesec")||eq("timesec")) return L"{apptsec}";
+    if(eq("reg_ts")||eq("regts")||eq("regstamp"))      return L"{reg_ts}";
+    if(eq("receptionist")||eq("receptionuser")||eq("admituser")) return L"{receptionist}";
+    if(eq("cashier_name")||eq("cashiername"))          return L"{cashier_name}";
+    if(eq("scnum")||eq("sc_num")||eq("sheetno")||eq("sheetnum")) return L"{scnum}";
+    if(eq("receiptbarcode")||eq("receipt_barcode")||eq("barcodeno")||eq("barcodenumber")) return L"{receiptbarcode}";
+    if(eq("receiptcode")||eq("receipt_code")||eq("shortcode")) return L"{receiptcode}";
+    if(eq("ins_percent")||eq("inspercent")||eq("insurancepercent")) return L"{ins_percent}";
+    if(eq("supp_percent")||eq("supppercent"))          return L"{supp_percent}";
+    if(eq("ins_full")||eq("insfull"))                  return L"{ins_full}";
+    if(eq("supp_full")||eq("suppfull"))                return L"{supp_full}";
+    if(eq("doctorcode")||eq("doctor_code")||eq("doccode")) return L"{doctorcode}";
+    if(eq("performer")||eq("performername"))           return L"{performer}";
+    if(eq("performercode")||eq("performer_code")||eq("perfcode")) return L"{performercode}";
+    if(eq("specialty")||eq("speciality")||eq("specialtydesc")) return L"{specialty}";
+    if(eq("specialtycode")||eq("specialitycode"))      return L"{specialtycode}";
+    if(eq("servicetype")||eq("service_type")||eq("svctype")) return L"{servicetype}";
+    if(eq("servicedesc")||eq("service_desc")||eq("svcdesc")) return L"{servicedesc}";
+    if(eq("pos")||eq("posamount")||eq("cardamount"))   return L"{pos}";
+    if(eq("cash")||eq("cashamount"))                   return L"{cash}";
+    if(eq("discount_from")||eq("discountfrom"))        return L"{discount_from}";
+    if(eq("eprescription")||eq("erx")||eq("erxcode")||eq("etrackcode")) return L"{eprescription}";
+    if(eq("referralno")||eq("referral_no")||eq("ref_no")||eq("refno")) return L"{referralno}";
+    if(eq("basepay")||eq("base_pay")||eq("baseshare"))  return L"{basepay}";
+    if(eq("supppay")||eq("supp_pay")||eq("suppshare"))  return L"{supppay}";
     // unknown bare name → wrap as {name} so the token pass can still decide
     return L"{"+f+L"}";
+}
+
+// ---------------------------------------------------------------------------
+//  v1.55.0 — DETERMINISTIC receipt identifiers.
+//  The operator explicitly required that NOTHING on a printed receipt is ever
+//  random: reprinting the same admission must always produce the SAME barcode
+//  and the SAME short code. Both are therefore pure functions of the receipt /
+//  queue number, so they are stable across reprints, sessions and machines.
+// ---------------------------------------------------------------------------
+// A 7-digit numeric barcode payload derived from the receipt number. Uses a
+// fixed odd multiplier so consecutive receipts get well-separated payloads (a
+// nicer looking barcode) while remaining fully reproducible.
+static std::wstring pdReceiptBarcode(long long seed){
+    if(seed<=0) return L"";
+    // v1.58.0: a 12-digit numeric payload derived deterministically from the
+    // patient-linked seed. 12 digits (plus an EAN-13 check digit computed by the
+    // encoder) gives every admission a unique, reproducible, scannable code.
+    long long v = 100000000000LL + ((seed * 2654435761LL) % 899999999999LL);
+    if(v<0) v = -v;
+    wchar_t b[24]; swprintf(b,24,L"%012lld",v);
+    return b;
+}
+// A 3-character Crockford-ish alphanumeric short tag (e.g. "56Y") derived from
+// the same seed. Ambiguous glyphs (I, O) are excluded from the alphabet.
+static std::wstring pdReceiptShortCode(long long seed){
+    if(seed<=0) return L"";
+    static const wchar_t A[] = L"0123456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+    const int N = (int)(sizeof(A)/sizeof(A[0])) - 1;   // 34 symbols
+    wchar_t b[4] = {0};
+    b[0] = A[(int)(( seed * 7LL) % N)];
+    b[1] = A[(int)(( seed * 13LL) % N)];
+    b[2] = A[(int)(( seed * 19LL) % N)];
+    return std::wstring(b);
+}
+// The canonical receipt seed for a record. v1.58.0: the barcode / short code
+// must be BOTH stable across reprints AND uniquely tied to the admitted patient
+// — the operator explicitly required "بارکد متصل به اطلاعات بیمار". We therefore
+// fold the patient's national-id digits into the deterministic receipt/queue
+// number. Reprinting the same admission always yields the same value (no
+// randomness); two different patients with the same daily queue number get
+// different barcodes because their national ids differ.
+static long long pdReceiptSeed(const ReceptionRecord& r){
+    long long base = (r.receiptNo > 0) ? r.receiptNo
+                                       : (r.queueNo > 0 ? (long long)r.queueNo : 0);
+    if(base <= 0) return 0;
+    // fold the national-id digits in as a deterministic mixer (no effect when
+    // the id was not captured, keeping older receipts byte-identical).
+    long long nidMix = 0;
+    for(wchar_t c : r.nationalId){
+        int d = -1;
+        if(c>=L'0'&&c<=L'9')            d=c-L'0';
+        else if(c>=0x06F0&&c<=0x06F9)   d=(int)(c-0x06F0);   // Persian digits
+        else if(c>=0x0660&&c<=0x0669)   d=(int)(c-0x0660);   // Arabic digits
+        if(d>=0) nidMix = (nidMix*10 + d) % 100000LL;
+    }
+    // combine deterministically: keep `base` dominant so consecutive receipts
+    // stay well-ordered, but let the patient id perturb the low digits.
+    return base * 100000LL + nidMix;
 }
 
 static std::wstring pdFieldValue(const ReceptionRecord& r, const std::wstring& tokIn){
@@ -1388,6 +1475,110 @@ static std::wstring pdFieldValue(const ReceptionRecord& r, const std::wstring& t
     // these let a design print a count or a one-line summary outside the table).
     if(tok==L"{servicescount}"){ wchar_t b[16]; swprintf(b,16,L"%d",(int)r.services.size()); return toFaDigits(b); }
     if(tok==L"{servicestotal}"){ return toFaDigits(formatMoney(r.total))+L" ریال"; }
+    // -----------------------------------------------------------------------
+    //  v1.55.0 — REAL-RECEIPT TOKENS (ثامن‌الائمه redesign)
+    //  Every value below comes from the live record, the live session or the
+    //  settings store. Nothing here is random or invented: when the operator
+    //  has not captured a value the token resolves to an EMPTY string so the
+    //  design simply prints a blank (or hides the row when visibility==1).
+    // -----------------------------------------------------------------------
+    // --- date / time -------------------------------------------------------
+    if(tok==L"{apptdatetime}") return toFaDigits(r.apptDate+L"  "+r.apptTime);
+    if(tok==L"{apptsec}"){
+        if(!r.apptSec.empty()) return toFaDigits(r.apptSec);
+        if(r.apptTime.empty()) return L"";
+        // pad "hh:mm" → "hh:mm:00" so the receipt column keeps a fixed width
+        std::wstring t=r.apptTime;
+        if(t.size()==5 && t[2]==L':') t += L":00";
+        return toFaDigits(t);
+    }
+    if(tok==L"{reg_ts}"){
+        if(!r.regStamp.empty()) return toFaDigits(r.regStamp);
+        if(r.apptDate.empty()) return L"";
+        SYSTEMTIME st; GetLocalTime(&st);
+        wchar_t b[16]; swprintf(b,16,L"%02d:%02d",st.wHour,st.wMinute);
+        return toFaDigits(r.apptDate+L"  "+b);
+    }
+    // --- receipt identity (deterministic, see pdReceiptBarcode above) ------
+    if(tok==L"{receiptbarcode}"){
+        if(!r.receiptBarcode.empty()) return toFaDigits(r.receiptBarcode);
+        return toFaDigits(pdReceiptBarcode(pdReceiptSeed(r)));
+    }
+    if(tok==L"{receiptcode}"){
+        if(!r.receiptCode.empty()) return r.receiptCode;
+        return pdReceiptShortCode(pdReceiptSeed(r));
+    }
+    // --- insurance + percentage ------------------------------------------
+    if(tok==L"{ins_percent}"){
+        int p = r.insPercent>=0 ? r.insPercent : Ins_Percent(r.insIdx);
+        if(p<=0) return L"";
+        wchar_t b[16]; swprintf(b,16,L"%d",p); return toFaDigits(b)+L"٪";
+    }
+    if(tok==L"{supp_percent}"){
+        int p = r.suppPercent>=0 ? r.suppPercent : Supp_Percent(r.suppIdx);
+        if(p<=0) return L"";
+        wchar_t b[16]; swprintf(b,16,L"%d",p); return toFaDigits(b)+L"٪";
+    }
+    if(tok==L"{ins_full}"){
+        if(r.insurance.empty()) return L"";
+        int p = r.insPercent>=0 ? r.insPercent : Ins_Percent(r.insIdx);
+        if(p<=0) return r.insurance;
+        wchar_t b[16]; swprintf(b,16,L"%d",p);
+        return r.insurance+L" ("+toFaDigits(b)+L"٪)";
+    }
+    if(tok==L"{supp_full}"){
+        if(r.suppInsurance.empty()) return L"";
+        int p = r.suppPercent>=0 ? r.suppPercent : Supp_Percent(r.suppIdx);
+        if(p<=0) return r.suppInsurance;
+        wchar_t b[16]; swprintf(b,16,L"%d",p);
+        return r.suppInsurance+L" ("+toFaDigits(b)+L"٪)";
+    }
+    // --- doctor / performer / specialty -----------------------------------
+    if(tok==L"{doctorcode}")     return toFaDigits(r.doctorCode);
+    if(tok==L"{performer}")      return r.performer.empty()? r.treatingDoctor : r.performer;
+    if(tok==L"{performercode}")  return toFaDigits(r.performerCode.empty()? r.doctorCode : r.performerCode);
+    if(tok==L"{specialty}")      return r.specialty;
+    if(tok==L"{specialtycode}")  return toFaDigits(r.specialtyCode);
+    // --- service description / type --------------------------------------
+    if(tok==L"{servicetype}"){
+        // نوع خدمت (e.g. «عمومی») — taken from the catalogue category of the
+        // first booked service, then the doctor's specialty, then patient type.
+        for(size_t i=0;i<r.services.size();++i)
+            if(!r.services[i].category.empty()) return r.services[i].category;
+        if(!r.specialty.empty()) return r.specialty;
+        return r.patientType;
+    }
+    if(tok==L"{servicedesc}"){
+        for(size_t i=0;i<r.services.size();++i)
+            if(!r.services[i].desc.empty()) return r.services[i].desc;
+        return r.services.empty()? L"" : r.services[0].name;
+    }
+    if(tok==L"{servicename}") return r.services.empty()? L"" : r.services[0].name;
+    // --- money split ------------------------------------------------------
+    if(tok==L"{basepay}")   return toFaDigits(formatMoney(r.mainShare))+L" ریال";
+    if(tok==L"{supppay}")   return toFaDigits(formatMoney(r.orgShare))+L" ریال";
+    if(tok==L"{cash}")      return toFaDigits(formatMoney(r.cash))+L" ریال";
+    if(tok==L"{pos}")       return toFaDigits(formatMoney(r.pos))+L" ریال";
+    if(tok==L"{discount_from}"){
+        if(r.discount<=0) return L"";
+        return toFaDigits(formatMoney(r.discount))+L" ریال";
+    }
+    // --- referral / e-prescription ----------------------------------------
+    if(tok==L"{eprescription}") return toFaDigits(r.eprescription);
+    if(tok==L"{referralno}")    return toFaDigits(r.referralNo);
+    // --- staff ------------------------------------------------------------
+    if(tok==L"{receptionist}"){
+        if(!r.receptionist.empty()) return r.receptionist;
+        return r.userName.empty()? g_session.user.fullname : r.userName;
+    }
+    if(tok==L"{cashier_name}"){
+        if(!r.cashierName.empty()) return r.cashierName;
+        return r.userName.empty()? g_session.user.fullname : r.userName;
+    }
+    if(tok==L"{scnum}"){
+        if(!r.scNum.empty()) return toFaDigits(r.scNum);
+        wchar_t b[16]; swprintf(b,16,L"%d",g_session.shift+1); return toFaDigits(b);
+    }
     return L"";
 }
 
@@ -1408,9 +1599,30 @@ static void pdDrawTable(HDC dc, const PrintItem& it, const RECT& box,
     cx.push_back(X1);
     double acc=0;
     for(int c=0;c<t.cols;++c){ acc+=t.widths[c]; cx.push_back(X1-(int)(W*(acc/sumw))); }
-    // row y-boundaries (top → bottom), equal height
+    // row y-boundaries (top → bottom).
+    // v1.55.0: honour the design's explicit ارتفاع سرستون (it.headerH, mm) and
+    // ارتفاع سطر (it.rowH, mm). Both default to 0 = "auto", which reproduces the
+    // v1.54 equal-height behaviour exactly. Pinned heights that would overflow
+    // the frame are scaled down uniformly instead of being clipped.
+    int hH = (t.header && it.headerH>0) ? (int)(it.headerH*pxPerMmY) : 0;
+    int rH = (it.rowH>0) ? (int)(it.rowH*pxPerMmY) : 0;
+    int nData = t.header ? t.rows-1 : t.rows; if(nData<0) nData=0;
     std::vector<int> ry; ry.reserve(t.rows+1);
-    for(int rr=0;rr<=t.rows;++rr) ry.push_back(Y0+(int)((double)H*rr/t.rows));
+    if(hH>0 || rH>0){
+        if(hH<=0) hH = rH>0 ? rH : (int)((double)H/(t.rows?t.rows:1));
+        if(rH<=0) rH = (nData>0) ? (int)((double)(H-hH)/nData) : hH;
+        if(rH<1) rH=1;
+        int need = (t.header? hH : 0) + rH*(t.header? nData : t.rows);
+        if(need>H && need>0){ double k=(double)H/(double)need; hH=(int)(hH*k); rH=(int)(rH*k); if(rH<4)rH=4; }
+        ry.push_back(Y0);
+        if(t.header) ry.push_back(Y0+hH);
+        int base = Y0 + (t.header? hH : 0);
+        int n = t.header? nData : t.rows;
+        for(int rr=1; rr<=n; ++rr) ry.push_back(base + rH*rr);
+    } else {
+        for(int rr=0;rr<=t.rows;++rr) ry.push_back(Y0+(int)((double)H*rr/t.rows));
+    }
+    while((int)ry.size() < t.rows+1) ry.push_back(ry.empty()?Y0:ry.back());
 
     // fill header row background
     if(t.header && t.rows>0){
@@ -1459,11 +1671,61 @@ static void pdDrawTable(HDC dc, const PrintItem& it, const RECT& box,
 // `cols`/`labels`/`widths` describe the table header; rows are filled from the
 // live ReceptionRecord.services vector (variable count) at render time.
 struct PdServicesModel {
-    int cols=4;
+    // v1.55.0: the real paper receipt has exactly THREE columns, right→left:
+    //   نام خدمت | شرح خدمت | تعداد
+    // so that is now the default shape (no ردیف / کد / مبلغ columns).
+    int cols=3;
     bool header=true;
     std::vector<double> widths;
     std::vector<std::wstring> labels;   // header captions (RTL order, col0=right)
 };
+// v1.55.0 — canonical column vocabulary of the services table. The renderer is
+// LABEL-DRIVEN: whatever caption a design puts in a column decides which piece
+// of the live ServiceLine goes in that column, so a designer can reorder or drop
+// columns freely and the data still lands in the right place.
+enum PdSvcCol {
+    PSC_NAME=0,   // نام خدمت
+    PSC_DESC,     // شرح خدمت
+    PSC_QTY,      // تعداد
+    PSC_CODE,     // کد خدمت
+    PSC_ROW,      // ردیف
+    PSC_PRICE,    // مبلغ واحد
+    PSC_LINE,     // مبلغ کل سطر
+    PSC_DISC,     // تخفیف
+    PSC_INS,      // سهم بیمه
+    PSC_PAT,      // سهم بیمار
+    PSC_CAT,      // نوع خدمت
+    PSC_NONE
+};
+// Classify a header caption. Matching is substring based and tolerant of the
+// spacing / ZWNJ variations that appear on real Persian forms.
+static PdSvcCol pdSvcColOf(const std::wstring& labIn, int idx){
+    std::wstring L; L.reserve(labIn.size());
+    for(size_t i=0;i<labIn.size();++i){
+        wchar_t c=labIn[i];
+        if(c==L' '||c==0x200C||c==0x200F||c==0x200E||c==L'\t') continue;  // ZWNJ/RLM/LRM
+        if(c==L'ي') c=L'ی';
+        if(c==L'ك') c=L'ک';
+        L+=c;
+    }
+    auto has=[&](const wchar_t* n){ return L.find(n)!=std::wstring::npos; };
+    if(L.empty()){
+        // an unlabelled column falls back to positional defaults
+        switch(idx){ case 0: return PSC_NAME; case 1: return PSC_DESC; case 2: return PSC_QTY; default: return PSC_NONE; }
+    }
+    if(has(L"شرح")||has(L"توضیح"))                       return PSC_DESC;
+    if(has(L"نوع"))                                       return PSC_CAT;
+    if(has(L"تعداد")||has(L"مقدار")||L==L"تع")            return PSC_QTY;
+    if(has(L"ردیف")||has(L"شماره")||L==L"ر")              return PSC_ROW;
+    if(has(L"سهمبیمه")||has(L"سهمپایه")||has(L"بیمه"))    return PSC_INS;
+    if(has(L"سهمبیمار")||has(L"پرداختی"))                 return PSC_PAT;
+    if(has(L"تخفیف"))                                     return PSC_DISC;
+    if(has(L"مبلغکل")||has(L"جمع")||has(L"کل"))           return PSC_LINE;
+    if(has(L"قیمت")||has(L"فی")||has(L"مبلغ")||has(L"نرخ")) return PSC_PRICE;
+    if(has(L"کد"))                                        return PSC_CODE;
+    if(has(L"نامخدمت")||has(L"خدمت")||has(L"نام")||has(L"عنوان")) return PSC_NAME;
+    return PSC_NONE;
+}
 static bool pdParseServicesModel(const std::wstring& jsonW, PdServicesModel& m){
     int n=WideCharToMultiByte(CP_UTF8,0,jsonW.c_str(),(int)jsonW.size(),NULL,0,NULL,NULL);
     std::string s(n,0); if(n) WideCharToMultiByte(CP_UTF8,0,jsonW.c_str(),(int)jsonW.size(),&s[0],n,NULL,NULL);
@@ -1495,16 +1757,57 @@ static bool pdParseServicesModel(const std::wstring& jsonW, PdServicesModel& m){
         ws(); if(p<s.size()&&s[p]==','){++p;continue;} ws(); if(p<s.size()&&s[p]=='}'){++p;break;}
         if(p>=s.size())break;
     }
-    if(m.cols<1) m.cols=4;
-    if((int)m.widths.size()!=m.cols) m.widths.assign(m.cols,1.0);
-    if(m.labels.empty()){
-        // sensible default Persian header (RTL order: col0=right → ردیف، نام، کد، مبلغ)
-        m.labels.clear();
-        const wchar_t* def[4]={L"ردیف",L"نام خدمت",L"کد",L"مبلغ"};
-        int nc=m.cols>4?m.cols:4;
-        for(int i=0;i<nc;++i) m.labels.push_back(i<4?std::wstring(def[i]):L"");
+    if(m.cols<1) m.cols=3;
+    if((int)m.widths.size()!=m.cols){
+        // v1.55.0 default proportions of the real receipt: نام خدمت is wide,
+        // شرح خدمت a little narrower, تعداد a thin trailing column.
+        if(m.cols==3){ m.widths.clear(); m.widths.push_back(0.55); m.widths.push_back(0.30); m.widths.push_back(0.15); }
+        else m.widths.assign(m.cols,1.0);
     }
+    if(m.labels.empty()){
+        // v1.55.0 default Persian header (RTL order, col0 = RIGHTMOST):
+        //   نام خدمت | شرح خدمت | تعداد
+        m.labels.clear();
+        const wchar_t* def[3]={L"نام خدمت",L"شرح خدمت",L"تعداد"};
+        for(int i=0;i<m.cols;++i) m.labels.push_back(i<3?std::wstring(def[i]):L"");
+    }
+    while((int)m.labels.size()<m.cols) m.labels.push_back(L"");
     return true;
+}
+
+// v1.55.0 — resolve one services-table cell from the live ServiceLine according
+// to the column's LABEL (never by blind index). All values are real data taken
+// straight from the record; nothing is generated or randomised. A service that
+// somehow has no name prints "—" so the row is never visually empty.
+static std::wstring pdSvcCellValue(PdSvcCol kind, const ServiceLine& s, int rowIdx){
+    switch(kind){
+        case PSC_NAME:  return s.name.empty()? std::wstring(L"—") : s.name;
+        case PSC_DESC:  return s.desc.empty()? (s.category.empty()? std::wstring(L"—") : s.category) : s.desc;
+        case PSC_QTY: { wchar_t b[16]; swprintf(b,16,L"%d", s.qty>0?s.qty:1); return toFaDigits(b); }
+        case PSC_CODE:  return toFaDigits(s.code);
+        case PSC_ROW: { wchar_t b[16]; swprintf(b,16,L"%d",rowIdx+1); return toFaDigits(b); }
+        case PSC_PRICE: return toFaDigits(formatMoney(s.price));
+        case PSC_LINE:  return toFaDigits(formatMoney(s.price*(long long)(s.qty>0?s.qty:1) - s.discount));
+        case PSC_DISC:  return s.discount>0? toFaDigits(formatMoney(s.discount)) : std::wstring(L"—");
+        case PSC_INS:   return toFaDigits(formatMoney(s.insShare));
+        case PSC_PAT:   return toFaDigits(formatMoney(s.patShare));
+        case PSC_CAT:   return s.category.empty()? std::wstring(L"—") : s.category;
+        default:        return L"";
+    }
+}
+// Preview placeholder for the same column kind (designer canvas, no record).
+static std::wstring pdSvcCellSample(PdSvcCol kind, int rowIdx){
+    switch(kind){
+        case PSC_NAME:  return rowIdx==0? L"ویزیت پزشک عمومی" : (rowIdx==1? L"تزریق عضلانی" : L"نوار قلب");
+        case PSC_DESC:  return rowIdx==0? L"عمومی" : (rowIdx==1? L"خدمات پرستاری" : L"تشخیصی");
+        case PSC_QTY:   return rowIdx==0? L"۱" : (rowIdx==1? L"۲" : L"۱");
+        case PSC_CODE:  return rowIdx==0? L"۹۰۱۰۱" : (rowIdx==1? L"۹۰۲۱۴" : L"۹۰۳۰۷");
+        case PSC_ROW: { wchar_t b[16]; swprintf(b,16,L"%d",rowIdx+1); return toFaDigits(b); }
+        case PSC_PRICE: case PSC_LINE: case PSC_INS: case PSC_PAT: return L"۰";
+        case PSC_DISC:  return L"—";
+        case PSC_CAT:   return L"عمومی";
+        default:        return L"";
+    }
 }
 
 // §1.51.0: draw a dynamic services table inside `box` (device px).
@@ -1536,17 +1839,37 @@ static void pdDrawServices(HDC dc, const PrintItem& it, const RECT& box,
     cx.push_back(X1);
     double acc=0;
     for(int c=0;c<m.cols;++c){ acc+=m.widths[c]; cx.push_back(X1-(int)(W*(acc/sumw))); }
-    // row y-boundaries (top → bottom). Header gets a slightly taller band.
-    std::vector<int> ry; ry.reserve(totalRows+1);
+    // ---- row y-boundaries (top → bottom) --------------------------------
+    // v1.55.0: the design may pin an EXACT header height (it.headerH, mm) and
+    // an EXACT data-row height (it.rowH, mm) — that is what the designer's
+    // "ارتفاع سطر / ارتفاع سرستون" controls (and the drag grips) write. When a
+    // value is 0 the old proportional behaviour is kept, so v1.54 designs are
+    // byte-for-byte identical. When the pinned heights would overflow the box
+    // the whole table is scaled down uniformly rather than clipped.
+    int headH = 0;
     if(m.header){
-        int headH=(int)(H*0.16); if(headH<14) headH=14;
-        ry.push_back(Y0); ry.push_back(Y0+headH);
-        for(int rr=1; rr<=nDataRows; ++rr)
-            ry.push_back(ry.back() + (int)((double)(H-headH)*rr/nDataRows));
-        // fix last
-        ry.back()=Y1;
+        headH = (it.headerH>0) ? (int)(it.headerH*pxPerMmY) : (int)(H*0.16);
+        if(headH<10) headH=10;
+    }
+    int rowHpx = (it.rowH>0) ? (int)(it.rowH*pxPerMmY) : 0;
+    if(rowHpx>0){
+        int need = headH + rowHpx*nDataRows;
+        if(need>H && need>0){                  // shrink to fit the frame
+            double k=(double)H/(double)need;
+            headH=(int)(headH*k); rowHpx=(int)(rowHpx*k);
+            if(rowHpx<4) rowHpx=4;
+        }
+    }
+    std::vector<int> ry; ry.reserve(totalRows+1);
+    ry.push_back(Y0);
+    if(m.header) ry.push_back(Y0+headH);
+    if(rowHpx>0){
+        for(int rr=1; rr<=nDataRows; ++rr) ry.push_back(Y0+headH+rowHpx*rr);
     } else {
-        for(int rr=0; rr<=nDataRows; ++rr) ry.push_back(Y0+(int)((double)H*rr/nDataRows));
+        int avail=H-headH; if(avail<nDataRows) avail=nDataRows;
+        for(int rr=1; rr<=nDataRows; ++rr)
+            ry.push_back(Y0+headH+(int)((double)avail*rr/nDataRows));
+        ry.back()=Y1;                          // exact bottom alignment
     }
 
     // fonts
@@ -1558,24 +1881,47 @@ static void pdDrawServices(HDC dc, const PrintItem& it, const RECT& box,
         CLEARTYPE_QUALITY,0,it.fontName.empty()?L"Vazirmatn":it.fontName.c_str());
     int pad=(int)(1.2*pxPerMmX); if(pad<2)pad=2;
 
-    // header background
+    // ---- header / banding colours ---------------------------------------
+    // v1.55.0: the table is no longer hard-wired to a blue corporate band. The
+    // header fill comes from the item's own fillColor (which the 30 new ready-
+    // made designs set to a light GREY, or leave transparent) so a monochrome
+    // design prints monochrome on a black-and-white laser printer. The header
+    // caption colour is chosen automatically for contrast against that fill.
+    bool   hasFill  = !it.fillTransparent;
+    DWORD  headFill = hasFill ? (DWORD)it.fillColor : 0xEFEFEFu;   // default light grey
+    int    lum      = (int)((((headFill>>16)&0xFF)*30 + ((headFill>>8)&0xFF)*59 + (headFill&0xFF)*11)/100);
+    COLORREF headTxt = (lum<140) ? RGB(255,255,255) : pdCR(it.textColor);
     if(m.header){
         RECT hr={cx[m.cols], ry[0], cx[0], ry[1]};
-        HBRUSH hb=CreateSolidBrush(RGB(31,95,214));   // deep blue header band
+        HBRUSH hb=CreateSolidBrush(pdCR((int)headFill));
         FillRect(dc,&hr,hb); DeleteObject(hb);
     }
-    // alternating row banding for readability
-    for(int rr=0; rr<nDataRows; ++rr){
-        if((rr&1)==0) continue;       // band every other data row
-        int y0r = m.header ? ry[1+rr] : ry[rr];
-        int y1r = m.header ? ry[2+rr] : ry[rr+1];
-        RECT br={cx[m.cols], y0r, cx[0], y1r};
-        HBRUSH hb=CreateSolidBrush(RGB(243,247,254));
-        FillRect(dc,&br,hb); DeleteObject(hb);
+    // Alternating row banding: only when the design explicitly asked for a
+    // header fill (i.e. it is a "banded" style). Pure line-art designs stay
+    // completely un-shaded, exactly like the paper receipt.
+    if(hasFill){
+        int br_,bg_,bb_;
+        br_=(int)((headFill>>16)&0xFF); bg_=(int)((headFill>>8)&0xFF); bb_=(int)(headFill&0xFF);
+        // 22% tint of the header colour towards white → a very light band
+        int zr=br_+(int)((255-br_)*0.78), zg=bg_+(int)((255-bg_)*0.78), zb=bb_+(int)((255-bb_)*0.78);
+        for(int rr=0; rr<nDataRows; ++rr){
+            if((rr&1)==0) continue;       // band every other data row
+            int y0r = m.header ? ry[1+rr] : ry[rr];
+            int y1r = m.header ? ry[2+rr] : ry[rr+1];
+            RECT br={cx[m.cols], y0r, cx[0], y1r};
+            HBRUSH hb=CreateSolidBrush(RGB(zr,zg,zb));
+            FillRect(dc,&br,hb); DeleteObject(hb);
+        }
     }
 
-    SetTextColor(dc, m.header ? RGB(255,255,255) : pdCR(it.textColor));
-    // header cells (white text on blue)
+    // v1.55.0: classify every column ONCE from its caption, so the data loop
+    // below never guesses meaning from the column index.
+    std::vector<PdSvcCol> kinds(m.cols, PSC_NONE);
+    for(int c=0;c<m.cols;++c)
+        kinds[c] = pdSvcColOf(c<(int)m.labels.size()? m.labels[c] : std::wstring(), c);
+
+    SetTextColor(dc, m.header ? headTxt : pdCR(it.textColor));
+    // header cells
     if(m.header){
         HGDIOBJ of=SelectObject(dc,fHead);
         for(int c=0;c<m.cols;++c){
@@ -1599,27 +1945,21 @@ static void pdDrawServices(HDC dc, const PrintItem& it, const RECT& box,
             int ry0 = m.header ? ry[1+rr] : ry[rr];
             int ry1 = m.header ? ry[2+rr] : ry[rr+1];
             for(int c=0;c<m.cols;++c){
-                std::wstring cell;
-                if(sln){
-                    if(c==0){ wchar_t b[8]; swprintf(b,8,L"%d",rr+1); cell=toFaDigits(b); }
-                    else if(c==1) cell=sln->name;
-                    else if(c==2) cell=toFaDigits(sln->code);
-                    else if(c==3) cell=toFaDigits(formatMoney(sln->price*(long long)sln->qty - sln->discount))+L" ریال";
-                    else cell=L"";
-                } else {
-                    // placeholder (designer preview with no record)
-                    const wchar_t* ph[4]={L"۱",L"نمونهٔ خدمت",L"۰۰۱",L"۱۰۰٬۰۰۰ ریال"};
-                    cell = (c<4)? std::wstring(ph[c]) : L"";
-                }
+                // v1.55.0: LABEL-driven cell resolution — the caption decides
+                // what goes here, so the designer may reorder / drop columns.
+                // Never fabricate example service text on a real print job. Sample
+                // values are for the designer canvas only (`live == NULL`).
+                std::wstring cell = sln ? pdSvcCellValue(kinds[c], *sln, rr)
+                                        : (live ? std::wstring() : pdSvcCellSample(kinds[c], rr));
                 RECT cr={cx[c+1]+pad, ry0+pad/2, cx[c]-pad, ry1-pad/2};
                 if(cr.right<=cr.left||cr.bottom<=cr.top) continue;
-                // §1.53.0 (Bug E): the name column (c==1) is Persian prose — force
-                // DT_RIGHT|DT_RTLREADING so it hugs the right edge and never flips
-                // when the name mixes Persian words with Latin/number fragments.
-                // All other columns (row #, code, money) are centered.
-                UINT al = (c==1)
-                    ? (DT_RIGHT |DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_END_ELLIPSIS|DT_NOPREFIX)
-                    : (DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_END_ELLIPSIS|DT_NOPREFIX);
+                // §1.53.0 (Bug E) / v1.55.0: Persian prose columns (نام خدمت،
+                // شرح خدمت، نوع خدمت) hug the RIGHT edge; numeric columns are
+                // centered. EVERY cell gets DT_RTLREADING so mixed Persian +
+                // Latin/digit content never flips visually.
+                bool prose = (kinds[c]==PSC_NAME || kinds[c]==PSC_DESC || kinds[c]==PSC_CAT);
+                UINT al = (prose ? DT_RIGHT : DT_CENTER)
+                        | DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_END_ELLIPSIS|DT_NOPREFIX;
                 DrawTextW(dc,cell.c_str(),-1,&cr,al);
             }
         }
@@ -1634,6 +1974,232 @@ static void pdDrawServices(HDC dc, const PrintItem& it, const RECT& box,
     for(int c=0;c<=m.cols;++c){ MoveToEx(dc,cx[c],ry[0],0); LineTo(dc,cx[c],ry[totalRows]); }
     for(int rr=0;rr<=totalRows;++rr){ MoveToEx(dc,cx[m.cols],ry[rr],0); LineTo(dc,cx[0],ry[rr]); }
     SelectObject(dc,op); DeleteObject(pen);
+}
+
+// ===========================================================================
+//  v1.55.0 — REAL 1-D BARCODE ENGINE (PIT_BARCODE)
+//  A genuine, standards-conformant symbol generator: Code 128-B, Code 39 and
+//  EAN-13. The bars are drawn as filled rectangles on the printer DC, so the
+//  output is device-resolution sharp and scans with any handheld reader.
+//  The payload ALWAYS comes from the item's bound field token (live record
+//  data). Nothing is invented: an empty payload draws nothing at all.
+// ===========================================================================
+
+// ---- Code 128 -------------------------------------------------------------
+// 107 symbol patterns, each 11 modules encoded as 6 run-lengths (b s b s b s).
+static const char* const PD_C128[107] = {
+"212222","222122","222221","121223","121322","131222","122213","122312","132212","221213",
+"221312","231212","112232","122132","122231","113222","123122","123221","223211","221132",
+"221231","213212","223112","312131","311222","321122","321221","312212","322112","322211",
+"212123","212321","232121","111323","131123","131321","112313","132113","132311","211313",
+"231113","231311","112133","112331","132131","113123","113321","133121","313121","211331",
+"231131","213113","213311","213131","311123","311321","331121","312113","312311","332111",
+"314111","221411","431111","111224","111422","121124","121421","141122","141221","112214",
+"112412","122114","122411","142112","142211","241211","221114","413111","241112","134111",
+"111242","121142","121241","114212","124112","124211","411212","421112","421211","212141",
+"214121","412121","111143","111341","131141","114113","114311","411113","411311","113141",
+"114131","311141","411131","211412","211214","211232","2331112"
+};
+// Build the module string ("1"=bar, "0"=space) for Code 128-B.
+static bool pdBc128(const std::string& data, std::string& mods){
+    std::vector<int> code;
+    code.push_back(104);                       // START B
+    long long sum = 104;
+    for(size_t i=0;i<data.size();++i){
+        unsigned char ch=(unsigned char)data[i];
+        if(ch<32||ch>126) return false;        // Code-B covers ASCII 32..126
+        int v = (int)ch - 32;
+        code.push_back(v);
+        sum += (long long)v * (long long)(i+1);
+    }
+    code.push_back((int)(sum % 103));          // check digit
+    code.push_back(106);                       // STOP
+    mods.clear();
+    for(size_t i=0;i<code.size();++i){
+        const char* p = PD_C128[code[i]];
+        for(int k=0; p[k]; ++k){
+            int run = p[k]-'0';
+            char lvl = (k%2==0) ? '1' : '0';   // runs alternate bar/space
+            mods.append((size_t)run, lvl);
+        }
+    }
+    return !mods.empty();
+}
+// ---- Code 39 --------------------------------------------------------------
+// 9 elements per character ("n"=narrow, "w"=wide), alternating bar/space.
+static const char  PD_C39_SET[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-. $/+%*";
+static const char* const PD_C39_PAT[44] = {
+"nnnwwnwnn","wnnwnnnnw","nnwwnnnnw","wnwwnnnnn","nnnwwnnnw","wnnwwnnnn","nnwwwnnnn","nnnwnnwnw",
+"wnnwnnwnn","nnwwnnwnn","wnnnnwnnw","nnwnnwnnw","wnwnnwnnn","nnnnwwnnw","wnnnwwnnn","nnwnwwnnn",
+"nnnnnwwnw","wnnnnwwnn","nnwnnwwnn","nnnnwwwnn","wnnnnnnww","nnwnnnnww","wnwnnnnwn","nnnnwnnww",
+"wnnnwnnwn","nnwnwnnwn","nnnnnnwww","wnnnnnwwn","nnwnnnwwn","nnnnwnwwn","wwnnnnnnw","nwwnnnnnw",
+"wwwnnnnnn","nwnnwnnnw","wwnnwnnnn","nwwnwnnnn","nwnnnnwnw","wwnnnnwnn","nwwnnnwnn","nwnwnwnnn",
+"nwnwnnnwn","nwnnnwnwn","nnnwnwnwn","nwnnwnwnn"
+};
+static bool pdBc39(const std::string& dataIn, std::string& mods){
+    std::string data;
+    for(size_t i=0;i<dataIn.size();++i){        // Code 39 is upper-case only
+        char c=dataIn[i];
+        if(c>='a'&&c<='z') c=(char)(c-'a'+'A');
+        if(!strchr(PD_C39_SET,c) || c=='*') return false;
+        data+=c;
+    }
+    if(data.empty()) return false;
+    data = "*" + data + "*";                   // mandatory start/stop guard
+    mods.clear();
+    for(size_t i=0;i<data.size();++i){
+        const char* pos = strchr(PD_C39_SET, data[i]);
+        if(!pos) return false;
+        const char* pat = PD_C39_PAT[pos-PD_C39_SET];
+        for(int k=0;k<9;++k){
+            int run = (pat[k]=='w') ? 3 : 1;
+            char lvl = (k%2==0) ? '1' : '0';
+            mods.append((size_t)run, lvl);
+        }
+        if(i+1<data.size()) mods.append(1,'0'); // inter-character space
+    }
+    return true;
+}
+// ---- EAN-13 ---------------------------------------------------------------
+static const char* const PD_EAN_A[10]={"0001101","0011001","0010011","0111101","0100011",
+                                       "0110001","0101111","0111011","0110111","0001011"};
+static const char* const PD_EAN_B[10]={"0100111","0110011","0011011","0100001","0011101",
+                                       "0111001","0000101","0010001","0001001","0010111"};
+// The right-hand (C) set is the bitwise complement of the left-odd (A) set.
+// v1.55.0 fix: entries 7 and 8 were transposed, which produced barcodes a
+// scanner would reject. Verified: C[i] == ~A[i] for every digit.
+static const char* const PD_EAN_C[10]={"1110010","1100110","1101100","1000010","1011100",
+                                       "1001110","1010000","1000100","1001000","1110100"};
+static const char* const PD_EAN_PAR[10]={"AAAAAA","AABABB","AABBAB","AABBBA","ABAABB",
+                                         "ABBAAB","ABBBAA","ABABAB","ABABBA","ABBABA"};
+static bool pdBcEan13(const std::string& dataIn, std::string& mods, std::string& hri){
+    std::string d;
+    for(size_t i=0;i<dataIn.size();++i) if(isdigit((unsigned char)dataIn[i])) d+=dataIn[i];
+    if(d.size()<12) return false;
+    d = d.substr(0,12);
+    int sum=0;                                  // compute the EAN-13 check digit
+    for(int i=0;i<12;++i) sum += (d[i]-'0') * ((i%2==0)?1:3);
+    int chk = (10 - (sum%10)) % 10;
+    d += (char)('0'+chk);
+    hri = d;
+    const char* par = PD_EAN_PAR[d[0]-'0'];
+    mods = "101";                               // left guard
+    for(int i=1;i<=6;++i)
+        mods += (par[i-1]=='A') ? PD_EAN_A[d[i]-'0'] : PD_EAN_B[d[i]-'0'];
+    mods += "01010";                            // centre guard
+    for(int i=7;i<=12;++i) mods += PD_EAN_C[d[i]-'0'];
+    mods += "101";                              // right guard
+    return true;
+}
+
+// Parse the optional PIT_BARCODE model JSON: {"sym":"code128","hri":true,"quiet":2}
+struct PdBarcodeModel { std::wstring sym; bool hri; double quiet; PdBarcodeModel():sym(L"code128"),hri(true),quiet(2.0){} };
+static void pdParseBarcodeModel(const std::wstring& jsonW, PdBarcodeModel& m){
+    if(jsonW.empty()) return;
+    if(jsonW.find(L'{')==std::wstring::npos){    // plain text = symbology name
+        m.sym=jsonW; return;
+    }
+    auto grabStr=[&](const wchar_t* key, std::wstring& out){
+        size_t k=jsonW.find(key); if(k==std::wstring::npos) return;
+        size_t c=jsonW.find(L':',k); if(c==std::wstring::npos) return;
+        size_t q1=jsonW.find(L'"',c); if(q1==std::wstring::npos) return;
+        size_t q2=jsonW.find(L'"',q1+1); if(q2==std::wstring::npos) return;
+        out=jsonW.substr(q1+1,q2-q1-1);
+    };
+    grabStr(L"\"sym\"", m.sym);
+    size_t k=jsonW.find(L"\"hri\"");
+    if(k!=std::wstring::npos) m.hri = (jsonW.find(L"false",k)==std::wstring::npos ||
+                                       jsonW.find(L"true",k)<jsonW.find(L"false",k));
+    k=jsonW.find(L"\"quiet\"");
+    if(k!=std::wstring::npos){ size_t c=jsonW.find(L':',k);
+        if(c!=std::wstring::npos){ double v=_wtof(jsonW.c_str()+c+1); if(v>=0&&v<20) m.quiet=v; } }
+    // normalise symbology spelling
+    for(size_t i=0;i<m.sym.size();++i) if(m.sym[i]>=L'A'&&m.sym[i]<=L'Z') m.sym[i]=(wchar_t)(m.sym[i]-L'A'+L'a');
+}
+
+// Draw a real barcode inside `box`. `payload` is the already-resolved live
+// value; digits may be Persian (they are folded back to ASCII for encoding,
+// while the human-readable line below keeps the Persian rendering).
+static void pdDrawBarcode(HDC dc, const PrintItem& it, const RECT& box,
+                          double pxPerMmX, double pxPerMmY,
+                          double fontPxPerPt, const std::wstring& payloadW){
+    if(payloadW.empty()) return;
+    PdBarcodeModel bm; pdParseBarcodeModel(it.text, bm);
+
+    // Fold Persian/Arabic-Indic digits back to ASCII so the encoder sees the
+    // real numeric value; keep everything else verbatim.
+    std::string ascii; std::wstring hriW;
+    for(size_t i=0;i<payloadW.size();++i){
+        wchar_t c=payloadW[i];
+        if(c>=0x06F0 && c<=0x06F9)      ascii += (char)('0' + (c-0x06F0));
+        else if(c>=0x0660 && c<=0x0669) ascii += (char)('0' + (c-0x0660));
+        else if(c>=32 && c<127)         ascii += (char)c;
+        else if(c==0x066C || c==0x060C || c==L'٬') { /* thousands separator: drop */ }
+    }
+    if(ascii.empty()) return;
+
+    std::string mods; std::string hriAscii = ascii;
+    bool ok=false;
+    if(bm.sym==L"ean13"||bm.sym==L"ean"||bm.sym==L"ean-13"){
+        ok = pdBcEan13(ascii, mods, hriAscii);
+        if(!ok) ok = pdBc128(ascii, mods);          // graceful fallback
+    } else if(bm.sym==L"code39"||bm.sym==L"c39"||bm.sym==L"code-39"){
+        ok = pdBc39(ascii, mods);
+        if(!ok) ok = pdBc128(ascii, mods);
+    } else {
+        ok = pdBc128(ascii, mods);
+    }
+    if(!ok || mods.empty()) return;
+
+    int X0=box.left, Y0=box.top, X1=box.right, Y1=box.bottom;
+    int W=X1-X0, H=Y1-Y0; if(W<=2||H<=2) return;
+
+    // quiet zone (mm on each side) — required for reliable scanning
+    int qz=(int)(bm.quiet*pxPerMmX); if(qz<0) qz=0;
+    if(2*qz > W/2) qz = W/4;
+    int bw = W - 2*qz; if(bw<(int)mods.size()) bw=(int)mods.size();
+
+    // Human-readable interpretation line height
+    double fontPt = it.fontPt>0 ? it.fontPt : 8.0;
+    int hriH = bm.hri ? (int)(fontPt*fontPxPerPt*1.45) : 0;
+    if(hriH > H/2) hriH = H/2;
+    int barsH = H - hriH; if(barsH<3){ barsH=H; hriH=0; }
+
+    // Draw bars. Consecutive '1' modules merge into a single rectangle so the
+    // printer never leaves hairline gaps inside a wide bar.
+    HBRUSH bbr=CreateSolidBrush(pdCR(it.textColor));
+    size_t n=mods.size();
+    size_t i=0;
+    while(i<n){
+        if(mods[i]=='0'){ ++i; continue; }
+        size_t j=i; while(j<n && mods[j]=='1') ++j;
+        int px0 = X0+qz + (int)((double)bw*(double)i/(double)n);
+        int px1 = X0+qz + (int)((double)bw*(double)j/(double)n);
+        if(px1<=px0) px1=px0+1;
+        RECT br={px0, Y0, px1, Y0+barsH};
+        FillRect(dc,&br,bbr);
+        i=j;
+    }
+    DeleteObject(bbr);
+
+    // Human-readable numeric line, centred under the symbol. The numeric code
+    // is ALWAYS shown next to the bars on the insurance receipt page, which is
+    // what the paper form does.
+    if(hriH>0){
+        hriW.clear();
+        for(size_t k=0;k<hriAscii.size();++k) hriW += (wchar_t)(unsigned char)hriAscii[k];
+        hriW = toFaDigits(hriW);
+        int lf=-(int)(fontPt*fontPxPerPt);
+        HFONT f=CreateFontW(lf,0,0,0,it.bold?FW_BOLD:FW_NORMAL,0,0,0,DEFAULT_CHARSET,0,0,
+            CLEARTYPE_QUALITY,0,it.fontName.empty()?L"Vazirmatn":it.fontName.c_str());
+        HGDIOBJ of=SelectObject(dc,f);
+        SetTextColor(dc,pdCR(it.textColor));
+        RECT tr={X0, Y0+barsH, X1, Y1};
+        DrawTextW(dc,hriW.c_str(),-1,&tr,
+            DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX);
+        SelectObject(dc,of); DeleteObject(f);
+    }
+    (void)pxPerMmY;
 }
 
 // Map a design paper name to a Windows DMPAPER_* code. Returns 0 for custom.
@@ -1782,6 +2348,16 @@ bool printPrintDesign(const ReceptionRecord& r, int sectionId, HWND owner){
             // §1.51.0: dynamic services list rendered from the live record.
             RECT rr={x0,y0,x1,y1};
             pdDrawServices(dc, it, rr, sx*pscale, sy*pscale, (dpiY/72.0)*pscale, &r);
+        } else if(it.type==PIT_BARCODE){
+            // v1.55.0: a REAL scannable barcode. The payload is resolved from
+            // the bound field token (default {receiptbarcode}) so it always
+            // encodes live record data. Empty payload → nothing is drawn.
+            std::wstring pl = it.field.empty()
+                ? pdFieldValue(r, L"{receiptbarcode}")
+                : pdFieldValue(r, it.field);
+            if(pl.empty() && !it.prefix.empty()) pl = it.prefix;
+            RECT rr={x0,y0,x1,y1};
+            pdDrawBarcode(dc, it, rr, sx*pscale, sy*pscale, (dpiY/72.0)*pscale, pl);
         } else if(it.type==PIT_HLINE){
             int wpx=(int)(it.borderWidth*sx*pscale); if(wpx<1)wpx=1;
             HPEN p=CreatePen(PS_SOLID,wpx,pdCR(it.borderColor)); HGDIOBJ o=SelectObject(dc,p);

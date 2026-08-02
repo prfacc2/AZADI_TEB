@@ -29,7 +29,7 @@ function freshDOM() {
 
 /* mock Bridge — evals bridge.js first (with a stubbed chrome.webview so the HTTP
    polling path never starts), then OVERWRITES global.Bridge with our mock. */
-function makeBridge(w, catalog, patient) {
+function makeBridge(w, catalog, patient, initOverrides) {
   function thenable(r) {
     return { then: function (ok) { setTimeout(function () { ok(r); }, 1); return this; },
              'catch': function () { return this; } };
@@ -41,9 +41,14 @@ function makeBridge(w, catalog, patient) {
     ready: function (cb) { setTimeout(cb, 1); },
     on: function () {},
     call: function (verb, payload) {
-      if (verb === 'init') return thenable({ ok: true,
-        insurances: [{ name: 'آزاد', pct: 0 }, { name: 'تأمین', pct: 70 }],
-        supp: [{ name: 'ندارد', pct: 0 }], ps: { P: 0, S: 0 }, date: '1404/04/24' });
+      if (verb === 'init') {
+        var init = { ok: true,
+          insurances: [{ name: 'آزاد', pct: 0 }, { name: 'تأمین', pct: 70 }],
+          supp: [{ name: 'ندارد', pct: 0 }], ps: { P: 0, S: 0 }, date: '1404/04/24' };
+        var ik;
+        for (ik in (initOverrides || {})) if (Object.prototype.hasOwnProperty.call(initOverrides, ik)) init[ik] = initOverrides[ik];
+        return thenable(init);
+      }
       if (verb === 'service.search') return thenable({ rows: catalog });
       if (verb === 'service.resolve') {
         var c = (payload && payload.code) || '', hit = null, i;
@@ -55,6 +60,21 @@ function makeBridge(w, catalog, patient) {
       if (verb === 'patient.search') return thenable({ rows: patient ? [patient] : [] });
       if (verb === 'doctor.search') return thenable({ rows: [] });
       if (verb === 'queue.list') return thenable({ rows: [] });
+      if (verb === 'bill.compute') {
+        var rows = (payload && payload.services) || [], gross = 0, disc = 0;
+        var org = 0, supp = 0, pat = 0, bp = payload && payload.hasIns && payload.insMain === 1 ? 70 : 0;
+        var sp = Number(payload && payload.insSuppPct) || 0, bi, row, unit, g, ds, net, os, rem, ss;
+        if (bp < 0) bp = 0; else if (bp > 100) bp = 100;
+        if (sp < 0) sp = 0; else if (sp > 100) sp = 100;
+        for (bi = 0; bi < rows.length; bi++) {
+          row = rows[bi]; unit = row.freeRate ? Number(row.freePrice || 0) : Number(row.price || 0);
+          g = unit * (Number(row.qty) || 1); ds = Math.min(g, Math.max(0, Number(row.discount) || 0));
+          net = g - ds; os = Math.round(net * bp / 100); rem = net - os; ss = Math.round(rem * sp / 100);
+          gross += g; disc += ds; org += os; supp += ss; pat += rem - ss;
+        }
+        return thenable({ gross: gross, disc: disc, org: org, supp: supp, pat: pat,
+          paid: payload && payload.noPay ? 0 : pat });
+      }
       return thenable({ ok: true });
     }
   };
@@ -69,6 +89,11 @@ function $(w, id) { return w.document.getElementById(id); }
 function click(w, el) { el.dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true })); }
 function typeInput(w, el, val) { el.value = val; el.dispatchEvent(new w.Event('input', { bubbles: true })); }
 function drain(ms) { return new Promise(function (r) { setTimeout(r, ms || 60); }); }
+function parseMoneyText(el) {
+  var text = (el || {}).textContent || '';
+  var en = text.replace(/[۰-۹]/g, function (d) { return '۰۱۲۳۴۵۶۷۸۹'.indexOf(d); }).replace(/,/g, '');
+  return parseInt(en, 10) || 0;
+}
 function enterKey(w, el) {
   var ke = new w.KeyboardEvent('keydown', { bubbles: true, keyCode: 13, which: 13 });
   try { Object.defineProperty(ke, 'keyCode', { value: 13 }); } catch (e) {}
@@ -228,6 +253,102 @@ function M7() {
   });
 }
 
+function M8() {
+  return setupWithPicker(CATALOG, PATIENT, '1').then(function (w) {
+    click(w, $(w, 'svcSuggest').querySelector('[data-s]'));
+    return drain(80).then(function () {
+      var inp = $(w, 'svcBody').querySelector('.disc-inp');
+      if (!inp) { bad('M8 live-service-discount', 'no discount input'); return; }
+      typeInput(w, inp, '200000');
+      return drain(180).then(function () {
+        var shown = ($(w, 'sfDisc') || {}).textContent || '';
+        if (parseMoneyText($(w, 'sfDisc')) === 200000 && $(w, 'svcBody').querySelector('.disc-inp') === inp)
+          ok('M8 live-service-discount', 'discount=200000, input survived typing');
+        else bad('M8 live-service-discount', 'shown=' + shown);
+      });
+    });
+  });
+}
+
+function M9() {
+  var dom = freshDOM(); var w = dom.window;
+  makeBridge(w, CATALOG, PATIENT);
+  var e = boot(w); if (e) return Promise.reject(new Error('boot: ' + e.message));
+  return drain(80).then(function () {
+    var right = $(w, 'colRight'), left = $(w, 'colLeft'), center = $(w, 'colCenter');
+    right.dispatchEvent(new w.MouseEvent('mousedown', { bubbles: true }));
+    var rightOnly = /is-active/.test(right.className) && !/is-active/.test(center.className);
+    left.dispatchEvent(new w.Event('focusin', { bubbles: true }));
+    if (rightOnly && /is-active/.test(left.className) && !/is-active/.test(right.className))
+      ok('M9 active-zone-focus', 'mouse and focus move a single active zone');
+    else bad('M9 active-zone-focus', 'active class did not move exclusively');
+  });
+}
+
+function bootWithInit(init) {
+  var dom = freshDOM(); var w = dom.window;
+  makeBridge(w, CATALOG, PATIENT, init);
+  var e = boot(w); if (e) return Promise.reject(new Error('boot: ' + e.message));
+  return drain(80).then(function () { return w; });
+}
+
+function M10() {
+  return bootWithInit({ theme: 'light', palette: 'calm' }).then(function (w) {
+    if (/theme-calm/.test(w.document.body.className) && !/theme-dark/.test(w.document.body.className))
+      ok('M10 light-palette', 'calm palette applied');
+    else bad('M10 light-palette', w.document.body.className);
+  });
+}
+
+function M11() {
+  return bootWithInit({ theme: 'dark', palette: 'warm' }).then(function (w) {
+    if (/theme-dark/.test(w.document.body.className) && !/theme-warm/.test(w.document.body.className))
+      ok('M11 dark-palette-isolation', 'dark excludes warm/calm classes');
+    else bad('M11 dark-palette-isolation', w.document.body.className);
+  });
+}
+
+function M12() {
+  return bootWithInit({
+    supp: [{ name: 'ندارد', pct: 0 }, { name: 'نامعتبر', pct: 150 }]
+  }).then(function (w) {
+    $(w, 'hasIns').checked = true;
+    $(w, 'insMain').selectedIndex = 1;
+    $(w, 'insSupp').selectedIndex = 1;
+    $(w, 'insSuppPct').selectedIndex = 0;
+    typeInput(w, $(w, 'svcSearch'), '1');
+    return drain(240).then(function () {
+      click(w, $(w, 'svcSuggest').querySelector('[data-s]'));
+      return drain(180).then(function () {
+        var pat = parseMoneyText($(w, 'sfPat'));
+        var insured = parseMoneyText($(w, 'sfIns'));
+        if (pat === 0 && insured === 1200000) ok('M12 percentage-clamp', '150% supplementary clamped to remaining 100%');
+        else bad('M12 percentage-clamp', 'pat=' + pat + ', insured=' + insured);
+      });
+    });
+  });
+}
+
+function M13() {
+  return setupWithPicker(CATALOG, PATIENT, '1').then(function (w) {
+    click(w, $(w, 'svcSuggest').querySelector('[data-s]'));
+    return drain(80).then(function () {
+      var inp = $(w, 'svcBody').querySelector('.disc-inp');
+      typeInput(w, inp, '9999999');
+      $(w, 'noPay').checked = true;
+      $(w, 'noPay').dispatchEvent(new w.Event('change', { bubbles: true }));
+      return drain(180).then(function () {
+        var disc = parseMoneyText($(w, 'sfDisc'));
+        var paid = parseMoneyText($(w, 'invFinPaid'));
+        var pat = parseMoneyText($(w, 'sfPat'));
+        if (disc === 1200000 && paid === 0 && pat === 0)
+          ok('M13 discount-noPay-bounds', 'discount capped at gross; noPay remains nonnegative');
+        else bad('M13 discount-noPay-bounds', 'disc=' + disc + ', paid=' + paid + ', pat=' + pat);
+      });
+    });
+  });
+}
+
 function report() {
   var pass = 0, fail = 0, i;
   for (i = 0; i < results.length; i++) {
@@ -247,4 +368,10 @@ M1()
   .then(M5).catch(function (e) { bad('M5', e.message); })
   .then(M6).catch(function (e) { bad('M6', e.message); })
   .then(M7).catch(function (e) { bad('M7', e.message); })
+  .then(M8).catch(function (e) { bad('M8', e.message); })
+  .then(M9).catch(function (e) { bad('M9', e.message); })
+  .then(M10).catch(function (e) { bad('M10', e.message); })
+  .then(M11).catch(function (e) { bad('M11', e.message); })
+  .then(M12).catch(function (e) { bad('M12', e.message); })
+  .then(M13).catch(function (e) { bad('M13', e.message); })
   .then(report);

@@ -46,6 +46,13 @@ void WebAdmission_PushEvent(const char* eventName, const std::string& jsonData){
     WV2_PushEvent(eventName,jsonData);
 }
 
+void WebAdmission_PushEventTo(HWND view, const char* eventName,
+                              const std::string& jsonData){
+    if(!view || !eventName) return;
+    if(WV2_PushEventTo(view,eventName,jsonData)) return;
+    MshtmlAdmission_PushEvent(view,eventName,jsonData);
+}
+
 // ---- LIVE SERVICE / INSURANCE SYNC from Management -------------------------
 //  When the Management «مدیریت خدمات» page adds / edits / deletes a service (or
 //  the insurance tables change), we push the fresh catalog + insurance snapshot
