@@ -570,32 +570,62 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
         if(!enabled) txt = g_theme.textDim;
         SetTextColor(dc, txt);
         if(st==BS_CARD){
-            // v1.60.0: icon sits inside a circular accent-tinted badge —
-            // a professional "app icon" look instead of a bare glyph.
+            // v1.62.0 CARD REDESIGN. The old card pinned its badge/title/sub to
+            // absolute offsets (16 / 78 / 112) so any card that was not exactly
+            // 170 px tall printed its caption in the wrong place — and on the
+            // welcome screen the caption sometimes fell outside the card. The
+            // content block is now CENTRED in the available height and every
+            // metric derives from the card's own size, so it looks correct at
+            // any dimension and any DPI.
+            int cw = rc.right, chh = rc.bottom;
+            int bd = S(58);                       // badge diameter
+            if(bd > chh/3) bd = chh/3;
+            if(bd < S(30)) bd = S(30);
+            int tH = S(30), sH = S(22);
+            bool hasSub = (d && !d->sub.empty());
+            int gap1 = S(14), gap2 = S(2);
+            int blockH = bd + gap1 + tH + (hasSub? gap2+sH : 0);
+            int by = rr.top + (chh - blockH)/2;
+            if(by < rr.top + S(10)) by = rr.top + S(10);
+
             if(d && d->icon){
-                int bd=S(52);
-                RECT br={rc.right/2-bd/2, rr.top+S(16), rc.right/2+bd/2, rr.top+S(16)+bd};
+                RECT br={cw/2-bd/2, by, cw/2+bd/2, by+bd};
                 COLORREF badgeBg = blendColor(g_theme.surface,
-                    hv?g_theme.accentHover:g_theme.accent, hv?30:16);
+                    hv?g_theme.accentHover:g_theme.accent, hv?34:18);
+                // hovering lifts the badge with a soft accent halo so the whole
+                // card feels interactive, not just the border.
+                if(hv){
+                    RECT halo=br; InflateRect(&halo,S(5),S(5));
+                    gpFillAlpha(dc, halo, (bd+S(10))/2,
+                        blendColor(g_theme.accent, g_theme.surface, 40), 60);
+                }
                 gpGradRoundRect(dc, br, bd/2,
                     blendColor(g_theme.surfaceTop, badgeBg, 55), badgeBg,
-                    hv?g_theme.accent:CLR_INVALID);
-                int isz=S(26);
-                RECT ir={rc.right/2-isz/2, br.top+(bd-isz)/2,
-                         rc.right/2+isz/2, br.top+(bd-isz)/2+isz};
+                    hv?g_theme.accent:blendColor(g_theme.border,g_theme.accent,30));
+                int isz=(bd*52)/100;
+                RECT ir={cw/2-isz/2, br.top+(bd-isz)/2,
+                         cw/2+isz/2, br.top+(bd-isz)/2+isz};
                 drawIcon(dc, d->icon, ir,
-                    hv?g_theme.accentHover:g_theme.accent, S(2));
+                    hv?g_theme.accentHover:g_theme.accent, S(2)+1);
             }
+            int ty = by + bd + gap1;
             SelectObject(dc, g_fTitle);
-            RECT tr = rr; tr.top += S(78); tr.bottom = tr.top+S(32);
+            SetTextColor(dc, hv?g_theme.accent:txt);
+            RECT tr = {S(8), ty, cw-S(8), ty+tH};
             DrawTextW(dc, d?d->text.c_str():L"", -1, &tr,
                 DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
-            if(d && !d->sub.empty()){
+            if(hasSub){
                 SelectObject(dc, g_fSmall);
                 SetTextColor(dc, g_theme.textDim);
-                RECT sr = rr; sr.top += S(112); sr.bottom = sr.top+S(22);
+                RECT sr = {S(10), ty+tH+gap2, cw-S(10), ty+tH+gap2+sH};
                 DrawTextW(dc, d->sub.c_str(), -1, &sr,
                     DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+            }
+            // a subtle "enter" chevron at the bottom edge, revealed on hover
+            if(hv){
+                int chv=S(11), cyv=rr.bottom-S(16);
+                RECT cr={cw/2-chv/2, cyv-chv/2, cw/2+chv/2, cyv+chv/2};
+                drawIcon(dc, ICO_CHEVRON, cr, g_theme.accent, S(2));
             }
         } else {
             bool hasText = d && !d->text.empty();

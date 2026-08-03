@@ -58,34 +58,44 @@ static bool loadRes(int id, std::string& out){
 //  The JS engine uses type strings ("label","field",…) and "#rrggbb" colours.
 //  The C++ PrintDesign uses int enums and 0x00RRGGBB. We bridge here so a saved
 //  web design is identical to a native one and prints through the same path.
-// §1.53.0 FIX (Bug A): this array MUST have one entry per PrintItemType enum
-// member and be in the EXACT enum order, because jsTypeToInt/intToJsType index
-// straight into it. Before this fix "services" (index 12 = PIT_SERVICES) was
-// MISSING, so a saved PIT_SERVICES item was silently downgraded to a plain
-// label on load, and the browser designer had no way to author a live services
-// list. Order below == PIT_LABEL,PIT_FIELD,PIT_HLINE,PIT_VLINE,PIT_RECT,
-// PIT_FRAME,PIT_IMAGE,PIT_LOGO,PIT_QR,PIT_PHOTO,PIT_APPTNO,PIT_TABLE,PIT_SERVICES.
-// v1.55.0: appended "barcode" (index 13 = PIT_BARCODE) — the real 1-D barcode
-// generator item. It MUST stay last so every previously-saved design keeps its
-// original type index.
-static const char* JS_TYPES[] = {
-    "label","field","hline","vline","rect","frame","image","logo","qr","photo","apptno","table","services","barcode" };
-// v1.60.0 FIX: the enum is NOT contiguous — PIT_BARCODE=13 and PIT_SERVICES=14,
-// so positional indexing into JS_TYPES mis-mapped "services"→12 (PIT_TABLE) and
-// intToJsType(14)→out-of-bounds→"label". A saved/authored services table was
-// silently downgraded to a plain label — the direct cause of «خدمات چاپ نمی‌شود».
-// Map by NAME for the two out-of-range ids; index only 0..11.
-static int jsTypeToInt(const std::string& t){
-    if(t=="services") return PIT_SERVICES;
+// Keep this mapping explicit. PrintItemType intentionally has gaps because the
+// retired appointment-counter item used numeric id 10 and must never be reused.
+// Explicit conversion prevents a services table from ever degrading to a label.
+static int jsTypeToInt(const std::string& t, bool& legacyRemoved){
+    legacyRemoved=false;
+    if(t=="label")    return PIT_LABEL;
+    if(t=="field")    return PIT_FIELD;
+    if(t=="hline")    return PIT_HLINE;
+    if(t=="vline")    return PIT_VLINE;
+    if(t=="rect")     return PIT_RECT;
+    if(t=="frame")    return PIT_FRAME;
+    if(t=="image")    return PIT_IMAGE;
+    if(t=="logo")     return PIT_LOGO;
+    if(t=="qr")       return PIT_QR;
+    if(t=="photo")    return PIT_PHOTO;
+    if(t=="table")    return PIT_TABLE;
     if(t=="barcode")  return PIT_BARCODE;
-    for(int i=0;i<12;++i) if(t==JS_TYPES[i]) return i;
+    if(t=="services") return PIT_SERVICES;
+    if(t=="apptno"){ legacyRemoved=true; return PIT_LABEL; }
     return PIT_LABEL;
 }
 static std::string intToJsType(int t){
-    if(t==PIT_SERVICES) return "services";
-    if(t==PIT_BARCODE)  return "barcode";
-    if(t<0||t>11) return "label";
-    return JS_TYPES[t];
+    switch(t){
+        case PIT_LABEL: return "label";
+        case PIT_FIELD: return "field";
+        case PIT_HLINE: return "hline";
+        case PIT_VLINE: return "vline";
+        case PIT_RECT: return "rect";
+        case PIT_FRAME: return "frame";
+        case PIT_IMAGE: return "image";
+        case PIT_LOGO: return "logo";
+        case PIT_QR: return "qr";
+        case PIT_PHOTO: return "photo";
+        case PIT_TABLE: return "table";
+        case PIT_BARCODE: return "barcode";
+        case PIT_SERVICES: return "services";
+        default: return "label";
+    }
 }
 static std::string hexColor(unsigned int c){
     char b[8]; sprintf(b,"#%02x%02x%02x",(c>>16)&0xFF,(c>>8)&0xFF,c&0xFF);
@@ -118,8 +128,11 @@ static std::string designToWebJson(const PrintDesign& d){
     o+="\"paperW\":"+jnum(d.paperW)+",";
     o+="\"paperH\":"+jnum(d.paperH)+",";
     o+="\"items\":[";
+    bool firstItem=true;
     for(size_t i=0;i<d.items.size();++i){
-        const PrintItem& it=d.items[i]; if(i)o+=",";
+        const PrintItem& it=d.items[i];
+        if(it.type==10) continue; // removed legacy appointment-counter item
+        if(!firstItem)o+=","; firstItem=false;
         o+="{";
         o+="\"id\":"+jint(it.id)+",";
         o+="\"type\":\""+intToJsType(it.type)+"\",";
@@ -140,7 +153,6 @@ static std::string designToWebJson(const PrintDesign& d){
         o+="\"borderStyle\":0,";
         o+="\"corner\":"+jnum(it.corner)+",\"padding\":"+jnum(it.padding)+",";
         o+="\"opacity\":"+jnum(it.opacity)+",\"visibility\":"+jint(it.visibility)+",";
-        o+="\"startValue\":"+jint(it.startValue)+",\"step\":"+jint(it.step)+",";
         // v1.55.0 table/services row geometry (mm; 0 = automatic)
         o+="\"rowH\":"+jnum(it.rowH)+",\"headerH\":"+jnum(it.headerH)+",";
         o+="\"imgPath\":"+jstr(it.imgPath);
@@ -191,10 +203,22 @@ static bool webJsonToDesign(const std::string& json, PrintDesign& out){
         else if(k=="paperH") out.paperH=j.dbl();
         else if(k=="items"){ j.eat('[');
             while(true){ j.ws(); if(j.eat(']'))break; PrintItem it;
+                bool legacyRemoved=false;
                 if(!j.eat('{'))return false;
                 while(true){ j.ws(); if(j.eat('}'))break; std::string ik=j.str(); j.eat(':');
                     if(ik=="id") it.id=(int)j.dbl();
-                    else if(ik=="type") it.type=jsTypeToInt(j.str());
+                    else if(ik=="type"){
+                        j.ws();
+                        if(j.p<j.s.size() && j.s[j.p]=='\"'){
+                            bool oldType=false;
+                            it.type=jsTypeToInt(j.str(),oldType);
+                            legacyRemoved=legacyRemoved||oldType;
+                        } else {
+                            int numericType=(int)j.dbl();
+                            if(numericType==10) legacyRemoved=true;
+                            else it.type=numericType;
+                        }
+                    }
                     else if(ik=="x") it.x=j.dbl(); else if(ik=="y") it.y=j.dbl();
                     else if(ik=="w") it.w=j.dbl(); else if(ik=="h") it.h=j.dbl();
                     else if(ik=="rot") it.rot=j.dbl(); else if(ik=="z") it.z=(int)j.dbl();
@@ -229,8 +253,7 @@ static bool webJsonToDesign(const std::string& json, PrintDesign& out){
                     else if(ik=="padding") it.padding=j.dbl();
                     else if(ik=="opacity") it.opacity=j.dbl();
                     else if(ik=="visibility") it.visibility=(int)j.dbl();
-                    else if(ik=="startValue") it.startValue=(int)j.dbl();
-                    else if(ik=="step") it.step=(int)j.dbl();
+                    else if(ik=="startValue" || ik=="step") j.skip();
                     // v1.55.0: explicit row / header heights for table+services
                     else if(ik=="rowH") it.rowH=j.dbl();
                     else if(ik=="headerH") it.headerH=j.dbl();
@@ -239,7 +262,7 @@ static bool webJsonToDesign(const std::string& json, PrintDesign& out){
                     if(!j.eat(',')){ j.eat('}'); break; } if(!j.ok)break; }
                 if(it.fontName.empty()) it.fontName=L"Vazirmatn";
                 if(it.fontPt<=0) it.fontPt=10;
-                out.items.push_back(it);
+                if(!legacyRemoved) out.items.push_back(it);
                 if(!j.eat(',')){ j.eat(']'); break; } if(!j.ok)break; }
         } else j.skip();
         if(!j.eat(',')){ j.eat('}'); break; } if(!j.ok)break; }

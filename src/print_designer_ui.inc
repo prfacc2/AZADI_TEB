@@ -478,10 +478,9 @@ static void drawItemGdip(Graphics& g,DesignerState* st,const PrintItem& it,bool 
             }
         }
         break; }
-    case PIT_APPTNO: case PIT_LABEL: case PIT_FIELD: default:{
+    case PIT_LABEL: case PIT_FIELD: default:{
         std::wstring text;
-        if(it.type==PIT_APPTNO) text=L"###";
-        else if(it.type==PIT_FIELD) text=it.prefix+sampleValue(it.field)+it.suffix;
+        if(it.type==PIT_FIELD) text=it.prefix+sampleValue(it.field)+it.suffix;
         else text=it.text;
         // §1.14.3: crash-proof font construction (deterministic fallback chain).
         int style=FontStyleRegular;
@@ -677,7 +676,6 @@ static void designer_buildInspector(HWND h){
             // v1.55.0 — بارکد خطی واقعی (Code128 / Code39 / EAN-13)
             {L"\u0628\u0627\u0631\u06a9\u062f \u062e\u0637\u06cc (\u0642\u0627\u0628\u0644 \u0627\u0633\u06a9\u0646)",PIT_BARCODE},
             {L"\u0639\u06a9\u0633 \u067e\u0631\u0633\u0646\u0644\u06cc \u0628\u06cc\u0645\u0627\u0631",PIT_PHOTO},
-            {L"\u0634\u0645\u0627\u0631\u0647 \u0646\u0648\u0628\u062a",PIT_APPTNO},
         };
         for(const auto& p:pal){
             // plain standard push-button (no custom flat-button owner state)
@@ -699,7 +697,7 @@ static void designer_buildInspector(HWND h){
     numEdit(6004,it->h,x0,y,w/2-S(2)); y+=S(28);
     label(L"\u0686\u0631\u062e\u0634 (\u062f\u0631\u062c\u0647)"); y+=S(20);
     numEdit(6005,it->rot,x0,y,w); y+=S(28);
-    if(it->type==PIT_LABEL || it->type==PIT_FIELD || it->type==PIT_APPTNO){
+    if(it->type==PIT_LABEL || it->type==PIT_FIELD){
         label(L"\u0627\u0646\u062f\u0627\u0632\u0647 \u0641\u0648\u0646\u062a (pt)"); y+=S(20);
         numEdit(6006,it->fontPt,x0,y,w); y+=S(28);
         label(L"\u0631\u0646\u06af \u0645\u062a\u0646"); y+=S(20);
@@ -838,7 +836,6 @@ static void addPaletteItem(DesignerState* st,int type){
     case PIT_LOGO:  it.w=24; it.h=24; break;
     case PIT_IMAGE: it.w=30; it.h=20; break;
     case PIT_PHOTO: it.w=22; it.h=28; it.borderWidth=0.3; break;
-    case PIT_APPTNO: it.w=40; it.h=14; it.fontPt=22; it.bold=true; it.align=1; break;
     case PIT_LABEL: it.text=L"\u0645\u062a\u0646 \u062f\u0644\u062e\u0648\u0627\u0647"; break;
     case PIT_FIELD: it.field=L"firstName"; it.prefix=L"\u0646\u0627\u0645: "; break;
     case PIT_SERVICES: {

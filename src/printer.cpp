@@ -57,7 +57,6 @@ static bool printerRequestGate(HWND h, const std::wstring& title,
 // ------------------------------------------------------------- sections -----
 const wchar_t* PRINT_SECTIONS[] = {
     L"پذیرش درمانگاه",
-    L"نوبت‌دهی",
     L"قبض / صورتحساب",
     L"بیمه",
     L"بیمه مکمل",
@@ -87,7 +86,7 @@ static const FieldDef FIELDS[] = {
     { L"{ptype}",     L"نوع بیمار" },
     { L"{ins}",       L"بیمه اصلی" },
     { L"{supp}",      L"بیمه مکمل" },
-    { L"{queue}",     L"شماره نوبت" },
+    { L"{queue}",     L"شماره پذیرش" },
     { L"{date}",      L"تاریخ" },
     { L"{time}",      L"ساعت" },
     { L"{shift}",     L"شیفت" },
@@ -251,7 +250,7 @@ static Design defaultDesign(int sec){
     addLabel(8,20,NULL,PRINT_SECTIONS[sec<N_PRINT_SECTIONS?sec:0],13,true,RGB(40,70,120));
     addLine(30);
     // top info row
-    addLabel(8,34,L"{queue}",L"شماره نوبت: ",13,true,RGB(0,0,0));
+    addLabel(8,34,L"{queue}",L"شماره پذیرش: ",13,true,RGB(0,0,0));
     addLabel(8,42,L"{date}", L"تاریخ: ",11,false,RGB(0,0,0));
     addLabel(70,42,L"{time}",L"ساعت: ",11,false,RGB(0,0,0));
     addLabel(8,50,L"{shift}",L"شیفت: ",11,false,RGB(0,0,0));
@@ -280,7 +279,7 @@ static const wchar_t* TEMPLATE_NAMES[] = {
     L"۳) رسمی با کادر آبی",
     L"۴) فشرده A5",
     L"۵) سربرگ رنگی مدرن",
-    L"۶) نوبت‌دهی درشت",
+    L"۶) شماره پذیرش درشت",
     L"۷) رسید پرداخت",
     L"۸) دو ستونه شیک",
     L"۹) مینیمال خط‌دار",
@@ -322,7 +321,7 @@ static Design templateByIndex(int sec, int idx){
         d.paper=1; paperMM(d.paper,cw,ch);
         d.items.push_back(label(8,10,cw-16,NULL,clinic.c_str(),16,true,RGB(20,50,100),1));
         d.items.push_back(label(8,20,cw-16,NULL,secName,12,true,RGB(40,70,120),1));
-        d.items.push_back(label(8,34,cw-16,L"{queue}",L"نوبت: ",13,true,RGB(0,0,0)));
+        d.items.push_back(label(8,34,cw-16,L"{queue}",L"پذیرش: ",13,true,RGB(0,0,0)));
         d.items.push_back(label(8,44,cw-16,L"{full}",L"بیمار: ",12,true,RGB(0,0,0)));
         d.items.push_back(label(8,52,cw-16,L"{nid}",L"کد ملی: ",11,false,RGB(0,0,0)));
         d.items.push_back(label(8,60,cw-16,L"{date}",L"تاریخ: ",11,false,RGB(0,0,0)));
@@ -336,7 +335,7 @@ static Design templateByIndex(int sec, int idx){
     case 3: { // compact A5
         d.paper=1; paperMM(d.paper,cw,ch);
         d.items.push_back(label(6,8,cw-12,NULL,clinic.c_str(),13,true,RGB(20,50,100)));
-        d.items.push_back(label(6,18,80,L"{queue}",L"نوبت: ",12,true,RGB(0,0,0)));
+        d.items.push_back(label(6,18,80,L"{queue}",L"پذیرش: ",12,true,RGB(0,0,0)));
         d.items.push_back(label(cw-80,18,74,L"{date}",L"تاریخ: ",10,false,RGB(0,0,0),2));
         d.items.push_back(label(6,26,cw-12,L"{full}",L"",12,true,RGB(0,0,0)));
         d.items.push_back(label(6,34,cw-12,L"{nid}",L"کد ملی: ",10,false,RGB(0,0,0)));
@@ -347,7 +346,7 @@ static Design templateByIndex(int sec, int idx){
         d.paper=1; paperMM(d.paper,cw,ch);
         d.items.push_back(bar(5,6,cw-10,NULL,clinic.c_str(),16,RGB(15,90,160),RGB(255,255,255),1));
         d.items.push_back(bar(5,18,cw-10,NULL,secName,12,RGB(30,130,200),RGB(255,255,255),1));
-        d.items.push_back(label(8,32,70,L"{queue}",L"نوبت: ",14,true,RGB(15,90,160)));
+        d.items.push_back(label(8,32,70,L"{queue}",L"پذیرش: ",14,true,RGB(15,90,160)));
         d.items.push_back(label(cw-78,32,70,L"{time}",L"ساعت: ",11,false,RGB(0,0,0),2));
         d.items.push_back(hline(8,40,cw-16,0.3,2,RGB(150,150,150)));
         d.items.push_back(label(8,44,cw-16,L"{full}",L"بیمار: ",13,true,RGB(0,0,0)));
@@ -359,7 +358,7 @@ static Design templateByIndex(int sec, int idx){
     case 5: { // big queue number (A5)
         d.paper=1; paperMM(d.paper,cw,ch);
         d.items.push_back(label(6,8,cw-12,NULL,clinic.c_str(),13,true,RGB(20,50,100),1));
-        d.items.push_back(label(6,18,cw-12,NULL,L"شماره نوبت شما",12,false,RGB(80,80,80),1));
+        d.items.push_back(label(6,18,cw-12,NULL,L"شماره پذیرش شما",12,false,RGB(80,80,80),1));
         d.items.push_back(label(6,26,cw-12,L"{queue}",L"",40,true,RGB(15,90,160),1));
         d.items.push_back(hline(8,60,cw-16,0.4,0,RGB(15,90,160)));
         d.items.push_back(label(6,64,cw-12,L"{full}",L"",13,true,RGB(0,0,0),1));
@@ -387,7 +386,7 @@ static Design templateByIndex(int sec, int idx){
         d.items.push_back(label(10,26,cw-20,NULL,secName,14,true,RGB(40,70,120),1));
         d.items.push_back(hline(12,40,cw-24,0.4,0,RGB(40,70,120)));
         double cR=cw/2+4, cL=12, colW=cw/2-16;
-        d.items.push_back(label(cR,46,colW,L"{queue}",L"نوبت: ",14,true,RGB(0,0,0)));
+        d.items.push_back(label(cR,46,colW,L"{queue}",L"پذیرش: ",14,true,RGB(0,0,0)));
         d.items.push_back(label(cL,46,colW,L"{date}",L"تاریخ: ",12,false,RGB(0,0,0)));
         d.items.push_back(label(cR,56,colW,L"{full}",L"بیمار: ",14,true,RGB(0,0,0)));
         d.items.push_back(label(cL,56,colW,L"{time}",L"ساعت: ",12,false,RGB(0,0,0)));
@@ -404,7 +403,7 @@ static Design templateByIndex(int sec, int idx){
         d.paper=1; paperMM(d.paper,cw,ch);
         d.items.push_back(label(8,8,cw-16,NULL,clinic.c_str(),15,true,RGB(0,0,0),1));
         d.items.push_back(hline(8,18,cw-16,0.5,0,RGB(0,0,0)));
-        d.items.push_back(label(8,22,cw-16,L"{queue}",L"نوبت: ",13,true,RGB(0,0,0)));
+        d.items.push_back(label(8,22,cw-16,L"{queue}",L"پذیرش: ",13,true,RGB(0,0,0)));
         d.items.push_back(hline(8,30,cw-16,0.2,1,RGB(180,180,180)));
         d.items.push_back(label(8,33,cw-16,L"{full}",L"بیمار: ",12,true,RGB(0,0,0)));
         d.items.push_back(hline(8,41,cw-16,0.2,1,RGB(180,180,180)));
@@ -425,7 +424,7 @@ static Design templateByIndex(int sec, int idx){
         d.items.push_back(label(10,42,cw-20,L"{birth}",L"تاریخ تولد: ",11,false,RGB(0,0,0)));
         d.items.push_back(label(10,50,cw-20,L"{mobile}",L"تلفن: ",11,false,RGB(0,0,0)));
         d.items.push_back(label(10,58,cw-20,L"{ins}",L"بیمه: ",11,false,RGB(0,0,0)));
-        d.items.push_back(bar(8,80,cw-16,L"{queue}",L"شماره نوبت: ",13,RGB(235,245,255),RGB(25,60,110),0));
+        d.items.push_back(bar(8,80,cw-16,L"{queue}",L"شماره پذیرش: ",13,RGB(235,245,255),RGB(25,60,110),0));
         d.items.push_back(label(8,92,cw-16,L"{date}",L"تاریخ مراجعه: ",10,false,RGB(120,120,120)));
         return d; }
     default:
@@ -1828,8 +1827,26 @@ static void pdDrawServices(HDC dc, const PrintItem& it, const RECT& box,
     // Persian/number content in the services table never flips visually.
     SetTextAlign(dc, TA_RTLREADING|TA_TOP|TA_LEFT);
 
-    int nDataRows = live ? (int)live->services.size() : 0;
-    if(nDataRows==0) nDataRows=1;   // keep at least one (placeholder) row
+    // v1.61.0 — services table row planning.
+    //   * A live record with services draws EXACTLY those rows (never a blank).
+    //   * A live record with NO services draws one honest «خدمتی ثبت نشده» row
+    //     instead of a silent, empty, meaningless grid line.
+    //   * The designer canvas (live == NULL) keeps the sample rows so the user
+    //     can see what a real print looks like while laying the table out.
+    int nLive = live ? (int)live->services.size() : 0;
+    bool emptyLive = (live && nLive==0);
+    int nDataRows = live ? (nLive>0? nLive : 1) : 3;
+    // The design pins a row height; make sure the printed table never claims
+    // fewer rows than the frame was drawn for, so short bills still look like
+    // the template the operator designed (empty trailing rows stay ruled).
+    int minRows = 0;
+    if(it.rowH>0){
+        int headMm = m.header ? (int)((it.headerH>0? it.headerH : 7.5)) : 0;
+        double availMm = (double)(Y1-Y0)/(pxPerMmY>0?pxPerMmY:1.0) - headMm;
+        if(availMm>0) minRows = (int)(availMm/it.rowH + 0.02);
+        if(minRows>40) minRows=40;
+    }
+    if(minRows>nDataRows) nDataRows=minRows;
     int totalRows = (m.header?1:0) + nDataRows;
     if(totalRows<1) return;
 
@@ -1949,8 +1966,14 @@ static void pdDrawServices(HDC dc, const PrintItem& it, const RECT& box,
                 // what goes here, so the designer may reorder / drop columns.
                 // Never fabricate example service text on a real print job. Sample
                 // values are for the designer canvas only (`live == NULL`).
-                std::wstring cell = sln ? pdSvcCellValue(kinds[c], *sln, rr)
-                                        : (live ? std::wstring() : pdSvcCellSample(kinds[c], rr));
+                std::wstring cell;
+                if(sln)            cell = pdSvcCellValue(kinds[c], *sln, rr);
+                else if(!live)     cell = pdSvcCellSample(kinds[c], rr);
+                else if(emptyLive && rr==0){
+                    // Honest, readable empty state — never a mystery blank row.
+                    if(kinds[c]==PSC_NAME)      cell = L"خدمتی ثبت نشده است";
+                    else if(kinds[c]==PSC_ROW)  cell = L"۱";
+                }
                 RECT cr={cx[c+1]+pad, ry0+pad/2, cx[c]-pad, ry1-pad/2};
                 if(cr.right<=cr.left||cr.bottom<=cr.top) continue;
                 // §1.53.0 (Bug E) / v1.55.0: Persian prose columns (نام خدمت،
@@ -2403,10 +2426,9 @@ bool printPrintDesign(const ReceptionRecord& r, int sectionId, HWND owner){
                     SelectObject(dc,of); DeleteObject(f);
                 }
             }
-        } else { // text-bearing: LABEL / FIELD / APPTNO
+        } else { // text-bearing: LABEL / FIELD
             std::wstring s=it.text;
             if(it.type==PIT_FIELD && !it.field.empty()) s=it.prefix+pdFieldValue(r,it.field)+it.suffix;
-            else if(it.type==PIT_APPTNO){ wchar_t b[16]; swprintf(b,16,L"%d",r.queueNo>0?r.queueNo:it.startValue); s=it.prefix+toFaDigits(b); }
             else s=it.prefix+it.text+it.suffix;
             if(it.visibility==1 && (it.type==PIT_FIELD) && pdFieldValue(r,it.field).empty()) continue;
             if(s.empty()) continue;

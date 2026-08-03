@@ -3,6 +3,7 @@
 //                last receipt, printing (real GDI printer output)
 // ============================================================================
 #include "app.h"
+#include "sections.h"
 #include <stdio.h>
 
 // ----------------------------------------------------- Iranian insurances --
@@ -139,6 +140,42 @@ int saveReception(ReceptionRecord& r){
 
 // -------------------------------------------------------- last receipt -----
 static std::wstring lastPath(){ return dataDir()+L"\\last_receipt.dat"; }
+
+// v1.61: keep the original 29 scalar lines byte-compatible, then append a
+// versioned, escaped service block. Old installations can still read the scalar
+// prefix; new builds recover every billed service for deterministic reprints.
+static std::wstring lrEscape(const std::wstring& in){
+    std::wstring out;
+    for(wchar_t c:in){
+        if(c==L'\\') out+=L"\\\\";
+        else if(c==L'\t') out+=L"\\t";
+        else if(c==L'\n') out+=L"\\n";
+        else if(c==L'\r') out+=L"\\r";
+        else out+=c;
+    }
+    return out;
+}
+static std::wstring lrUnescape(const std::wstring& in){
+    std::wstring out;
+    for(size_t i=0;i<in.size();++i){
+        if(in[i]!=L'\\' || i+1>=in.size()){ out+=in[i]; continue; }
+        wchar_t n=in[++i];
+        if(n==L't') out+=L'\t';
+        else if(n==L'n') out+=L'\n';
+        else if(n==L'r') out+=L'\r';
+        else out+=n;
+    }
+    return out;
+}
+static std::vector<std::wstring> lrSplitTabs(const std::wstring& line){
+    std::vector<std::wstring> out; std::wstring cur; bool escaped=false;
+    for(wchar_t c:line){
+        if(c==L'\t' && !escaped){ out.push_back(cur); cur.clear(); continue; }
+        cur+=c;
+        if(escaped) escaped=false; else escaped=(c==L'\\');
+    }
+    out.push_back(cur); return out;
+}
 void saveLastReceipt(const ReceptionRecord& r){
     wchar_t nums[512];
     swprintf(nums,512,L"%lld\n%lld\n%lld\n%lld\n%lld\n%lld\n%lld\n%lld\n%d",
@@ -149,7 +186,16 @@ void saveLastReceipt(const ReceptionRecord& r){
         +r.landline+L"\n"+r.address+L"\n"+r.patientType+L"\n"+r.insurance+L"\n"
         +r.suppInsurance+L"\n"+r.apptDate+L"\n"+r.apptTime+L"\n"+r.shift+L"\n"
         +r.dept+L"\n"+r.userName+L"\n"+nums+L"\n"+r.insuranceType+L"\n"+
-        r.treatingDoctor+L"\n"+r.doctorCode;
+        r.treatingDoctor+L"\n"+r.doctorCode+L"\nAZT_LAST_RECEIPT_V2\n";
+    wchar_t count[32]; swprintf(count,32,L"%u",(unsigned)r.services.size());
+    s+=count; s+=L"\n";
+    for(const auto& line:r.services){
+        wchar_t values[160];
+        swprintf(values,160,L"%lld\t%d\t%lld\t%lld\t%lld",
+                 line.price,line.qty,line.discount,line.insShare,line.patShare);
+        s+=lrEscape(line.code)+L"\t"+lrEscape(line.name)+L"\t"+
+           lrEscape(line.category)+L"\t"+lrEscape(line.desc)+L"\t"+values+L"\n";
+    }
     writeFileUtf8(lastPath(), s, false);
 }
 bool loadLastReceipt(ReceptionRecord& r){
@@ -158,22 +204,41 @@ bool loadLastReceipt(ReceptionRecord& r){
     std::vector<std::wstring> f; size_t pos=0;
     while(pos <= all.size()){
         size_t e = all.find(L'\n',pos);
-        if(e==std::wstring::npos){ f.push_back(trim(all.substr(pos))); break; }
-        f.push_back(trim(all.substr(pos,e-pos))); pos=e+1;
+        std::wstring line=(e==std::wstring::npos)?all.substr(pos):all.substr(pos,e-pos);
+        if(!line.empty() && line.back()==L'\r') line.pop_back();
+        f.push_back(line);
+        if(e==std::wstring::npos) break;
+        pos=e+1;
     }
     if(f.size() < 26) return false;
-    r.firstName=f[0]; r.lastName=f[1]; r.nationalId=f[2]; r.fatherName=f[3];
-    r.birthDate=f[4]; r.gender=f[5]; r.mobile=f[6]; r.landline=f[7];
-    r.address=f[8]; r.patientType=f[9]; r.insurance=f[10]; r.suppInsurance=f[11];
-    r.apptDate=f[12]; r.apptTime=f[13]; r.shift=f[14]; r.dept=f[15]; r.userName=f[16];
+    r.firstName=trim(f[0]); r.lastName=trim(f[1]); r.nationalId=trim(f[2]); r.fatherName=trim(f[3]);
+    r.birthDate=trim(f[4]); r.gender=trim(f[5]); r.mobile=trim(f[6]); r.landline=trim(f[7]);
+    r.address=trim(f[8]); r.patientType=trim(f[9]); r.insurance=trim(f[10]); r.suppInsurance=trim(f[11]);
+    r.apptDate=trim(f[12]); r.apptTime=trim(f[13]); r.shift=trim(f[14]); r.dept=trim(f[15]); r.userName=trim(f[16]);
     r.total=_wtoi64(f[17].c_str()); r.mainShare=_wtoi64(f[18].c_str());
     r.patientShare=_wtoi64(f[19].c_str()); r.baseDiff=_wtoi64(f[20].c_str());
     r.orgShare=_wtoi64(f[21].c_str()); r.finalTotal=_wtoi64(f[22].c_str());
     r.discount=_wtoi64(f[23].c_str()); r.paid=_wtoi64(f[24].c_str());
     r.queueNo=_wtoi(f[25].c_str());
-    if(f.size()>26) r.insuranceType=f[26];
-    if(f.size()>27) r.treatingDoctor=f[27];
-    if(f.size()>28) r.doctorCode=f[28];
+    if(f.size()>26) r.insuranceType=trim(f[26]);
+    if(f.size()>27) r.treatingDoctor=trim(f[27]);
+    if(f.size()>28) r.doctorCode=trim(f[28]);
+    r.services.clear();
+    if(f.size()>30 && trim(f[29])==L"AZT_LAST_RECEIPT_V2"){
+        int count=_wtoi(f[30].c_str());
+        if(count<0) count=0; if(count>1000) count=1000;
+        for(int i=0;i<count && 31+(size_t)i<f.size();++i){
+            auto cols=lrSplitTabs(f[31+i]);
+            if(cols.size()<9) continue;
+            ServiceLine line;
+            line.code=lrUnescape(cols[0]); line.name=lrUnescape(cols[1]);
+            line.category=lrUnescape(cols[2]); line.desc=lrUnescape(cols[3]);
+            line.price=_wtoi64(cols[4].c_str()); line.qty=_wtoi(cols[5].c_str());
+            line.discount=_wtoi64(cols[6].c_str()); line.insShare=_wtoi64(cols[7].c_str());
+            line.patShare=_wtoi64(cols[8].c_str()); if(line.qty<1) line.qty=1;
+            r.services.push_back(line);
+        }
+    }
     return true;
 }
 
@@ -260,7 +325,7 @@ bool printReceipt(const ReceptionRecord& r, int kind, HWND owner){
     pLine(dc,y,x,w, std::wstring(L"درمانگاه ") + APP_NAME_W, fT, true);
     pLine(dc,y,x,w, names[kind], fB, true);
     pSep(dc,y,x,w);
-    swprintf(buf,512,L"شماره نوبت: %d        تاریخ: %s        ساعت: %s",
+    swprintf(buf,512,L"شماره پذیرش: %d        تاریخ ثبت: %s        ساعت ثبت: %s",
         r.queueNo, toFaDigits(r.apptDate).c_str(), toFaDigits(r.apptTime).c_str());
     pLine(dc,y,x,w, buf, fN);
     swprintf(buf,512,L"شیفت: %s        بخش: %s        کاربر: %s",
@@ -279,11 +344,104 @@ bool printReceipt(const ReceptionRecord& r, int kind, HWND owner){
     if(!r.address.empty())
         pLine(dc,y,x,w, L"آدرس: " + r.address, fN);
     pSep(dc,y,x,w);
-    swprintf(buf,512,L"نوع بیمار: %s        نوع نوبت ثبت‌شده", r.patientType.c_str());
     pLine(dc,y,x,w, L"نوع بیمار: " + r.patientType, fN);
     pLine(dc,y,x,w, L"بیمه اصلی: " + r.insurance +
                     L"        بیمه مکمل: " + r.suppInsurance, fN);
     pSep(dc,y,x,w);
+
+    // =====================================================================
+    //  v1.61.0 — SERVICES TABLE on the classic fallback receipt.
+    //  Until now this last-resort printer emitted only money and identity
+    //  lines, so whenever a section had no bound design the services the
+    //  operator entered vanished from the paper. It now prints a real ruled
+    //  table: ردیف / نام خدمت / شرح / تعداد / مبلغ کل.
+    // =====================================================================
+    {
+        pLine(dc,y,x,w, L"خدمات ارائه‌شده", fB, true);
+        int colW[5]; // RTL: rightmost first
+        colW[0]=(int)(w*0.07);   // ردیف
+        colW[1]=(int)(w*0.34);   // نام خدمت
+        colW[2]=(int)(w*0.27);   // شرح
+        colW[3]=(int)(w*0.10);   // تعداد
+        colW[4]=w-colW[0]-colW[1]-colW[2]-colW[3]; // مبلغ
+        const wchar_t* hdr[5]={L"ردیف",L"نام خدمت",L"شرح خدمت",L"تعداد",L"مبلغ (ریال)"};
+        int rowH=(int)(dpiY*0.26); if(rowH<18) rowH=18;
+        int nRows=(int)r.services.size();
+        int tableTop=y;
+        // header row
+        {
+            HGDIOBJ of=SelectObject(dc,fB);
+            UINT oldAl=GetTextAlign(dc);
+            SetTextAlign(dc,TA_TOP|TA_LEFT|TA_RTLREADING);
+            int cxr=x+w;
+            for(int c=0;c<5;++c){
+                RECT cr={cxr-colW[c]+4, y+2, cxr-4, y+rowH-2};
+                DrawTextW(dc,hdr[c],-1,&cr,
+                    DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+                cxr-=colW[c];
+            }
+            SetTextAlign(dc,oldAl);
+            SelectObject(dc,of);
+            y+=rowH;
+        }
+        if(nRows==0){
+            HGDIOBJ of=SelectObject(dc,fN);
+            UINT oldAl=GetTextAlign(dc);
+            SetTextAlign(dc,TA_TOP|TA_LEFT|TA_RTLREADING);
+            RECT cr={x+4,y+2,x+w-4,y+rowH-2};
+            DrawTextW(dc,L"خدمتی ثبت نشده است",-1,&cr,
+                DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+            SetTextAlign(dc,oldAl);
+            SelectObject(dc,of);
+            y+=rowH;
+        } else {
+            HGDIOBJ of=SelectObject(dc,fN);
+            UINT oldAl=GetTextAlign(dc);
+            SetTextAlign(dc,TA_TOP|TA_LEFT|TA_RTLREADING);
+            for(int i=0;i<nRows;++i){
+                const ServiceLine& sl=r.services[i];
+                int q = sl.qty>0? sl.qty : 1;
+                std::wstring cells[5];
+                wchar_t nb[32];
+                swprintf(nb,32,L"%d",i+1);            cells[0]=toFaDigits(nb);
+                cells[1]= sl.name.empty()? L"—" : sl.name;
+                cells[2]= sl.desc.empty()? (sl.category.empty()? std::wstring(L"—") : sl.category) : sl.desc;
+                swprintf(nb,32,L"%d",q);              cells[3]=toFaDigits(nb);
+                cells[4]= toFaDigits(formatMoney(sl.price*(long long)q - sl.discount));
+                int cxr=x+w;
+                for(int c=0;c<5;++c){
+                    RECT cr={cxr-colW[c]+4, y+2, cxr-4, y+rowH-2};
+                    UINT al=(c==1||c==2)? DT_RIGHT : DT_CENTER;
+                    DrawTextW(dc,cells[c].c_str(),-1,&cr,
+                        al|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_END_ELLIPSIS|DT_NOPREFIX);
+                    cxr-=colW[c];
+                }
+                y+=rowH;
+            }
+            SetTextAlign(dc,oldAl);
+            SelectObject(dc,of);
+        }
+        // grid
+        {
+            int rows=(nRows>0? nRows : 1)+1;
+            HPEN gp=CreatePen(PS_SOLID,1,RGB(0,0,0));
+            HGDIOBJ op=SelectObject(dc,gp);
+            for(int rr=0;rr<=rows;++rr){
+                int yy=tableTop+rr*rowH;
+                MoveToEx(dc,x,yy,0); LineTo(dc,x+w,yy);
+            }
+            int cxr=x+w;
+            MoveToEx(dc,cxr,tableTop,0); LineTo(dc,cxr,tableTop+rows*rowH);
+            for(int c=0;c<5;++c){
+                cxr-=colW[c];
+                MoveToEx(dc,cxr,tableTop,0); LineTo(dc,cxr,tableTop+rows*rowH);
+            }
+            SelectObject(dc,op); DeleteObject(gp);
+        }
+        y+=10;
+        pSep(dc,y,x,w);
+    }
+
     if(kind != 1){  // مالی — رسید بیمه و قبض
         pLine(dc,y,x,w, L"جمع کل: " + toFaDigits(formatMoney(r.total)) + L" ریال", fN);
         pLine(dc,y,x,w, L"سهم بیمه اصلی: " + toFaDigits(formatMoney(r.mainShare)) + L" ریال", fN);
@@ -315,5 +473,17 @@ bool printLastReceipt(HWND owner){
             MB_OK|MB_ICONINFORMATION);
         return false;
     }
-    return printReceipt(r, 2, owner);
+    // Resolve the stored department again so a reprint uses the same section-
+    // bound design and receives the restored live service rows.
+    int sectionId=0; std::vector<Section> sections; Sections_All(sections);
+    for(const auto& s:sections){
+        if(s.is_active && (s.name_fa==r.dept || s.code==r.dept)){ sectionId=s.id; break; }
+    }
+    if(sectionId==0){
+        for(const auto& s:sections){ if(s.is_active && s.kind==L"reception"){ sectionId=s.id; break; } }
+    }
+    if(sectionId==0){ for(const auto& s:sections){ if(s.is_active){ sectionId=s.id; break; } } }
+    if(sectionId>0 && printPrintDesign(r,sectionId,owner)) return true;
+    if(printDesignedReceipt(r,0,owner)) return true;
+    return printReceipt(r,2,owner);
 }

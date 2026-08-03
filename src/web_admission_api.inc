@@ -113,35 +113,69 @@ static std::string adBlockJson(const BlacklistEntry& b){
 // for: the reception service row is bound to the catalogue entry BY CODE, and
 // whatever the HTML form sent (or failed to send) is replaced with the
 // authoritative catalogue text before the record reaches the print engine.
+// v1.61.0 — THE services-not-printing ROOT CAUSE FIX.
+// The previous implementation returned FALSE for (a) a zero-priced catalogue
+// entry and (b) any row it could not match, and both call sites did
+// `if(!adCatalogPrice(...)) continue;`. Consequence: the service the operator
+// picked in پذیرش was SILENTLY DROPPED from ReceptionRecord::services and could
+// therefore never appear in a printed receipt — the single biggest bug reported.
+//
+// New contract: a row is accepted whenever it carries ANY identity at all
+// (code, name, or a free rate). Price 0 is perfectly legal (رایگان / تحت پوشش
+// کامل بیمه). Only a completely empty row is rejected.
 static bool adCatalogPrice(const std::vector<ServiceDef>& catalog,
                            const std::string& obj,long long& price,
                            const ServiceDef** defOut=nullptr){
     bool freeRate=jsonGetBool(obj,"freeRate",false);
     double n=0;
-    if(freeRate){
-        if(!jsonGetNumber(obj,"freePrice",n) || n<=0) return false;
-        price=(long long)llround(n); return true;
-    }
     std::string codeU; jsonGetString(obj,"code",codeU);
-    std::wstring want=normDigits(trim(u82w(codeU)));
-    // exact code match first
-    for(const auto& s:catalog){
-        if(s.status!=0 && normDigits(trim(s.code))==want){
-            price=s.price; if(defOut) *defOut=&s; return price>0;
-        }
-    }
-    // v1.60.0 fallback — match by NAME so a row whose code was cleared in the
-    // form still binds to its catalogue entry and prints with real data.
     std::string nameU; jsonGetString(obj,"name",nameU);
-    std::wstring wantName=trim(u82w(nameU));
-    if(!wantName.empty()){
+    std::wstring want     = normDigits(trim(u82w(codeU)));
+    std::wstring wantName = trim(u82w(nameU));
+
+    if(freeRate){
+        // Manual («آزاد») rate row: trust the typed amount, but still bind the
+        // row to its catalogue entry when we can so نام/شرح/دسته stay real.
+        price = (jsonGetNumber(obj,"freePrice",n) && n>0) ? (long long)llround(n) : 0;
+        if(defOut && !want.empty()){
+            for(const auto& s:catalog)
+                if(s.status!=0 && normDigits(trim(s.code))==want){ *defOut=&s; break; }
+        }
+        return !(want.empty() && wantName.empty() && price<=0);
+    }
+
+    // exact code match first — price 0 is accepted (رایگان است، حذف نمی‌شود)
+    if(!want.empty()){
         for(const auto& s:catalog){
-            if(s.status!=0 && trim(s.name)==wantName){
-                price=s.price; if(defOut) *defOut=&s; return price>0;
+            if(s.status!=0 && normDigits(trim(s.code))==want){
+                price=s.price; if(price<0) price=0;
+                if(defOut) *defOut=&s;
+                return true;
             }
         }
     }
-    return false;
+    // fallback — match by NAME so a row whose code was cleared in the form
+    // still binds to its catalogue entry and prints with real data.
+    if(!wantName.empty()){
+        for(const auto& s:catalog){
+            if(s.status!=0 && trim(s.name)==wantName){
+                price=s.price; if(price<0) price=0;
+                if(defOut) *defOut=&s;
+                return true;
+            }
+        }
+    }
+    // Not in the catalogue at all (deleted/deactivated service, or a row typed
+    // by hand). NEVER drop it: keep whatever the form sent so the operator sees
+    // on paper exactly what they selected on screen.
+    if(!want.empty() || !wantName.empty()){
+        price=0;
+        if(jsonGetNumber(obj,"price",n) && n>0)          price=(long long)llround(n);
+        else if(jsonGetNumber(obj,"freePrice",n) && n>0) price=(long long)llround(n);
+        else if(jsonGetNumber(obj,"unit",n) && n>0)      price=(long long)llround(n);
+        return true;
+    }
+    return false;   // truly empty row
 }
 
 // ---- resolve the operator's print-design SECTION (mirrors reception.cpp) ----
@@ -410,11 +444,22 @@ static ReceptionRecord adBuildRecord(const std::string& body){
             // priced the row; the HTML form is never trusted for these fields.
             // This is what finally puts «تزریقات + تعداد + شرح» on EVERY print.
             if(def){
-                ln.name     = def->name;
-                ln.category = def->category;
-                ln.desc     = def->desc.empty()? def->category : def->desc;
+                if(!def->name.empty())     ln.name     = def->name;
+                if(!def->category.empty()) ln.category = def->category;
+                if(!def->desc.empty())     ln.desc     = def->desc;
+                else if(ln.desc.empty())   ln.desc     = def->category;
                 if(ln.code.empty()) ln.code=normDigits(def->code);
             }
+            // v1.61.0 — a printed line must never be blank. If neither the
+            // catalogue nor the form supplied a name, fall back to the code or
+            // the category so the services table always shows something real.
+            if(trim(ln.name).empty()){
+                if(!trim(ln.category).empty())   ln.name=ln.category;
+                else if(!trim(ln.code).empty())  ln.name=L"خدمت "+ln.code;
+                else if(!trim(ln.desc).empty())  ln.name=ln.desc;
+                else                             ln.name=L"خدمت";
+            }
+            if(trim(ln.desc).empty()) ln.desc = trim(ln.category).empty()? ln.name : ln.category;
             jsonGetNumber(obj,"qty",qty);
             jsonGetNumber(obj,"discount",discount);
             if(qty<1) qty=1; if(qty>999) qty=999;

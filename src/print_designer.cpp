@@ -1,7 +1,7 @@
 // ============================================================================
 //  print_designer.cpp — implementation of the vector print designer
-//  (release 1.4.0, §3/§4). Part 1: data model, JSON, store, counters,
-//  built-in templates. Part 2 (UI: section picker + editor + restore) follows.
+//  Part 1: data model, JSON, store and built-in templates.
+//  Part 2 (UI: section picker + editor + restore) follows.
 // ============================================================================
 #include "app.h"
 #include "print_designer.h"
@@ -29,7 +29,6 @@ PrintItem::PrintItem()
       borderColor(0x000000), borderWidth(0), corner(0), padding(1),
       opacity(1.0), visibility(0),
       objectFit(0),
-      startValue(1), step(1),
       // v1.55.0: 0 == automatic row geometry (backward compatible: an old
       // design that never stored rowH/headerH keeps its previous rendering).
       rowH(0), headerH(0) {}
@@ -137,11 +136,8 @@ std::string Design_ToJson(const PrintDesign& d){
         o << "\"pad\":" << num(it.padding) << ",";
         o << "\"op\":" << num(it.opacity) << ",";
         o << "\"vis\":" << inum(it.visibility) << ",";
-        o << "\"img\":\"" << js_esc(it.imgPath) << "\",";
-        o << "\"sv\":" << inum(it.startValue) << ",";
-        o << "\"sp\":" << inum(it.step);
-        // v1.55.0: only emit the row-geometry keys when they were actually set,
-        // so an untouched design serialises byte-identically to v1.54.0.
+        o << "\"img\":\"" << js_esc(it.imgPath) << "\"";
+        // v1.55.0: only emit the row-geometry keys when they were actually set.
         if(it.rowH    > 0) o << ",\"rh\":" << num(it.rowH);
         if(it.headerH > 0) o << ",\"hh\":" << num(it.headerH);
         o << "}";
@@ -255,8 +251,7 @@ bool Design_FromJson(const std::string& json, PrintDesign& out, std::wstring& er
                     else if(k=="op") it.opacity=jp.dbl();
                     else if(k=="vis") it.visibility=(int)jp.dbl();
                     else if(k=="img") it.imgPath=js_utf8_to_w(jp.str());
-                    else if(k=="sv") it.startValue=(int)jp.dbl();
-                    else if(k=="sp") it.step=(int)jp.dbl();
+                    else if(k=="sv" || k=="sp") jp.skipValue(); // ignored legacy counter data
                     // v1.55.0 row geometry (absent in older files ⇒ stays 0 = auto)
                     else if(k=="rh") it.rowH=jp.dbl();
                     else if(k=="hh") it.headerH=jp.dbl();
@@ -269,7 +264,10 @@ bool Design_FromJson(const std::string& json, PrintDesign& out, std::wstring& er
                 // draws with an empty/undefined face name.
                 if(it.fontName.empty()) it.fontName=L"Vazirmatn";
                 if(it.fontPt<=0) it.fontPt=10;
-                out.items.push_back(it);
+                // Type id 10 is permanently reserved. Silently discard it while
+                // importing old .aztpl/design files so retired UI elements cannot
+                // reappear through persisted user data.
+                if(it.type!=10) out.items.push_back(it);
                 if(!jp.match(',')){ jp.match(']'); break; }
                 if(!jp.ok) break;
             }
@@ -483,51 +481,6 @@ int SectionDesign_Cleanup(){
         FindClose(h);
     }
     return removed;
-}
-
-// ============================================================================
-//  appointment counters — file-backed (data\appt_counters.dat)
-//      sectionId|ymd|value
-// ============================================================================
-static std::wstring counterPath(){ return dataDir()+L"\\appt_counters.dat"; }
-struct CRow { int sid; std::wstring ymd; int val; };
-static std::vector<CRow> loadCounters(){
-    std::vector<CRow> v; std::wstring all=readFileUtf8(counterPath());
-    size_t pos=0;
-    while(pos<all.size()){
-        size_t e=all.find(L'\n',pos); if(e==std::wstring::npos)e=all.size();
-        std::wstring line=all.substr(pos,e-pos); pos=e+1;
-        while(!line.empty()&&(line.back()==L'\r'||line.back()==L'\n'))line.pop_back();
-        if(line.empty())continue;
-        size_t a=line.find(L'|'); if(a==std::wstring::npos)continue;
-        size_t b=line.find(L'|',a+1); if(b==std::wstring::npos)continue;
-        CRow r; r.sid=_wtoi(line.substr(0,a).c_str());
-        r.ymd=line.substr(a+1,b-a-1); r.val=_wtoi(line.substr(b+1).c_str());
-        v.push_back(r);
-    }
-    return v;
-}
-static void saveCounters(const std::vector<CRow>& v){
-    std::wstring out;
-    for(auto& r:v){ wchar_t b[64]; swprintf(b,64,L"%d|",r.sid); out+=b;
-        out+=r.ymd; swprintf(b,64,L"|%d\r\n",r.val); out+=b; }
-    writeFileUtf8(counterPath(),out,false);
-}
-int ApptCounter_Next(int sectionId,int startValue,int step){
-    if(step<=0) step=1;
-    std::wstring ymd=JalaliTodayKey();
-    auto v=loadCounters();
-    for(auto& r:v){
-        if(r.sid==sectionId && r.ymd==ymd){ r.val+=step; saveCounters(v); return r.val; }
-    }
-    CRow r; r.sid=sectionId; r.ymd=ymd; r.val=startValue;
-    v.push_back(r); saveCounters(v); return r.val;
-}
-int ApptCounter_Peek(int sectionId){
-    std::wstring ymd=JalaliTodayKey();
-    auto v=loadCounters();
-    for(auto& r:v) if(r.sid==sectionId && r.ymd==ymd) return r.val;
-    return 0;
 }
 
 #include "print_designer_templates.inc"
