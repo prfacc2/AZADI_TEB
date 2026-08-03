@@ -185,12 +185,12 @@
   var ITEM_LABELS = {
     label: "متن ثابت", field: "فیلد داده", hline: "خط افقی", vline: "خط عمودی",
     rect: "کادر", frame: "حاشیه صفحه", logo: "لوگو", photo: "عکس بیمار",
-    qr: "بارکد / QR", apptno: "شماره نوبت", image: "تصویر", table: "جدول",
+    qr: "بارکد / QR", image: "تصویر", table: "جدول",
     services: "لیست خدمات", barcode: "بارکد خطی (قابل اسکن)"
   };
   var ITEM_ICONS = {
     label: "T", field: "{}", hline: "—", vline: "│", rect: "▭", frame: "⬚",
-    logo: "★", photo: "👤", qr: "▦", apptno: "#", image: "🖼", table: "▦",
+    logo: "★", photo: "👤", qr: "▦", image: "🖼", table: "▦",
     services: "☰", barcode: "|||"
   };
 
@@ -211,7 +211,6 @@
 
   function displayText(it) {
     if (it.type === "label") return it.text || "";
-    if (it.type === "apptno") return (it.prefix || "") + faDigits(String(it.startValue || 1));
     if (it.type === "field") {
       var f = window.AZ_FIELDS[it.field];
       var lbl = f ? f.label : (it.field || "فیلد");
@@ -702,7 +701,7 @@
     el.dataset.id = it.id;
     styleItem(el, it);
 
-    if (it.type === "label" || it.type === "field" || it.type === "apptno") {
+    if (it.type === "label" || it.type === "field") {
       var t = document.createElement("div");
       t.className = "pi-text" + (it.type === "field" ? " pi-fieldtext" : "");
       t.textContent = displayText(it);
@@ -842,7 +841,7 @@
       font: "Vazirmatn", pt: 11, bold: false, italic: false, align: 0, dir: 0, lineSpacing: 1.25,
       textColor: "#111111", fillColor: "#ffffff", fillTransparent: true,
       borderColor: "#333333", borderWidth: 0.4, corner: 0, padding: 1, opacity: 1,
-      visibility: 0, startValue: 1, step: 1, imgPath: "",
+      visibility: 0, imgPath: "",
       // v1.55.0: explicit row / header heights in mm (0 = auto-distribute)
       rowH: 0, headerH: 0
     };
@@ -866,7 +865,6 @@
       it.field = "{receiptbarcode}";
       it.text = JSON.stringify({ sym: "code128", hri: true, quiet: 2 });
     }
-    else if (type === "apptno") { it.w = 30; it.h = 14; it.pt = 22; it.bold = true; it.align = 1; }
     else if (type === "table") {
       it.w = 90; it.h = 30; it.pt = 9; it.borderWidth = 0.4;
       it.text = JSON.stringify({ cols: 3, rows: 4, header: true, widths: [1, 1, 1],
@@ -926,8 +924,7 @@
       ["label", "متن ثابت"], ["field", "فیلد داده"], ["services", "لیست خدمات"], ["table", "جدول"],
       ["hline", "خط افقی"], ["vline", "خط عمودی"], ["rect", "کادر"],
       ["frame", "حاشیه صفحه"], ["logo", "لوگو"], ["photo", "عکس بیمار"],
-      ["image", "تصویر"], ["qr", "بارکد / QR"], ["barcode", "بارکد خطی"],
-      ["apptno", "شماره نوبت"]
+      ["image", "تصویر"], ["qr", "بارکد / QR"], ["barcode", "بارکد خطی"]
     ];
     var sec = document.createElement("div"); sec.className = "pl-cat";
     sec.innerHTML = "<div class='pl-cat-h'>عناصر طراحی</div>";
@@ -1047,12 +1044,6 @@
       gf.appendChild(row("پسوند", textInput(it.suffix, function (v) { it.suffix = v; up(true); }, "")));
       gf.appendChild(row("فقط وقتی پر است", checkInput(it.visibility === 1, function (v) { it.visibility = v ? 1 : 0; up(); })));
     }
-    if (it.type === "apptno") {
-      var ga = grp("شمارنده نوبت");
-      ga.appendChild(row("مقدار شروع", numInput(it.startValue, 0, 99999, 1, function (v) { it.startValue = v; up(); })));
-      ga.appendChild(row("گام", numInput(it.step, 1, 100, 1, function (v) { it.step = v; up(); })));
-      ga.appendChild(row("پیشوند", textInput(it.prefix, function (v) { it.prefix = v; up(true); }, "نوبت ")));
-    }
     if (it.type === "table") {
       var gtb = grp("جدول");
       var edit = document.createElement("button"); edit.className = "btn btn-sm btn-primary"; edit.style.width = "100%";
@@ -1156,7 +1147,7 @@
       }
     }
 
-    if (it.type === "label" || it.type === "field" || it.type === "apptno" || it.type === "table" ||
+    if (it.type === "label" || it.type === "field" || it.type === "table" ||
         it.type === "services" || it.type === "barcode") {
       var gt = grp("قلم و متن");
       if (it.type !== "table" && it.type !== "services" && it.type !== "barcode")
@@ -1565,14 +1556,12 @@
   /* -------------------------------------------------- templates gallery --- */
   var TPL_GROUPS = [
     { key: "reception", title: "پذیرش و صورتحساب" },
-    { key: "appointment", title: "نوبت‌دهی" },
     { key: "lab", title: "آزمایشگاه و تصویربرداری" }
   ];
   function tplGroupOf(t) {
     var g = (t.group || "").toLowerCase();
     if (g) return g;
     var n = (t.name || "") + (t.kind || "");
-    if (/نوبت|appoint|queue/i.test(n)) return "appointment";
     if (/آزمایش|رادیو|lab|radio/i.test(n)) return "lab";
     return "reception";
   }
@@ -1689,10 +1678,9 @@
       else if (it.type === "logo" || it.type === "photo" || it.type === "image" || it.type === "qr") {
         e.style.border = "0.6px dashed #9aa7c2"; e.style.background = "#f3f6fb";
       }
-      else if (it.type === "label" || it.type === "field" || it.type === "apptno") {
+      else if (it.type === "label" || it.type === "field") {
         e.className += " mini-tx";
         var txt = it.type === "label" ? (it.text || "") :
-          it.type === "apptno" ? "۱۲" :
           ((it.prefix || "") + (window.AZ_FIELDS[it.field] ? window.AZ_FIELDS[it.field].label : "···"));
         e.textContent = txt;
         e.style.color = it.textColor || "#222";

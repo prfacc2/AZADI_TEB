@@ -160,7 +160,6 @@ struct TabPage {
     // ---- v1.26.0: unpaid-box panel toolbar controls ----
     HWND eUpDate;    HWND cUpHours;   HWND bUpRefresh;
     HWND chkIns;             // «دارای بیمه» — کنار کد ملی، پیش‌فرض تیک‌خورده
-    HWND appt;               // نوبت‌دهی child page (kind==TK_APPOINTMENT)
     //  v1.13.0 (§3/§4): the hybrid HTML/CSS/JS presentation host. When non-NULL
     //  it is the VISIBLE interface for this reception/appointment tab (rendered
     //  via the system MSHTML control). C++ stays the source of truth — the host
@@ -208,7 +207,7 @@ struct TabPage {
     std::wstring lastMsg; COLORREF msgCol;
     TabPage():page(0),kind(TK_RECEPTION),svcPanelOpen(false),
         svcCollapsed(true),upCollapsed(true),
-        svcHotRow(-1),svcHotBtn(0),bottomTab(0),appt(0),web(0),
+        svcHotRow(-1),svcHotBtn(0),bottomTab(0),web(0),
         total(0),mainShare(0),patientShare(0),
         baseDiff(0),orgShare(0),paid(0),detached(false),autoPrice(false),
         idChecked(false),idVerified(false),
@@ -1425,6 +1424,18 @@ static void collect(TabPage* t, ReceptionRecord& r){
         sl.category = sr.category;
         if(sl.desc.empty() && sl.category.empty())
             svcResolveMeta(sr.code, sl.desc, sl.category);
+        // v1.61.0 — never let a picked service reach the printer as a blank
+        // row. A name is synthesised from whatever identity the row carries.
+        if(trim(sl.name).empty()){
+            const ServiceDef* sd = findService(sr.code);
+            if(sd && sd->status!=0 && !sd->name.empty()) sl.name = sd->name;
+            else if(!trim(sl.category).empty())          sl.name = sl.category;
+            else if(!trim(sl.code).empty())              sl.name = L"خدمت "+sl.code;
+            else if(!trim(sl.desc).empty())              sl.name = sl.desc;
+            else                                         sl.name = L"خدمت";
+        }
+        if(trim(sl.desc).empty())
+            sl.desc = trim(sl.category).empty()? sl.name : sl.category;
         r.services.push_back(sl);
     }
 
@@ -2702,7 +2713,7 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
                         r.landline,r.address,ins,r.suppIdx);
                 }
                 wchar_t mb[160];
-                swprintf(mb,160,L"پذیرش با شماره نوبت %d ثبت شد — %s %s",
+                swprintf(mb,160,L"پذیرش با شماره پذیرش %d ثبت شد — %s %s",
                     q, r.firstName.c_str(), r.lastName.c_str());
                 t->lastMsg=toFaDigits(mb); t->msgCol=g_theme.success;
                 // v1.4.0: prefer the user-designed layout for this section; fall
@@ -3975,7 +3986,7 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
     switch(m){
     case WM_CREATE:
         s_rd = new RecData();
-        // v1.7.0: «پذیرش جدید» / «نوبت‌دهی» / «تب جدید» now live in the FRAME
+        // v1.60.0: «پذیرش جدید» / «تب جدید» live in the FRAME action bar
         // HEADER (main.cpp). The reception info-bar no longer owns any action
         // buttons, so the tab strip is clean and uncluttered.
         s_rd->bNewPat = NULL;

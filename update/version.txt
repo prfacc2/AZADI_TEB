@@ -1,2 +1,2 @@
-1.60.0
-https://github.com/prfacc2/AZADI_TEB/releases/download/v1.60.0/AzadiTeb.exe
+1.62.0
+https://github.com/prfacc2/AZADI_TEB/releases/download/v1.62.0/AzadiTeb.exe

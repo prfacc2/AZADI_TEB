@@ -2363,11 +2363,10 @@ static void pcPaintDesign(HDC dc, const RECT& area, const PrintDesign& d, double
                     SelectObject(dc,of); DeleteObject(f);
                 }
             }
-        } else { // text: LABEL / FIELD / APPTNO — show sample/text
+        } else { // text: LABEL / FIELD — show sample/text
             std::wstring s=it.text;
             if(it.type==PIT_FIELD){ std::wstring v=it.field.empty()?L"":(L"["+it.field+L"]");
                 s=it.prefix+(it.text.empty()?v:it.text)+it.suffix; }
-            else if(it.type==PIT_APPTNO){ s=it.prefix+toFaDigits(std::to_wstring(it.startValue>0?it.startValue:1)); }
             else s=it.prefix+it.text+it.suffix;
             if(s.empty()) continue;
             // WYSIWYG font size: pt → px.  sc is px-per-mm, and 1pt = 1/72 in =
@@ -2935,11 +2934,8 @@ static void mgPaintDash(HDC dc, HWND h){
     }
 
     // ------------------------------------------------------------------------
-    // v1.12.0 (§5): CRM-style "at-a-glance" activity panel. A read-only,
-    // additive surface — it never changes data, only summarises it: total
-    // patient roster, appointments registered today, and a tiny workload bar
-    // (today vs. the day's busiest historical count). All sourced from the
-    // existing file-backed stores so nothing else changes.
+    // CRM-style read-only activity panel: total patient roster and today's
+    // completed reception records, sourced only from the reception store.
     {
         int panelTop = a.top+mgHeadH()+S(150)+S(110)+S(20);   // below quick tiles
         int panelBot = a.bottom-S(12);
@@ -2953,29 +2949,13 @@ static void mgPaintDash(HDC dc, HWND h){
                 DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
             // data
             int nPat=(int)loadAllPatients().size();
-            auto appts=loadAppointments(false);
-            SYSTEMTIME nowst=iranNow();
-            std::wstring today=jalaliDateShort(nowst);
-            int nToday=0; int busiest=0;
-            { // tally per-day counts without <map>: collect distinct dates +
-              // counts in parallel vectors (appointment volume is small).
-              std::vector<std::wstring> days; std::vector<int> cnt;
-              for(auto&ap:appts){
-                  if(ap.cancelled) continue;
-                  size_t k=0; for(;k<days.size();k++) if(days[k]==ap.apptDate) break;
-                  if(k==days.size()){ days.push_back(ap.apptDate); cnt.push_back(0); }
-                  cnt[k]++;
-              }
-              for(size_t k=0;k<days.size();k++){
-                  if(cnt[k]>busiest) busiest=cnt[k];
-                  if(days[k]==today) nToday=cnt[k];
-              }
-            }
+            int nToday=countTodayReceptions();
+            int busiest=nToday;
             // two read-only metric chips (patients / today) — RTL, right→left
             struct AC{ const wchar_t* lbl; std::wstring val; COLORREF col; int ico; };
             AC ac[2]={
                 { L"کل بیماران ثبت‌شده", toFaDigits(std::to_wstring(nPat)),   g_theme.accent, ICO_USER },
-                { L"نوبت‌های امروز",     toFaDigits(std::to_wstring(nToday)), g_infoAccent,   ICO_BELL },
+                { L"پذیرش‌های امروز",    toFaDigits(std::to_wstring(nToday)), g_infoAccent,   ICO_RECEIPT },
             };
             int cy=pr.top+S(48);
             int cellW=(pr.right-pr.left-S(32))/2;

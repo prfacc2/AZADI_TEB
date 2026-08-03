@@ -34,10 +34,12 @@ static HWND s_bExit=0, s_bSettings=0, s_bCalc=0;
 //  v1.60.0: «نوبت‌دهی» (appointment scheduling) has been REMOVED from the
 //  reception account entirely — page, option and code path.
 static HWND s_bNewPat=0, s_bNewTab=0;
-// v1.56.0: print actions belong to the native bottom bar. Keeping them outside
-// the embedded page makes keyboard/mouse printing available on both WebView2
-// and MSHTML while receptionPrintAction targets only the active tab.
-static HWND s_bPrintIns=0, s_bPrintRx=0, s_bPrintLast=0;
+// v1.62.0: the three print actions («چاپ آخرین قبض / چاپ نسخه / رسید بیمه») no
+// longer live in the native bottom bar — they were moved INTO the embedded
+// admission page (bottom-right `.print-card`) so the whole receipt workflow sits
+// in one place instead of straddling two surfaces. receptionPrintAction() stays
+// alive because the keyboard accelerators (F8 = last receipt) still route
+// through it, and the bottom bar is now a clean status strip.
 static HWND s_screen=0;
 static ScreenId s_curScreen = SC_HOME;
 
@@ -46,9 +48,8 @@ static ScreenId s_curScreen = SC_HOME;
 #define ID_FR_CALC     105
 #define ID_FR_NEWPAT   106
 #define ID_FR_NEWTAB   108
-#define ID_FR_PRINT_INS  109
-#define ID_FR_PRINT_RX   110
-#define ID_FR_PRINT_LAST 113
+// 109 / 110 / 113 were the native bottom-bar print buttons — retired in v1.62.0
+// when printing moved into the embedded admission page. Do not reuse the ids.
 #define TIMER_CLOCK  1
 
 // ------------------------------------------------------------------ fonts --
@@ -128,7 +129,7 @@ HFONT fitFont(int px, int weight, double f){
 //  fit comfortably; thinner bottom status bar (clock moved up to the header).
 //  v1.8.0 — the header now has TWO layers: LAYER 1 (identity + clock + gear /
 //  calculator / exit) and a thinner LAYER 2 "action bar" that, on the reception
-//  screen, hosts the blue navigation buttons (نوبت‌دهی / پذیرش جدید / تب جدید)
+//  screen, hosts the blue navigation buttons (پذیرش جدید / تب جدید)
 //  RIGHT-aligned. The action bar is only present where it is needed so other
 //  screens keep the original clean single-layer header.
 // §2.B (1.12.0): the LAYER-1 header was slightly reduced from S(64) to S(56)
@@ -182,35 +183,128 @@ void switchScreen(ScreenId id){
 #define ID_HM_RECEPTION 111
 #define ID_HM_MANAGE    112
 
+// ---------------------------------------------------------------------------
+//  v1.62.0 WELCOME SCREEN REDESIGN
+//  The old home screen scattered its parts with hard-coded offsets (logo 96 →
+//  title 46 → sub 28 → a 72 px hole → cards) and its "glass" hero ended ABOVE
+//  the cards, so on the light theme the cards floated on the raw background
+//  image and the whole screen looked unfinished.
+//
+//  The new layout is ONE cohesive elevated hero panel that contains every
+//  pre-login element — brand mark, the system title «سامانه پذیرش و مدیریت
+//  درمانگاه», the tagline, three capability chips and both entry cards — so the
+//  composition is independent of whatever the background artwork does. A single
+//  geometry function is shared by WM_SIZE and WM_PAINT (they can never drift
+//  apart again) and every vertical metric passes through one fit factor, so the
+//  panel scales down gracefully on small screens / high DPI instead of clipping.
+// ---------------------------------------------------------------------------
+struct HomeGeom {
+    RECT panel;      // the elevated hero surface
+    RECT ribbon;     // accent gradient ribbon along the panel top
+    RECT logo;       // circular brand mark
+    RECT title;      // «سامانه پذیرش و مدیریت درمانگاه»
+    RECT sub;        // tagline
+    RECT chips;      // capability chip row
+    RECT cardR;      // پذیرش  (RTL: right)
+    RECT cardL;      // مدیریت (RTL: left)
+    RECT foot;       // footer pill (brand • version • security note)
+    int  radius;     // panel corner radius
+    int  chipH;      // chip height
+};
+static HomeGeom homeGeom(int W, int H){
+    HomeGeom g;
+    memset(&g, 0, sizeof(g));
+    if(W < S(320)) W = S(320);
+    if(H < S(260)) H = S(260);
+
+    // ---- horizontal: derive the panel width from the two entry cards -------
+    int padX  = S(40);
+    int cgap  = S(26);
+    int cardW = S(306);
+    int maxW  = W - S(40);
+    if(2*cardW + cgap + 2*padX > maxW){
+        if(maxW < S(560)) padX = S(20);
+        int avail = maxW - cgap - 2*padX;
+        if(avail < S(300)) avail = S(300);
+        cardW = avail/2;
+        if(cardW < S(146)) cardW = S(146);
+    }
+    int panelW = 2*cardW + cgap + 2*padX;
+    if(panelW > maxW) panelW = maxW;
+
+    // ---- vertical: one stack, one fit factor ------------------------------
+    int padTop = S(38), logoD = S(88), gLogo = S(20);
+    int titleH = S(50), gTitle = S(4), subH = S(28), gSub = S(20);
+    int chipH  = S(32), gChip = S(28), cardH = S(198), padBot = S(34);
+    int footH  = S(38), footGap = S(22);
+
+    int need = padTop+logoD+gLogo+titleH+gTitle+subH+gSub+chipH+gChip+cardH+padBot;
+    int avail = H - S(26)*2 - footH - footGap;
+    double f = 1.0;
+    if(avail > S(200) && need > avail) f = (double)avail/(double)need;
+    if(f < 0.62) f = 0.62;
+    #define Zf(v) ((int)((v)*f + 0.5))
+    padTop=Zf(padTop); logoD=Zf(logoD); gLogo=Zf(gLogo);
+    titleH=Zf(titleH); gTitle=Zf(gTitle); subH=Zf(subH); gSub=Zf(gSub);
+    chipH=Zf(chipH);   gChip=Zf(gChip);  cardH=Zf(cardH); padBot=Zf(padBot);
+    #undef Zf
+    int panelH = padTop+logoD+gLogo+titleH+gTitle+subH+gSub+chipH+gChip+cardH+padBot;
+
+    int totalH = panelH + footGap + footH;
+    int top = (H - totalH)/2;
+    if(top < S(14)) top = S(14);
+    int cx = W/2;
+
+    g.radius = S(26);
+    g.chipH  = chipH;
+    SetRect(&g.panel, cx-panelW/2, top, cx+panelW/2, top+panelH);
+    SetRect(&g.ribbon, g.panel.left, g.panel.top, g.panel.right, g.panel.top+S(5));
+
+    int y = g.panel.top + padTop;
+    SetRect(&g.logo,  cx-logoD/2, y, cx+logoD/2, y+logoD);   y += logoD + gLogo;
+    SetRect(&g.title, g.panel.left+S(16), y, g.panel.right-S(16), y+titleH);
+    y += titleH + gTitle;
+    SetRect(&g.sub,   g.panel.left+S(16), y, g.panel.right-S(16), y+subH);
+    y += subH + gSub;
+    SetRect(&g.chips, g.panel.left+S(16), y, g.panel.right-S(16), y+chipH);
+    y += chipH + gChip;
+
+    int cardsW = 2*cardW + cgap;
+    int cl = cx - cardsW/2;
+    SetRect(&g.cardR, cl+cardW+cgap, y, cl+cardsW,  y+cardH);   // RTL right
+    SetRect(&g.cardL, cl,            y, cl+cardW,   y+cardH);   // RTL left
+
+    int fy = g.panel.bottom + footGap;
+    SetRect(&g.foot, cx-S(250), fy, cx+S(250), fy+footH);
+    if(g.foot.left < S(12)){ g.foot.left = S(12); g.foot.right = W-S(12); }
+    return g;
+}
+
 static LRESULT CALLBACK homeProc(HWND h, UINT m, WPARAM w, LPARAM l){
     switch(m){
     case WM_CREATE: {
         HWND r=createFlatButton(h, ID_HM_RECEPTION, L"پذیرش درمانگاه", ICO_CROSS_MED,
-            BS_CARD, 0,0,10,10, L"ثبت پذیرش بیمار و صدور قبض");
-        HWND mg=createFlatButton(h, ID_HM_MANAGE, L"پنل مدیریت درمانگاه", ICO_SHIELD,
-            BS_CARD, 0,0,10,10, L"گزارش‌ها و مدیریت سامانه");
-        setFlatButtonBg(r,  g_theme.bg2);
-        setFlatButtonBg(mg, g_theme.bg2);
+            BS_CARD, 0,0,10,10, L"ثبت بیمار، خدمات و صدور قبض");
+        HWND mg=createFlatButton(h, ID_HM_MANAGE, L"مدیریت درمانگاه", ICO_SHIELD,
+            BS_CARD, 0,0,10,10, L"خدمات، گزارش‌ها و طراحی چاپ");
+        // the cards now sit ON the hero panel, so their antialiased corners must
+        // blend into the panel surface — not the page background (the old bug
+        // that made the corners look chipped on the light theme).
+        setFlatButtonBg(r,  g_theme.surface);
+        setFlatButtonBg(mg, g_theme.surface);
         return 0; }
     case WM_APP_THEME:
-        setFlatButtonBg(GetDlgItem(h,ID_HM_RECEPTION), g_theme.bg2);
-        setFlatButtonBg(GetDlgItem(h,ID_HM_MANAGE),    g_theme.bg2);
+        setFlatButtonBg(GetDlgItem(h,ID_HM_RECEPTION), g_theme.surface);
+        setFlatButtonBg(GetDlgItem(h,ID_HM_MANAGE),    g_theme.surface);
         InvalidateRect(h,NULL,TRUE);
         return 0;
     case WM_SIZE: {
-        int W=LOWORD(l), H=HIWORD(l);
-        int cw=S(290), chh=S(170), gap=S(32);
-        // v1.4.0: more breathing room. Vertical stack:
-        //   logo(96) + 18 + title(46) + sub(28) + BIG gap(72) + cards(170)
-        int gapTitleCards = S(72);
-        int stackH = S(96)+S(18)+S(46)+S(28)+gapTitleCards+chh;
-        int yTop = (H-stackH)/2; if(yTop<S(10)) yTop=S(10);
-        int yCards = yTop + S(96)+S(18)+S(46)+S(28)+gapTitleCards;
-        int totW = 2*cw+gap;
-        int x=(W-totW)/2;
-        // RTL: reception card on the right
-        MoveWindow(GetDlgItem(h,ID_HM_RECEPTION), x+cw+gap, yCards, cw, chh, TRUE);
-        MoveWindow(GetDlgItem(h,ID_HM_MANAGE),    x,        yCards, cw, chh, TRUE);
+        HomeGeom g = homeGeom(LOWORD(l), HIWORD(l));
+        MoveWindow(GetDlgItem(h,ID_HM_RECEPTION), g.cardR.left, g.cardR.top,
+                   g.cardR.right-g.cardR.left, g.cardR.bottom-g.cardR.top, TRUE);
+        MoveWindow(GetDlgItem(h,ID_HM_MANAGE),    g.cardL.left, g.cardL.top,
+                   g.cardL.right-g.cardL.left, g.cardL.bottom-g.cardL.top, TRUE);
+        InvalidateRect(h,NULL,TRUE);
         return 0; }
     case WM_COMMAND: {
         static bool s_busy=false;            // re-entry guard for modal dialogs
@@ -253,66 +347,152 @@ static LRESULT CALLBACK homeProc(HWND h, UINT m, WPARAM w, LPARAM l){
         HBITMAP bmp=CreateCompatibleBitmap(dc0,rc.right,rc.bottom);
         HGDIOBJ obm=SelectObject(dc,bmp);
 
-        // v1.3.0: real background image with a soft legibility scrim so the
-        // welcome screen feels like a designed product, not a blank panel.
-        if(!gpDrawBackground(dc, rc, g_dark, g_theme.bg, g_dark?70:40)){
-            // fallback: gentle vertical gradient
+        // ---- 1. artwork -----------------------------------------------------
+        // v1.62.0: the light artwork is a soft clinical illustration, so it only
+        // needs a whisper of scrim (the panel below carries the contrast). The
+        // dark artwork is deeper, so it gets a stronger wash.
+        if(!gpDrawBackground(dc, rc, g_dark, g_theme.bg, g_dark?96:26)){
             RECT full={0,0,rc.right,rc.bottom};
             gpGradRoundRect(dc,full,0,g_theme.bg,g_theme.bg2,CLR_INVALID);
         }
         SetBkMode(dc,TRANSPARENT);
 
-        // ---- same vertical stack math as WM_SIZE ----
-        int chh=S(170);
-        int gapTitleCards = S(72);
-        int stackH = S(96)+S(18)+S(46)+S(28)+gapTitleCards+chh;
-        int yTop = (rc.bottom-stackH)/2; if(yTop<S(10)) yTop=S(10);
+        HomeGeom g = homeGeom(rc.right, rc.bottom);
 
-        // glass hero panel behind the centered content (open, layered look)
-        int heroW=S(760); if(heroW>rc.right-S(40)) heroW=rc.right-S(40);
-        RECT hero={rc.right/2-heroW/2, yTop-S(28),
-                   rc.right/2+heroW/2, yTop+S(96)+S(18)+S(46)+S(28)+S(20)};
-        gpShadow(dc,hero,S(22),S(14),60);
-        // Hero "glass": a gentle theme-aware gradient (light surface in light
-        // mode, deep slate in dark mode) so the title text always has strong
-        // contrast against the busy background image.
-        COLORREF heroTop = g_dark?RGB(26,33,46):RGB(255,255,255);
-        COLORREF heroBot = g_dark?RGB(18,24,34):RGB(244,248,253);
-        gpGradRoundRect(dc,hero,S(22), heroTop, heroBot, g_theme.border);
+        // ---- 2. the elevated hero panel ------------------------------------
+        // A double shadow (wide+soft, then tight+dark) reads as a real material
+        // edge on BOTH themes — this is what makes the light theme finally look
+        // designed instead of washed out.
+        gpShadow(dc, g.panel, g.radius, S(30), g_dark?110:52);
+        gpShadow(dc, g.panel, g.radius, S(10), g_dark?120:64);
+        COLORREF pTop = g_dark ? RGB(24,29,38) : RGB(255,255,255);
+        COLORREF pBot = g_dark ? RGB(14,18,25) : blendColor(RGB(255,255,255), g_theme.surface2, 62);
+        gpGradRoundRect(dc, g.panel, g.radius, pTop, pBot,
+                        g_dark ? blendColor(g_theme.border,g_theme.accent,18)
+                               : blendColor(g_theme.border,g_theme.accent,26));
+        // Accent ribbon hugging the panel's top edge. It is inset by the corner
+        // radius so it never spills outside the rounded silhouette (drawing it
+        // full-width would leave two hard accent squares in the corners).
+        {
+            RECT rb = g.ribbon;
+            rb.left  += g.radius;
+            rb.right -= g.radius;
+            if(rb.right - rb.left > S(40))
+                gpGradRoundRectBgH(dc, rb, S(3), g_theme.accent2, g_theme.accent,
+                                   CLR_INVALID, CLR_INVALID);
+        }
 
-        // logo circle (gradient) centered horizontally
-        int r = S(48);
-        int cy = yTop + r;
-        RECT lc={rc.right/2-r, cy-r, rc.right/2+r, cy+r};
-        gpShadow(dc,lc,r,S(8),70);
-        gpGradRoundRect(dc,lc,r,g_theme.accent2,g_theme.accent,CLR_INVALID);
-        RECT li={lc.left+S(24),lc.top+S(24),lc.right-S(24),lc.bottom-S(24)};
-        drawIcon(dc,ICO_CROSS_MED,li,RGB(255,255,255),S(2)+1);
+        // ---- 3. brand mark --------------------------------------------------
+        {
+            int d  = g.logo.right-g.logo.left;
+            int rr = d/2;
+            // soft accent halo, then the gradient disc, then a light inner ring
+            RECT halo=g.logo; InflateRect(&halo,S(7),S(7));
+            gpFillAlpha(dc, halo, (d+S(14))/2,
+                        blendColor(g_theme.accent, pTop, 55), g_dark?70:52);
+            gpShadow(dc, g.logo, rr, S(9), g_dark?110:78);
+            gpGradRoundRect(dc, g.logo, rr, g_theme.accent2, g_theme.accent, CLR_INVALID);
+            RECT ring=g.logo; InflateRect(&ring,-S(4),-S(4));
+            gpRoundRect(dc, ring, (d-S(8))/2, CLR_INVALID,
+                        blendColor(g_theme.accent, RGB(255,255,255), 55));
+            RECT gi=g.logo; InflateRect(&gi,-d/4,-d/4);
+            drawIcon(dc, ICO_CROSS_MED, gi, RGB(255,255,255), S(2)+1);
+        }
 
-        // title — v1.4.0: brand name "آزادی طب" removed from the centre per
-        // the brief; the centred title is now the system tagline only.
-        int yTitle = yTop + S(96) + S(18);
-        SetTextColor(dc,g_theme.text);
-        SelectObject(dc,g_fBig);
-        RECT tr={0,yTitle,rc.right,yTitle+S(46)};
-        DrawTextW(dc,L"سامانه پذیرش و مدیریت درمانگاه",-1,&tr,
-            DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+        // ---- 4. title + tagline --------------------------------------------
+        {
+            int th = g.title.bottom-g.title.top;
+            SelectObject(dc, fitFont(30, FW_BOLD, th/(double)S(50)));
+            SetTextColor(dc, g_dark?RGB(240,246,252):g_theme.sectionInk);
+            RECT tr=g.title;
+            DrawTextW(dc, L"سامانه پذیرش و مدیریت درمانگاه", -1, &tr,
+                DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+            // a short accent rule under the title — the "designed" signature
+            int uw = S(84), ux = rc.right/2 - uw/2, uy = g.title.bottom - S(2);
+            RECT ur={ux, uy, ux+uw, uy+S(3)};
+            gpGradRoundRectBgH(dc, ur, S(2), g_theme.accent, g_theme.accent2,
+                               CLR_INVALID, pTop);
+        }
+        {
+            SelectObject(dc, g_fUI);
+            SetTextColor(dc, g_dark?RGB(168,180,197):g_theme.textDim);
+            RECT sr=g.sub;
+            DrawTextW(dc, L"درمانگاه شبانه‌روزی آزادی طب  ·  حساب کاربری خود را انتخاب کنید",
+                -1, &sr, DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+        }
 
-        // subtitle
-        int ySub = yTitle + S(46);
-        SelectObject(dc,g_fUI);
-        SetTextColor(dc,g_theme.textDim);
-        RECT sr={0,ySub,rc.right,ySub+S(28)};
-        DrawTextW(dc,L"نوع کاربری خود را انتخاب کنید",-1,&sr,
-            DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+        // ---- 5. capability chips -------------------------------------------
+        // Three tinted pills that tell a first-time user what the app DOES —
+        // synced with the artwork's clinical theme.
+        {
+            struct Chip { const wchar_t* t; int ico; };
+            static const Chip CH[3]={
+                { L"پذیرش و صدور قبض", ICO_RECEIPT },
+                { L"خدمات و تعرفه",     ICO_WALLET  },
+                { L"چاپ حرفه‌ای",       ICO_PRINT   },
+            };
+            SelectObject(dc, g_fSmall);
+            int ch = g.chipH, pad=S(14), icoD=S(15), gapI=S(7), gapC=S(12);
+            int wid[3], tot=0;
+            for(int i=0;i<3;i++){
+                RECT ms={0,0,0,0};
+                DrawTextW(dc, CH[i].t, -1, &ms,
+                    DT_CALCRECT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+                wid[i]= (ms.right-ms.left) + 2*pad + icoD + gapI;
+                tot += wid[i];
+            }
+            tot += 2*gapC;
+            int avail = g.chips.right-g.chips.left;
+            // Narrow windows: drop the chip row rather than overflow it.
+            if(tot <= avail){
+                int x = rc.right/2 - tot/2;
+                for(int i=0;i<3;i++){
+                    RECT cr={x, g.chips.top, x+wid[i], g.chips.top+ch};
+                    COLORREF cf = g_dark ? blendColor(pTop, g_theme.accent, 16)
+                                         : blendColor(g_theme.surface2, g_theme.accent, 8);
+                    gpRoundRectBg(dc, cr, ch/2, cf,
+                                  blendColor(g_theme.border, g_theme.accent, 30), pTop);
+                    RECT ir={cr.right-pad-icoD, (cr.top+cr.bottom)/2-icoD/2,
+                             cr.right-pad,      (cr.top+cr.bottom)/2+icoD/2};
+                    drawIcon(dc, CH[i].ico, ir, g_theme.accent, S(2));
+                    SetTextColor(dc, g_dark?RGB(198,210,226):g_theme.labelInk);
+                    RECT tr={cr.left+pad, cr.top, cr.right-pad-icoD-gapI, cr.bottom};
+                    DrawTextW(dc, CH[i].t, -1, &tr,
+                        DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+                    x += wid[i] + gapC;
+                }
+            }
+        }
 
-        // hint (version)
-        SelectObject(dc,g_fSmall);
-        SetTextColor(dc,g_theme.textDim);
-        RECT hr={0,rc.bottom-S(34),rc.right,rc.bottom-S(8)};
-        std::wstring hint = std::wstring(L"نسخه ")+toFaDigits(APP_VERSION_W);
-        DrawTextW(dc,hint.c_str(),-1,&hr,
-            DT_CENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+        // ---- 6. footer pill -------------------------------------------------
+        // The bottom items used to be bare grey text floating on the artwork.
+        // They now live in their own frosted container, as requested.
+        {
+            RECT fr=g.foot;
+            gpShadow(dc, fr, (fr.bottom-fr.top)/2, S(8), g_dark?100:44);
+            COLORREF fFill = g_dark ? RGB(18,22,30)
+                                    : blendColor(RGB(255,255,255), g_theme.surface2, 30);
+            gpGradRoundRect(dc, fr, (fr.bottom-fr.top)/2,
+                blendColor(fFill, RGB(255,255,255), g_dark?6:40), fFill,
+                blendColor(g_theme.border, g_theme.accent, 18));
+            SelectObject(dc, g_fSmall);
+            // right: brand + version
+            SetTextColor(dc, g_dark?RGB(186,198,214):g_theme.labelInk);
+            RECT vr={fr.left+S(18), fr.top, fr.right-S(18), fr.bottom};
+            std::wstring tag = std::wstring(APP_NAME_W) + L"  ·  نسخه " +
+                               toFaDigits(APP_VERSION_W);
+            DrawTextW(dc, tag.c_str(), -1, &vr,
+                DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+            // left: a small lock chip + the security note
+            int icoD=S(14);
+            RECT ir={fr.left+S(16), (fr.top+fr.bottom)/2-icoD/2,
+                     fr.left+S(16)+icoD, (fr.top+fr.bottom)/2+icoD/2};
+            drawIcon(dc, ICO_SHIELD, ir, g_theme.accent, S(2));
+            SetTextColor(dc, g_dark?RGB(150,163,182):g_theme.textDim);
+            RECT nr={fr.left+S(16)+icoD+S(7), fr.top, fr.right-S(200), fr.bottom};
+            DrawTextW(dc, L"ورود با حساب کاربری سازمانی", -1, &nr,
+                DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+        }
 
         BitBlt(dc0,0,0,rc.right,rc.bottom,dc,0,0,SRCCOPY);
         SelectObject(dc,obm); DeleteObject(bmp); DeleteDC(dc);
@@ -344,9 +524,6 @@ static void updateHeaderButtons(HWND h){
     bool show = headerHasActionBar();
     ShowWindow(s_bNewPat,   show?SW_SHOW:SW_HIDE);
     ShowWindow(s_bNewTab,   show?SW_SHOW:SW_HIDE);
-    ShowWindow(s_bPrintIns, show?SW_SHOW:SW_HIDE);
-    ShowWindow(s_bPrintRx,  show?SW_SHOW:SW_HIDE);
-    ShowWindow(s_bPrintLast,show?SW_SHOW:SW_HIDE);
     if(!show) return;
     RECT rc; GetClientRect(h,&rc);
     int bh=S(38), pad=S(16), g=S(10);
@@ -361,16 +538,6 @@ static void updateHeaderButtons(HWND h){
     // blend the buttons' rounded corners into the LAYER 2 surface colour.
     setFlatButtonBg(s_bNewPat, g_theme.surface2);
     setFlatButtonBg(s_bNewTab, g_theme.surface2);
-
-    // Native bottom-bar print cluster (left to right). «چاپ نسخه» is primary.
-    int py=rc.bottom-botBarH()+(botBarH()-S(32))/2;
-    int px=S(14);
-    MoveWindow(s_bPrintIns, px, py, S(112), S(32), TRUE); px+=S(120);
-    MoveWindow(s_bPrintRx, px, py, S(122), S(32), TRUE); px+=S(130);
-    MoveWindow(s_bPrintLast,px, py, S(122), S(32), TRUE);
-    setFlatButtonBg(s_bPrintIns, g_theme.surface2);
-    setFlatButtonBg(s_bPrintRx,  g_theme.surface2);
-    setFlatButtonBg(s_bPrintLast,g_theme.surface2);
 }
 static void frameLayout(HWND h){
     RECT rc; GetClientRect(h,&rc);
@@ -415,25 +582,15 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         // (BS_PRIMARY) for a consistent header action style.
         s_bNewTab   = createFlatButton(h, ID_FR_NEWTAB, L"تب جدید",    ICO_TAB,  BS_PRIMARY,0,0,10,10,
                           L"باز کردن یک تب خالی");
-        s_bPrintIns = createFlatButton(h, ID_FR_PRINT_INS, L"رسید بیمه", ICO_PRINT,
-                          BS_OUTLINE,0,0,10,10,L"چاپ رسید بیمه تب فعال");
-        s_bPrintRx  = createFlatButton(h, ID_FR_PRINT_RX, L"چاپ نسخه", ICO_RECEIPT,
-                          BS_PRIMARY,0,0,10,10,L"چاپ نسخه تب فعال");
-        s_bPrintLast= createFlatButton(h, ID_FR_PRINT_LAST, L"آخرین قبض", ICO_PRINT,
-                          BS_OUTLINE,0,0,10,10,L"چاپ آخرین قبض ثبت‌شده");
+        // v1.62.0: no native print buttons here any more — the admission page
+        // owns «چاپ آخرین قبض / چاپ نسخه / رسید بیمه» in its bottom-right card.
         ShowWindow(s_bNewPat,SW_HIDE);
         ShowWindow(s_bNewTab,SW_HIDE);
-        ShowWindow(s_bPrintIns,SW_HIDE);
-        ShowWindow(s_bPrintRx,SW_HIDE);
-        ShowWindow(s_bPrintLast,SW_HIDE);
         setFlatButtonBg(s_bExit,     g_theme.headerTop);
         setFlatButtonBg(s_bSettings, g_theme.headerTop);
         setFlatButtonBg(s_bCalc,     g_theme.headerTop);
         setFlatButtonBg(s_bNewPat,   g_theme.headerTop);
         setFlatButtonBg(s_bNewTab,   g_theme.headerTop);
-        setFlatButtonBg(s_bPrintIns, g_theme.surface2);
-        setFlatButtonBg(s_bPrintRx,  g_theme.surface2);
-        setFlatButtonBg(s_bPrintLast,g_theme.surface2);
         SetTimer(h, TIMER_CLOCK, g_lowSpec?1000:500, NULL);
         return 0;
     case WM_SIZE: frameLayout(h); return 0;
@@ -445,9 +602,6 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         setFlatButtonBg(s_bCalc,     g_theme.headerTop);
         setFlatButtonBg(s_bNewPat,   g_theme.headerTop);
         setFlatButtonBg(s_bNewTab,   g_theme.headerTop);
-        setFlatButtonBg(s_bPrintIns, g_theme.surface2);
-        setFlatButtonBg(s_bPrintRx,  g_theme.surface2);
-        setFlatButtonBg(s_bPrintLast,g_theme.surface2);
         InvalidateRect(h,NULL,TRUE);
         return 0;
     case WM_APP_UI_TASK:
@@ -510,9 +664,6 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         // v1.7.0: header reception-action buttons → route to reception screen
         else if(id==ID_FR_NEWPAT) receptionAction(RA_NEWPAT);
         else if(id==ID_FR_NEWTAB) receptionAction(RA_NEWTAB);
-        else if(id==ID_FR_PRINT_INS)  receptionPrintAction(RPA_INSURANCE);
-        else if(id==ID_FR_PRINT_RX)   receptionPrintAction(RPA_RX);
-        else if(id==ID_FR_PRINT_LAST) receptionPrintAction(RPA_LAST);
         return 0; }
     case WM_KEYDOWN: {
         // hidden admin: Ctrl + P + N held together (home screen only)

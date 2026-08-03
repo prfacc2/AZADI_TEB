@@ -1053,3 +1053,401 @@ body.theme-warm{background:#f4f0ea;}
 .theme-dark .datetime-card .dt-ico{background:#213047;color:#7fb0f5;}
 .theme-dark .datetime-card .dt-fld > span{color:#c0ccdc;}
 .theme-dark .datetime-card .inp{background:#151e2a;border-color:#46566c;color:#dceafe;}
+
+/* ============================================================================
+   v1.62.0 — PATIENT-ADMISSION VISUAL OVERHAUL
+   ----------------------------------------------------------------------------
+   This final cascade block is authoritative: it is appended last, so it wins
+   over every earlier rule without having to edit (and risk breaking) them.
+
+   Goals, in the order the operator experiences them:
+     1. A calm, genuinely light workspace — the previous sheet stacked three
+        different blue-grey washes (body -> .body -> .col-*) which muddied the
+        surface and dropped text contrast below comfortable reading levels.
+     2. Readable typography everywhere: one ink scale, never grey-on-grey.
+     3. Inputs, containers and buttons rebuilt with a single consistent
+        language (10px radius, 1.5px border, soft inner fill, blue focus ring).
+     4. The صندوق نرفته‌ها mini-page is repaired: it can no longer open cut off,
+        slide under an invisible layer, or resist dragging.
+     5. Services live at the BOTTOM-CENTRE of the workspace and always keep a
+        usable height.
+   Still strictly Trident-safe: no custom properties, no grid, no flex `gap`,
+   no logical properties, -ms- prefixes present on every flex declaration.
+   ============================================================================ */
+
+/* ---------------------------------------------------------------- 1. INK --- */
+/* Single, calm page wash. One gradient only — no competing zone tints. */
+body{
+  background:#eef4fb;
+  background:-webkit-linear-gradient(top,#f8fbff 0%,#e6eef8 100%);
+  background:linear-gradient(180deg,#f8fbff 0%,#e6eef8 100%);
+  color:#0f2038;font-weight:600;
+}
+.body{background:transparent;border-top:1px solid #d3dfee;padding:12px;}
+
+/* The three zones become near-white trays with a hairline edge, so the CARDS
+   are the elevated objects and the rails simply group them. Previously the
+   rails were darker than the cards, which made the light theme look dirty. */
+.col-action,.col-left,.col-center{
+  border:1px solid #ccd9e9;border-radius:16px;padding:11px;
+  background:#f4f8fd;
+  background:-webkit-linear-gradient(top,#fbfdff 0%,#eef4fc 100%);
+  background:linear-gradient(180deg,#fbfdff 0%,#eef4fc 100%);
+  -webkit-box-shadow:inset 0 1px 0 #ffffff;box-shadow:inset 0 1px 0 #ffffff;
+}
+.col-center{background:#ffffff;background:-webkit-linear-gradient(top,#ffffff 0%,#f5f9fe 100%);
+  background:linear-gradient(180deg,#ffffff 0%,#f5f9fe 100%);}
+.col.is-active{
+  border-color:#8fb4e6;
+  -webkit-box-shadow:0 0 0 3px rgba(31,95,214,.09),0 12px 30px rgba(16,40,76,.10);
+  box-shadow:0 0 0 3px rgba(31,95,214,.09),0 12px 30px rgba(16,40,76,.10);
+}
+.col.is-active .card-title{color:#0b3068;}
+
+/* ------------------------------------------------------- 2. CARD SURFACE --- */
+.card{
+  background:#ffffff;border:1px solid #d3dfee;border-radius:13px;
+  -webkit-box-shadow:0 1px 1px rgba(16,40,76,.04),0 5px 16px rgba(16,40,76,.07);
+  box-shadow:0 1px 1px rgba(16,40,76,.04),0 5px 16px rgba(16,40,76,.07);
+  margin-bottom:12px;
+}
+.card-head{
+  min-height:44px;padding:10px 14px;
+  border-bottom:1px solid #e2eaf5;
+  background:#f7fafe;
+  background:-webkit-linear-gradient(top,#ffffff 0%,#f1f6fd 100%);
+  background:linear-gradient(180deg,#ffffff 0%,#f1f6fd 100%);
+  /* one thin accent keyline instead of the old chunky 3px inset bar */
+  -webkit-box-shadow:inset 0 2px 0 #2f6fe4;box-shadow:inset 0 2px 0 #2f6fe4;
+}
+.card-title{font-size:14px;font-weight:900;color:#0d2748;letter-spacing:0;}
+.ct-ico{color:#2f6fe4;margin-left:7px;}
+.card-body{padding:14px;}
+
+/* ------------------------------------------------- 3. FIELDS & CONTROLS --- */
+.fld > span{
+  font-size:12.5px;font-weight:800;color:#2b3f5c;
+  margin-bottom:6px;letter-spacing:0;
+}
+.inp{
+  height:39px;padding:0 12px;
+  border:1.5px solid #c2d1e4;border-radius:10px;
+  background:#fbfdff;color:#0d1e36;
+  font-size:14px;font-weight:700;
+  -webkit-box-shadow:inset 0 1px 2px rgba(16,40,76,.04);
+  box-shadow:inset 0 1px 2px rgba(16,40,76,.04);
+}
+.inp:hover{border-color:#9db6d8;background:#ffffff;}
+.inp:focus{
+  border-color:#2f6fe4;border-width:1.5px;background:#ffffff;font-weight:800;
+  -webkit-box-shadow:0 0 0 3px rgba(47,111,228,.16);
+  box-shadow:0 0 0 3px rgba(47,111,228,.16);
+}
+.inp[readonly]{background:#f2f6fc;color:#153a6b;}
+.inp[disabled]{background:#eef2f8;color:#7b8ba0;border-color:#d3dfee;}
+.inp-sm{height:34px;font-size:13px;}
+select.inp{background:#fbfdff;}
+.inp::-webkit-input-placeholder{color:#93a5bb;font-weight:600;}
+.inp:-ms-input-placeholder{color:#93a5bb;font-weight:600;}
+.chk,.chk-block{color:#2b3f5c;font-weight:800;}
+.chk-block{background:#f4f8fd;border:1px solid #cdd9e9;border-radius:10px;}
+
+/* ---------------------------------------------------------- 4. BUTTONS --- */
+.btn{
+  height:37px;border-radius:10px;font-size:13.5px;font-weight:800;
+  border-width:1.5px;letter-spacing:0;
+  -webkit-transition:background .14s,border-color .14s,color .14s,box-shadow .14s;
+  transition:background .14s,border-color .14s,color .14s,box-shadow .14s;
+}
+.btn-primary{
+  background:#2f6fe4;border-color:#245cc4;color:#ffffff;
+  background:-webkit-linear-gradient(top,#3a7bf0 0%,#2360cf 100%);
+  background:linear-gradient(180deg,#3a7bf0 0%,#2360cf 100%);
+  -webkit-box-shadow:0 2px 6px rgba(47,111,228,.24);box-shadow:0 2px 6px rgba(47,111,228,.24);
+}
+.btn-primary:hover{
+  background:-webkit-linear-gradient(top,#2f6fe4 0%,#1c53ba 100%);
+  background:linear-gradient(180deg,#2f6fe4 0%,#1c53ba 100%);
+}
+.btn-outline{background:#ffffff;border-color:#c2d1e4;color:#17325a;}
+.btn-outline:hover{border-color:#2f6fe4;color:#1d55bd;background:#f4f9ff;}
+.btn-ghost{background:#eaf1fa;border-color:#d6e2f1;color:#2b3f5c;}
+.btn-ghost:hover{background:#dce7f6;border-color:#bacce4;}
+.btn-danger{background:#ffffff;border-color:#e9aab0;color:#c81f42;}
+.btn-danger:hover{background:#fdeef0;border-color:#c81f42;}
+.btn-icon,.btn-icon-only{background:#ffffff;border-color:#c2d1e4;color:#3d5573;}
+.btn-icon{width:36px;height:34px;color:#3d5573;}
+.btn-icon:hover{border-color:#2f6fe4;color:#2f6fe4;background:#f4f9ff;}
+/* «ثبت قبض» — deliberately BLUE (never green), the single strongest control. */
+.btn-submit{
+  height:48px;font-size:15.5px;font-weight:900;border-radius:12px;
+  border:1.5px solid #1c4fb0;color:#ffffff;
+  background:#2f6fe4;
+  background:-webkit-linear-gradient(top,#3d81f5 0%,#1e57c4 100%);
+  background:linear-gradient(180deg,#3d81f5 0%,#1e57c4 100%);
+  text-shadow:0 1px 0 rgba(0,0,0,.16);
+  -webkit-box-shadow:0 4px 14px rgba(47,111,228,.30);box-shadow:0 4px 14px rgba(47,111,228,.30);
+}
+.btn-submit:hover{
+  background:-webkit-linear-gradient(top,#3273e6 0%,#1748a8 100%);
+  background:linear-gradient(180deg,#3273e6 0%,#1748a8 100%);
+}
+
+/* --------------------------------------------------- 5. RIGHT RAIL CARDS --- */
+.action-card{background:#ffffff;border-color:#c4d5ee;padding:13px;}
+.action-kicker{color:#123a72;border-bottom:1px solid #e2eaf5;}
+.tc-strip{
+  border-radius:11px;
+  background:-webkit-linear-gradient(top,#3a7bf0 0%,#1e57c4 100%);
+  background:linear-gradient(180deg,#3a7bf0 0%,#1e57c4 100%);
+  -webkit-box-shadow:0 4px 12px rgba(47,111,228,.26);box-shadow:0 4px 12px rgba(47,111,228,.26);
+}
+.profile-card .profile-top{padding:14px 14px 11px;}
+.avatar{background:#eaf2fe;color:#5b83bf;}
+.pf-name{color:#0d2748;font-size:15.5px;}
+.pf-file{color:#516782;}
+.pf-file b{color:#17325a;}
+.ps-line{border:1px solid #d3dfee;background:#f8fbff;border-radius:10px;}
+.ps-cap{color:#2b3f5c;}
+.ps-val{color:#0d2748;}
+.ps-total{background:#fffaea;border-color:#ecd08a;}
+.ps-paid{background:#f0fbf4;border-color:#a4dcb8;}
+.doctor-preview{background:#f4f9ff;border-top:1px solid #e2eaf5;}
+.rx-box{background:#f8fbff;border-color:#d3dfee;border-radius:10px;}
+.rx-lbl{color:#516782;}
+.rx-val{color:#0d2748;}
+.btn-erx{background:#eaf2fe;border-color:#c9dcf9;color:#1d55bd;}
+.btn-erx:hover{background:#dbe9fd;border-color:#2f6fe4;}
+.status-card .card-body{padding:10px 13px;}
+.sync-badge{color:#516782;font-weight:700;font-size:12px;}
+
+/* -------------------------------------------------------- 6. LEFT RAIL --- */
+.invoice-body{padding:12px 13px;}
+.inv-gtitle{color:#1d55bd;border-bottom:2px solid #e2eaf5;}
+.inv-line span{color:#3d5573;font-weight:700;}
+.inv-line b{color:#0d2748;}
+.inv-remain{border-top:1px dashed #d3dfee;}
+.inv-remain span{color:#17325a;}
+.inv-remain b{color:#d81b47;}
+/* مبلغ نهایی — sits directly beneath صورت حساب, no explanatory caption. */
+.payable-card{
+  margin-top:12px;padding:16px 14px;border-color:#1c4fb0;
+  background:-webkit-linear-gradient(top,#3a7bf0 0%,#164a9f 100%);
+  background:linear-gradient(180deg,#3a7bf0 0%,#164a9f 100%);
+  -webkit-box-shadow:0 8px 24px rgba(31,95,214,.26);box-shadow:0 8px 24px rgba(31,95,214,.26);
+}
+.payable-caption{color:#dceaff;font-size:13px;font-weight:800;}
+.payable-value b{font-size:26px;}
+.queue-hub-btn{
+  height:46px;background:#ffffff;border:1.5px solid #a7c2e8;color:#123a72;
+  -webkit-box-shadow:0 3px 10px rgba(18,58,114,.10);box-shadow:0 3px 10px rgba(18,58,114,.10);
+}
+.queue-hub-btn:hover{background:#eef5ff;border-color:#2f6fe4;color:#1d55bd;}
+
+/* --------------------------------------------- 7. TABLES (high contrast) --- */
+.tbl-wrap{border:1px solid #d3dfee;border-top:none;}
+.tbl thead th{
+  background:#e6eefa;color:#0d2748;
+  border-bottom:2px solid #c2d1e4;border-left:1px solid #d3dfee;
+  font-size:12px;font-weight:900;padding:9px 8px;
+}
+.tbl tbody td{
+  color:#12253f;font-weight:700;
+  border-bottom:1px solid #e6ecf4;border-left:1px solid #eff3f8;
+}
+.tbl tbody tr:nth-child(even){background:#f7fafe;}
+.tbl tbody tr:hover{background:#eaf3ff;}
+.tbl .qty-inp,.svc-tbl .desc-inp,.svc-tbl .free-inp{height:31px;border-radius:8px;}
+.svc-foot,.queue-foot{
+  border-top:2px solid #d3dfee;
+  background:-webkit-linear-gradient(top,#f7fafe 0%,#e9f0fa 100%);
+  background:linear-gradient(180deg,#f7fafe 0%,#e9f0fa 100%);
+}
+.sf-cell span{color:#4b6280;}
+.sf-cell b{color:#0d2748;font-size:14.5px;}
+.sf-cell + .sf-cell{border-right:1px solid #d3dfee;}
+.tab{color:#5a7290;}
+.tab:hover{color:#2b3f5c;}
+.tab.active{color:#2f6fe4;border-bottom-color:#2f6fe4;}
+.empty{color:#6d829b;font-weight:700;}
+
+/* ------------------------------------- 8. SERVICES: BOTTOM-CENTRE ANCHOR --- */
+/* The centre column is a flex COLUMN. Pushing the services card with an auto
+   top margin parks it at the BOTTOM of the workspace, and `align-self:center`
+   plus a max-width keeps it visually CENTRED rather than edge-to-edge. The
+   queue mini-page is position:fixed so it does not participate here. */
+.col-center{-ms-flex-pack:start;justify-content:flex-start;}
+.col-center > .svc-card{
+  margin-top:auto;margin-bottom:0;
+  -ms-flex:0 0 auto;flex:0 0 auto;
+  width:100%;max-width:1180px;
+  -ms-flex-item-align:center;-ms-grid-row-align:center;align-self:center;
+  border-color:#bcd0ea;
+  -webkit-box-shadow:0 2px 5px rgba(16,40,76,.07),0 10px 26px rgba(16,40,76,.10);
+  box-shadow:0 2px 5px rgba(16,40,76,.07),0 10px 26px rgba(16,40,76,.10);
+}
+.svc-card{min-height:238px;}
+.svc-card .tbl-wrap{max-height:236px;}
+.svc-card .tbl-wrap.expanded{max-height:360px;}
+.svc-card > .card-head{-webkit-box-shadow:inset 0 2px 0 #2f6fe4;box-shadow:inset 0 2px 0 #2f6fe4;}
+#svcAddBtn{min-width:124px;}
+
+/* --------------------- 9. DATE + SHIFT: separate, side-by-side, responsive --- */
+.datetime-card{
+  -ms-flex-wrap:wrap;flex-wrap:wrap;          /* wraps instead of squashing */
+  padding:12px 14px;border-color:#cddcef;
+  background:-webkit-linear-gradient(top,#ffffff 0%,#f3f8fe 100%);
+  background:linear-gradient(180deg,#ffffff 0%,#f3f8fe 100%);
+}
+.datetime-card .dt-half{
+  -ms-flex:1 1 210px;flex:1 1 210px;         /* flexible basis → truly responsive */
+  min-width:196px;
+}
+.datetime-card .dt-ico{
+  width:40px;height:40px;border-radius:11px;background:#e8f1fe;color:#2f6fe4;
+  border:1px solid #cfe0fb;
+}
+.datetime-card .dt-fld > span{color:#3d5573;font-size:12px;font-weight:800;}
+.datetime-card .inp{
+  background:#f2f7fd;border-style:solid;border-color:#c2d1e4;
+  color:#14396c;font-weight:800;
+}
+@media (max-width:980px){
+  .datetime-card .dt-half + .dt-half{margin-right:0;margin-top:10px;}
+  .datetime-card .dt-half{-ms-flex:1 1 100%;flex:1 1 100%;}
+}
+
+/* ------------------------------------------- 10. IN-PAGE PRINT CLUSTER --- */
+/* Bottom-RIGHT of the page: the print card is the LAST card of the right rail
+   and is pushed down with an auto top margin, so «چاپ آخرین قبض / چاپ نسخه /
+   رسید بیمه» sit at the bottom-right exactly where the native bar used to be. */
+.print-card{-ms-flex-order:4;order:4;margin-top:auto;margin-bottom:0;border-color:#c4d5ee;}
+.status-card{-ms-flex-order:5;order:5;margin-top:12px;}
+.print-grid .btn-print{
+  height:43px;border-radius:11px;border:1.5px solid #c2d1e4;
+  background:#ffffff;color:#17325a;font-weight:800;
+}
+.print-grid .btn-print:hover{border-color:#2f6fe4;color:#1d55bd;background:#f4f9ff;}
+.print-grid .btn-print-primary{
+  border-color:#1c4fb0;color:#ffffff;
+  background:-webkit-linear-gradient(top,#3a7bf0 0%,#1e57c4 100%);
+  background:linear-gradient(180deg,#3a7bf0 0%,#1e57c4 100%);
+  -webkit-box-shadow:0 3px 11px rgba(47,111,228,.24);box-shadow:0 3px 11px rgba(47,111,228,.24);
+}
+
+/* ============================================================================
+   11. صندوق نرفته‌ها MINI-PAGE — the reported bug, fixed properly.
+   ----------------------------------------------------------------------------
+   Symptoms the user reported: it opened cut off half-way down the screen, it
+   could not be dragged, and it slid under an "invisible layer" and vanished.
+   Root causes, all addressed here:
+     a) it was anchored with `bottom:28px` while its own content could exceed
+        the remaining height → the head (the drag handle) was pushed off-screen,
+        which is exactly why it looked cut off AND became undraggable.
+        → now anchored from the TOP with a hard `max-height:80vh` and the panel
+          is a flex COLUMN so only the table body scrolls, never the handle.
+     b) `overflow:hidden` on the ancestor columns clipped it. → z-index raised
+        far above every rail and the panel is a direct viewport-fixed layer with
+        its own backdrop, so no ancestor can clip or cover it.
+     c) nothing visually separated it from the page, so when another surface
+        painted over it the panel appeared to "disappear". → an explicit dim
+        backdrop (.mini-backdrop) now sits directly beneath it.
+   ============================================================================ */
+.mini-backdrop{
+  display:none;position:fixed;z-index:4000;top:0;right:0;bottom:0;left:0;
+  background:#0b1a30;
+  filter:alpha(opacity=34);         /* Trident */
+  opacity:.34;
+}
+.mini-backdrop.open{display:block;}
+.mini-page{
+  display:none;position:fixed;z-index:4001;
+  top:64px;left:auto;right:auto;bottom:auto;
+  width:860px;max-width:96%;
+  max-height:80vh;                  /* never taller than the viewport */
+  background:#ffffff;
+  border:1px solid #b6cae6;border-radius:14px;
+  -webkit-box-shadow:0 26px 70px rgba(9,24,48,.42);
+  box-shadow:0 26px 70px rgba(9,24,48,.42);
+  overflow:hidden;                  /* clip to the rounded corners */
+  margin:0;
+}
+.mini-page.open{
+  display:-ms-flexbox;display:flex;
+  -ms-flex-direction:column;flex-direction:column;
+}
+/* the drag handle is a fixed-height flex item → it can NEVER be pushed off */
+.mini-page > .mini-drag{
+  -ms-flex:0 0 auto;flex:0 0 auto;
+  height:46px;padding:0 14px;
+  background:-webkit-linear-gradient(top,#215ec9 0%,#153c78 100%);
+  background:linear-gradient(180deg,#215ec9 0%,#153c78 100%);
+  color:#ffffff;font-weight:900;font-size:14px;cursor:move;
+  -ms-user-select:none;user-select:none;-webkit-user-select:none;
+}
+.mini-page > .mini-drag .btn{
+  color:#ffffff;background:rgba(255,255,255,.14);
+  border-color:rgba(255,255,255,.45);font-weight:900;
+}
+.mini-page > .mini-drag .btn:hover{background:rgba(255,255,255,.26);color:#ffffff;}
+.mini-page > .card-head{-ms-flex:0 0 auto;flex:0 0 auto;border-radius:0;}
+/* only the body scrolls */
+.mini-page > .card-body{
+  -ms-flex:1 1 auto;flex:1 1 auto;min-height:0;
+  overflow:auto;padding:0;
+}
+.mini-page .tbl-wrap,
+.mini-page .tbl-wrap.collapsed,
+.mini-page .tbl-wrap.expanded{max-height:none;border-left:none;border-right:none;}
+.mini-page .queue-foot{-ms-flex:0 0 auto;flex:0 0 auto;}
+@media (max-width:900px){
+  .mini-page{width:96%;top:44px;max-height:86vh;}
+}
+
+/* --------------------------------------------------- 12. DARK PARITY --- */
+body.theme-dark{background:#0e1622;background:linear-gradient(180deg,#131d2c 0%,#0c1420 100%);color:#e7eff9;}
+.theme-dark .body{background:transparent;border-color:#2c3a4d;}
+.theme-dark .col-action,.theme-dark .col-left,.theme-dark .col-center{
+  background:#182335;border-color:#334259;
+  -webkit-box-shadow:inset 0 1px 0 rgba(255,255,255,.04);box-shadow:inset 0 1px 0 rgba(255,255,255,.04);
+}
+.theme-dark .col-center{background:#1b2839;}
+.theme-dark .card{background:#1e2a3c;border-color:#38485f;}
+.theme-dark .card-head{background:#243149;border-color:#38485f;
+  -webkit-box-shadow:inset 0 2px 0 #4f92f0;box-shadow:inset 0 2px 0 #4f92f0;}
+.theme-dark .card-title{color:#f2f7ff;}
+.theme-dark .ct-ico{color:#7fb3f7;}
+.theme-dark .fld > span{color:#c3d1e2;}
+.theme-dark .inp{background:#141d2a;border-color:#46586f;color:#f2f7ff;
+  -webkit-box-shadow:none;box-shadow:none;}
+.theme-dark .inp[readonly]{background:#1b2637;color:#cfe1fb;}
+.theme-dark .inp[disabled]{background:#1b2432;color:#8496ad;border-color:#3a4a60;}
+.theme-dark .btn-outline{background:#1e2a3c;border-color:#4a5c74;color:#e7eff9;}
+.theme-dark .btn-outline:hover{border-color:#5f9cf0;color:#cfe4ff;background:#22314a;}
+.theme-dark .btn-ghost{background:#243149;border-color:#3d4d64;color:#dbe6f4;}
+.theme-dark .btn-icon{background:#1e2a3c;border-color:#4a5c74;color:#cfdcec;}
+.theme-dark .tbl thead th{background:#27364d;color:#eef5ff;border-color:#46586f;}
+.theme-dark .tbl tbody td{color:#e7eff9;border-color:#334259;}
+.theme-dark .tbl tbody tr:nth-child(even){background:#212e42;}
+.theme-dark .tbl tbody tr:hover{background:#283a54;}
+.theme-dark .svc-foot,.theme-dark .queue-foot{background:#243149;border-color:#46586f;}
+.theme-dark .sf-cell span{color:#b8c8dc;}
+.theme-dark .sf-cell b{color:#f2f7ff;}
+.theme-dark .sf-cell + .sf-cell{border-color:#3a4a60;}
+.theme-dark .empty{color:#93a6bd;}
+.theme-dark .ps-line{background:#1b2637;border-color:#3a4a60;}
+.theme-dark .rx-box{background:#1b2637;border-color:#3a4a60;}
+.theme-dark .rx-lbl{color:#b8c8dc;}
+.theme-dark .rx-val{color:#f2f7ff;}
+.theme-dark .avatar{background:#22314a;color:#8ab4ef;}
+.theme-dark .doctor-preview{background:#1b2637;border-color:#3a4a60;}
+.theme-dark .chk-block{background:#1b2637;border-color:#3a4a60;color:#c3d1e2;}
+.theme-dark .inv-gtitle{color:#8ab4ef;border-color:#3a4a60;}
+.theme-dark .inv-line span{color:#bccbdd;}
+.theme-dark .inv-remain{border-color:#3a4a60;}
+.theme-dark .mini-page{background:#1e2a3c;border-color:#46586f;}
+.theme-dark .mini-page > .mini-drag{background:linear-gradient(180deg,#22528f 0%,#152f56 100%);}
+.theme-dark .tab{color:#a7b8cd;}
+.theme-dark .tab.active{color:#7fb3f7;border-bottom-color:#7fb3f7;}
+.theme-dark .queue-hub-btn{background:#243149;border-color:#4f6884;color:#e9f2ff;}
+.theme-dark .print-grid .btn-print{background:#1e2a3c;border-color:#4f6884;color:#e9f2ff;}

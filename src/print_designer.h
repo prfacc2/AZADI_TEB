@@ -1,8 +1,8 @@
 // ============================================================================
-//  print_designer.h — full vector print-design editor (release 1.4.0, §3/§4)
-//  WYSIWYG canvas, draggable/resizable/rotatable items, 20 built-in templates,
-//  per-section design binding, .aztpl export/import, undo/redo, appointment
-//  counters. File-backed data model so the EXE stays a single static binary.
+//  print_designer.h — full vector print-design editor
+//  WYSIWYG canvas, draggable/resizable/rotatable items, 30 built-in templates,
+//  per-section design binding, .aztpl export/import and undo/redo.
+//  File-backed data model keeps the EXE a single static binary.
 // ============================================================================
 #pragma once
 #include <string>
@@ -11,17 +11,18 @@
 // --------------------------------------------------------------- item types --
 enum PrintItemType {
     PIT_LABEL = 0,     // free text / static label
-    PIT_FIELD,         // data-bound text (field name in `field`)
-    PIT_HLINE,         // horizontal line
-    PIT_VLINE,         // vertical line
-    PIT_RECT,          // rectangle box
-    PIT_FRAME,         // full-page border (special hit-test, §3.10)
-    PIT_IMAGE,         // custom image (path or embedded base64)
-    PIT_LOGO,          // clinic logo (image)
-    PIT_QR,            // QR / barcode (encodes the receipt number)
-    PIT_PHOTO,         // patient personal photo placeholder
-    PIT_APPTNO,        // appointment-number counter (§3.13)
-    PIT_TABLE,         // §1.21.0: grid/table. Model stored as JSON in `text`:
+    PIT_FIELD = 1,     // data-bound text (field name in `field`)
+    PIT_HLINE = 2,     // horizontal line
+    PIT_VLINE = 3,     // vertical line
+    PIT_RECT = 4,      // rectangle box
+    PIT_FRAME = 5,     // full-page border (special hit-test, §3.10)
+    PIT_IMAGE = 6,     // custom image (path or embedded base64)
+    PIT_LOGO = 7,      // clinic logo (image)
+    PIT_QR = 8,        // QR / barcode (encodes the receipt number)
+    PIT_PHOTO = 9,     // patient personal photo placeholder
+    // Numeric value 10 belonged to the removed appointment counter and is
+    // intentionally never reused, preserving old persisted type ids.
+    PIT_TABLE = 11,    // §1.21.0: grid/table. Model stored as JSON in `text`:
                        //   {"cols":n,"rows":n,"header":bool,"widths":[..],
                        //    "cells":[[..],..]}  — round-trips through C++ as a
                        //    plain string so it never breaks the data model.
@@ -81,10 +82,6 @@ struct PrintItem {
     int          objectFit;     // 0=contain (aspect-fit, no crop) 1=cover (fill,
                                 //   crop overflow) 2=fill (stretch). v1.23.0
 
-    // appointment counter (§3.13)
-    int          startValue;
-    int          step;
-
     // v1.55.0 — TABLE / SERVICES row geometry (millimetres). 0 = automatic
     // (divide the item height evenly, the pre-1.55 behaviour), so old saved
     // designs and .aztpl files keep printing byte-identically. When > 0 the
@@ -115,10 +112,8 @@ struct PrintDesign {
 //  captured at admission the token resolves to an EMPTY string so the design
 //  prints cleanly (or hides the row when PrintItem::visibility == 1).
 //
-//   date / time / appointment
-//     {date} {time} {datetime} {shift} {apptdate} {appttime}
-//     {apptdatetime}  تاریخ و ساعت نوبت
-//     {apptsec}       ساعت نوبت با ثانیه (hh:mm:ss)
+//   reception date / time
+//     {date} {time} {datetime} {shift} {regdate} {regtime}
 //     {reg_ts}        تاریخ و ساعت ثبت پذیرش
 //   patient
 //     {first} {last} {full} {father} {nid} {birth} {gender} {mobile}
@@ -189,13 +184,6 @@ bool SectionDesign_Resolve(int sectionId, PrintDesign& out);
 // registry — detach orphaned/stale mappings and archive orphaned design files.
 // Returns the number of stale bindings/files removed.
 int  SectionDesign_Cleanup();
-
-// ---------------------------------------------------- appointment counters ---
-//  Atomically advance the counter for (section, today-jalali) and return the
-//  new value. step/start come from the design's APPTNO item (defaults 1/1).
-int  ApptCounter_Next(int sectionId, int startValue, int step);
-//  Peek the current counter value without advancing (for preview).
-int  ApptCounter_Peek(int sectionId);
 
 // -------------------------------------------------------------- UI entries ---
 //  Management → "دیزاین چاپگر": opens the section picker then the editor.

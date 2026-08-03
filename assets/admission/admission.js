@@ -1085,15 +1085,10 @@
       var c = $('invoiceCard'); if (!c) return;
       c.className = /collapsed/.test(c.className) ? c.className.replace(/\s*collapsed/, '') : c.className + ' collapsed';
     });
-    on($('queueLauncher'), 'click', function () {
-      var p=$('queuePanel');
-      if(p){
-        p.className=p.className.replace(/\s*open/, '')+' open';
-        if(p._azDock) p._azDock();   /* v1.60.0: always opens fully inside the viewport */
-        refreshQueue();
-      }
-    });
-    on($('queueClose'), 'click', function () { var p=$('queuePanel'); if(p)p.className=p.className.replace(/\s*open/, ''); });
+    on($('queueLauncher'), 'click', function () { openQueuePanel(); });
+    on($('queueClose'),    'click', function () { closeQueuePanel(); });
+    /* v1.62.0: clicking the dim backdrop dismisses the panel, like a modal. */
+    on($('miniBackdrop'),  'click', function () { closeQueuePanel(); });
     wireDrag($('queuePanel'), $('queueDrag'));
     /* v1.60.0: zoom in/out buttons REMOVED — fixed, readable scale. */
 
@@ -1150,35 +1145,84 @@
      layer. Now the drag is CLAMPED to the viewport so the panel can never be
      pushed outside the visible area or under another surface, and opening it
      recentres it inside the window. */
+  function vw(){ return window.innerWidth  || document.documentElement.clientWidth  || 1024; }
+  function vh(){ return window.innerHeight || document.documentElement.clientHeight || 768;  }
+
+  /* v1.62.0 — open/close go through one pair of helpers so the panel, its dim
+     backdrop and the docking pass can never fall out of sync (previously the
+     panel could be shown with no backdrop, which is what made it look like it
+     had slipped underneath an invisible layer). */
+  function openQueuePanel() {
+    var p = $('queuePanel'), b = $('miniBackdrop');
+    if (!p) return;
+    if (b) b.className = 'mini-backdrop open';
+    p.className = p.className.replace(/\s*open/g, '') + ' open';
+    /* dock AFTER the panel is displayed — offsetWidth/Height are 0 while
+       display:none, so measuring first produced the mis-placed, half-off-screen
+       position the user reported. */
+    if (p._azDock) p._azDock();
+    refreshQueue();
+  }
+  function closeQueuePanel() {
+    var p = $('queuePanel'), b = $('miniBackdrop');
+    if (p) p.className = p.className.replace(/\s*open/g, '');
+    if (b) b.className = 'mini-backdrop';
+  }
+
   function wireDrag(panel, handle) {
     if (!panel || !handle) return; var moving=false, sx=0, sy=0, left=0, top=0;
-    function vw(){ return window.innerWidth  || document.documentElement.clientWidth  || 1024; }
-    function vh(){ return window.innerHeight || document.documentElement.clientHeight || 768;  }
+    /* Clamp so the panel is ALWAYS fully inside the viewport. The 44px floor on
+       the vertical maximum guarantees the drag handle itself can never be pushed
+       past the bottom edge — losing the handle is what made the panel
+       undraggable once it had drifted. */
     function clamp(l, t){
-      var w=panel.offsetWidth||400, h=panel.offsetHeight||300;
-      var ml=Math.max(4, vw()-w-4), mt=Math.max(4, vh()-h-4);
-      if(l<4) l=4; if(l>ml) l=ml;
-      if(t<4) t=4; if(t>mt) t=mt;
+      var w=panel.offsetWidth||420, h=panel.offsetHeight||320;
+      var ml=vw()-w-8, mt=vh()-h-8;
+      if(ml<8) ml=8;
+      if(mt<8) mt=8;
+      if(l<8) l=8;
+      if(l>ml) l=ml;
+      if(t<8) t=8;
+      if(t>mt) t=mt;
+      var maxT=vh()-44;             /* the drag handle must stay reachable */
+      if(t>maxT) t=maxT;
+      if(t<8) t=8;
       return {l:l,t:t};
+    }
+    function reposition(){
+      if(!/open/.test(panel.className)) return;
+      var r=panel.getBoundingClientRect();
+      var p=clamp(r.left, r.top);
+      panel.style.left=p.l+'px'; panel.style.top=p.t+'px';
     }
     on(handle,'mousedown',function(e){
       e=e||window.event; moving=true; sx=e.clientX; sy=e.clientY;
       var r=panel.getBoundingClientRect(); left=r.left; top=r.top;
       panel.style.left=left+'px'; panel.style.top=top+'px';
       panel.style.right='auto'; panel.style.bottom='auto';
+      panel.style.margin='0';
       if(e.preventDefault) e.preventDefault();
+      return false;                 /* stop Trident starting a text selection */
     });
     on(document,'mousemove',function(e){
       if(!moving) return; e=e||window.event;
       var p=clamp(left+e.clientX-sx, top+e.clientY-sy);
       panel.style.left=p.l+'px'; panel.style.top=p.t+'px';
+      if(e.preventDefault) e.preventDefault();
     });
     on(document,'mouseup',function(){moving=false;});
-    /* on open: place the panel fully INSIDE the viewport (bottom-centre). */
+    /* if the mouse leaves the window mid-drag, stop cleanly instead of sticking */
+    on(window,'blur',function(){moving=false;});
+    /* keep the panel inside the viewport when the window is resized */
+    on(window,'resize',reposition);
+    /* on open: centre the panel horizontally and dock it near the top so its
+       full height (capped at 80vh by CSS) is always visible. */
     panel._azDock = function(){
-      panel.style.right='auto'; panel.style.bottom='auto';
-      var w=panel.offsetWidth||Math.min(820, vw()-40);
-      var p=clamp(Math.round((vw()-w)/2), Math.round(vh()-(panel.offsetHeight||360)-24));
+      panel.style.right='auto'; panel.style.bottom='auto'; panel.style.margin='0';
+      var w=panel.offsetWidth||Math.min(860, vw()-40);
+      var h=panel.offsetHeight||Math.min(520, vh()-80);
+      var t=Math.round((vh()-h)/2); if(t<8) t=8;
+      var p=clamp(Math.round((vw()-w)/2), t);
       panel.style.left=p.l+'px'; panel.style.top=p.t+'px';
     };
   }

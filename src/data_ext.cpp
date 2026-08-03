@@ -1,7 +1,6 @@
 // ============================================================================
 //  data_ext.cpp  (v1.7.0)
-//  Extended data layer for the appointment (نوبت‌دهی) module and the upgraded
-//  reception screen:
+//  Extended data layer for the upgraded reception and management screens:
 //    • Iranian Civil-Registry (ثبت احوال) + insurance lookup with NO fabrication.
 //      We validate the 10-digit national-code checksum, then resolve the
 //      identity ONLY from a trusted source: (1) a configured online registry
@@ -10,7 +9,6 @@
 //      the UI shows an unverified state + manual entry — we never invent a name,
 //      birth date, address or insurance.
 //    • Doctors + their services (file-backed, seeded with realistic specialties)
-//    • Appointment store (CSV-like .dat, queue numbers, cancel/edit/search)
 //    • Profile-change request workflow (reception → management approval)
 //    • Cartable v2 actions: pin / seen-one / delete-one (each reported back)
 //
@@ -487,98 +485,6 @@ std::vector<DoctorDef> todaysDoctors(){
     for(size_t i=0;i<all.size();i++)
         if(((int)i + jd) % 2 == 0) out.push_back(all[i]);
     if(out.empty() && !all.empty()) out.push_back(all[0]);
-    return out;
-}
-
-// ============================================================================
-//  APPOINTMENTS
-// ============================================================================
-static std::wstring apptPath(){ return dataDir()+L"\\appointments.dat"; }
-//  per line: nid|first|last|mobile|doctor|service|date|time|day|shift|kind|user|queue|cancelled
-static Appointment parseAppt(const std::wstring& line){
-    Appointment a;
-    auto f=dx_split(line,L'|');
-    if(f.size()<14) return a;
-    a.nationalId=f[0]; a.firstName=f[1]; a.lastName=f[2]; a.mobile=f[3];
-    a.doctor=f[4]; a.service=f[5]; a.apptDate=f[6]; a.apptTime=f[7];
-    a.day=f[8]; a.shift=f[9]; a.kind=f[10]; a.user=f[11];
-    a.queueNo=_wtoi(f[12].c_str()); a.cancelled=(f[13]==L"1");
-    return a;
-}
-static std::wstring serializeAppt(const Appointment& a){
-    wchar_t qn[16]; swprintf(qn,16,L"%d",a.queueNo);
-    return dx_esc(a.nationalId)+L"|"+dx_esc(a.firstName)+L"|"+dx_esc(a.lastName)+L"|"
-        + dx_esc(a.mobile)+L"|"+dx_esc(a.doctor)+L"|"+dx_esc(a.service)+L"|"
-        + dx_esc(a.apptDate)+L"|"+dx_esc(a.apptTime)+L"|"+dx_esc(a.day)+L"|"
-        + dx_esc(a.shift)+L"|"+dx_esc(a.kind)+L"|"+dx_esc(a.user)+L"|"
-        + std::wstring(qn)+L"|"+(a.cancelled?L"1":L"0");
-}
-std::vector<Appointment> loadAppointments(bool includeCancelled){
-    std::vector<Appointment> out;
-    std::wstring all=readFileUtf8(apptPath());
-    size_t pos=0;
-    while(pos<all.size()){
-        size_t e=all.find(L'\n',pos); if(e==std::wstring::npos) e=all.size();
-        std::wstring line=trim(all.substr(pos,e-pos)); pos=e+1;
-        if(line.empty()) continue;
-        Appointment a=parseAppt(line);
-        if(a.queueNo==0 && a.nationalId.empty() && a.lastName.empty()) continue;
-        if(!includeCancelled && a.cancelled) continue;
-        out.push_back(a);
-    }
-    return out;
-}
-static void saveAllAppts(const std::vector<Appointment>& v){
-    std::wstring out;
-    for(auto&a:v) out+=serializeAppt(a)+L"\r\n";
-    writeFileUtf8(apptPath(),out,false);
-}
-static const wchar_t* weekdayName(const SYSTEMTIME& st){
-    static const wchar_t* days[7]={L"یکشنبه",L"دوشنبه",L"سه‌شنبه",
-        L"چهارشنبه",L"پنجشنبه",L"جمعه",L"شنبه"};
-    return days[st.wDayOfWeek];   // 0=Sunday
-}
-int saveAppointment(Appointment& a){
-    auto v=loadAppointments(true);
-    int maxQ=0; for(auto&x:v) if(!x.cancelled && x.queueNo>maxQ) maxQ=x.queueNo;
-    a.queueNo=maxQ+1;
-    if(a.apptDate.empty()){ SYSTEMTIME st=iranNow(); a.apptDate=jalaliDateShort(st); }
-    if(a.apptTime.empty()){ SYSTEMTIME st=iranNow(); a.apptTime=iranTimeStr(st,false); }
-    if(a.day.empty()){ SYSTEMTIME st=iranNow(); a.day=weekdayName(st); }
-    if(a.shift.empty()) a.shift=shiftName(g_session.shift);
-    if(a.kind.empty()) a.kind=L"حضوری";
-    if(a.user.empty()) a.user=g_session.user.username;
-    v.push_back(a);
-    saveAllAppts(v);
-    logLine(L"appointment saved q="+std::to_wstring(a.queueNo));
-    return a.queueNo;
-}
-bool cancelAppointment(int index){
-    auto v=loadAppointments(true);
-    if(index<0||index>=(int)v.size()) return false;
-    v[index].cancelled=true; saveAllAppts(v); return true;
-}
-bool updateAppointment(int index, const Appointment& a){
-    auto v=loadAppointments(true);
-    if(index<0||index>=(int)v.size()) return false;
-    int q=v[index].queueNo; v[index]=a; v[index].queueNo=q;
-    saveAllAppts(v); return true;
-}
-static bool icontains(const std::wstring& hay, const std::wstring& needle){
-    if(needle.empty()) return true;
-    return hay.find(needle)!=std::wstring::npos;
-}
-std::vector<Appointment> searchAppointments(const std::wstring& nid,
-        const std::wstring& mobile, const std::wstring& fn,
-        const std::wstring& ln, bool includeCancelled){
-    std::vector<Appointment> out;
-    for(auto&a:loadAppointments(includeCancelled)){
-        if(!nid.empty()    && !icontains(a.nationalId,nid)) continue;
-        if(!mobile.empty() && !icontains(a.mobile,mobile))  continue;
-        if(!fn.empty()     && !icontains(a.firstName,fn))   continue;
-        if(!ln.empty()     && !icontains(a.lastName,ln))    continue;
-        out.push_back(a);
-    }
     return out;
 }
 

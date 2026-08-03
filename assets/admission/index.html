@@ -145,12 +145,15 @@
           </div>
         </section>
 
-        <!-- middle row: insurance/appointment | doctor | performer -->
+        <!-- middle row: insurance | doctor | performer
+             v1.62.0: the card was titled «بیمه و نوبت» but every appointment
+             field was removed with the نوبت‌دهی workflow, so the caption was
+             stale — it now says plainly what it holds. -->
         <div class="row-3">
           <section class="card">
             <div class="card-head"><span class="card-title">
               <svg class="ct-ico" viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M12 1L3 5v6c0 5 3.8 9.7 9 11 5.2-1.3 9-6 9-11V5l-9-4z"/></svg>
-              بیمه و نوبت</span></div>
+              اطلاعات بیمه و نوع پذیرش</span></div>
             <div class="card-body grid-2 tight">
               <label class="fld"><span>بیمه پایه</span><select id="insMain" class="inp" data-nav></select></label>
               <label class="fld"><span>نوع بیمه</span><select id="insType" class="inp" data-nav><option>خدمات درمانی</option><option>تأمین اجتماعی</option><option>نیروهای مسلح</option><option>آزاد</option></select></label>
@@ -201,7 +204,10 @@
             <label class="fld dt-fld"><span>تاریخ پذیرش (خودکار)</span><input type="text" id="apptDate" class="inp" data-nav readonly /></label>
           </div>
           <div class="dt-half">
-            <span class="dt-ico"><svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M12 2a10 10 0 100 20 10 10 0 000-20zm1 5h-2v6l5 3 1-1.7-4-2.3V7z"/></svg></span>
+            <!-- v1.62.0: the old single-path clock filled solid because the dial
+                 and the hands were one subpath; drawn now as a stroked ring plus
+                 stroked hands so it reads as a clock at 16px. -->
+            <span class="dt-ico"><svg viewBox="0 0 24 24" width="17" height="17"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 7.5V12l3.2 2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
             <label class="fld dt-fld"><span>شیفت (خودکار)</span><select id="apptShift" class="inp" data-nav disabled><option>صبح</option><option>عصر</option><option>شب</option></select></label>
           </div>
         </section>
@@ -252,6 +258,12 @@
             </div>
           </div>
         </section>
+
+        <!-- v1.62.0 — dim backdrop for the صندوق نرفته‌ها panel. Without an
+             explicit layer beneath it the panel appeared to slide under an
+             "invisible layer" and vanish whenever another surface repainted.
+             It sits one z-index below the panel and closes it on click. -->
+        <div class="mini-backdrop" id="miniBackdrop"></div>
 
         <!-- Queue mini-page: hidden by default, opened from the action rail. -->
         <section class="card queue-card mini-page" id="queuePanel">

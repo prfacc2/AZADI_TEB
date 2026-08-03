@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.60.0"
+#define APP_VERSION_W   L"1.62.0"
 
 // ----------------------------------------------------------- logging policy -
 //  RELEASE 1.2.0 (Section A): all general user-behavior logging is gated behind
@@ -797,24 +797,6 @@ ImportResult importPatientsFromFile(const std::wstring& path);
 struct DoctorDef { std::wstring name, specialty; std::vector<std::wstring> services; };
 std::vector<DoctorDef> loadDoctors();          // seeds defaults if empty
 std::vector<DoctorDef> todaysDoctors();        // doctors on shift today
-
-// ----------------------------------------------------------- appointments ---
-struct Appointment {
-    std::wstring nationalId, firstName, lastName, mobile;
-    std::wstring doctor, service, apptDate, apptTime, day, shift;
-    std::wstring kind;        // حضوری / غیرحضوری
-    std::wstring user;        // who registered it
-    int  queueNo;
-    bool cancelled;
-    Appointment():queueNo(0),cancelled(false){}
-};
-std::vector<Appointment> loadAppointments(bool includeCancelled);
-int  saveAppointment(Appointment& a);          // assigns queue no, persists
-bool cancelAppointment(int index);             // marks cancelled by list index
-bool updateAppointment(int index, const Appointment& a);
-std::vector<Appointment> searchAppointments(const std::wstring& nid,
-        const std::wstring& mobile, const std::wstring& fn,
-        const std::wstring& ln, bool includeCancelled);
 
 // ----------------------------------------------------- profile-change reqs --
 //  v1.6.0: a full profile-change request workflow (reception → management).
