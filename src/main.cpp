@@ -692,9 +692,36 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
     case WM_PAINT: {
         PAINTSTRUCT ps; HDC dc0=BeginPaint(h,&ps);
         RECT rc; GetClientRect(h,&rc);
+        if(rc.right<=0 || rc.bottom<=0){ EndPaint(h,&ps); return 0; }
+        // ------------------------------------------------------------------
+        //  v1.63.0 FPS FIX — dirty-rect double buffer.
+        //  The clock timer invalidates ONLY the LAYER-1 header strip twice a
+        //  second, but this handler still allocated (and immediately destroyed)
+        //  a bitmap the size of the WHOLE CLIENT AREA — on a 1920x1080 screen
+        //  that is an 8 MB GDI allocation + free 2x per second, forever, plus a
+        //  full-screen BitBlt. That allocation churn is the second half of the
+        //  reported frame-rate drop (the first half was the uncached background
+        //  resample, now fixed in gpDrawBackground).
+        //  The buffer is now sized to the INVALIDATED RECT and the drawing code
+        //  below is untouched: SetViewportOrgEx shifts the origin so all the
+        //  absolute coordinates keep working, and a clip region keeps every
+        //  primitive inside the strip.
+        // ------------------------------------------------------------------
+        RECT d = ps.rcPaint;
+        if(d.left<0) d.left=0;
+        if(d.top<0)  d.top=0;
+        if(d.right>rc.right)   d.right=rc.right;
+        if(d.bottom>rc.bottom) d.bottom=rc.bottom;
+        int dw=d.right-d.left, dh=d.bottom-d.top;
+        if(dw<=0||dh<=0){ EndPaint(h,&ps); return 0; }
         HDC dc=CreateCompatibleDC(dc0);
-        HBITMAP bmp=CreateCompatibleBitmap(dc0,rc.right,rc.bottom);
+        HBITMAP bmp=CreateCompatibleBitmap(dc0,dw,dh);
         HGDIOBJ obm=SelectObject(dc,bmp);
+        SetViewportOrgEx(dc,-d.left,-d.top,NULL);
+        // SelectClipRgn takes DEVICE units, so the region is the buffer extent
+        // (0,0,dw,dh) — not the logical dirty rect.
+        HRGN dclip=CreateRectRgn(0,0,dw,dh);
+        SelectClipRgn(dc,dclip);
 
         // ===================== LAYER 1 — top header bar =====================
         // Soft vertical gradient so the header reads as a distinct, polished
@@ -821,7 +848,9 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         DrawTextW(dc,tag.c_str(),-1,&pr,
             DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
 
-        BitBlt(dc0,0,0,rc.right,rc.bottom,dc,0,0,SRCCOPY);
+        SelectClipRgn(dc,NULL); DeleteObject(dclip);
+        SetViewportOrgEx(dc,0,0,NULL);
+        BitBlt(dc0,d.left,d.top,dw,dh,dc,0,0,SRCCOPY);
         SelectObject(dc,obm); DeleteObject(bmp); DeleteDC(dc);
         EndPaint(h,&ps);
         return 0; }

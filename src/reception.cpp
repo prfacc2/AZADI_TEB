@@ -1808,8 +1808,18 @@ static void drawCartDetail(HDC dc, const RECT& rc, TabPage* t){
         int bw=sz.cx+S(34);
         RECT r={bx,by,bx+bw,by+bh};
         bool hov=(t->cartHotBtn==d.id);
-        fillRoundRect(dc,r,S(9), hov?g_theme.accent:d.fill,
-                      hov?g_theme.accent:g_theme.border);
+        // v1.63.0: cartable action buttons are raised gradient pills; hover
+        // lifts them with an accent glow instead of only swapping two colours.
+        if(hov){
+            gpShadowColor(dc,r,S(10),S(6),90,g_theme.accent);
+            gpGradRoundRect(dc,r,S(10),g_theme.accentHover,g_theme.accent,
+                            CLR_INVALID);
+        } else {
+            gpShadow(dc,r,S(10),S(4),40);
+            gpGradRoundRect(dc,r,S(10),
+                blendColor(d.fill,RGB(255,255,255),g_dark?10:22),d.fill,
+                blendColor(g_theme.border,g_theme.accent,18));
+        }
         SetTextColor(dc, hov?g_theme.accentText:d.txt);
         DrawTextW(dc,d.lbl,-1,&r,DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
         s_cartBtns.push_back({r,d.id});
@@ -2077,10 +2087,19 @@ static void paintInfoGroup(HDC dc, int iL, int iR, int y, const wchar_t* title, 
     drawIcon(dc,icon,si,g_theme.accent,S(2));
     RECT sr={iL,y,iR-icoW-S(6),y+titleH};
     DrawTextW(dc,title,-1,&sr,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
-    HPEN pn=CreatePen(PS_SOLID,1,g_theme.border);
-    HGDIOBJ op=SelectObject(dc,pn);
-    MoveToEx(dc,iL,y+titleH+S(2),0); LineTo(dc,iR,y+titleH+S(2));
-    SelectObject(dc,op); DeleteObject(pn);
+    // v1.63.0: the group rule now fades from the title edge (RTL: right) toward
+    // the left instead of being a hard pen line across the whole panel — the
+    // group heading reads as a heading, not a table row.
+    { int y2=y+titleH+S(2), span=iR-iL;
+      if(span>0){
+        int seg=S(6); if(seg<2) seg=2;
+        for(int x=iL;x<iR;x+=seg){
+            int xe=x+seg; if(xe>iR) xe=iR;
+            int a=200-(180*(iR-x))/span;
+            if(a<8) a=8; if(a>255) a=255;
+            gpLine(dc,x,y2,xe,y2,blendColor(g_theme.border,g_theme.accent,25),1.0f,a);
+        }
+      } }
 }
 //  Helper: draw a small field caption (right-aligned, dim) above a control.
 static void paintInfoLabel(HDC dc, int iL, int iR, int y, const wchar_t* txt, double f=1.0){
@@ -2096,7 +2115,13 @@ static void paintInfoPanel(HDC dc, TabPage* t, int infoL, int infoR, int H, int 
     RECT card={infoL,S(16)-sy,infoR,VH-S(16)-sy};
     // v2: clip the rounded card so nothing bleeds outside the rounded corners,
     // and patch the corner gaps with the page background so no square shows.
-    gpRoundRectBg(dc,card,S(16),g_theme.surface,g_theme.border,g_theme.bg);
+    // v1.63.0: the patient panel is the tallest object on the tab, so it now
+    // carries a real elevation shadow + surface gradient (matching the form
+    // cards) and a soft accent wash across the profile header area so the
+    // avatar block reads as a distinct "identity" zone.
+    gpShadow(dc,card,S(16),S(9),g_dark?76:50);
+    gpGradRoundRectBg(dc,card,S(16),g_theme.surfaceTop,g_theme.surface,
+        g_theme.border,g_theme.bg);
     InfoLayout L; computeInfoLayout(infoL,infoR,VH,L);
     // shift the whole computed layout up by the scroll offset
     #define SY(v) ((v)-sy)
@@ -2125,7 +2150,12 @@ static void paintInfoPanel(HDC dc, TabPage* t, int infoL, int infoR, int H, int 
     { int pad=L.iw/8;
       RECT chip={iL+pad,SY(L.chipY),iR-pad,SY(L.chipY)+L.chipH};
       COLORREF gfill=blendColor(g_theme.success,g_theme.surface,78);
-      fillRoundRect(dc,chip,L.chipH/2,gfill,blendColor(g_theme.success,g_theme.surface,40));
+      // v1.63.0: the status chip is a gradient pill with a whisper of
+      // elevation, so it sits ON the card instead of being stamped into it.
+      gpShadowColor(dc,chip,L.chipH/2,S(4),46,g_theme.success);
+      gpGradRoundRect(dc,chip,L.chipH/2,
+          blendColor(gfill,RGB(255,255,255),g_dark?10:40),gfill,
+          blendColor(g_theme.success,g_theme.surface,40));
       SelectObject(dc,fSm); SetTextColor(dc,g_theme.success);
       DrawTextW(dc,L"نسخه الکترونیک",-1,&chip,
           DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX); }
@@ -2136,7 +2166,12 @@ static void paintInfoPanel(HDC dc, TabPage* t, int infoL, int infoR, int H, int 
       RECT bR={iR-half,SY(L.boxY),iR,SY(L.boxY)+L.boxH};
       for(int k=0;k<2;k++){
           RECT bx = k==0?bR:bL;          // RTL: first box on the RIGHT
-          fillRoundRect(dc,bx,S(8),g_theme.inputBg,g_theme.border);
+          // v1.63.0: an inset "well" look — a top-down gradient from a slightly
+          // darker shade to the input colour reads as recessed, which is the
+          // correct affordance for a read-only counter (vs. a raised button).
+          gpGradRoundRect(dc,bx,S(9),
+              blendColor(g_theme.inputBg,g_theme.border,g_dark?26:34),
+              g_theme.inputBg,g_theme.border);
           SelectObject(dc,fSm); SetTextColor(dc,g_theme.textDim);
           RECT lr={bx.left,bx.top+S(3),bx.right,bx.top+lnH};
           DrawTextW(dc,k==0?L"نسخه (سرپایی)":L"نسخه (الکترونیکی)",-1,&lr,
@@ -2158,11 +2193,19 @@ static void paintInfoPanel(HDC dc, TabPage* t, int infoL, int infoR, int H, int 
       RECT sBox={iL,SY(L.psY),iL+half,SY(L.psY)+boxH};       // S on the LEFT
       auto psCard=[&](RECT box,COLORREF badge,COLORREF glyphCol,const wchar_t* glyph,
                       const wchar_t* lbl,COLORREF txt){
-          fillRoundRect(dc,box,S(8),g_theme.surface2,g_theme.border);
+          // v1.63.0: the P/S cards are raised chips with a gradient body, and
+          // the badge square glows in its own colour so the two metrics are
+          // instantly distinguishable at a glance.
+          gpShadow(dc,box,S(9),S(5),g_dark?58:38);
+          gpGradRoundRect(dc,box,S(9),
+              blendColor(g_theme.surfaceTop,g_theme.surface2,40),
+              g_theme.surface2,g_theme.border);
           // badge square hugging the OUTER edge, vertically centered
           int by=box.top+(boxH-sq)/2;
           RECT sqR={box.right-S(6)-sq,by,box.right-S(6),by+sq};
-          fillRoundRect(dc,sqR,S(6),badge,badge);
+          gpShadowColor(dc,sqR,S(7),S(5),100,badge);
+          gpGradRoundRect(dc,sqR,S(7),
+              blendColor(badge,RGB(255,255,255),26),badge,CLR_INVALID);
           SelectObject(dc,fBadge); SetTextColor(dc,glyphCol);
           DrawTextW(dc,glyph,-1,&sqR,DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX);
           // stacked label / value in the remaining LEFT space
@@ -3234,22 +3277,55 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         HFONT fSec = fitFont(16, FW_BOLD,     v.fitF);
         HFONT fLbl = fitFont(13, FW_SEMIBOLD, v.fitF);
         int   hband= (int)(S(38)*v.fitF+0.5); if(hband<S(26)) hband=S(26);
+        //  ------------------------------------------------------------------
+        //  v1.63.0 CARD REDESIGN (reception form).
+        //  The cards were a flat surface fill + a hard 1-px full-width pen
+        //  rule, so on screen they looked like plain boxes drawn with a ruler.
+        //  They now get: a real elevation shadow, a soft surface gradient, an
+        //  accent-tinted rounded medallion behind the section icon, and a
+        //  divider that starts strong under the title and FADES toward the
+        //  other edge — the detail that separates a designed panel from a
+        //  drawn rectangle. Every metric still derives from hband/v.fitF so
+        //  the look survives DPI scaling and the tight-screen fit factor.
+        //  ------------------------------------------------------------------
+        auto cardShell=[&](RECT cr){
+            gpShadow(dc,cr,S(14),S(8),g_dark?70:46);
+            gpGradRoundRectBg(dc,cr,S(14),g_theme.surfaceTop,g_theme.surface,
+                g_theme.border,g_theme.bg);
+        };
+        //  fading divider: `strongAt` is the edge the title sits on (right for
+        //  RTL), so the rule is fully opaque there and dissolves to nothing.
+        auto fadeRule=[&](int x0,int x1,int y){
+            int span=x1-x0; if(span<=0) return;
+            int seg=S(6); if(seg<2) seg=2;
+            for(int x=x0;x<x1;x+=seg){
+                int xe=x+seg; if(xe>x1) xe=x1;
+                int a=210-(190*(x1-x))/span;   // opaque at x1 (right/RTL side)
+                if(a<8) a=8; if(a>255) a=255;
+                gpLine(dc,x,y,xe,y,g_theme.border,1.0f,a);
+            }
+        };
+        //  accent medallion behind a section icon
+        auto medallion=[&](RECT hi){
+            RECT md=hi; InflateRect(&md,S(6),S(6));
+            int mr2=(md.bottom-md.top)/2;
+            gpFillAlpha(dc,md,mr2,
+                blendColor(g_theme.accent,g_theme.surface,50),g_dark?80:46);
+            gpRoundRect(dc,md,mr2,CLR_INVALID,
+                blendColor(g_theme.border,g_theme.accent,45));
+        };
         auto subcard=[&](int top,int bot,const wchar_t* title,int icon){
             RECT cr={m.cardL,Y(top),m.cardR,Y(bot)};
-            gpRoundRectBg(dc,cr,S(14),g_theme.surface,g_theme.border,g_theme.bg);
+            cardShell(cr);
             int icoW=(int)(S(20)*v.fitF+0.5); if(icoW<S(14)) icoW=S(14);
             int icoTop=cr.top+(hband-icoW)/2;
             RECT hi={formR-icoW,icoTop,formR,icoTop+icoW};
+            medallion(hi);
             drawIcon(dc,icon,hi,g_theme.accent,S(2));
             SetTextColor(dc,g_theme.sectionInk); SelectObject(dc,fSec);
-            RECT ht={formL,cr.top,formR-icoW-S(8),cr.top+hband};
+            RECT ht={formL,cr.top,formR-icoW-S(14),cr.top+hband};
             DrawTextW(dc,title,-1,&ht,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
-            // thin divider under the section title
-            HPEN pn=CreatePen(PS_SOLID,1,g_theme.border);
-            HGDIOBJ op=SelectObject(dc,pn);
-            int dy=cr.top+hband;
-            MoveToEx(dc,formL,dy,NULL); LineTo(dc,formR,dy);
-            SelectObject(dc,op); DeleteObject(pn);
+            fadeRule(formL,formR,cr.top+hband);
         };
         //  v1.27.0: draw a field label (with optional red required asterisk)
         //  above (x,y). Uses the readable 13-medium label font + labelInk color
@@ -3292,22 +3368,20 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         {
             MidCards mc; rcMidCards(m,mc);
             int in=S(10);
+            // v1.63.0: same modern shell as subcard() (shadow + gradient +
+            // icon medallion + fading rule) at the narrower sub-card scale.
             auto card3=[&](int L0,int R0,const wchar_t* title,int icon){
                 RECT cr={L0,Y(v.dpTop),R0,Y(v.dpBot)};
-                gpRoundRectBg(dc,cr,S(14),g_theme.surface,g_theme.border,g_theme.bg);
+                cardShell(cr);
                 int icoW=(int)(S(18)*v.fitF+0.5); if(icoW<S(13)) icoW=S(13);
                 int icoTop=cr.top+(hband-icoW)/2;
                 RECT hi={R0-in-icoW,icoTop,R0-in,icoTop+icoW};
+                medallion(hi);
                 drawIcon(dc,icon,hi,g_theme.accent,S(2));
                 SetTextColor(dc,g_theme.sectionInk); SelectObject(dc,fSec);
-                RECT ht={L0+in,cr.top,R0-in-icoW-S(6),cr.top+hband};
+                RECT ht={L0+in,cr.top,R0-in-icoW-S(12),cr.top+hband};
                 DrawTextW(dc,title,-1,&ht,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
-                // divider under the sub-card title
-                HPEN pn=CreatePen(PS_SOLID,1,g_theme.border);
-                HGDIOBJ op=SelectObject(dc,pn);
-                int dy=cr.top+hband;
-                MoveToEx(dc,L0+in,dy,NULL); LineTo(dc,R0-in,dy);
-                SelectObject(dc,op); DeleteObject(pn);
+                fadeRule(L0+in,R0-in,cr.top+hband);
             };
             // — انجام دهنده (rightmost)
             card3(mc.perfL,mc.perfR,L"انجام دهنده",ICO_USER);
@@ -3351,7 +3425,7 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             int in=S(10);
             int svL=bp.svL+in, svR=bp.svR-in, svW=svR-svL;
             RECT cr={bp.svL,Y(v.bTop),bp.svR,Y(v.bBot)};
-            gpRoundRectBg(dc,cr,S(14),g_theme.surface,g_theme.border,g_theme.bg);
+            cardShell(cr);
             // header row: «خدمات» title flush-right + (افزودن خدمت btn = control)
             SetTextColor(dc,g_theme.sectionInk); SelectObject(dc,fitFont(16,FW_BOLD,v.fitF));
             { RECT ht={svL,Y(v.svcToolY),svR,Y(v.svcToolY)+rh};
@@ -3364,12 +3438,31 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
               int tx=svR-tsz2.cx-S(8)-tsz;
               RECT tr={tx,ty,tx+tsz,ty+tsz};
               s_svcToggleR=tr;
-              fillRoundRect(dc,tr,S(6),g_theme.surface2,g_theme.border);
+              // v1.63.0: the collapse chip is a small raised control
+              gpGradRoundRect(dc,tr,S(7),
+                  blendColor(g_theme.surfaceTop,g_theme.surface2,45),
+                  g_theme.surface2,blendColor(g_theme.border,g_theme.accent,30));
               drawCollapseCaret(dc,tr,t->svcCollapsed,g_theme.accent); }
             // table header strip — reference columns (RTL):
             // ردیف | نام خدمت | مبلغ (ریال) | تخفیف بیمه (ریال) | سهم بیمه (ریال) | عملیات
+            // ------------------------------------------------------------
+            //  v1.63.0 SERVICES TABLE. The header was a flat grey strip and the
+            //  zebra rows were the same grey, so a filled table was hard to
+            //  read: you could not tell the header from the data. Now:
+            //    * the header is an accent-tinted gradient band with a bright
+            //      bottom rule (a real table head),
+            //    * a hairline separates the header from the first data row,
+            //    * zebra rows use a much subtler wash so the DATA dominates,
+            //    * every column gets a faint vertical divider, which is what
+            //      makes a money table actually readable.
+            // ------------------------------------------------------------
             RECT head={svL,Y(v.svcHeadY),svR,Y(v.svcHeadY)+S(28)};
-            fillRoundRect(dc,head,S(6),g_theme.surface2,g_theme.border);
+            gpGradRoundRect(dc,head,S(7),
+                blendColor(g_theme.accent,g_theme.surface,g_dark?76:84),
+                blendColor(g_theme.accent,g_theme.surface,g_dark?84:90),
+                blendColor(g_theme.border,g_theme.accent,40));
+            gpLine(dc,svL+S(2),head.bottom-1,svR-S(2),head.bottom-1,
+                blendColor(g_theme.accent,g_theme.surface,35),1.0f,190);
             SelectObject(dc,g_fLabel); SetTextColor(dc,g_theme.text);
             const wchar_t* cols[6]={L"ردیف",L"نام خدمت",L"مبلغ (ریال)",
                 L"تخفیف بیمه (ریال)",L"سهم بیمه (ریال)",L"عملیات"};
@@ -3386,6 +3479,15 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             int maxRows=(v.svcBodyBot-v.svcBodyY)/rowH; if(maxRows<0) maxRows=0;
             if(v.svcRows==0){
                 int ecy=Y(v.svcBodyY)+(v.svcBodyBot-v.svcBodyY)/2-S(10);
+                // v1.63.0: the empty table shows a small tinted glyph above the
+                // hint so an un-filled bill reads as a state, not a blank void.
+                { int gsz=S(26), gx=(svL+svR)/2;
+                  RECT gr={gx-gsz/2,ecy-gsz-S(8),gx+gsz/2,ecy-S(8)};
+                  RECT md=gr; InflateRect(&md,S(7),S(7));
+                  gpFillAlpha(dc,md,(md.bottom-md.top)/2,
+                      blendColor(g_theme.accent,g_theme.surface,55),g_dark?72:46);
+                  drawIcon(dc,ICO_PLUS,gr,
+                      blendColor(g_theme.accent,g_theme.text,10),S(2)); }
                 SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
                 RECT er={svL,ecy,svR,ecy+S(20)};
                 DrawTextW(dc,L"هیچ خدمتی اضافه نشده است — روی «افزودن خدمت +» بزنید.",-1,&er,
@@ -3398,7 +3500,14 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
                     if(r0>=maxRows) continue;      // beyond the visible band
                     int ry=Y(v.svcBodyY)+r0*rowH;
                     if(r0%2==1){ RECT zr={svL,ry,svR,ry+rowH};
-                        fillRoundRect(dc,zr,S(4),g_theme.surface2,g_theme.surface2); }
+                        // v1.63.0: a whisper-light band (was full surface2,
+                        // which fought with the header for attention)
+                        gpFillAlpha(dc,zr,S(4),g_theme.surface2,g_dark?110:150); }
+                    // faint row separator + column dividers
+                    gpLine(dc,svL+S(2),ry+rowH,svR-S(2),ry+rowH,g_theme.border,1.0f,70);
+                    for(int c=1;c<6;c++)
+                        gpLine(dc,colR[c],ry+S(3),colR[c],ry+rowH-S(3),
+                               g_theme.border,1.0f,55);
                     wchar_t idx[8]; swprintf(idx,8,L"%d",r0+1);
                     std::wstring cells[5]={
                         toFaDigits(idx), s.name,
@@ -3424,7 +3533,11 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             }
             // footer summary strip — always drawn (matches the reference)
             RECT foot={svL,Y(v.svcFootY),svR,Y(v.svcFootY)+S(24)};
-            fillRoundRect(dc,foot,S(6),g_theme.surface2,g_theme.border);
+            // v1.63.0: the totals strip is emphasised with a slightly stronger
+            // gradient + accent hairline so the money line stands out.
+            gpGradRoundRect(dc,foot,S(7),
+                blendColor(g_theme.surfaceTop,g_theme.surface2,35),
+                g_theme.surface2, blendColor(g_theme.border,g_theme.accent,32));
             SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.text);
             { int qw=svW/4, x=svR;
               auto footCell=[&](const wchar_t* label,long long val){
@@ -3441,13 +3554,18 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             // inline add-service panel background strip (when open)
             if(v.panelOpen){
                 RECT pr={svL,Y(v.svcPanelY)-S(3),svR,Y(v.svcPanelY)+rh+S(3)};
-                fillRoundRect(dc,pr,S(6),g_theme.surface2,g_theme.accent);
+                // v1.63.0: the open add-service strip glows so it is obvious the
+                // form is in "adding" mode.
+                gpShadowColor(dc,pr,S(8),S(6),70,g_theme.accent);
+                gpGradRoundRect(dc,pr,S(8),
+                    blendColor(g_theme.surface2,g_theme.accent,g_dark?14:8),
+                    g_theme.surface2,g_theme.accent);
             }
 
             // ==== BOTTOM LEFT PANEL: صندوق نرفته‌ها / صف پذیرش ====
             int upL=bp.upL+in, upR=bp.upR-in, upW=upR-upL;
             RECT ur={bp.upL,Y(v.bTop),bp.upR,Y(v.bBot)};
-            gpRoundRectBg(dc,ur,S(12),g_theme.surface,g_theme.border,g_theme.bg);
+            cardShell(ur);
             // ---- flat desktop tabs: صندوق نرفته ها | صف پذیرش (RTL order) ----
             { int tw=S(120), th=S(26);
               RECT t0={upR-tw,Y(v.upTabY),upR,Y(v.upTabY)+th};              // صندوق نرفته‌ها
@@ -3456,9 +3574,19 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
               for(int k=0;k<2;k++){
                   RECT tr=k==0?t0:t1;
                   bool act=(t->bottomTab==k);
-                  fillRoundRect(dc,tr,S(6),
-                      act?g_theme.accent:g_theme.surface2,
-                      act?g_theme.accent:g_theme.border);
+                  // v1.63.0: the active sub-tab is a glowing accent pill; the
+                  // inactive one is a soft raised chip (was two flat rects that
+                  // differed only in colour).
+                  if(act){
+                      gpShadowColor(dc,tr,S(8),S(6),88,g_theme.accent);
+                      gpGradRoundRect(dc,tr,S(8),g_theme.accentHover,
+                                      g_theme.accent,CLR_INVALID);
+                  } else {
+                      gpGradRoundRect(dc,tr,S(8),
+                          blendColor(g_theme.surfaceTop,g_theme.surface2,45),
+                          g_theme.surface2,
+                          blendColor(g_theme.border,g_theme.accent,22));
+                  }
                   SelectObject(dc,act?g_fUIB:g_fSmall);
                   SetTextColor(dc,act?RGB(255,255,255):g_theme.textDim);
                   DrawTextW(dc,k==0?L"صندوق نرفته ها":L"صف پذیرش",-1,&tr,
@@ -3469,14 +3597,23 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
               int tsz=S(22), ty=Y(v.upTabY)+(th-tsz)/2;
               RECT tgl={upL,ty,upL+tsz,ty+tsz};
               s_upToggleR=tgl;
-              fillRoundRect(dc,tgl,S(6),g_theme.surface2,g_theme.border);
+              gpGradRoundRect(dc,tgl,S(7),
+                  blendColor(g_theme.surfaceTop,g_theme.surface2,45),
+                  g_theme.surface2,blendColor(g_theme.border,g_theme.accent,30));
               drawCollapseCaret(dc,tgl,t->upCollapsed,g_theme.accent);
             }
             // ---- toolbar captions (controls themselves are real windows) ----
             // ---- table header: بارکد/کد پرونده | نام بیمار | تاریخ | زمان |
             //      دقیقه پیش | عملیات ----
+            // v1.63.0: same accent-tinted table head as the services table, so
+            // both bottom panels read as one designed system.
             RECT uhead={upL,Y(v.upHeadY),upR,Y(v.upHeadY)+S(28)};
-            fillRoundRect(dc,uhead,S(6),g_theme.surface2,g_theme.border);
+            gpGradRoundRect(dc,uhead,S(7),
+                blendColor(g_theme.accent,g_theme.surface,g_dark?76:84),
+                blendColor(g_theme.accent,g_theme.surface,g_dark?84:90),
+                blendColor(g_theme.border,g_theme.accent,40));
+            gpLine(dc,upL+S(2),uhead.bottom-1,upR-S(2),uhead.bottom-1,
+                blendColor(g_theme.accent,g_theme.surface,35),1.0f,190);
             SelectObject(dc,g_fLabel); SetTextColor(dc,g_theme.text);
             const wchar_t* ucols[6]={L"بارکد/کد پرونده",L"نام بیمار",L"تاریخ",
                 L"زمان",L"دقیقه پیش",L"عملیات"};
@@ -3527,6 +3664,14 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             int umax=(v.upBodyBot-v.upBodyY)/urowH; if(umax<0) umax=0;
             if(shown.empty()){
                 int ecy=Y(v.upBodyY)+(v.upBodyBot-v.upBodyY)/2-S(10);
+                // v1.63.0: tinted glyph above the hint (state, not a blank void)
+                { int gsz=S(26), gx=(upL+upR)/2;
+                  RECT gr={gx-gsz/2,ecy-gsz-S(8),gx+gsz/2,ecy-S(8)};
+                  RECT md=gr; InflateRect(&md,S(7),S(7));
+                  gpFillAlpha(dc,md,(md.bottom-md.top)/2,
+                      blendColor(g_theme.accent,g_theme.surface,55),g_dark?72:46);
+                  drawIcon(dc,ICO_RECEIPT,gr,
+                      blendColor(g_theme.accent,g_theme.text,10),S(2)); }
                 SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
                 RECT er={upL,ecy,upR,ecy+S(20)};
                 DrawTextW(dc,t->bottomTab==0
@@ -3539,7 +3684,13 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
                     const UpRow& rrow=s_upRows[shown[k]];
                     int ry=Y(v.upBodyY)+k*urowH;
                     if(k%2==1){ RECT zr={upL,ry,upR,ry+urowH};
-                        fillRoundRect(dc,zr,S(4),g_theme.surface2,g_theme.surface2); }
+                        // v1.63.0: whisper-light zebra + hairline separators and
+                        // column dividers (same language as the services table).
+                        gpFillAlpha(dc,zr,S(4),g_theme.surface2,g_dark?110:150); }
+                    gpLine(dc,upL+S(2),ry+urowH,upR-S(2),ry+urowH,g_theme.border,1.0f,70);
+                    for(int c=1;c<6;c++)
+                        gpLine(dc,ucR[c],ry+S(3),ucR[c],ry+urowH-S(3),
+                               g_theme.border,1.0f,55);
                     // minutes ago (only when the epoch is known)
                     std::wstring ago=L"—";
                     if(rrow.epoch>0){
@@ -3629,7 +3780,19 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 bool invalid = idErr || reqErr;
                 COLORREF bord = invalid ? g_theme.danger
                               : focused ? g_theme.accent : g_theme.border;
-                fillRoundRect(dc,well,S(8),g_theme.inputBg,bord);
+                // ------------------------------------------------------------
+                //  v1.63.0 INPUT WELL. Every field was a flat rectangle whose
+                //  only state cue was the border colour. A well is now visibly
+                //  RECESSED (darker at the top, fading to the input colour),
+                //  the FOCUSED field gets an accent glow so the caret's home is
+                //  obvious, and an INVALID field gets a red glow + red rim so a
+                //  failed validation cannot be missed on a dense form.
+                // ------------------------------------------------------------
+                if(invalid)      gpShadowColor(dc,well,S(9),S(6),86,g_theme.danger);
+                else if(focused) gpShadowColor(dc,well,S(9),S(6),74,g_theme.accent);
+                gpGradRoundRect(dc,well,S(9),
+                    blendColor(g_theme.inputBg,g_theme.border,g_dark?26:34),
+                    g_theme.inputBg,bord);
             }
         }
 
@@ -3657,11 +3820,12 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             int sumTop = S(RC_OUT);
             int sumBot = sumTop + S(30) + 3*(S(20)+3*S(20)) + S(26) + S(8);
             RECT card={m.billL,Y(sumTop),m.billR,Y(sumBot)};
-            gpRoundRectBg(dc,card,S(12),g_theme.surface,g_theme.border,g_theme.bg);
+            cardShell(card);
             int bl=card.left+S(10), br=card.right-S(10);
             // header «صورت حساب» (icon flush-right, RTL) — strong section title
             { int icoW=S(18);
               RECT bi={br-icoW,card.top+S(7),br,card.top+S(7)+icoW};
+              medallion(bi);
               drawIcon(dc,ICO_RECEIPT,bi,g_theme.accent,S(2));
               SetTextColor(dc,g_theme.sectionInk); SelectObject(dc,g_fSection);
               RECT bt={bl,card.top+S(4),br-icoW-S(6),card.top+S(28)};
@@ -3704,12 +3868,15 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             //  a subtle light-gray divider above it, with a soft light-gray fill
             //  only (readable dark text). The prominent blue is reserved for the
             //  «جمع مبلغ نهایی» total card below.
-            { HPEN dpn=CreatePen(PS_SOLID,1,g_theme.border);
-              HGDIOBJ dop=SelectObject(dc,dpn);
-              MoveToEx(dc,bl,ry+S(1),NULL); LineTo(dc,br,ry+S(1));
-              SelectObject(dc,dop); DeleteObject(dpn);
+            { // v1.63.0: a fading rule (strong at the RTL edge) + a soft raised
+              // plate for the balance row, instead of a hard pen line and a flat
+              // grey block.
+              fadeRule(bl,br,ry+S(1));
               RECT hi={bl-S(4),ry+S(3),br+S(4),ry+S(26)};
-              fillRoundRect(dc,hi,S(6),g_theme.surface2,g_theme.surface2);
+              gpGradRoundRect(dc,hi,S(7),
+                  blendColor(g_theme.surfaceTop,g_theme.surface2,40),
+                  g_theme.surface2,
+                  blendColor(g_theme.border,g_theme.accent,26));
               SelectObject(dc,g_fLabel); SetTextColor(dc,g_theme.text);
               RECT kr={bl+S(4),ry+S(3),br-S(4),ry+S(26)};
               DrawTextW(dc,L"مانده قابل پرداخت",-1,&kr,
@@ -4164,21 +4331,26 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
         HBITMAP bmp=CreateCompatibleBitmap(dc0,rc.right,rc.bottom);
         HGDIOBJ obm=SelectObject(dc,bmp);
 
-        // info bar
-        RECT ib={0,0,rc.right,infoBarH()};
-        FillRect(dc,&ib,g_brSurface2);
-        // tab bar
-        RECT tb2={0,infoBarH(),rc.right,infoBarH()+tabBarH()};
-        FillRect(dc,&tb2,g_brSurface);
-        // body
+        // ------------------------------------------------------------------
+        //  v1.63.0 RECEPTION CHROME REDESIGN.
+        //  The bars were three flat FillRect() slabs separated by one 1-px
+        //  GDI line — visually indistinguishable from a 1990s toolbar. They
+        //  now render as layered surfaces: the info + tab strip is one soft
+        //  vertical gradient sitting on the page, closed by a two-tone
+        //  separator (a hairline border over a lighter highlight) which is
+        //  what gives a bar an actual edge instead of a drawn line.
+        // ------------------------------------------------------------------
         RECT bd={0,infoBarH()+tabBarH(),rc.right,rc.bottom};
         FillRect(dc,&bd,g_brBg);
-        HPEN pen=CreatePen(PS_SOLID,1,g_theme.border);
-        HGDIOBJ op=SelectObject(dc,pen);
-        // v1.10.0: only the tab-bar bottom separator remains (the collapsed
-        // info bar no longer needs its own divider line).
-        MoveToEx(dc,0,infoBarH()+tabBarH()-1,0); LineTo(dc,rc.right,infoBarH()+tabBarH()-1);
-        SelectObject(dc,op); DeleteObject(pen);
+        RECT strip={0,0,rc.right,infoBarH()+tabBarH()};
+        gpGradRoundRect(dc,strip,0,
+            blendColor(g_theme.surfaceTop,g_theme.surface2,35),
+            g_theme.surface, CLR_INVALID);
+        // two-tone closing edge: darker rule + 1 px light lip beneath it
+        int sepY = infoBarH()+tabBarH()-1;
+        gpLine(dc,0,sepY,rc.right,sepY,g_theme.border,1.0f,255);
+        gpLine(dc,0,sepY+1,rc.right,sepY+1,
+            blendColor(g_theme.bg,RGB(255,255,255),g_dark?8:60),1.0f,200);
 
         SetBkMode(dc,TRANSPARENT);
         // v1.10.0: the old "میز پذیرش بیمار" title row was removed — it was an
@@ -4193,8 +4365,47 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 RECT r=tabRect(h,(int)i);
                 bool act = ((int)i==s_rd->active) && !t->detached;
                 bool hov = ((int)i==s_rd->hotTab);
-                COLORREF fill = act?g_theme.bg : hov?g_theme.hover:g_theme.surface;
-                fillRoundRect(dc,r,S(9),fill, act?g_theme.accent:g_theme.border);
+                // ------------------------------------------------------
+                //  v1.63.0 TAB REDESIGN. Previously every tab was the same
+                //  flat rounded rect and the only cue for "active" was the
+                //  border colour — on a busy screen it was genuinely hard
+                //  to tell which tab you were on. Now:
+                //    * the ACTIVE tab is a raised page-coloured card that
+                //      merges into the body below (its bottom edge is
+                //      overdrawn with the body colour so it reads as one
+                //      continuous surface, the browser-tab idiom), topped
+                //      by a 3 px accent indicator,
+                //    * HOVER lifts an inactive tab with a soft shadow and
+                //      an accent-warmed hairline,
+                //    * a DETACHED tab is drawn as a dashed-feel ghost.
+                // ------------------------------------------------------
+                int trad = S(10);
+                if(act){
+                    gpShadowColor(dc,r,trad,S(7),70,g_theme.accent);
+                    gpGradRoundRect(dc,r,trad,
+                        blendColor(g_theme.bg,g_theme.surfaceTop,45),
+                        g_theme.bg,
+                        blendColor(g_theme.border,g_theme.accent,55));
+                    // merge with the body: paint over the bottom 4 px
+                    RECT mb={r.left+S(2),r.bottom-S(4),r.right-S(2),r.bottom+S(2)};
+                    HBRUSH mbr=CreateSolidBrush(g_theme.bg);
+                    FillRect(dc,&mb,mbr); DeleteObject(mbr);
+                    // accent indicator across the top of the active tab
+                    RECT ind2={r.left+S(9),r.top+S(2),r.right-S(9),r.top+S(2)+S(3)};
+                    gpRoundRect(dc,ind2,S(2),g_theme.accent,CLR_INVALID);
+                } else if(hov){
+                    gpShadow(dc,r,trad,S(5),44);
+                    gpGradRoundRect(dc,r,trad,
+                        blendColor(g_theme.surfaceTop,g_theme.hover,40),
+                        g_theme.hover,
+                        blendColor(g_theme.border,g_theme.accent,38));
+                } else {
+                    gpGradRoundRect(dc,r,trad,
+                        blendColor(g_theme.surfaceTop,g_theme.surface,55),
+                        g_theme.surface,
+                        t->detached? blendColor(g_theme.border,g_theme.bg,45)
+                                   : g_theme.border);
+                }
                 // title
                 SetTextColor(dc, t->detached?g_theme.textDim:
                                  act?g_theme.text:g_theme.textDim);
@@ -4208,7 +4419,12 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
                     int n=unseenMessageCount(g_session.user.username);
                     if(n>0){
                         RECT bd={r.left+S(6),r.top+S(8),r.left+S(28),r.bottom-S(8)};
-                        fillRoundRect(dc,bd,S(9),g_theme.danger,CLR_INVALID);
+                        // v1.63.0: the counter pill now glows and carries a
+                        // gradient so an unread cartable actually draws the eye.
+                        gpShadowColor(dc,bd,S(9),S(6),110,g_theme.danger);
+                        gpGradRoundRect(dc,bd,S(9),
+                            blendColor(g_theme.danger,RGB(255,255,255),24),
+                            g_theme.danger,CLR_INVALID);
                         SetTextColor(dc,RGB(255,255,255)); SelectObject(dc,g_fSmall);
                         wchar_t nb[8]; swprintf(nb,8,L"%d",n);
                         DrawTextW(dc,toFaDigits(nb).c_str(),-1,&bd,
@@ -4216,21 +4432,31 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
                     }
                     continue;   // cartable: no close/detach controls
                 }
-                // close ×
+                // close ×  (v1.63.0: hover raises a soft glowing danger pill
+                // instead of a flat red square)
                 RECT cl={r.left+S(6),r.top+S(7),r.left+S(26),r.bottom-S(7)};
-                if((int)i==s_rd->hotClose)
-                    fillRoundRect(dc,cl,S(6),g_theme.danger,CLR_INVALID);
+                bool hcl=((int)i==s_rd->hotClose);
+                if(hcl){
+                    gpShadowColor(dc,cl,S(7),S(5),90,g_theme.danger);
+                    gpGradRoundRect(dc,cl,S(7),
+                        blendColor(g_theme.danger,RGB(255,255,255),20),
+                        g_theme.danger,CLR_INVALID);
+                }
                 RECT cli={cl.left+S(5),cl.top+S(5),cl.right-S(5),cl.bottom-S(5)};
                 drawIcon(dc,ICO_X,cli,
-                    (int)i==s_rd->hotClose?RGB(255,255,255):g_theme.textDim,S(2));
-                // detach ⧉
+                    hcl?RGB(255,255,255):g_theme.textDim,S(2));
+                // detach ⧉  (same treatment in the accent colour)
                 if(!t->detached){
                     RECT dt={r.left+S(28),r.top+S(7),r.left+S(48),r.bottom-S(7)};
-                    if((int)i==s_rd->hotDetach)
-                        fillRoundRect(dc,dt,S(6),g_theme.accent,CLR_INVALID);
+                    bool hdt=((int)i==s_rd->hotDetach);
+                    if(hdt){
+                        gpShadowColor(dc,dt,S(7),S(5),90,g_theme.accent);
+                        gpGradRoundRect(dc,dt,S(7),
+                            g_theme.accentHover,g_theme.accent,CLR_INVALID);
+                    }
                     RECT dti={dt.left+S(4),dt.top+S(4),dt.right-S(4),dt.bottom-S(4)};
                     drawIcon(dc,ICO_DETACH,dti,
-                        (int)i==s_rd->hotDetach?RGB(255,255,255):g_theme.textDim,S(2));
+                        hdt?RGB(255,255,255):g_theme.textDim,S(2));
                 }
             }
             // v1.7.0: drag-reorder drop indicator — a bright accent bar at the
@@ -4249,18 +4475,48 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 }
                 int top=infoBarH()+S(4), bot=infoBarH()+tabBarH()-S(2);
                 RECT ind={barX-S(2),top,barX+S(2),bot};
-                fillRoundRect(dc,ind,S(2),g_theme.accent,CLR_INVALID);
-                // dim-highlight the dragged tab so it reads as "lifted"
+                // v1.63.0: the insertion caret glows so it is unmissable, and
+                // the lifted tab gets a real elevation shadow.
+                gpShadowColor(dc,ind,S(2),S(6),150,g_theme.accent);
+                gpRoundRect(dc,ind,S(2),g_theme.accent,CLR_INVALID);
                 RECT dr=tabRect(h,s_rd->dragIdx);
-                fillRoundRect(dc,dr,S(9),g_theme.hover,g_theme.accent);
+                gpShadowColor(dc,dr,S(10),S(11),110,g_theme.accent);
+                gpGradRoundRect(dc,dr,S(10),
+                    blendColor(g_theme.hover,g_theme.surfaceTop,40),
+                    g_theme.hover,g_theme.accent);
             }
             if(s_rd->tabs.empty()){
-                SetTextColor(dc,g_theme.textDim);
+                // ----------------------------------------------------------
+                //  v1.63.0 EMPTY STATE. A single line of grey text floating in
+                //  a void looked like a bug, not a state. It is now a proper
+                //  empty-state card: a large tinted icon medallion, a headline
+                //  and a dimmer hint line, centred as one block.
+                // ----------------------------------------------------------
+                int cy=(infoBarH()+tabBarH()+rc.bottom)/2;
+                int med=S(96), gap=S(22), hl=S(34), sl=S(26);
+                int blockH=med+gap+hl+S(6)+sl;
+                int by=cy-blockH/2;
+                RECT mr={rc.right/2-med/2,by,rc.right/2+med/2,by+med};
+                gpFillAlpha(dc,mr,med/2,
+                    blendColor(g_theme.accent,g_theme.bg,58),g_dark?70:52);
+                gpRoundRect(dc,mr,med/2,CLR_INVALID,
+                    blendColor(g_theme.border,g_theme.accent,40));
+                int isz=(med*44)/100;
+                RECT ir2={rc.right/2-isz/2,by+(med-isz)/2,
+                          rc.right/2+isz/2,by+(med-isz)/2+isz};
+                drawIcon(dc,ICO_USER,ir2,
+                    blendColor(g_theme.accent,g_theme.text,15),S(2)+1);
+                SelectObject(dc,g_fTitle);
+                SetTextColor(dc,g_theme.text);
+                RECT hr={S(20),by+med+gap,rc.right-S(20),by+med+gap+hl};
+                DrawTextW(dc,L"هیچ پذیرشی باز نیست",-1,&hr,
+                    DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
                 SelectObject(dc,g_fUI);
-                RECT er={0,infoBarH()+tabBarH(),rc.right,rc.bottom};
+                SetTextColor(dc,g_theme.textDim);
+                RECT sr2={S(20),hr.bottom+S(6),rc.right-S(20),hr.bottom+S(6)+sl};
                 DrawTextW(dc,
                     L"برای شروع، «پذیرش جدید» را از نوار بالا انتخاب کنید",
-                    -1,&er,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+                    -1,&sr2,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
             }
         }
         BitBlt(dc0,0,0,rc.right,rc.bottom,dc,0,0,SRCCOPY);

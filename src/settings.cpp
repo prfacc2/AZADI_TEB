@@ -258,22 +258,38 @@ static void doProfile(HWND h){
 }
 
 // --------------------------------------------------------------- painting --
+//  v1.63.0: a modern switch — the ON track is a gradient that GLOWS in the
+//  accent colour, the OFF track is a recessed grey well, and the knob carries
+//  its own small shadow so it reads as a physical thumb sitting in the track.
 static void drawToggle(HDC dc, int cx, int cy, bool on){
     int w=S(46), hh=S(24);
     RECT tr={cx-w/2,cy-hh/2,cx+w/2,cy+hh/2};
-    gpRoundRect(dc,tr,hh/2,on?g_theme.accent:g_theme.border,CLR_INVALID,255);
+    if(on){
+        gpShadowColor(dc,tr,hh/2,S(5),90,g_theme.accent);
+        gpGradRoundRect(dc,tr,hh/2,g_theme.accentHover,g_theme.accent,CLR_INVALID);
+    } else {
+        gpGradRoundRect(dc,tr,hh/2,
+            blendColor(g_theme.border,g_theme.bg,30),
+            blendColor(g_theme.border,g_theme.surface,15),
+            blendColor(g_theme.border,g_theme.textDim,20));
+    }
     int kn=hh-S(6);
     int kx=on?(tr.right-S(3)-kn):(tr.left+S(3));
     RECT kr={kx,tr.top+S(3),kx+kn,tr.bottom-S(3)};
-    gpRoundRect(dc,kr,kn/2,RGB(255,255,255),CLR_INVALID,255);
+    gpShadow(dc,kr,kn/2,S(4),90);
+    gpGradRoundRect(dc,kr,kn/2,RGB(255,255,255),RGB(238,241,246),CLR_INVALID);
 }
+//  v1.63.0: the value chip is a soft gradient pill with a slightly stronger
+//  hairline, so a row's current value reads as a badge rather than flat text.
 static void drawValueChip(HDC dc, RECT row, const wchar_t* val){
     SIZE sz; HGDIOBJ of=SelectObject(dc,g_fSmall);
     GetTextExtentPoint32W(dc,val,(int)wcslen(val),&sz);
     int pad=S(12);
     RECT chip={ row.left+S(8),(row.top+row.bottom)/2-S(13),
                 row.left+S(8)+sz.cx+pad*2,(row.top+row.bottom)/2+S(13) };
-    gpRoundRect(dc,chip,S(13),g_theme.surface2,g_theme.border,255);
+    gpGradRoundRect(dc,chip,S(13),
+        blendColor(g_theme.surfaceTop,g_theme.surface2,40),
+        g_theme.surface2, blendColor(g_theme.border,g_theme.accent,18));
     SetTextColor(dc,g_theme.textDim);
     DrawTextW(dc,val,-1,&chip,DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX);
     SelectObject(dc,of);
@@ -376,7 +392,10 @@ static void paintRows(HWND h, HDC dc){
     // live close (×) hover highlight (icon itself lives in the cached bg)
     if(s_st && s_st->hot==-2){
         RECT cb=closeBtnRect(card);
-        gpRoundRect(dc,cb,S(8),RGB(255,255,255),CLR_INVALID,60);
+        // v1.63.0: the close target now lights up as a soft white pill with a
+        // faint ring, so it reads as a real button on the coloured cover band.
+        gpFillAlpha(dc,cb,S(9),RGB(255,255,255),86);
+        gpRoundRect(dc,cb,S(9),CLR_INVALID,RGB(255,255,255),150);
         RECT ci={cb.left+S(5),cb.top+S(5),cb.right-S(5),cb.bottom-S(5)};
         drawIcon(dc,ICO_X,ci,RGB(255,255,255),S(2));
     }
@@ -387,10 +406,45 @@ static void paintRows(HWND h, HDC dc){
             bool dis=rd.disabled;
             bool hov=(!dis && s_st->hot==rd.id);
             bool danger=(rd.id==ROW_LOGOUT);
-            gpRoundRect(dc,r,S(11),hov?g_theme.hover:g_theme.surface,
-                hov?g_theme.accent:g_theme.border,255);
+            // --------------------------------------------------------------
+            //  v1.63.0 SETTINGS ROW REDESIGN (the "settings buttons" fix).
+            //  A row was a flat rect whose only hover feedback was swapping two
+            //  colours — it neither looked nor felt like a button. Now each row
+            //  is a real pressable tile:
+            //    * at rest  — soft surface gradient + hairline border,
+            //    * on hover — elevation shadow tinted with the row's OWN accent
+            //                 (danger red for خروج), a warmed border, and a
+            //                 bright 3 px leading indicator on the RTL edge,
+            //    * disabled — a flat, de-saturated plate with no indicator, so
+            //                 it visibly cannot be pressed.
+            //  The icon always sits in a tinted medallion, which is what makes
+            //  the list scan as a menu instead of a wall of text.
+            // --------------------------------------------------------------
+            COLORREF rowAcc = danger ? g_theme.danger : g_theme.accent;
+            if(dis){
+                gpRoundRect(dc,r,S(12),
+                    blendColor(g_theme.surface,g_theme.bg,35),
+                    blendColor(g_theme.border,g_theme.bg,40),255);
+            } else if(hov){
+                gpShadowColor(dc,r,S(12),S(7),86,rowAcc);
+                gpGradRoundRect(dc,r,S(12),
+                    blendColor(g_theme.surfaceTop,g_theme.hover,45),
+                    g_theme.hover, blendColor(g_theme.border,rowAcc,60));
+                RECT li={r.right-S(5),r.top+S(8),r.right-S(2),r.bottom-S(8)};
+                if(li.bottom>li.top) gpRoundRect(dc,li,S(2),rowAcc,CLR_INVALID);
+            } else {
+                gpGradRoundRect(dc,r,S(12),
+                    blendColor(g_theme.surfaceTop,g_theme.surface,55),
+                    g_theme.surface, g_theme.border);
+            }
             COLORREF ic= dis ? g_theme.textDim : (danger?g_theme.danger:g_theme.accent);
-            RECT ir={r.right-S(38),r.top+S(10),r.right-S(14),r.top+S(34)};
+            RECT ir={r.right-S(40),r.top+S(10),r.right-S(16),r.top+S(34)};
+            { RECT md=ir; InflateRect(&md,S(6),S(6));
+              int mr2=(md.bottom-md.top)/2;
+              gpFillAlpha(dc,md,mr2,blendColor(ic,g_theme.surface,dis?68:50),
+                          dis?(g_dark?46:30):(hov?(g_dark?100:66):(g_dark?76:44)));
+              gpRoundRect(dc,md,mr2,CLR_INVALID,
+                          blendColor(g_theme.border,ic,dis?18:(hov?58:38))); }
             drawIcon(dc,rd.icon,ir,ic,S(2));
             SelectObject(dc,g_fUIB);
             SetTextColor(dc, dis ? g_theme.textDim : (danger?g_theme.danger:g_theme.text));

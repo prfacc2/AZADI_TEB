@@ -113,23 +113,39 @@ static LRESULT CALLBACK loginProc(HWND h, UINT m, WPARAM w, LPARAM l){
         HBITMAP bmp=CreateCompatibleBitmap(dc0,rc.right,rc.bottom);
         HGDIOBJ obm=SelectObject(dc,bmp);
         // dim layer
-        HBRUSH dim=CreateSolidBrush(g_dark?RGB(8,10,14):RGB(150,160,176));
-        FillRect(dc,&rc,dim); DeleteObject(dim);
+        // v1.63.0 SCRIM: a flat mid-grey wash made the modal look like a
+        // screenshot pasted over the app. It is now a soft vertical gradient
+        // (darker at the edges, lighter behind the card) which reads as depth
+        // and keeps the dialog visually attached to the window beneath it.
+        gpGradRoundRect(dc,rc,0,
+            g_dark?RGB(6,8,12):RGB(126,138,158),
+            g_dark?RGB(14,18,26):RGB(168,178,194),CLR_INVALID);
 
         RECT c; loginCard(h,c);
         int sh = (d && d->shake>0) ? ((d->shake%2)? S(6):-S(6)) : 0;
         OffsetRect(&c, sh, 0);
         int cx=c.left, cy=c.top, cw=c.right-c.left;
-        // shadow + card
-        RECT shd=c; OffsetRect(&shd,0,S(6));
-        fillRoundRect(dc,shd,S(18),g_dark?RGB(5,7,10):RGB(120,130,146),CLR_INVALID);
-        fillRoundRect(dc,c,S(18),g_theme.surface,g_theme.border);
+        // ------------------------------------------------------------------
+        //  v1.63.0 LOGIN CARD REDESIGN. The card used a hard offset rectangle
+        //  as a "shadow" (a visible grey duplicate behind it) and a flat fill.
+        //  It is now a genuinely elevated panel: a real layered blur shadow, a
+        //  soft surface gradient, and a hairline accent ring; the role badge is
+        //  a glowing gradient disc with a coloured halo instead of a flat blob.
+        // ------------------------------------------------------------------
+        COLORREF roleCol = (d&&d->role==2)?g_theme.danger:g_theme.accent;
+        gpShadow(dc,c,S(18),S(22),120);
+        gpGradRoundRect(dc,c,S(18),g_theme.surfaceTop,g_theme.surface,
+            blendColor(g_theme.border,roleCol,22));
 
         SetBkMode(dc,TRANSPARENT);
-        // icon circle
+        // role badge — glowing gradient disc with a coloured halo
         int ir=S(28);
         RECT ic={cx+cw/2-ir,cy+S(26),cx+cw/2+ir,cy+S(26)+2*ir};
-        fillRoundRect(dc,ic,4*ir, (d&&d->role==2)?g_theme.danger:g_theme.accent, CLR_INVALID);
+        { RECT halo=ic; InflateRect(&halo,S(7),S(7));
+          gpFillAlpha(dc,halo,(halo.bottom-halo.top)/2,roleCol,g_dark?70:52); }
+        gpShadowColor(dc,ic,ir,S(9),120,roleCol);
+        gpGradRoundRect(dc,ic,ir,
+            blendColor(roleCol,RGB(255,255,255),26),roleCol,CLR_INVALID);
         RECT ii={ic.left+S(14),ic.top+S(14),ic.right-S(14),ic.bottom-S(14)};
         drawIcon(dc, (d&&d->role==2)?ICO_SHIELD:ICO_USER, ii, RGB(255,255,255), S(2)+1);
 
@@ -147,10 +163,21 @@ static LRESULT CALLBACK loginProc(HWND h, UINT m, WPARAM w, LPARAM l){
         RECT lp={cx+S(48),cy+S(220),cx+cw-S(48),cy+S(242)};
         DrawTextW(dc,L"رمز عبور",-1,&lp,DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
 
-        RECT bu={cx+S(40),cy+S(160),cx+cw-S(40),cy+S(206)};
-        fillRoundRect(dc,bu,S(8),g_theme.inputBg,g_theme.border);
-        RECT bp={cx+S(40),cy+S(244),cx+cw-S(40),cy+S(290)};
-        fillRoundRect(dc,bp,S(8),g_theme.inputBg,g_theme.border);
+        // v1.63.0: recessed input wells with an accent glow on the focused one,
+        // so the caret's location is obvious even at a glance.
+        { HWND foc=GetFocus();
+          RECT bu={cx+S(40),cy+S(160),cx+cw-S(40),cy+S(206)};
+          RECT bp={cx+S(40),cy+S(244),cx+cw-S(40),cy+S(290)};
+          bool fu=(d && d->eUser && foc==d->eUser);
+          bool fp=(d && d->ePass && foc==d->ePass);
+          for(int k=0;k<2;k++){
+              RECT wr2 = k? bp : bu;
+              bool fo  = k? fp : fu;
+              if(fo) gpShadowColor(dc,wr2,S(10),S(6),80,g_theme.accent);
+              gpGradRoundRect(dc,wr2,S(10),
+                  blendColor(g_theme.inputBg,g_theme.border,g_dark?26:34),
+                  g_theme.inputBg, fo?g_theme.accent:g_theme.border);
+          } }
 
         if(d && !d->errMsg.empty()){
             SetTextColor(dc,g_theme.danger);
@@ -357,12 +384,20 @@ static LRESULT CALLBACK shiftProc(HWND h, UINT m, WPARAM w, LPARAM l){
         HDC dc=CreateCompatibleDC(dc0);
         HBITMAP bmp=CreateCompatibleBitmap(dc0,rc.right,rc.bottom);
         HGDIOBJ obm=SelectObject(dc,bmp);
-        HBRUSH dim=CreateSolidBrush(g_dark?RGB(8,10,14):RGB(150,160,176));
-        FillRect(dc,&rc,dim); DeleteObject(dim);
+        // v1.63.0 SCRIM: a flat mid-grey wash made the modal look like a
+        // screenshot pasted over the app. It is now a soft vertical gradient
+        // (darker at the edges, lighter behind the card) which reads as depth
+        // and keeps the dialog visually attached to the window beneath it.
+        gpGradRoundRect(dc,rc,0,
+            g_dark?RGB(6,8,12):RGB(126,138,158),
+            g_dark?RGB(14,18,26):RGB(168,178,194),CLR_INVALID);
         RECT c; shiftCard(h,c);
-        RECT shd=c; OffsetRect(&shd,0,S(6));
-        fillRoundRect(dc,shd,S(18),g_dark?RGB(5,7,10):RGB(120,130,146),CLR_INVALID);
-        fillRoundRect(dc,c,S(18),g_theme.surface,g_theme.border);
+        // v1.63.0: real layered blur shadow + surface gradient (the old code
+        // drew a solid grey duplicate of the card offset by 6 px, which looked
+        // like a rendering artefact rather than elevation).
+        gpShadow(dc,c,S(18),S(22),120);
+        gpGradRoundRect(dc,c,S(18),g_theme.surfaceTop,g_theme.surface,
+            g_theme.border);
         SetBkMode(dc,TRANSPARENT);
         SetTextColor(dc,g_theme.text);
         SelectObject(dc,g_fTitle);
@@ -521,12 +556,20 @@ static LRESULT CALLBACK profProc(HWND h, UINT m, WPARAM w, LPARAM l){
         HDC dc=CreateCompatibleDC(dc0);
         HBITMAP bmp=CreateCompatibleBitmap(dc0,rc.right,rc.bottom);
         HGDIOBJ obm=SelectObject(dc,bmp);
-        HBRUSH dim=CreateSolidBrush(g_dark?RGB(8,10,14):RGB(150,160,176));
-        FillRect(dc,&rc,dim); DeleteObject(dim);
+        // v1.63.0 SCRIM: a flat mid-grey wash made the modal look like a
+        // screenshot pasted over the app. It is now a soft vertical gradient
+        // (darker at the edges, lighter behind the card) which reads as depth
+        // and keeps the dialog visually attached to the window beneath it.
+        gpGradRoundRect(dc,rc,0,
+            g_dark?RGB(6,8,12):RGB(126,138,158),
+            g_dark?RGB(14,18,26):RGB(168,178,194),CLR_INVALID);
         RECT c; profCard(h,c);
-        RECT shd=c; OffsetRect(&shd,0,S(6));
-        fillRoundRect(dc,shd,S(18),g_dark?RGB(5,7,10):RGB(120,130,146),CLR_INVALID);
-        fillRoundRect(dc,c,S(18),g_theme.surface,g_theme.border);
+        // v1.63.0: real layered blur shadow + surface gradient (the old code
+        // drew a solid grey duplicate of the card offset by 6 px, which looked
+        // like a rendering artefact rather than elevation).
+        gpShadow(dc,c,S(18),S(22),120);
+        gpGradRoundRect(dc,c,S(18),g_theme.surfaceTop,g_theme.surface,
+            g_theme.border);
         SetBkMode(dc,TRANSPARENT);
         SetTextColor(dc,g_theme.text);
         SelectObject(dc,g_fTitle);

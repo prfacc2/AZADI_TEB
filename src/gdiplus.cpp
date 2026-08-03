@@ -141,13 +141,47 @@ void gpGradRoundRectBgH(HDC dc, RECT rc, int rad, COLORREF left, COLORREF right,
 
 //  Soft drop shadow: draw several expanding translucent rounded rects so the
 //  edge fades out — a cheap, dependency-free blur that gives cards real depth.
+//  v1.63.0: tinted variant. A coloured button casts coloured light, so its
+//  elevation shadow is drawn in a very dark mix of its own hue rather than
+//  neutral black — that is what makes the modern solid buttons read as lit
+//  objects instead of stickers. gpShadow() is now this function with black.
+void gpShadowColor(HDC dc, RECT rc, int rad, int spread, int alpha, COLORREF tint){
+    if(!s_gdipOK) return;
+    // pull the tint down hard: a shadow is the colour's shade, not the colour.
+    BYTE tr=(BYTE)((GetRValue(tint)*32)/100);
+    BYTE tg=(BYTE)((GetGValue(tint)*32)/100);
+    BYTE tb=(BYTE)((GetBValue(tint)*32)/100);
+    Graphics g(dc); g.SetSmoothingMode(SmoothingModeAntiAlias);
+    int layers = spread; if(layers<1) layers=1; if(layers>24) layers=24;
+    int step = (layers + 11) / 12; if(step<1) step=1;
+    for(int i=layers;i>=1;i-=step){
+        int a = (alpha * (layers-i+1) * step) / (layers*layers);
+        if(a<1) a=1;
+        if(a>255) a=255;
+        Rect r(rc.left-i, rc.top-i+2, (rc.right-rc.left)+2*i-1,
+               (rc.bottom-rc.top)+2*i-1);
+        GraphicsPath p; roundPath(p,r,rad+i);
+        SolidBrush br(Color((BYTE)a,tr,tg,tb));
+        g.FillPath(&br,&p);
+    }
+}
+
 void gpShadow(HDC dc, RECT rc, int rad, int spread, int alpha){
     if(!s_gdipOK) return;
     Graphics g(dc); g.SetSmoothingMode(SmoothingModeAntiAlias);
     int layers = spread; if(layers<1) layers=1; if(layers>24) layers=24;
-    for(int i=layers;i>=1;i--){
-        int a = (alpha * (layers-i+1)) / (layers*layers);  // fades toward edge
+    // v1.63.0 PERF: a wide shadow (spread 20-30, as used by the welcome hero
+    // panel and the settings card) previously issued ONE antialiased FillPath
+    // per pixel of spread — 24 full-panel path fills on every repaint, which is
+    // where most of the paint budget went. The ring count is now capped at 12 by
+    // walking the spread in steps; each drawn ring carries the alpha of the
+    // steps it replaces, so the falloff — and therefore the look — is preserved
+    // while the number of GDI+ path fills is halved or better.
+    int step = (layers + 11) / 12; if(step<1) step=1;
+    for(int i=layers;i>=1;i-=step){
+        int a = (alpha * (layers-i+1) * step) / (layers*layers);
         if(a<1) a=1;
+        if(a>255) a=255;
         Rect r(rc.left-i, rc.top-i+2, (rc.right-rc.left)+2*i-1,
                (rc.bottom-rc.top)+2*i-1);
         GraphicsPath p; roundPath(p,r,rad+i);
@@ -192,31 +226,82 @@ static Image* loadBgImage(int resId){
     return img;
 }
 
-bool gpDrawBackground(HDC dc, RECT rc, bool dark, COLORREF scrim, int scrimA){
-    if(!s_gdipOK) return false;
+// ---------------------------------------------------------------------------
+//  v1.63.0 PERFORMANCE FIX — cached background composite.
+//
+//  The old gpDrawBackground re-scaled the FULL 1920x1080 embedded JPEG with
+//  InterpolationModeHighQualityBicubic and re-filled the scrim on EVERY single
+//  WM_PAINT. A bicubic resample of a 2-megapixel image costs tens of
+//  milliseconds; the welcome screen repaints on every theme flip, on every
+//  settings-panel close (InvalidateRect(frame,NULL,TRUE) invalidates children
+//  too) and on every frame resize. That per-paint resample was the dominant
+//  cost behind the "opening the settings panel drops FPS" report.
+//
+//  The artwork + scrim are now composited ONCE into a DIB cache keyed by
+//  (width, height, theme, scrim colour, scrim alpha). Subsequent paints are a
+//  single BitBlt, i.e. O(pixels) memory copy with zero resampling. The cache is
+//  invalidated automatically whenever any key changes, so correctness is
+//  unchanged — only the cost is.
+// ---------------------------------------------------------------------------
+static HDC      s_bgcDC   = NULL;
+static HBITMAP  s_bgcBmp  = NULL;
+static HGDIOBJ  s_bgcOld  = NULL;
+static int      s_bgcW    = 0, s_bgcH = 0;
+static bool     s_bgcDark = false;
+static COLORREF s_bgcScrim= 0;
+static int      s_bgcA    = -1;
+
+void gpFreeBackgroundCache(){
+    if(s_bgcDC){ SelectObject(s_bgcDC, s_bgcOld); DeleteDC(s_bgcDC); s_bgcDC=NULL; }
+    if(s_bgcBmp){ DeleteObject(s_bgcBmp); s_bgcBmp=NULL; }
+    s_bgcW=s_bgcH=0; s_bgcA=-1;
+}
+
+//  Render the artwork + scrim into the cache DC at the given size. Returns
+//  false when the artwork is unavailable (caller then paints a gradient).
+static bool buildBgComposite(HDC ref, int W, int H, bool dark,
+                             COLORREF scrim, int scrimA){
     Image*& slot = dark ? s_bgDark : s_bgLight;
     if(!slot) slot = loadBgImage(dark ? 104 : 103);
     if(!slot) return false;
-
-    Graphics g(dc);
-    g.SetInterpolationMode(InterpolationModeHighQualityBicubic);
-    g.SetPixelOffsetMode(PixelOffsetModeHalf);
-
-    int W = rc.right-rc.left, H = rc.bottom-rc.top;
-    if(W<=0||H<=0) return false;
     REAL iw = (REAL)slot->GetWidth(), ih = (REAL)slot->GetHeight();
     if(iw<=0||ih<=0) return false;
-    // cover-fit (fill the whole area, crop overflow, keep aspect)
-    REAL scale = (W/iw > H/ih) ? W/iw : H/ih;
-    REAL dw = iw*scale, dh = ih*scale;
-    REAL dx = rc.left + (W-dw)/2, dy = rc.top + (H-dh)/2;
-    g.DrawImage(slot, RectF(dx,dy,dw,dh), 0,0,iw,ih, UnitPixel);
 
-    // legibility scrim
-    if(scrimA>0){
-        SolidBrush br(C(scrim, scrimA));
-        g.FillRectangle(&br, rc.left, rc.top, W, H);
+    gpFreeBackgroundCache();
+    s_bgcDC  = CreateCompatibleDC(ref);
+    if(!s_bgcDC) return false;
+    s_bgcBmp = CreateCompatibleBitmap(ref, W, H);
+    if(!s_bgcBmp){ DeleteDC(s_bgcDC); s_bgcDC=NULL; return false; }
+    s_bgcOld = SelectObject(s_bgcDC, s_bgcBmp);
+
+    {
+        Graphics g(s_bgcDC);
+        g.SetInterpolationMode(InterpolationModeHighQualityBicubic);
+        g.SetPixelOffsetMode(PixelOffsetModeHalf);
+        // cover-fit (fill the whole area, crop overflow, keep aspect)
+        REAL scale = (W/iw > H/ih) ? W/iw : H/ih;
+        REAL dw = iw*scale, dh = ih*scale;
+        REAL dx = (W-dw)/2, dy = (H-dh)/2;
+        g.DrawImage(slot, RectF(dx,dy,dw,dh), 0,0,iw,ih, UnitPixel);
+        if(scrimA>0){
+            SolidBrush br(C(scrim, scrimA));
+            g.FillRectangle(&br, 0, 0, W, H);
+        }
     }
+    s_bgcW=W; s_bgcH=H; s_bgcDark=dark; s_bgcScrim=scrim; s_bgcA=scrimA;
+    return true;
+}
+
+bool gpDrawBackground(HDC dc, RECT rc, bool dark, COLORREF scrim, int scrimA){
+    if(!s_gdipOK) return false;
+    int W = rc.right-rc.left, H = rc.bottom-rc.top;
+    if(W<=0||H<=0) return false;
+
+    bool fresh = s_bgcDC && s_bgcW==W && s_bgcH==H && s_bgcDark==dark &&
+                 s_bgcScrim==scrim && s_bgcA==scrimA;
+    if(!fresh && !buildBgComposite(dc, W, H, dark, scrim, scrimA)) return false;
+    if(!s_bgcDC) return false;
+    BitBlt(dc, rc.left, rc.top, W, H, s_bgcDC, 0, 0, SRCCOPY);
     return true;
 }
 

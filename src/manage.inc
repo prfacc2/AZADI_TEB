@@ -2638,6 +2638,63 @@ static RECT mgContentRect(HWND h){
     RECT r={rc.left+S(8), rc.top+S(8), rc.right-mgNavW()-S(8), rc.bottom-S(8)};
     return r;
 }
+
+// ----------------------------------------------------------------------------
+//  v1.63.0 SHARED LIST-ROW / CARD SHELL.
+//  Every management list (sections, employees, patients, services, requests,
+//  notes) drew its own `gpRoundRectBg(surface / surface2, border / accent)`
+//  rectangle. That is why the whole panel looked flat: a row at rest and a
+//  hovered row differed only by two colours, with no depth, no gradient and
+//  no leading accent. This single helper gives them all one modern language:
+//    * at rest — a faint surface gradient with a hairline border,
+//    * on hover — an elevation shadow, an accent-warmed border, and a bright
+//      3 px accent indicator on the RTL (right) leading edge,
+//  and because it is ONE function the look can never drift between pages.
+// ----------------------------------------------------------------------------
+static void mgRowShell(HDC dc, RECT r, bool hot, int rad, COLORREF accent){
+    if(hot){
+        gpShadowColor(dc,r,rad,S(7),84,accent);
+        gpGradRoundRectBg(dc,r,rad,
+            blendColor(g_theme.surfaceTop,g_theme.surface2,45),
+            g_theme.surface2, blendColor(g_theme.border,accent,60), g_theme.bg);
+        RECT li={r.right-S(5),r.top+S(8),r.right-S(2),r.bottom-S(8)};
+        if(li.bottom>li.top) gpRoundRect(dc,li,S(2),accent,CLR_INVALID);
+    } else {
+        gpGradRoundRectBg(dc,r,rad,
+            blendColor(g_theme.surfaceTop,g_theme.surface,55),
+            g_theme.surface, g_theme.border, g_theme.bg);
+    }
+}
+//  v1.63.0: the standard management empty state — a tinted icon medallion, a
+//  headline and a hint, centred as one block inside `a`. Replaces the lone
+//  grey sentence that made every empty page look broken.
+static void mgEmptyState(HDC dc, RECT a, int icon, const wchar_t* head,
+                         const wchar_t* hint){
+    int cx=(a.left+a.right)/2;
+    int top=a.top+mgHeadH();
+    int cy=(top+a.bottom)/2;
+    int med=S(88), gap=S(20), hl=S(32), sl=S(24);
+    int blockH=med+gap+hl+S(6)+sl;
+    int by=cy-blockH/2; if(by<top+S(16)) by=top+S(16);
+    RECT mr={cx-med/2,by,cx+med/2,by+med};
+    gpFillAlpha(dc,mr,med/2,blendColor(g_infoAccent,g_theme.surface,55),
+                g_dark?76:50);
+    gpRoundRect(dc,mr,med/2,CLR_INVALID,
+                blendColor(g_theme.border,g_infoAccent,42));
+    int isz=(med*44)/100;
+    RECT ir={cx-isz/2,by+(med-isz)/2,cx+isz/2,by+(med-isz)/2+isz};
+    drawIcon(dc,icon,ir,blendColor(g_infoAccent,g_theme.text,12),S(2)+1);
+    SelectObject(dc,g_fTitle); SetTextColor(dc,g_theme.text);
+    RECT hr={a.left+S(20),by+med+gap,a.right-S(20),by+med+gap+hl};
+    DrawTextW(dc,head,-1,&hr,
+        DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+    if(hint && *hint){
+        SelectObject(dc,g_fUI); SetTextColor(dc,g_theme.textDim);
+        RECT sr={a.left+S(20),hr.bottom+S(6),a.right-S(20),hr.bottom+S(6)+sl};
+        DrawTextW(dc,hint,-1,&sr,
+            DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+    }
+}
 // The compose block at the top of the saved-messages page:
 //   caption line  +  editor (multi-line)  +  hint line.
 // A single source of truth so the editor, its buttons, the hint and the note
@@ -2897,8 +2954,21 @@ static void mgPaintDash(HDC dc, HWND h){
     };
     for(int i=0;i<4;i++){
         RECT r=mgSummaryRect(h,i);
-        gpRoundRectBg(dc,r,S(14),g_theme.surface,g_theme.border,g_theme.bg);
+        // v1.63.0 KPI TILE. Was a flat surface box; now an elevated card whose
+        // glyph sits in a medallion tinted with that metric's OWN colour, so the
+        // four KPIs are distinguishable at a glance instead of looking identical.
+        gpShadow(dc,r,S(14),S(7),g_dark?66:44);
+        gpGradRoundRectBg(dc,r,S(14),
+            blendColor(g_theme.surfaceTop,g_theme.surface,45),
+            g_theme.surface,
+            blendColor(g_theme.border,cards[i].col,26), g_theme.bg);
         RECT ir={r.right-S(56),r.top+S(16),r.right-S(20),r.top+S(52)};
+        { RECT md=ir; InflateRect(&md,S(7),S(7));
+          int mr2=(md.bottom-md.top)/2;
+          gpFillAlpha(dc,md,mr2,blendColor(cards[i].col,g_theme.surface,50),
+                      g_dark?80:48);
+          gpRoundRect(dc,md,mr2,CLR_INVALID,
+                      blendColor(g_theme.border,cards[i].col,48)); }
         drawIcon(dc,cards[i].ico,ir,cards[i].col,S(2));
         SetTextColor(dc,g_theme.text); SelectObject(dc,g_fHuge);
         RECT vr={r.left+S(16),r.top+S(12),r.right-S(60),r.top+S(58)};
@@ -2921,9 +2991,18 @@ static void mgPaintDash(HDC dc, HWND h){
     for(int i=0;i<4;i++){
         RECT r=mgQuickRect(h,i);
         bool hot=(s_mg&&s_mg->hot==MG_QA_BASE+i);
-        gpRoundRectBg(dc,r,S(14), hot?g_theme.surface2:g_theme.surface,
-                      hot?g_infoAccent:g_theme.border, g_theme.bg);
+        mgRowShell(dc,r,hot,S(14),g_infoAccent);
         RECT ir={r.left+(r.right-r.left)/2-S(18),r.top+S(18),r.left+(r.right-r.left)/2+S(18),r.top+S(54)};
+        // v1.63.0: centred glyph medallion; hover brightens the wash so the
+        // tile responds as one object rather than only changing its border.
+        { RECT md=ir; InflateRect(&md,S(8),S(8));
+          int mr2=(md.bottom-md.top)/2;
+          gpFillAlpha(dc,md,mr2,
+              blendColor(hot?g_infoAccent:g_theme.accent,g_theme.surface,
+                         hot?42:56), hot?(g_dark?96:66):(g_dark?76:44));
+          gpRoundRect(dc,md,mr2,CLR_INVALID,
+              blendColor(g_theme.border,hot?g_infoAccent:g_theme.accent,
+                         hot?60:38)); }
         drawIcon(dc,qa[i].ico,ir,hot?g_infoAccent:g_theme.accent,S(2));
         SetTextColor(dc,g_theme.text); SelectObject(dc,g_fUIB);
         RECT lr={r.left+S(8),r.top+S(60),r.right-S(8),r.top+S(84)};
@@ -3011,17 +3090,22 @@ static void mgPaintSects(HDC dc, HWND h){
     }
     // existing sections grid
     if(s_mg->cats.empty()){
-        SetTextColor(dc,g_theme.textDim); SelectObject(dc,g_fUI);
-        RECT er={a.left,a.top+mgHeadH()+S(80),a.right,a.top+mgHeadH()+S(120)};
-        DrawTextW(dc,L"هنوز بخشی ثبت نشده است.",-1,&er,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+        mgEmptyState(dc,a,ICO_SHIELD,L"هنوز بخشی ثبت نشده است",
+            L"با دکمهٔ «بخش جدید» نخستین بخش را بسازید");
         return;
     }
     for(int i=0;i<(int)s_mg->cats.size();i++){
         RECT r=mgSecCardRect(h,i);
         bool hot=(s_mg->hot==MG_CARD_BASE+i);
-        gpRoundRectBg(dc,r,S(14), hot?g_theme.surface2:g_theme.surface,
-                      hot?g_infoAccent:g_theme.border, g_theme.bg);
+        mgRowShell(dc,r,hot,S(14),g_infoAccent);
         RECT ir={r.right-S(50),r.top+S(14),r.right-S(18),r.top+S(46)};
+        // v1.63.0: the section glyph sits in its own tinted medallion
+        { RECT md=ir; InflateRect(&md,S(6),S(6));
+          int mr2=(md.bottom-md.top)/2;
+          gpFillAlpha(dc,md,mr2,blendColor(g_infoAccent,g_theme.surface,52),
+                      g_dark?76:46);
+          gpRoundRect(dc,md,mr2,CLR_INVALID,
+                      blendColor(g_theme.border,g_infoAccent,45)); }
         drawIcon(dc,ICO_SHIELD,ir,g_infoAccent,S(2));
         SetTextColor(dc,g_theme.text); SelectObject(dc,g_fUIB);
         RECT nr={r.left+S(14),r.top+S(16),r.right-S(56),r.top+S(46)};
@@ -3038,24 +3122,30 @@ static void mgPaintSects(HDC dc, HWND h){
 static void mgPaintEmps(HDC dc, HWND h){
     RECT a=mgContentRect(h);
     if(s_mg->emps.empty()){
-        SetTextColor(dc,g_theme.textDim); SelectObject(dc,g_fUI);
-        RECT er={a.left,a.top+mgHeadH()+S(90),a.right,a.top+mgHeadH()+S(130)};
-        DrawTextW(dc,L"کارمندی با این فیلتر یافت نشد.",-1,&er,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+        mgEmptyState(dc,a,ICO_USER,L"کارمندی یافت نشد",
+            L"عبارت جست‌وجو یا فیلتر بخش را تغییر دهید");
         return;
     }
     for(int i=0;i<(int)s_mg->emps.size();i++){
         RECT r=mgEmpRowRect(h,i);
         if(r.top>a.bottom) break;
         bool hot=(s_mg->hot==MG_DETAIL_BASE+i);
-        gpRoundRectBg(dc,r,S(12), hot?g_theme.surface2:g_theme.surface,
-                      hot?g_infoAccent:g_theme.border, g_theme.bg);
+        mgRowShell(dc,r,hot,S(12),g_infoAccent);
         const EmpRow& e=s_mg->emps[i];
-        // online dot
-        { RECT dot={r.right-S(34),r.top+(r.bottom-r.top)/2-S(6),r.right-S(22),r.top+(r.bottom-r.top)/2+S(6)};
-          gpRoundRectBg(dc,dot,S(6), e.online?g_theme.success:g_theme.textDim,
-                        e.online?g_theme.success:g_theme.textDim, g_theme.surface); }
+        // v1.63.0 presence dot: an ONLINE user gets a glowing green disc with a
+        // soft halo (a real presence light); offline stays a flat grey dot.
+        { int cy2=(r.top+r.bottom)/2;
+          RECT dot={r.right-S(38),cy2-S(6),r.right-S(26),cy2+S(6)};
+          if(e.online){
+              RECT halo=dot; InflateRect(&halo,S(4),S(4));
+              gpFillAlpha(dc,halo,(halo.bottom-halo.top)/2,g_theme.success,70);
+              gpRoundRect(dc,dot,S(6),g_theme.success,CLR_INVALID);
+          } else {
+              gpRoundRect(dc,dot,S(6),
+                  blendColor(g_theme.textDim,g_theme.surface,45),CLR_INVALID);
+          } }
         SetTextColor(dc,g_theme.text); SelectObject(dc,g_fUIB);
-        RECT nr={r.left+S(14),r.top+S(8),r.right-S(48),r.top+S(32)};
+        RECT nr={r.left+S(14),r.top+S(8),r.right-S(52),r.top+S(32)};
         DrawTextW(dc,e.user.fullname.c_str(),-1,&nr,DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_WORD_ELLIPSIS|DT_NOPREFIX);
         SetTextColor(dc,g_theme.textDim); SelectObject(dc,g_fSmall);
         std::wstring sub=e.deptName;
@@ -3090,21 +3180,26 @@ static void mgPaintMsg(HDC dc, HWND h){
     DrawTextW(dc,hdr.c_str(),-1,&hr,DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
 
     if(s_mg->emps.empty()){
-        SetTextColor(dc,g_theme.textDim); SelectObject(dc,g_fUI);
-        RECT er={a.left,hy+S(60),a.right,hy+S(100)};
-        DrawTextW(dc,L"کارمندی برای نمایش وجود ندارد.",-1,&er,
-            DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+        mgEmptyState(dc,a,ICO_USER,L"کارمندی برای نمایش وجود ندارد",
+            L"پس از ثبت کارمندان، گیرندگان پیام اینجا فهرست می‌شوند");
         return;
     }
     for(int i=0;i<(int)s_mg->emps.size();i++){
         RECT r=mgMsgEmpRowRect(h,i);
         if(r.top>a.bottom) break;
-        gpRoundRectBg(dc,r,S(12), g_theme.surface, g_theme.border, g_theme.bg);
+        mgRowShell(dc,r,false,S(12),g_infoAccent);
         const EmpRow& e=s_mg->emps[i];
-        // online dot
-        { RECT dot={r.right-S(34),r.top+(r.bottom-r.top)/2-S(6),r.right-S(22),r.top+(r.bottom-r.top)/2+S(6)};
-          gpRoundRectBg(dc,dot,S(6), e.online?g_theme.success:g_theme.textDim,
-                        e.online?g_theme.success:g_theme.textDim, g_theme.surface); }
+        // v1.63.0 presence light (same treatment as the کارمندان page)
+        { int cy2=(r.top+r.bottom)/2;
+          RECT dot={r.right-S(38),cy2-S(6),r.right-S(26),cy2+S(6)};
+          if(e.online){
+              RECT halo=dot; InflateRect(&halo,S(4),S(4));
+              gpFillAlpha(dc,halo,(halo.bottom-halo.top)/2,g_theme.success,70);
+              gpRoundRect(dc,dot,S(6),g_theme.success,CLR_INVALID);
+          } else {
+              gpRoundRect(dc,dot,S(6),
+                  blendColor(g_theme.textDim,g_theme.surface,45),CLR_INVALID);
+          } }
         SetTextColor(dc,g_theme.text); SelectObject(dc,g_fUIB);
         RECT nr={r.left+S(14),r.top+S(8),r.right-S(48),r.top+S(32)};
         DrawTextW(dc,e.user.fullname.c_str(),-1,&nr,DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_WORD_ELLIPSIS|DT_NOPREFIX);
@@ -3170,7 +3265,12 @@ static void mgPaintSaved(HDC dc, HWND h){
       int bw=S(110), gap=S(10);
       RECT well={a.left+S(12)+bw+gap-S(6),edTop-S(4),a.right-S(12)+S(0),edTop+edH+S(4)};
       bool foc=(GetFocus()==s_mg->eNote);
-      fillRoundRect(dc,well,S(8),g_theme.inputBg,foc?g_theme.accent:g_theme.border); }
+      // v1.63.0: recessed well (top-down darker→input gradient) + a glowing
+      // accent ring while focused, so the active field is unmistakable.
+      if(foc) gpShadowColor(dc,well,S(9),S(5),70,g_theme.accent);
+      gpGradRoundRect(dc,well,S(9),
+          blendColor(g_theme.inputBg,g_theme.border,g_dark?26:34),
+          g_theme.inputBg, foc?g_theme.accent:g_theme.border); }
     // hint line BELOW the compose block
     SetTextColor(dc,g_theme.textDim); SelectObject(dc,g_fSmall);
     int hintY=mgSavedComposeBottom(h)-mgSavedHintH();
@@ -3181,15 +3281,15 @@ static void mgPaintSaved(HDC dc, HWND h){
     auto notes=loadLocalNotes(g_session.user.username);
     if(notes.empty()){
         SetTextColor(dc,g_theme.textDim); SelectObject(dc,g_fUI);
-        RECT er={a.left,mgNoteListTop(h)+S(30),a.right,mgNoteListTop(h)+S(70)};
-        DrawTextW(dc,L"یادداشت ذخیره‌شده‌ای وجود ندارد.",-1,&er,
-            DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+        RECT ea=a; ea.top=mgNoteListTop(h)-mgHeadH();
+        mgEmptyState(dc,ea,ICO_SAVE,L"یادداشت ذخیره‌شده‌ای وجود ندارد",
+            L"متن را بنویسید و «ذخیره» را بزنید");
         return;
     }
     for(int i=0;i<(int)notes.size();i++){
         RECT r=mgNoteRowRect(h,i); if(r.top>=a.bottom-S(16)) break;
         bool hot=(s_mg->noteHot==i);
-        gpRoundRectBg(dc,r,S(12),g_theme.surface, hot?g_infoAccent:g_theme.border, g_theme.bg);
+        mgRowShell(dc,r,hot,S(12),g_infoAccent);
         // time header
         SetTextColor(dc,g_infoAccent2); SelectObject(dc,g_fSmall);
         RECT hr={r.left+S(14),r.top+S(8),r.right-S(80),r.top+S(28)};
@@ -3327,20 +3427,50 @@ static void mgPaintServices(HDC dc, HWND h){
 static void mgPaintShell(HDC dc, HWND h){
     RECT rc; GetClientRect(h,&rc);
     FillRect(dc,&rc,g_brBg); SetBkMode(dc,TRANSPARENT);
-    // ---- nav rail on the RIGHT ----
+    // ------------------------------------------------------------------
+    //  v1.63.0 MANAGEMENT SHELL REDESIGN.
+    //  The rail and the content card were flat surface fills, and a selected
+    //  nav item was a solid blue block with no depth — the panel looked like
+    //  a mock-up rather than a product. Both surfaces now get an elevation
+    //  shadow + a soft top-down gradient, the rail title sits over its own
+    //  faint accent wash with a fading rule beneath it, and the SELECTED nav
+    //  item becomes a glowing gradient pill with a bright leading indicator
+    //  on the RTL (right) edge — the standard "you are here" affordance.
+    // ------------------------------------------------------------------
     RECT nav={rc.right-mgNavW(), rc.top, rc.right, rc.bottom};
-    gpRoundRectBg(dc,(RECT){nav.left+S(4),nav.top+S(8),nav.right-S(8),nav.bottom-S(8)},
-                  S(16),g_theme.surface,g_theme.border,g_theme.bg);
+    RECT navCard={nav.left+S(4),nav.top+S(8),nav.right-S(8),nav.bottom-S(8)};
+    gpShadow(dc,navCard,S(16),S(9),g_dark?78:52);
+    gpGradRoundRectBg(dc,navCard,S(16),g_theme.surfaceTop,g_theme.surface,
+                      g_theme.border,g_theme.bg);
     // app/section title in the rail header
     SetTextColor(dc,g_theme.text); SelectObject(dc,g_fTitle);
     RECT th={nav.left+S(12),nav.top+S(20),nav.right-S(16),nav.top+S(60)};
     DrawTextW(dc,L"پنل مدیریت",-1,&th,DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+    // fading rule under the rail title (strong on the RTL/right side)
+    { int y2=nav.top+S(64), x0=navCard.left+S(12), x1=navCard.right-S(12);
+      int span=x1-x0;
+      if(span>0){ int seg=S(6); if(seg<2) seg=2;
+        for(int x=x0;x<x1;x+=seg){ int xe=x+seg; if(xe>x1) xe=x1;
+            int a=200-(180*(x1-x))/span; if(a<8)a=8; if(a>255)a=255;
+            gpLine(dc,x,y2,xe,y2,blendColor(g_theme.border,g_infoAccent,25),1.0f,a); } } }
     for(int i=0;i<PG_COUNT;i++){
         RECT r=mgNavItemRect(h,i);
         bool sel=(s_mg && s_mg->page==i);
         bool hot=(s_mg && s_mg->navHot==i);
-        if(sel) gpRoundRectBg(dc,r,S(12),g_infoAccent,g_infoAccent,g_theme.surface);
-        else if(hot) gpRoundRectBg(dc,r,S(12),g_theme.surface2,g_theme.border,g_theme.surface);
+        if(sel){
+            gpShadowColor(dc,r,S(12),S(7),96,g_infoAccent);
+            gpGradRoundRect(dc,r,S(12),
+                blendColor(g_infoAccent,RGB(255,255,255),18),
+                g_infoAccent,CLR_INVALID);
+            // leading indicator on the RTL edge
+            RECT li={r.right-S(5),r.top+S(9),r.right-S(2),r.bottom-S(9)};
+            gpRoundRect(dc,li,S(2),RGB(255,255,255),CLR_INVALID);
+        } else if(hot){
+            gpShadow(dc,r,S(12),S(5),44);
+            gpGradRoundRect(dc,r,S(12),
+                blendColor(g_theme.surfaceTop,g_theme.surface2,40),
+                g_theme.surface2,blendColor(g_theme.border,g_infoAccent,34));
+        }
         RECT ir={r.right-S(44),r.top+S(12),r.right-S(16),r.top+S(40)};
         drawIcon(dc,MG_NAV_ICONS[i],ir, sel?RGB(255,255,255):g_theme.textDim, S(2));
         SetTextColor(dc, sel?RGB(255,255,255):g_theme.text); SelectObject(dc,g_fUI);
@@ -3351,8 +3481,14 @@ static void mgPaintShell(HDC dc, HWND h){
             int n=unseenSetReqCount()+unseenProfReqCount();
             if(n>0){
                 RECT bd={r.left+S(12),r.top+S(14),r.left+S(34),r.top+S(36)};
-                gpRoundRectBg(dc,bd,S(11),g_infoAccent2,g_infoAccent2,
-                              sel?g_infoAccent:(hot?g_theme.surface2:g_theme.surface));
+                // v1.63.0: a glowing gradient counter so pending requests
+                // genuinely demand attention from across the room.
+                COLORREF bhost = sel?g_infoAccent:(hot?g_theme.surface2:g_theme.surface);
+                gpRoundRectBg(dc,bd,S(11),bhost,CLR_INVALID,bhost);
+                gpShadowColor(dc,bd,S(11),S(5),110,g_theme.danger);
+                gpGradRoundRect(dc,bd,S(11),
+                    blendColor(g_theme.danger,RGB(255,255,255),24),
+                    g_theme.danger,CLR_INVALID);
                 SetTextColor(dc,RGB(255,255,255)); SelectObject(dc,g_fSmall);
                 DrawTextW(dc,toFaDigits(std::to_wstring(n)).c_str(),-1,&bd,
                     DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX);
@@ -3361,12 +3497,21 @@ static void mgPaintShell(HDC dc, HWND h){
     }
     // ---- content card on the LEFT ----
     RECT a=mgContentRect(h);
-    gpRoundRectBg(dc,a,S(18),g_theme.surface,g_theme.border,g_theme.bg);
-    // content header
+    gpShadow(dc,a,S(18),S(10),g_dark?80:54);
+    gpGradRoundRectBg(dc,a,S(18),g_theme.surfaceTop,g_theme.surface,
+                      g_theme.border,g_theme.bg);
+    // v1.63.0: the page title now sits on a faint accent wash band that spans
+    // the header, so the card has a real titlebar instead of floating text.
+    { RECT hb={a.left+S(1),a.top+S(1),a.right-S(1),a.top+mgHeadH()};
+      gpFillAlpha(dc,hb,S(16),
+          blendColor(g_infoAccent,g_theme.surface,g_dark?72:84),g_dark?70:120); }
     SetTextColor(dc,g_theme.text); SelectObject(dc,g_fBig);
     RECT hr={a.left+S(24),a.top+S(16),a.right-S(24),a.top+mgHeadH()-S(8)};
     DrawTextW(dc,mgCardTitle(s_mg?s_mg->page:0),-1,&hr,DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+    // two-tone closing edge for the header band (rule + light lip)
     gpLine(dc,a.left+S(16),a.top+mgHeadH(),a.right-S(16),a.top+mgHeadH(),g_theme.border,1);
+    gpLine(dc,a.left+S(16),a.top+mgHeadH()+1,a.right-S(16),a.top+mgHeadH()+1,
+        blendColor(g_theme.surface,RGB(255,255,255),g_dark?8:70),1.0f,180);
     // page body
     if(s_mg){
         switch(s_mg->page){
