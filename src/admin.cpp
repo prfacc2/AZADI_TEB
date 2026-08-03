@@ -441,9 +441,18 @@ static LRESULT CALLBACK adminProc(HWND h, UINT m, WPARAM w, LPARAM l){
         for(int i=0;i<AD_TAB_COUNT;i++){
             bool active=(d->tab==i);
             RECT t=d->tabRects[i];
-            uikit::RoundedPanel(dc,t,S(8),
-                active?g_theme.accent:g_theme.surface,
-                active?g_theme.accent:g_theme.border, g_theme.bg);
+            // v1.63.0: an active tab is a glowing accent pill (elevated,
+            // gradient) instead of a flat blue rectangle; inactive tabs get the
+            // same soft surface gradient used everywhere else in the app.
+            if(active){
+                gpShadowColor(dc,t,S(9),S(6),90,g_theme.accent);
+                gpGradRoundRect(dc,t,S(9),g_theme.accentHover,g_theme.accent,
+                                CLR_INVALID);
+            } else {
+                gpGradRoundRectBg(dc,t,S(9),
+                    blendColor(g_theme.surfaceTop,g_theme.surface,55),
+                    g_theme.surface,g_theme.border,g_theme.bg);
+            }
             SetTextColor(dc,active?g_theme.accentText:g_theme.textDim);
             DrawTextW(dc,tabLabels[i],-1,&t,
                 DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
@@ -477,7 +486,11 @@ static LRESULT CALLBACK adminProc(HWND h, UINT m, WPARAM w, LPARAM l){
         int fw=S(360), pad=S(24);
         int fx=rc.right-pad-fw, fy=topU+S(30);
         RECT card={fx-S(0),fy-S(20),fx+fw,fy+S(28)+5*S(64)+S(76)};
-        fillRoundRect(dc,card,S(14),g_theme.surface,g_theme.border);
+        // v1.63.0: elevated form card (shadow + surface gradient) to match the
+        // reception / management card language.
+        gpShadow(dc,card,S(14),S(9),g_dark?76:50);
+        gpGradRoundRectBg(dc,card,S(14),g_theme.surfaceTop,g_theme.surface,
+                          g_theme.border,g_theme.bg);
 
         // input wells behind each editable field (consistent flat look + clear
         // separation between a caption and the control beneath it)
@@ -494,8 +507,11 @@ static LRESULT CALLBACK adminProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 int minH=a.y+S(40);
                 RECT well={a.x-S(6),a.y-S(4),b.x+S(6),(b.y<minH)?minH:b.y+S(4)};
                 bool focused=(fields[i]==foc);
-                fillRoundRect(dc,well,S(8),g_theme.inputBg,
-                    focused?g_theme.accent:g_theme.border);
+                // v1.63.0: recessed well + accent glow on focus.
+                if(focused) gpShadowColor(dc,well,S(9),S(5),70,g_theme.accent);
+                gpGradRoundRect(dc,well,S(9),
+                    blendColor(g_theme.inputBg,g_theme.border,g_dark?26:34),
+                    g_theme.inputBg, focused?g_theme.accent:g_theme.border);
             }
         }
 

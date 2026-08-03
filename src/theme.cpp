@@ -134,6 +134,10 @@ static BOOL CALLBACK topProc(HWND h, LPARAM){
     return TRUE;
 }
 void broadcastThemeChange(){
+    // v1.63.0: the welcome artwork composite is cached per (size, theme, scrim);
+    // a theme flip changes the scrim, so drop the cache BEFORE anyone repaints
+    // or the first frame after the switch would blit the previous theme's wash.
+    gpFreeBackgroundCache();
     EnumWindows(topProc, 0);
 }
 
@@ -531,18 +535,72 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
         }
         RECT rr = rc;
         if(dn){ rr.top+=1; rr.bottom+=1; }
+        // ------------------------------------------------------------------
+        //  v1.63.0 BUTTON REDESIGN (solid + quiet styles).
+        //  1.62.0 modernised only BS_CARD; every other style was still the
+        //  1.3.0 look: a flat two-stop gradient, no elevation, no sheen, a
+        //  hard 10 px radius at every size and no visible pressed state.
+        //  The refresh below gives the whole set one coherent language:
+        //    * radius scales with the control height (pill-ish on short bars,
+        //      soft-rounded on tall ones) instead of a fixed 10 px,
+        //    * solid styles (PRIMARY/DANGER/INFO) get a tinted drop shadow
+        //      that GROWS on hover and COLLAPSES on press, so the button
+        //      physically lifts and depresses,
+        //    * a 45 %-height top sheen + a darker bottom rim reads as a real
+        //      moulded surface rather than a printed rectangle,
+        //    * quiet styles (OUTLINE/GHOST) get a hairline that warms toward
+        //      the accent on hover plus a faint inner wash, so they respond
+        //      without shouting.
+        // ------------------------------------------------------------------
+        int hgt = rr.bottom-rr.top; if(hgt<1) hgt=1;
         int rad = S(st==BS_CARD?16:10);
+        if(st!=BS_CARD){
+            rad = hgt/3;                       // proportional corner
+            if(rad > S(14)) rad = S(14);
+            if(rad < S(6))  rad = S(6);
+        }
+        // shared helper: solid style body = shadow + gradient + sheen + rim
+        auto solidBody = [&](COLORREF top, COLORREF bot, COLORREF glow){
+            if(!dn){
+                // elevation. hover lifts higher; the shadow is tinted with the
+                // button's own colour so it feels like coloured light.
+                gpShadowColor(dc, rr, rad, hv?S(10):S(6), hv?96:60, glow);
+            }
+            gpGradRoundRect(dc, rr, rad, top, bot, CLR_INVALID);
+            // top sheen — a white wash over the upper 45 % of the body
+            RECT sh = rr; sh.bottom = rr.top + (hgt*45)/100;
+            if(sh.bottom > sh.top+1)
+                gpFillAlpha(dc, sh, rad, RGB(255,255,255), dn?14:26);
+            // bottom rim — one hairline of the darker stop for definition
+            gpRoundRect(dc, rr, rad, CLR_INVALID,
+                blendColor(bot, RGB(0,0,0), dn?26:16));
+        };
         // v1.3.0: anti-aliased GDI+ fills with a soft gradient on solid styles
         if(st==BS_PRIMARY){
-            COLORREF a = dn ? g_theme.accent : (hv?g_theme.accentHover:g_theme.accent);
-            COLORREF b = dn ? g_theme.accent2: (hv?g_theme.accent:g_theme.accent2);
-            gpGradRoundRect(dc, rr, rad, a, b, CLR_INVALID);
+            COLORREF a = dn ? g_theme.accent2 : (hv?g_theme.accentHover:g_theme.accent);
+            COLORREF b = dn ? g_theme.accent  : (hv?g_theme.accent:g_theme.accent2);
+            solidBody(a, b, g_theme.accent);
         } else if(st==BS_DANGER){
-            COLORREF a = (dn||hv)?g_theme.dangerHover:g_theme.danger;
-            gpGradRoundRect(dc, rr, rad, a, g_theme.danger, CLR_INVALID);
+            COLORREF a = dn ? g_theme.danger : (hv?g_theme.dangerHover:g_theme.danger);
+            COLORREF b = dn ? g_theme.dangerHover
+                            : blendColor(g_theme.danger, RGB(0,0,0), 18);
+            solidBody(a, b, g_theme.danger);
         } else if(st==BS_INFO){
-            COLORREF a = (dn||hv)?g_infoAccent2:g_infoAccent;
-            gpGradRoundRect(dc, rr, rad, a, g_infoAccent2, CLR_INVALID);
+            COLORREF a = dn ? g_infoAccent2 : (hv?g_infoAccent2:g_infoAccent);
+            COLORREF b = dn ? g_infoAccent
+                            : blendColor(g_infoAccent2, RGB(0,0,0), 14);
+            solidBody(a, b, g_infoAccent);
+        } else if(st==BS_OUTLINE){
+            // quiet, bordered. hover warms the hairline toward the accent and
+            // lays down a faint accent wash; press flattens both.
+            COLORREF bd = hv ? blendColor(g_theme.border, g_theme.accent, dn?70:48)
+                             : g_theme.border;
+            COLORREF f  = dn ? g_theme.hover
+                             : (hv ? blendColor(g_theme.surface, g_theme.accent, 8)
+                                   : g_theme.surface);
+            if(hv && !dn) gpShadow(dc, rr, rad, S(5), 40);
+            gpGradRoundRect(dc, rr, rad,
+                blendColor(g_theme.surfaceTop, f, 45), f, bd);
         } else if(st==BS_CARD){
             // v1.60.0 modern card: soft elevation shadow, then a gentle
             // surface gradient; hover lifts the card with an accent halo.
@@ -555,7 +613,22 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 gpRoundRect(dc, halo, rad+S(1), CLR_INVALID, g_theme.accent);
             }
         } else {
-            gpRoundRect(dc, rr, rad, fill, bord);
+            // BS_GHOST — the borderless bar/toolbar button. At rest it is a
+            // bare tinted plate; hover raises a soft tinted pill with a barely
+            // visible hairline so it reads as a target without adding chrome;
+            // press sinks it to the flat hover colour with no highlight.
+            bool danger = (d && d->icon==ICO_X && hv);
+            COLORREF acc = danger ? g_theme.danger : g_theme.accent;
+            if(hv && !dn){
+                gpShadowColor(dc, rr, rad, S(5), 46, acc);
+                gpGradRoundRect(dc, rr, rad,
+                    blendColor(fill, RGB(255,255,255), danger?0:16), fill,
+                    blendColor(fill, acc, danger?0:34));
+            } else if(dn){
+                gpRoundRect(dc, rr, rad, fill, blendColor(fill, acc, 22));
+            } else {
+                gpRoundRect(dc, rr, rad, fill, bord);
+            }
         }
         // §C: explicit focus ring — a crisp accent hairline inset 2px so keyboard
         //     focus is always visible without shifting layout.

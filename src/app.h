@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.62.0"
+#define APP_VERSION_W   L"1.63.0"
 
 // ----------------------------------------------------------- logging policy -
 //  RELEASE 1.2.0 (Section A): all general user-behavior logging is gated behind
@@ -185,12 +185,19 @@ void gpGradRoundRectBgH(HDC dc, RECT rc, int rad, COLORREF left, COLORREF right,
 void gpFillCorners(HDC dc, RECT rc, int rad, COLORREF bg);
 //  Soft drop shadow behind a rounded rect (blurred, layered look).
 void gpShadow(HDC dc, RECT rc, int rad, int spread, int alpha);
+//  v1.63.0: same shadow, tinted with `tint` shaded to ~32% so a coloured
+//  control casts coloured light (used by the modern solid button styles).
+void gpShadowColor(HDC dc, RECT rc, int rad, int spread, int alpha, COLORREF tint);
 //  Solid translucent rounded fill (for glass overlays / dim layers).
 void gpFillAlpha(HDC dc, RECT rc, int rad, COLORREF fill, int alpha);
 //  Draw the embedded background image (id 103 light / 104 dark) cover-fitted
 //  into rc, then a translucent scrim of `scrim` colour at `scrimA` alpha so
 //  foreground text stays perfectly legible.  Returns false if no image.
 bool gpDrawBackground(HDC dc, RECT rc, bool dark, COLORREF scrim, int scrimA);
+//  v1.63.0: gpDrawBackground caches the scaled artwork + scrim composite keyed
+//  by (size, theme, scrim). Call this to drop the cache when the theme changes
+//  so the next paint rebuilds it (a stale cache would show the old scrim).
+void gpFreeBackgroundCache();
 //  v1.4.1: draw a real (raster) RCDATA PNG icon, aspect-fit & centred in rc and
 //  recoloured to `tint`. Used for the print-action buttons. Returns false if
 //  GDI+ / resource unavailable so callers fall back to the vector drawIcon().
