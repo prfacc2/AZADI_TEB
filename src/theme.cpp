@@ -58,7 +58,7 @@ void applyTheme(bool dark){
         //      border 196 ── crisp hairline between layers
         //      surface 255 ── cards (clean white, pops off the tinted page)
         //      surfaceTop 250 ── soft top-light on cards
-        // ---- v1.19.0: premium "Azadi-Teb 2026" light palette — matches the
+        // ---- v1.19.0: premium "DarmanPlus 2026" light palette — matches the
         //  reference reception design exactly.
         //  bg #F5F8FD · surface #FFFFFF · surface2 #EAF4FF · border #DCE6F2
         //  text #233042 · muted #6B7A90 · accent #1976F3 · hover #2D8CFF
@@ -510,26 +510,37 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
         bool enabled = IsWindowEnabled(h)!=FALSE;
         bool hv = enabled && d && d->hover, dn = enabled && d && d->down;
         bool focused = enabled && (GetFocus()==h);   // §C: explicit focus ring
+        // v1.64.0: relative-luminance contrast guard. If a style's text colour
+        // is too close to its fill colour (the white-on-white regression), the
+        // ink is forced to the opposite extreme so every label stays legible.
+        auto lum = [](COLORREF c){ int r=GetRValue(c),g=GetGValue(c),b=GetBValue(c);
+            return (2126*r+7152*g+722*b)/10000; };
+        auto readable = [&](COLORREF bg, COLORREF ink){
+            int lb=lum(bg), li=lum(ink);
+            int diff = lb>li ? lb-li : li-lb;
+            if(diff >= 90) return ink;                 // already legible
+            return lb>140 ? RGB(0x1F,0x29,0x37) : RGB(255,255,255);
+        };
         switch(st){
         case BS_PRIMARY:
             fill = dn ? g_theme.accent : hv ? g_theme.accentHover : g_theme.accent;
-            txt  = g_theme.accentText; break;
+            txt  = readable(fill, g_theme.accentText); break;
         case BS_DANGER:
             fill = dn||hv ? g_theme.dangerHover : g_theme.danger;
-            txt  = RGB(255,255,255); break;
+            txt  = readable(fill, RGB(255,255,255)); break;
         case BS_INFO:
             fill = dn||hv ? g_infoAccent2 : g_infoAccent;
-            txt  = RGB(255,255,255); break;
+            txt  = readable(fill, RGB(255,255,255)); break;
         case BS_OUTLINE:
             fill = hv ? g_theme.hover : g_theme.surface;
-            txt  = g_theme.text; bord = g_theme.border; break;
+            txt  = readable(fill, g_theme.text); bord = g_theme.border; break;
         case BS_CARD:
             fill = hv ? g_theme.hover : g_theme.surface;
-            txt  = g_theme.text;
+            txt  = readable(fill, g_theme.text);
             bord = hv ? g_theme.accent : g_theme.border; break;
         default: // ghost
             fill = hv ? g_theme.hover : g_theme.surface2;
-            txt  = hv ? g_theme.text : g_theme.textDim;
+            txt  = readable(fill, hv ? g_theme.text : g_theme.textDim);
             if(d && d->icon==ICO_X && hv){ fill=g_theme.danger; txt=RGB(255,255,255); }
             break;
         }
@@ -559,13 +570,19 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
             if(rad > S(14)) rad = S(14);
             if(rad < S(6))  rad = S(6);
         }
-        // shared helper: solid style body = shadow + gradient + sheen + rim
+        // shared helper: solid style body = shadow + SOLID BASE + gradient + sheen
+        // + rim. The solid base (the darker stop) is painted FIRST so the button
+        // always carries its brand colour even if the GDI+ gradient pass ever
+        // fails to draw — this is the definitive guard against the
+        // "white text on a white button" regression (v1.64.0).
         auto solidBody = [&](COLORREF top, COLORREF bot, COLORREF glow){
             if(!dn){
                 // elevation. hover lifts higher; the shadow is tinted with the
                 // button's own colour so it feels like coloured light.
                 gpShadowColor(dc, rr, rad, hv?S(10):S(6), hv?96:60, glow);
             }
+            // guaranteed coloured base (never leaves a bare surface behind)
+            gpRoundRect(dc, rr, rad, bot, CLR_INVALID);
             gpGradRoundRect(dc, rr, rad, top, bot, CLR_INVALID);
             // top sheen — a white wash over the upper 45 % of the body
             RECT sh = rr; sh.bottom = rr.top + (hgt*45)/100;

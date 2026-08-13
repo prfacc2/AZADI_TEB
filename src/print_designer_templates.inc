@@ -197,7 +197,7 @@ static PrintItem mkServices(double x,double y,double w,double h,double pt,
 }
 
 // localized captions reused across templates
-#define FA_CLINIC   L"درمانگاه شبانه‌روزی آزادی طب"
+#define FA_CLINIC   L"درمانگاه شبانه‌روزی درمان پلاس"
 #define FA_SUBTITLE L"سامانه پذیرش و مدیریت درمانگاه"
 #define FA_SVCLIST  L"لیست خدمات ارائه‌شده"
 #define FA_NAME     L"نام: "

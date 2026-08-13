@@ -463,21 +463,37 @@ static void buildBlacklistPage(SettingsWin* sw){
         WS_CHILD|WS_VISIBLE|ES_RIGHT|ES_MULTILINE|ES_AUTOVSCROLL|WS_VSCROLL,
         x,y+S(166),w,S(72),sw->hwnd,(HMENU)(INT_PTR)(IDC_PANEL_BASE+89),g_hInst,NULL);
     SendMessageW(reason,WM_SETFONT,(WPARAM)g_fUIB,TRUE); sw->ctrls.push_back(reason);
-    HWND lookup=createFlatButton(sw->hwnd,IDC_PANEL_BASE+92,L"تکمیل خودکار با کد ملی",
-        ICO_USER,BS_OUTLINE,x+w/2+S(4),y+S(246),w/2-S(4),S(34));
+    // v1.64.0 (درمان پلاس): the «تکمیل خودکار با کد ملی» button was removed;
+    // «ثبت مسدودی» is now a full-width primary action. The flat buttons are
+    // told the surface they sit on so their rounded corners blend cleanly and
+    // the contrast guard keeps their labels legible.
     HWND add=createFlatButton(sw->hwnd,IDC_PANEL_BASE+91,L"ثبت مسدودی",
-        ICO_SHIELD,BS_PRIMARY,x,y+S(246),w/2-S(4),S(34));
-    sw->ctrls.push_back(lookup); sw->ctrls.push_back(add);
-    addSettingsLabel(sw,L"جستجوی لحظه‌ای تاریخچه",x,y+S(292),w);
+        ICO_SHIELD,BS_PRIMARY,x,y+S(246),w,S(40));
+    setFlatButtonBg(add, g_theme.bg);
+    sw->ctrls.push_back(add);
+    addSettingsLabel(sw,L"جستجوی لحظه‌ای تاریخچه",x,y+S(300),w);
     HWND search=CreateWindowExW(WS_EX_CLIENTEDGE|WS_EX_RTLREADING,L"EDIT",L"",
         WS_CHILD|WS_VISIBLE|ES_RIGHT|ES_AUTOHSCROLL,x,y+S(314),w,S(30),sw->hwnd,
         (HMENU)(INT_PTR)(IDC_PANEL_BASE+93),g_hInst,NULL);
     HWND list=CreateWindowExW(WS_EX_CLIENTEDGE|WS_EX_RTLREADING,L"LISTBOX",L"",
         WS_CHILD|WS_VISIBLE|WS_VSCROLL|LBS_NOINTEGRALHEIGHT|LBS_NOTIFY,
-        x,y+S(352),w,S(210),sw->hwnd,(HMENU)(INT_PTR)(IDC_PANEL_BASE+94),g_hInst,NULL);
+        x,y+S(352),w,S(180),sw->hwnd,(HMENU)(INT_PTR)(IDC_PANEL_BASE+94),g_hInst,NULL);
     SendMessageW(search,WM_SETFONT,(WPARAM)g_fUI,TRUE);
     SendMessageW(list,WM_SETFONT,(WPARAM)g_fSmall,TRUE);
     sw->ctrls.push_back(search); sw->ctrls.push_back(list);
+    // v1.64.0 (درمان پلاس): «رفع مسدودی» — remove every blacklist entry for a
+    // national id so the patient can be admitted again. A textbox + primary
+    // button; the history list refreshes after a successful removal.
+    addSettingsLabel(sw,L"رفع مسدودی بیمار با کد ملی",x,y+S(544),w);
+    HWND unNid=CreateWindowExW(WS_EX_CLIENTEDGE|WS_EX_RTLREADING,L"EDIT",L"",
+        WS_CHILD|WS_VISIBLE|ES_RIGHT|ES_AUTOHSCROLL,x,y+S(568),w-S(150)-S(8),S(32),sw->hwnd,
+        (HMENU)(INT_PTR)(IDC_PANEL_BASE+95),g_hInst,NULL);
+    HWND unBtn=createFlatButton(sw->hwnd,IDC_PANEL_BASE+96,L"رفع مسدودی",
+        ICO_CHECK,BS_PRIMARY,x+w-S(150),y+S(568),S(150),S(32));
+    setFlatButtonBg(unBtn, g_theme.bg);
+    SendMessageW(unNid,WM_SETFONT,(WPARAM)g_fUI,TRUE);
+    SendMessageW(unNid,EM_SETCUEBANNER,TRUE,(LPARAM)L"کد ملی بیمار مسدود…");
+    sw->ctrls.push_back(unNid); sw->ctrls.push_back(unBtn);
     refreshBlacklistHistory(sw);
 }
 
@@ -486,9 +502,9 @@ static void buildContactPage(SettingsWin* sw){
     int x=c.left+S(20), y=subTop(sw), w=c.right-c.left-S(40);
     std::wstring phone = getSetting(L"contact.phone", L"\u06f0\u06f2\u06f1-\u06f1\u06f2\u06f3\u06f4\u06f5\u06f6\u06f7\u06f8");
     std::wstring mobile= getSetting(L"contact.mobile",L"\u06f0\u06f9\u06f1\u06f2-\u06f3\u06f4\u06f5\u06f6\u06f7\u06f8\u06f9");
-    std::wstring email = getSetting(L"contact.email", L"support@azaditeb.ir");
+    std::wstring email = getSetting(L"contact.email", L"support@darmanplus.ir");
     std::wstring addr  = getSetting(L"contact.address",
-        L"\u062a\u0647\u0631\u0627\u0646\u060c \u062f\u0631\u0645\u0627\u0646\u06af\u0627\u0647 \u0622\u0632\u0627\u062f\u06cc \u0637\u0628");
+        L"\u062a\u0647\u0631\u0627\u0646\u060c \u062f\u0631\u0645\u0627\u0646\u06af\u0627\u0647 \u062f\u0631\u0645\u0627\u0646 \u067e\u0644\u0627\u0633");
     std::wstring hours = getSetting(L"contact.hours",
         L"\u0634\u0646\u0628\u0647 \u062a\u0627 \u067e\u0646\u062c\u200c\u0634\u0646\u0628\u0647\u060c \u06f8 \u062a\u0627 \u06f2\u06f0");
     std::wstring body;
@@ -509,10 +525,10 @@ static void buildContactPage(SettingsWin* sw){
 static void buildAboutPage(SettingsWin* sw){
     RECT c=contentRect(sw);
     int x=c.left+S(20), y=subTop(sw), w=c.right-c.left-S(40);
-    std::wstring body=L"\u0622\u0632\u0627\u062f\u06cc \u0637\u0628 \u2014 \u0646\u0633\u062e\u0647 ";
+    std::wstring body=L"\u062f\u0631\u0645\u0627\u0646 \u067e\u0644\u0627\u0633 \u2014 \u0646\u0633\u062e\u0647 ";
     body+=APP_VERSION_W; body+=L"\r\n";
     body+=L"\u0633\u0627\u0645\u0627\u0646\u0647 \u067e\u0630\u06cc\u0631\u0634 \u0648 \u0645\u062f\u06cc\u0631\u06cc\u062a \u062f\u0631\u0645\u0627\u0646\u06af\u0627\u0647\r\n";
-    body+=L"\u0645\u062c\u0648\u0632: \u0627\u062e\u062a\u0635\u0627\u0635\u06cc \u00a9 Azadi-Teb\r\n";
+    body+=L"\u0645\u062c\u0648\u0632: \u0627\u062e\u062a\u0635\u0627\u0635\u06cc \u00a9 DarmanPlus\r\n";
     HWND b=CreateWindowExW(0,L"STATIC",body.c_str(),WS_CHILD|WS_VISIBLE|SS_RIGHT|WS_CLIPSIBLINGS,
         x,y,w,S(160),sw->hwnd,NULL,g_hInst,NULL);
     SendMessageW(b,WM_SETFONT,(WPARAM)g_fUI,TRUE); sw->ctrls.push_back(b);
@@ -1031,7 +1047,23 @@ static LRESULT CALLBACK SettingsProc(HWND h,UINT m,WPARAM w,LPARAM l){
             MessageBoxW(h,L"تنظیمات پذیرش برای این کاربر ذخیره شد.",
                 L"تنظیمات پذیرش",MB_OK|MB_ICONINFORMATION);
             return 0; }
-        case IDC_PANEL_BASE+92: lookupBlacklistPatient(sw,false); return 0;
+        case IDC_PANEL_BASE+96: {   // v1.64.0: رفع مسدودی (unblock by national id)
+            std::wstring nid=settingsDigits(settingsText(h,IDC_PANEL_BASE+95));
+            if(nid.empty()){
+                MessageBoxW(h,L"کد ملی را وارد کنید.",L"رفع مسدودی",
+                    MB_OK|MB_ICONWARNING); return 0;
+            }
+            int n=Blacklist_Remove(nid);
+            if(n>0){
+                SetDlgItemTextW(h,IDC_PANEL_BASE+95,L"");
+                refreshBlacklistHistory(sw);
+                MessageBoxW(h,L"مسدودی این بیمار رفع شد.",L"رفع مسدودی",
+                    MB_OK|MB_ICONINFORMATION);
+            } else {
+                MessageBoxW(h,L"موردی برای این کد ملی در لیست سیاه یافت نشد.",
+                    L"رفع مسدودی",MB_OK|MB_ICONWARNING);
+            }
+            return 0; }
         case IDC_PANEL_BASE+91: {
             BlacklistEntry r;
             r.nid=settingsDigits(settingsText(h,IDC_PANEL_BASE+84));
@@ -1086,7 +1118,7 @@ static LRESULT CALLBACK SettingsProc(HWND h,UINT m,WPARAM w,LPARAM l){
         case IDC_PANEL_BASE+70: {   // copy contact details
             std::wstring c =
                 getSetting(L"contact.phone", L"\u06f0\u06f2\u06f1-\u06f1\u06f2\u06f3\u06f4\u06f5\u06f6\u06f7\u06f8")+L"  |  "+
-                getSetting(L"contact.email", L"support@azaditeb.ir");
+                getSetting(L"contact.email", L"support@darmanplus.ir");
             if(OpenClipboard(h)){
                 EmptyClipboard();
                 size_t bytes=(c.size()+1)*sizeof(wchar_t);

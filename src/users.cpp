@@ -10,6 +10,9 @@ static std::wstring usersPath(){ return dataDir()+L"\\users.dat"; }
 
 std::wstring hashPassword(const std::wstring& p){
     // FNV-1a 64-bit, double pass with salt — adequate for offline local store.
+    // NOTE: the SALT is intentionally kept as the original AzadiTeb token so
+    // existing user accounts (passwords hashed in data\users.dat) keep working
+    // after the درمان پلاس rename. Do NOT change this string.
     const wchar_t* SALT = L"AzadiTeb#2025!";
     std::wstring s = SALT + p + SALT;
     unsigned long long h = 14695981039346656037ULL;

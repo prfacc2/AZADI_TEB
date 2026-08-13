@@ -10,7 +10,7 @@
 //    SEH exception code (if relevant), full stack trace, free disk space,
 //    and the free-form "detail" payload.
 //
-//  Storage: %LOCALAPPDATA%/AzadiTeb/backup_logs/backup.log
+//  Storage: %LOCALAPPDATA%/DarmanPlus/backup_logs/backup.log
 //  Rotated at 2 MB, keeps the last 5 files (older ones gzipped via miniz).
 // ============================================================================
 #pragma once

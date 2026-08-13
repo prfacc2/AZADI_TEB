@@ -288,7 +288,7 @@ void BackupLog_Init(){
         // fall back to %TEMP%
         GetTempPathW(MAX_PATH,local);
     }
-    s_logDir = std::wstring(local)+L"\\AzadiTeb\\backup_logs";
+    s_logDir = std::wstring(local)+L"\\DarmanPlus\\backup_logs";
     SHCreateDirectoryExW(NULL,s_logDir.c_str(),NULL);
     s_logPath = s_logDir+L"\\backup.log";
     s_inited=true;

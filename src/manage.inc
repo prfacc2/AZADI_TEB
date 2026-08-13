@@ -490,7 +490,7 @@ static bool printPersonnelCard(HWND owner, const EmpRow& r, int paper){
         if(!PrintDlgW(&pd)) return false; dc=pd.hDC;
     }
     if(!dc) return false;
-    DOCINFOW di={sizeof(di)}; di.lpszDocName=L"آزادی طب — شناسنامهٔ پرسنلی";
+    DOCINFOW di={sizeof(di)}; di.lpszDocName=L"درمان پلاس — شناسنامهٔ پرسنلی";
     if(StartDocW(dc,&di)<=0){ DeleteDC(dc); return false; }
     StartPage(dc);
     int horz=GetDeviceCaps(dc,HORZRES), vert=GetDeviceCaps(dc,VERTRES);
@@ -2430,7 +2430,7 @@ static void pcDownload(HWND h){
     std::wstring suggest = (s_pcs->sel>=0? s_pcs->sects[s_pcs->sel].name_fa : L"design")+L".aztpl";
     wchar_t fn[MAX_PATH]={0}; wcsncpy(fn,suggest.c_str(),MAX_PATH-1);
     OPENFILENAMEW ofn={sizeof(ofn)}; ofn.hwndOwner=h;
-    ofn.lpstrFilter=L"طرح چاپ آزادی‌طب\0*.aztpl\0همه\0*.*\0";
+    ofn.lpstrFilter=L"طرح چاپ درمان‌پلاس\0*.aztpl\0همه\0*.*\0";
     ofn.lpstrFile=fn; ofn.nMaxFile=MAX_PATH; ofn.lpstrDefExt=L"aztpl";
     ofn.Flags=OFN_OVERWRITEPROMPT|OFN_PATHMUSTEXIST;
     if(!GetSaveFileNameW(&ofn)) return;
@@ -2445,7 +2445,7 @@ static void pcUpload(HWND h){
     if(!s_pcs) return;
     wchar_t fn[MAX_PATH]={0};
     OPENFILENAMEW ofn={sizeof(ofn)}; ofn.hwndOwner=h;
-    ofn.lpstrFilter=L"طرح چاپ آزادی‌طب\0*.aztpl;*.json\0همه\0*.*\0";
+    ofn.lpstrFilter=L"طرح چاپ درمان‌پلاس\0*.aztpl;*.json\0همه\0*.*\0";
     ofn.lpstrFile=fn; ofn.nMaxFile=MAX_PATH;
     ofn.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST;
     if(!GetOpenFileNameW(&ofn)) return;

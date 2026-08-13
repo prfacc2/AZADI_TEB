@@ -1085,10 +1085,14 @@
       var c = $('invoiceCard'); if (!c) return;
       c.className = /collapsed/.test(c.className) ? c.className.replace(/\s*collapsed/, '') : c.className + ' collapsed';
     });
-    on($('queueLauncher'), 'click', function () { openQueuePanel(); });
+    on($('queueLauncher'), 'click', function () { openQueuePanel('unpaid'); });
     on($('queueClose'),    'click', function () { closeQueuePanel(); });
-    /* v1.62.0: clicking the dim backdrop dismisses the panel, like a modal. */
-    on($('miniBackdrop'),  'click', function () { closeQueuePanel(); });
+    /* v1.64.0 (درمان پلاس): dedicated navigation buttons in the action rail that
+       open the full-screen queue directly on the requested tab. */
+    on($('navUnpaid'), 'click', function () { openQueuePanel('unpaid'); });
+    on($('navAdmQ'),   'click', function () { openQueuePanel('admission'); });
+    /* clicking the dim backdrop dismisses the full-screen overlay, like a modal. */
+    on($('queueBackdrop'),  'click', function () { closeQueuePanel(); });
     wireDrag($('queuePanel'), $('queueDrag'));
     /* v1.60.0: zoom in/out buttons REMOVED — fixed, readable scale. */
 
@@ -1111,13 +1115,12 @@
       setText($('addToQueue'), 'افزودن به صف پذیرش'); refreshQueue();
     });
 
-    /* save / clear / new */
+    /* save / clear / new — v1.64.0: «پذیرش جدید» and «انصراف» were removed;
+       «پاک کردن» empties every field via clearForm(). */
     on($('btnSave'), 'click', saveAdmission);
-    on($('btnNew'), 'click', function () { clearForm(); Bridge.call('admission.new', {}); toast('پذیرش جدید', 'ok'); });
     on($('hdrNewAdm'), 'click', function () { clearForm(); toast('پذیرش جدید', 'ok'); });
     on($('hdrNew'), 'click', function () { clearForm(); toast('پذیرش جدید', 'ok'); });
     on($('btnClear'), 'click', function () { clearForm(); Bridge.call('admission.clear', {}); });
-    on($('btnCancel'), 'click', function () { clearForm(); });
 
     /* Printing is intentionally native-only; F8 remains a convenience shortcut. */
     on($('hdrSettings'), 'click', function () { Bridge.call('ui.settings', {}); });
@@ -1148,25 +1151,29 @@
   function vw(){ return window.innerWidth  || document.documentElement.clientWidth  || 1024; }
   function vh(){ return window.innerHeight || document.documentElement.clientHeight || 768;  }
 
-  /* v1.62.0 — open/close go through one pair of helpers so the panel, its dim
-     backdrop and the docking pass can never fall out of sync (previously the
-     panel could be shown with no backdrop, which is what made it look like it
-     had slipped underneath an invisible layer). */
-  function openQueuePanel() {
-    var p = $('queuePanel'), b = $('miniBackdrop');
+  /* v1.64.0 (درمان پلاس) — the queue panel is now a FULL-SCREEN overlay sized
+     to the user's monitor (not a fixed draggable box). open/close go through
+     one pair of helpers so the overlay + its dim backdrop can never fall out of
+     sync. `tab` optionally selects the صندوق/صف tab before showing. */
+  function openQueuePanel(tab) {
+    var p = $('queuePanel'), b = $('queueBackdrop');
     if (!p) return;
-    if (b) b.className = 'mini-backdrop open';
-    p.className = p.className.replace(/\s*open/g, '') + ' open';
-    /* dock AFTER the panel is displayed — offsetWidth/Height are 0 while
-       display:none, so measuring first produced the mis-placed, half-off-screen
-       position the user reported. */
-    if (p._azDock) p._azDock();
+    if (tab === 'admission') {
+      state.queueKind = 'admission'; setActiveTab('tabAdmQ');
+      setText($('addToQueue'), 'افزودن به صف پذیرش');
+    } else if (tab === 'unpaid') {
+      state.queueKind = 'unpaid'; setActiveTab('tabQueue');
+      setText($('addToQueue'), 'افزودن به صندوق نرفته‌ها');
+    }
+    if (b) b.className = 'queue-backdrop open';
+    p.className = (p.className || '').replace(/\s*open/g, '') + ' open';
+    p.setAttribute('aria-hidden', 'false');
     refreshQueue();
   }
   function closeQueuePanel() {
-    var p = $('queuePanel'), b = $('miniBackdrop');
-    if (p) p.className = p.className.replace(/\s*open/g, '');
-    if (b) b.className = 'mini-backdrop';
+    var p = $('queuePanel'), b = $('queueBackdrop');
+    if (p) { p.className = (p.className || '').replace(/\s*open/g, ''); p.setAttribute('aria-hidden', 'true'); }
+    if (b) b.className = 'queue-backdrop';
   }
 
   function wireDrag(panel, handle) {
@@ -1543,6 +1550,22 @@
     subscribeEvents();
     on($('blockClose'),'click',closeBlock);
     on($('blockOverride'),'click',function(){closeBlock();state.overrideBlock=true;saveAdmission();});
+    /* v1.64.0 (درمان پلاس): «رفع مسدودی» — permanently remove the blacklist
+       entry for the entered national id so the patient can be admitted normally
+       from now on. The C++ side answers blacklist.remove. */
+    on($('blockUnblock'),'click',function(){
+      var rec = collectRecord();
+      var nid = (rec && rec.nid) ? rec.nid : '';
+      if(!nid){ toast('کد ملی وارد نشده است','err'); return; }
+      Bridge.call('blacklist.remove', { nid: nid }).then(function (res) {
+        if (res && res.ok) {
+          closeBlock();
+          toast('مسدودی این بیمار رفع شد', 'ok');
+        } else {
+          toast('رفع مسدودی ناموفق بود', 'err');
+        }
+      });
+    });
     setActiveTab('tabQueue');
     renderServices();
     recompute();               /* zero invoice on open */

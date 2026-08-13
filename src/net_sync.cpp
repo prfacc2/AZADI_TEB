@@ -46,7 +46,7 @@ static bool httpDo(const std::wstring& fullUrl, const wchar_t* method,
     std::wstring url = fullUrl;
     if(!splitUrl(url, host, port, path, https)) return false;
 
-    HINTERNET hSession = WinHttpOpen(L"AzadiTeb-NetSync/1.4",
+    HINTERNET hSession = WinHttpOpen(L"DarmanPlus-NetSync/1.4",
         WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME,
         WINHTTP_NO_PROXY_BYPASS, 0);
     if(!hSession) return false;
@@ -129,7 +129,7 @@ static std::wstring shareDir(const wchar_t* sub){
     std::wstring root = c.share_path;
     if(!root.empty() && root.back()==L'\\') root.pop_back();
     CreateDirectoryW(root.c_str(), NULL);
-    std::wstring p1 = root + L"\\AzadiTeb";
+    std::wstring p1 = root + L"\\DarmanPlus";
     CreateDirectoryW(p1.c_str(), NULL);
     std::wstring base = p1 + L"\\" + sub;
     CreateDirectoryW(base.c_str(), NULL);

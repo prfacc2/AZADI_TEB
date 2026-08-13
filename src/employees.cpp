@@ -260,7 +260,7 @@ void notifyNewMessageRecipients(){
             any=true; writeFileUtf8(seenP,tag,false);
         }
     }
-    if(any) showWindowsNotification(L"آزادی طب", L"شما یک پیام جدید دارید.");
+    if(any) showWindowsNotification(L"درمان پلاس", L"شما یک پیام جدید دارید.");
 }
 
 void pushMessageT(const std::wstring& from, const std::wstring& to,

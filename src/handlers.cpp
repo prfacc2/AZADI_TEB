@@ -42,11 +42,11 @@ void Breadcrumb(const wchar_t* what){
 
 // ---------------------------------------------------------- crash dumps ----
 //  RELEASE 1.2.0 (F.4): write a MiniDumpWriteDump alongside the existing crash
-//  log. Dumps go to %LOCALAPPDATA%/AzadiTeb/crashdumps/azaditeb-<utc>.dmp and
+//  log. Dumps go to %LOCALAPPDATA%/DarmanPlus/crashdumps/darmanplus-<utc>.dmp and
 //  the last 5 are kept (crash-only — exempt from the "no user logs" rule).
 static void crashRotateDumps(const wchar_t* dir){
     // collect *.dmp, delete all but the newest 4 (so adding 1 keeps 5)
-    wchar_t pat[MAX_PATH]; wsprintfW(pat,L"%s\\azaditeb-*.dmp",dir);
+    wchar_t pat[MAX_PATH]; wsprintfW(pat,L"%s\\darmanplus-*.dmp",dir);
     WIN32_FIND_DATAW fd; HANDLE h=FindFirstFileW(pat,&fd);
     if(h==INVALID_HANDLE_VALUE) return;
     // simple: gather names + write-times, keep newest 4
@@ -68,12 +68,12 @@ static void crashRotateDumps(const wchar_t* dir){
 static void crashWriteMiniDump(EXCEPTION_POINTERS* ep){
     wchar_t local[MAX_PATH]={0};
     if(SHGetFolderPathW(NULL,CSIDL_LOCAL_APPDATA,NULL,0,local)!=S_OK) return;
-    wchar_t dir[MAX_PATH]; wsprintfW(dir,L"%s\\AzadiTeb\\crashdumps",local);
+    wchar_t dir[MAX_PATH]; wsprintfW(dir,L"%s\\DarmanPlus\\crashdumps",local);
     SHCreateDirectoryExW(NULL,dir,NULL);
     crashRotateDumps(dir);
     SYSTEMTIME ut; GetSystemTime(&ut);
     wchar_t path[MAX_PATH];
-    wsprintfW(path,L"%s\\azaditeb-%04d%02d%02dT%02d%02d%02dZ.dmp",
+    wsprintfW(path,L"%s\\darmanplus-%04d%02d%02dT%02d%02d%02dZ.dmp",
         dir,ut.wYear,ut.wMonth,ut.wDay,ut.wHour,ut.wMinute,ut.wSecond);
     HANDLE hf=CreateFileW(path,GENERIC_WRITE,0,NULL,CREATE_ALWAYS,
                           FILE_ATTRIBUTE_NORMAL,NULL);
@@ -176,7 +176,7 @@ static void crashCore(DWORD code, void* addr, CONTEXT* c){
     static wchar_t body[4096];
 #if defined(_M_X64) || defined(__x86_64__)
     wsprintfW(body,
-        L"==== Azadi-Teb crash report v%s (x64) ====\r\n"
+        L"==== DarmanPlus crash report v%s (x64) ====\r\n"
         L"Time   : %04d-%02d-%02d %02d:%02d:%02d (local)\r\n"
         L"Code   : 0x%08X (%s)\r\n"
         L"Address: %p\r\nModule : %s\r\nFault  : %s\r\n"
@@ -190,7 +190,7 @@ static void crashCore(DWORD code, void* addr, CONTEXT* c){
         (UINT)(ms.ullTotalPhys/(1024*1024)), (UINT)(ms.ullAvailPhys/(1024*1024)));
 #else
     wsprintfW(body,
-        L"==== Azadi-Teb crash report v%s (x86) ====\r\n"
+        L"==== DarmanPlus crash report v%s (x86) ====\r\n"
         L"Time   : %04d-%02d-%02d %02d:%02d:%02d (local)\r\n"
         L"Code   : 0x%08X (%s)\r\n"
         L"Address: %p\r\nModule : %s\r\nFault  : %s\r\n"
@@ -239,7 +239,7 @@ static void crashCore(DWORD code, void* addr, CONTEXT* c){
         L"متأسفانه خطای غیرمنتظره‌ای رخ داد و برنامه بسته می‌شود.\n"
         L"گزارش کامل خطا در پوشهٔ logs ذخیره شد.\n\n"
         L"لطفاً برنامه را به‌صورت دستی دوباره اجرا کنید.",
-        L"آزادی طب — خطای سیستم",
+        L"درمان پلاس — خطای سیستم",
         MB_OK|MB_ICONERROR|MB_TOPMOST|MB_SETFOREGROUND);
     (void)dir; (void)exe;
     TerminateProcess(GetCurrentProcess(), (UINT)code);

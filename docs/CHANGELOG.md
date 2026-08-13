@@ -5,6 +5,35 @@
 
 ---
 
+## 1.64.0 — 2026-08-13 — بازنویسی هویت «درمان پلاس»
+
+> تغییر نام کامل برنامه از «آزادی طب» به «درمان پلاس» (DarmanPlus)، لوگوی دایره‌ای جدید، رفع باگ دکمه‌های سفید-بر-سفید، بازطراحی صفحهٔ پذیرش بیمار (تم سفید هماهنگ، صف/صندوق تمام‌صفحه) و رفع مسدودی بیمار.
+
+### Changed — تغییر نام کامل به درمان پلاس
+- `src/app.h`: `APP_NAME_W` → «درمان پلاس»، `APP_CLASS_W` → `DarmanPlusFrame`، نسخه ۱.۶۴.۰.
+- `src/app.rc` / `src/app.manifest` / `build.sh` / `build_incremental.sh`: نام محصول، نسخه و خروجی EXE به `DarmanPlus.exe`.
+- همهٔ رشته‌های فارسی «آزادی طب» در سراسر کد و دارایی‌ها به «درمان پلاس» تغییر کرد (SALT رمز عبور عمداً دست‌نخورده ماند تا حساب‌های موجود کار کنند).
+
+### Added — لوگوی دایره‌ای جدید
+- `assets/icons/logo.png`: لوگوی دایره‌ای ۲۵۶×۲۵۶ (گوشه‌های مربعی حذف شد).
+- `src/app.rc`: منبع RCDATA ۲۰۷ برای لوگو؛ `gpDrawImageResCircle()` جدید در `gdiplus.cpp`.
+- `src/main.cpp` / `src/dialogs.cpp` / `src/setup_splash.cpp`: لوگوی واقعی روی صفحهٔ خوش‌آمد، کارت ورود و هدر (با fallback گلایف).
+
+### Fixed — باگ دکمه‌های سفید-بر-سفید (تداخل ظاهری)
+- `src/theme.cpp`: دکمه‌های توپر حالا یک لایهٔ پایهٔ رنگی ثابت پیش از گرادیان می‌کشند (هرگز سطح لخت نمی‌ماند) و یک گارد کنتراست luminance، متن را در صورت نزدیکی به پس‌زمینه به رنگ متضاد تبدیل می‌کند.
+
+### Changed — بازطراحی صفحهٔ پذیرش بیمار (تم سفید هماهنگ)
+- `assets/admission/index.html` + `admission.css` + `admission.js`: پالت هماهنگ، ورودی‌های خوانا، کلیدهای ناوبری «صندوق نرفته‌ها» / «صف پذیرش».
+- حذف: تیک «عدم پرداخت فعلی»، دکمهٔ «پذیرش جدید»، دکمهٔ «انصراف». «پاک کردن» مقادیر تکست‌باکس‌ها را خالی می‌کند.
+- صف/صندوق حالا یک overlay تمام‌صفحه (بر اساس مانیتور کاربر) است، نه یک باکس نیمه‌صفحه.
+
+### Added — رفع مسدودی بیمار
+- `src/blacklist.cpp` / `src/app.h`: `Blacklist_Remove()` برای حذف دائمی مسدودی با کد ملی.
+- `src/web_admission_api.inc`: فعل `blacklist.remove`؛ دکمهٔ «رفع مسدودی» در مودال مسدودی پذیرش.
+- `src/user_settings.cpp`: صفحهٔ لیست سیاه — حذف دکمهٔ «تکمیل خودکار با کد ملی»، افزودن بخش «رفع مسدودی» با تکست‌باکس کد ملی.
+
+---
+
 ## 1.63.0 — 2026-08-03
 
 > این نسخه، کارهای **باقی‌ماندهٔ گزارش پایانی ۱.۶۲.۰** را تکمیل می‌کند: افت FPS تنظیمات، آیکون‌های حرفه‌ای، دکمه‌های صفحهٔ تنظیمات، و مدرن‌سازی تمام رابط نیتیو (پذیرش، مدیریت، دیالوگ‌ها، جدول‌ها) — در ۱.۶۲.۰ فقط صفحهٔ خوش‌آمد و کارت‌های ورود بازطراحی شده بود.
@@ -136,7 +165,7 @@
 - `src/user_settings.cpp`: «لیست سیاه بیماران» از تنظیمات ظاهری/پذیرش خارج و به یک **گزینه و صفحهٔ کاملاً مستقل** تبدیل شد (`ROW_BLACKLIST` / `PAGE_BLACKLIST`, آیکن `ICO_ID`). تنظیمات پذیرش اکنون فقط شامل حالت نمایش، بزرگ‌نمایی و ذخیره است.
 
 ### Meta
-- `src/app.h`، `src/app.rc`، `update/version.txt`: نسخه به ۱.۵۸.۰ ارتقا یافت. build کامل `AzadiTeb.exe` گرفته شد.
+- `src/app.h`، `src/app.rc`، `update/version.txt`: نسخه به ۱.۵۸.۰ ارتقا یافت. build کامل `DarmanPlus.exe` گرفته شد.
 
 ---
 
@@ -175,7 +204,7 @@
 > «لیستِ خدماتِ خالی روی رسید»، واکنش‌گرا کردنِ واقعیِ قالب‌های آماده هنگامِ
 > تغییرِ کاغذِ بخش، همگام‌سازیِ واژگانِ فیلدها با فرمِ پذیرش، و بهبودِ
 > راست‌به‌چپ/ارقامِ فارسی در جدولِ خدمات. (اجرای پرامپتِ مهندسیِ انگلیسی
-> «Azadi-Teb Print Designer Overhaul» — باگ‌های A تا F.)
+> «DarmanPlus Print Designer Overhaul» — باگ‌های A تا F.)
 
 ### Fixed — باگ A: نوعِ آیتمِ «services» در پلِ JS↔C++ گم شده بود (ریشهٔ اصلی)
 - **ریشهٔ مشکل:** آرایهٔ `JS_TYPES[]` در `src/web_designer.cpp` تنها ۱۲ عضو
@@ -544,7 +573,7 @@ No amount of JavaScript can synthesize Win32 messages that were never delivered.
     (کرومیوم از قبل `::-webkit-scrollbar` باریکِ ۶px داشت).
 
 ### Verification
-- بیلدِ موفقِ `./build.sh` → `build/AzadiTeb.exe` (PE32 i386، static).
+- بیلدِ موفقِ `./build.sh` → `build/DarmanPlus.exe` (PE32 i386، static).
 - راستی‌آزماییِ مرورگری (Playwright) با یک پلِ ماکِ C++: بدونِ خطای JS؛ پنهان‌شدنِ
   لودر، پرشدنِ بیمه‌ها، صفرـبودنِ صورت‌حساب هنگامِ باز شدن، اتوفیلِ کدِملی با Enter،
   افزودنِ خدمت با Enter، به‌روزرسانیِ زندهٔ قیمت پس از `catalog.update`، و
@@ -594,7 +623,7 @@ No amount of JavaScript can synthesize Win32 messages that were never delivered.
 
 ### Build / Verification
 - نسخه به **1.32.0** ارتقا یافت (`src/app.h`, `src/app.rc`).
-- خروجیِ نهاییِ production با `-Werror` تمیز build شد (`build/AzadiTeb.exe`، ۳٫۴ مگابایت).
+- خروجیِ نهاییِ production با `-Werror` تمیز build شد (`build/DarmanPlus.exe`، ۳٫۴ مگابایت).
 - راستی‌آزماییِ تصویری با wine 32-bit + Xvfb در ۱۳۶۶×۷۶۸ و ۱۶۰۰×۹۰۰ تأیید کرد:
   کارتِ پروفایل تمیز، P/S بدون تداخل، پزشکِ تکراری حذف، کلیدهای جمع‌شونده دیده
   می‌شوند، بدونِ سرریزِ پایین، و باز/جمع‌شدن کار می‌کند.
@@ -1082,7 +1111,7 @@ No amount of JavaScript can synthesize Win32 messages that were never delivered.
 
 ### Changed
 - نسخه به **1.21.0** ارتقا یافت. (`src/app.h`، `src/app.rc`)
-- EXE بازساخته‌شده در `build/AzadiTeb.exe` جایگزین شد.
+- EXE بازساخته‌شده در `build/DarmanPlus.exe` جایگزین شد.
 
 ---
 
@@ -1253,7 +1282,7 @@ No amount of JavaScript can synthesize Win32 messages that were never delivered.
 ### Fixed — کرش دیزاینر چاپ `ACCESS_VIOLATION 0xC0000005` (`src/print_designer_ui.inc`)
 - **ریشهٔ مشکل:** پنل Inspector دیزاینر از کنترل‌های سفارشی owner-draw
   (`AzNumberSpinner` / `AzColorPicker` / `AzSwitch` در `ui_kit.cpp`) استفاده می‌کرد
-  که منبع کرش قطعی در `AzadiTeb.exe+0x12789` بود.
+  که منبع کرش قطعی در `DarmanPlus.exe+0x12789` بود.
 - **راه‌حل (طبق درخواست کاربر «با کتابخانه/زبان دیگر بازنویسی شود»):** کل Inspector
   با **کنترل‌های استاندارد Win32** بازنویسی شد:
   - ویژگی‌های عددی → `EDIT` (IDها 6001–6006) با تابع `readNumEdit()` که ارقام
@@ -1297,7 +1326,7 @@ No amount of JavaScript can synthesize Win32 messages that were never delivered.
 ### Build
 - ارتقای نسخه به `1.18.3` در `src/app.h` (`APP_VERSION_W`)، `src/app.rc`
   (`FILEVERSION`/`PRODUCTVERSION` = `1,18,3,0`) و `update/version.txt`.
-- بازتولید EXE تک‌فایلی استاتیک 32 بیتی در `build/AzadiTeb.exe`.
+- بازتولید EXE تک‌فایلی استاتیک 32 بیتی در `build/DarmanPlus.exe`.
 
 ---
 
@@ -1317,7 +1346,7 @@ No amount of JavaScript can synthesize Win32 messages that were never delivered.
 ### Build
 - ارتقای نسخه به `1.18.2` در `src/app.h` (`APP_VERSION_W`)، `src/app.rc`
   (`FILEVERSION`/`PRODUCTVERSION` = `1,18,2,0`) و `update/version.txt`.
-- بازتولید EXE تک‌فایلی استاتیک 32 بیتی در `build/AzadiTeb.exe`.
+- بازتولید EXE تک‌فایلی استاتیک 32 بیتی در `build/DarmanPlus.exe`.
 
 ---
 
@@ -1447,8 +1476,8 @@ No amount of JavaScript can synthesize Win32 messages that were never delivered.
 - `update/version.txt`: `1.17.0`.
 
 ### Build
-- خروجی: `build/AzadiTeb.exe` (PE32/i386، استاتیک، ~۲٫۹MB) جایگزین نسخهٔ
-  قبلی شد؛ `AzadiTeb.exe.sha256` به‌روزرسانی شد.
+- خروجی: `build/DarmanPlus.exe` (PE32/i386، استاتیک، ~۲٫۹MB) جایگزین نسخهٔ
+  قبلی شد؛ `DarmanPlus.exe.sha256` به‌روزرسانی شد.
 
 ---
 
@@ -1483,7 +1512,7 @@ No amount of JavaScript can synthesize Win32 messages that were never delivered.
 - `src/setup_splash.cpp` (جدید)، `src/main.cpp` (فراخوانی `RunSetupSplash`)،
   `src/webhost_assets.inc`، `build.sh` (افزودن منبع جدید)، `src/app.h`،
   `src/app.rc`، `update/version.txt` → نسخه **1.16.1**؛ بازبیلد
-  `build/AzadiTeb.exe` + `build/AzadiTeb.exe.sha256`.
+  `build/DarmanPlus.exe` + `build/DarmanPlus.exe.sha256`.
 
 ---
 
@@ -1527,8 +1556,8 @@ No amount of JavaScript can synthesize Win32 messages that were never delivered.
 
 ### Files
 - `src/webhost_assets.inc`، `src/webhost_bridge.inc`، `src/app.h`، `src/app.rc`،
-  `update/version.txt` → نسخه **1.16.0**؛ بازبیلد `build/AzadiTeb.exe` +
-  `build/AzadiTeb.exe.sha256`.
+  `update/version.txt` → نسخه **1.16.0**؛ بازبیلد `build/DarmanPlus.exe` +
+  `build/DarmanPlus.exe.sha256`.
 
 ---
 
@@ -1560,7 +1589,7 @@ No amount of JavaScript can synthesize Win32 messages that were never delivered.
 ### Files
 - `src/webhost_assets.inc` (بازچینش کامل ظاهر + JS سازگار)، `src/app.h`،
   `src/app.rc`، `update/version.txt` → نسخه **1.15.1**؛ بازبیلد
-  `build/AzadiTeb.exe` + `build/AzadiTeb.exe.sha256`.
+  `build/DarmanPlus.exe` + `build/DarmanPlus.exe.sha256`.
 
 ---
 
@@ -1634,7 +1663,7 @@ No amount of JavaScript can synthesize Win32 messages that were never delivered.
 
 > **Print-designer crash containment for the modal pump + reception save/insurance
 > hardening.** Closes the remaining crash window in «دیزاین پرینتر» (the
-> `0xC0000005` ACCESS_VIOLATION at `AzadiTeb.exe+0x12649`, last breadcrumb
+> `0xC0000005` ACCESS_VIOLATION at `DarmanPlus.exe+0x12649`, last breadcrumb
 > *"print designer: open editor"*, garbage `EBP`) and finishes the patient
 > reception update (save error, empty insurance lists, ptype tariff parity).
 
@@ -1744,7 +1773,7 @@ No amount of JavaScript can synthesize Win32 messages that were never delivered.
 ### Files
 - `src/print_designer_ui.inc`, `src/webhost_assets.inc`,
   `src/app.h`, `src/app.rc`, `update/version.txt`,
-  `build/AzadiTeb.exe`, `build/AzadiTeb.exe.sha256`, `docs/CHANGELOG.md`.
+  `build/DarmanPlus.exe`, `build/DarmanPlus.exe.sha256`, `docs/CHANGELOG.md`.
 
 ---
 
@@ -1788,8 +1817,8 @@ No amount of JavaScript can synthesize Win32 messages that were never delivered.
 ### Validated
 - Clean cross-build with `./build.sh` under
   `-Wall -Wextra -Werror` (i686-w64-mingw32, static PE32). The rebuilt
-  `build/AzadiTeb.exe` carries the `1.14.2` version resource and its
-  `build/AzadiTeb.exe.sha256` sidecar was regenerated to match.
+  `build/DarmanPlus.exe` carries the `1.14.2` version resource and its
+  `build/DarmanPlus.exe.sha256` sidecar was regenerated to match.
 
 ---
 
@@ -2179,8 +2208,8 @@ No amount of JavaScript can synthesize Win32 messages that were never delivered.
   FUTURE version are round-tripped verbatim and never silently dropped.
 
 ### Build
-- Single static 32-bit `build/AzadiTeb.exe` (PE32, runs on Windows 7–11),
-  rebuilt with `-Wall -Wextra -Werror` clean; refreshed `AzadiTeb.exe.sha256`.
+- Single static 32-bit `build/DarmanPlus.exe` (PE32, runs on Windows 7–11),
+  rebuilt with `-Wall -Wextra -Werror` clean; refreshed `DarmanPlus.exe.sha256`.
 
 ---
 
@@ -2215,7 +2244,7 @@ No amount of JavaScript can synthesize Win32 messages that were never delivered.
   `data\profile_requests_inbox\*.json`, with approve (applies the new name via
   `setUserFullName`) / reject (archives) actions.
 - **Backup-log viewer** (`src/backup_log_viewer.cpp`, §7.2) — read-only
-  newest-first viewer of `%LOCALAPPDATA%\AzadiTeb\backup_logs\backup.log`
+  newest-first viewer of `%LOCALAPPDATA%\DarmanPlus\backup_logs\backup.log`
   (and rotated siblings) with همه / موفق / ناموفق filter chips and a raw
   details pane.
 - **LAN-sync layer** (`src/net_sync.{h,cpp}`, §9) — WinHTTP-first
@@ -2259,7 +2288,7 @@ No amount of JavaScript can synthesize Win32 messages that were never delivered.
   `backup_logs/backup.log` (+ crash dumps); `.gitignore` extended with
   `logs/` and the v1.4.0 runtime stores.
 - Still a single static PE32 exe built by `build.sh`; a `.sha256` sidecar is
-  written next to `build/AzadiTeb.exe`.
+  written next to `build/DarmanPlus.exe`.
 
 ---
 
@@ -2312,7 +2341,7 @@ No amount of JavaScript can synthesize Win32 messages that were never delivered.
 
 ### Notes
 - Logging policy re-verified: the only on-disk logs are the dedicated
-  Backup Log (`%LOCALAPPDATA%/AzadiTeb/backup_logs/backup.log`) and crash
+  Backup Log (`%LOCALAPPDATA%/DarmanPlus/backup_logs/backup.log`) and crash
   dumps; the general `logLine()` channel is a compile-time no-op in
   release. `.gitignore` extended with `crashdumps/`.
 - Build remains a single static PE32 exe via `build.sh`
@@ -2332,11 +2361,11 @@ No amount of JavaScript can synthesize Win32 messages that were never delivered.
   picker with paper size + print preview + test print.
 - Admin inbox for profile change requests.
 - Backup Log channel (only logging that remains): dedicated
-  `%LOCALAPPDATA%/AzadiTeb/backup_logs/backup.log`, 2 MB rotation,
+  `%LOCALAPPDATA%/DarmanPlus/backup_logs/backup.log`, 2 MB rotation,
   last-5 gzipped, with timestamp/pid/tid/phase/file/size/identity-hash/
   Win32+SQLite+SEH/C++ error text/stack trace/free-disk/breadcrumbs.
 - Crash handler now also writes a full `MiniDumpWriteDump` to
-  `%LOCALAPPDATA%/AzadiTeb/crashdumps/` (crash-only, last 5 kept).
+  `%LOCALAPPDATA%/DarmanPlus/crashdumps/` (crash-only, last 5 kept).
 
 ### Changed
 - Reception form layout: new 3-column grid; all blue section labels
@@ -2427,7 +2456,7 @@ No amount of JavaScript can synthesize Win32 messages that were never delivered.
     و کست‌های امن `GetProcAddress`).
 21. **build.sh**: افزودن منابع جدید، فلگ‌های `-DUNICODE -D_UNICODE`، لینک
     `-lmsimg32 -ldwmapi -luxtheme -lversion -lwinmm`، و تولید خودکار
-    `AzadiTeb.exe.sha256`.
+    `DarmanPlus.exe.sha256`.
 
 ---
 
@@ -2540,7 +2569,7 @@ No amount of JavaScript can synthesize Win32 messages that were never delivered.
      شبکه‌ای از طریق `lookupCitizen` → فروشگاه محلی در `dataDir`.
    - چاپ: مسیر کامل `printDesignedReceipt` با مقیاس‌بندی DPI، حالت‌های fit/fill،
      متن RTL، خط/قاب/لوگو و گزینهٔ چاپگر پیش‌فرض یا دیالوگ سیستمی سالم است.
-7. **ساخت نسخهٔ تولیدی تازه**: `build/AzadiTeb.exe` با همهٔ تغییرات این جلسه و بدون
+7. **ساخت نسخهٔ تولیدی تازه**: `build/DarmanPlus.exe` با همهٔ تغییرات این جلسه و بدون
    `AZ_DEBUG_BUILD` بازسازی شد. نسخه به **۱.۹.۲** در `app.h` و `app.rc` ارتقا یافت.
 
 ### 📁 فایل‌های تغییریافته
@@ -2610,7 +2639,7 @@ Enter و تکمیل خودکار، بازیابی پشتیبان به لایهٔ
 `src/admin.cpp`، `src/manage.inc`، `src/main.cpp`، `src/app.h`.
 
 ### 🧪 ساخت
-`./build.sh` → `build/AzadiTeb.exe` (PE32 i386، استاتیک، ~1.7MB) بدون خطا.
+`./build.sh` → `build/DarmanPlus.exe` (PE32 i386، استاتیک، ~1.7MB) بدون خطا.
 
 ---
 
@@ -2678,7 +2707,7 @@ Enter و تکمیل خودکار، بازیابی پشتیبان به لایهٔ
      (قبلاً تکست‌باکس‌ها بدون کادر و در هم بودند).
    - ارتفاع ردیف `30→44`، ارتفاع ورودی `→28`، لیبل‌ها بالاتر و شروع گروه جستجو
      پایین‌تر تا تداخل لیبل/ورودی/عنوان گروه/ردیف بعدی برطرف شود.
-3. **بیلد**: `build/AzadiTeb.exe` تازه ساخته و جایگزین خروجی قبلی شد؛ نسخه `1.8.1`.
+3. **بیلد**: `build/DarmanPlus.exe` تازه ساخته و جایگزین خروجی قبلی شد؛ نسخه `1.8.1`.
 
 ---
 
@@ -2723,7 +2752,7 @@ Enter و تکمیل خودکار، بازیابی پشتیبان به لایهٔ
     آرشیوشده، گزینهٔ «ارسال به پیام‌های ذخیره‌شده» (پیش‌فرض غیرفعال/خاکستری) و
     کلید تنظیمات «پیام‌های ذخیره‌شده» (پیش‌فرض غیرفعال). داده‌ها به‌صورت محلی و
     دائمی با متن و پیوست قابل‌دانلود ذخیره می‌شوند.
-14. **بیلد تازه**: خروجی قبلی پاک و با `build/AzadiTeb.exe` تازه جایگزین شد.
+14. **بیلد تازه**: خروجی قبلی پاک و با `build/DarmanPlus.exe` تازه جایگزین شد.
 
 ### 🔢 نسخه
 - `APP_VERSION_W` در `app.h` و `app.rc` به **1.8.0** ارتقا یافت.
@@ -2732,7 +2761,7 @@ Enter و تکمیل خودکار، بازیابی پشتیبان به لایهٔ
 
 ## v1.7.0 (build) — 2026-06-15 — بیلد تازه و همگام‌سازی با گیت‌هاب
 
-- **بیلد تمیز و تازهٔ `build/AzadiTeb.exe`** از روی سورس کامل v1.7.0 با
+- **بیلد تمیز و تازهٔ `build/DarmanPlus.exe`** از روی سورس کامل v1.7.0 با
   کراس‌کامپایلر MinGW-w64 i686 (پاک‌سازی کامل `build/` و `obj/` قبل از بیلد).
   خروجی یک EXE ایستای ۳۲ بیتی PE32 i386 GUI است که با درخت سورس کاملاً منطبق
   است (بدون خطا؛ فقط چند هشدار بی‌خطر indentation).
@@ -2771,7 +2800,7 @@ Enter و تکمیل خودکار، بازیابی پشتیبان به لایهٔ
 7. **رفع پرش/کندی پنجرهٔ تنظیمات** (`settings.cpp`): کش پس‌زمینه (Memory DC +
    بیت‌مپ) و **بازترسیم ناحیه‌ای** به‌جای Invalidate تمام‌صفحه در هر حرکت ماوس؛
    حرکت ماوس روان شد.
-8. **خروجی ساخت**: پاک‌سازی پوشهٔ build و تولید مجدد `build/AzadiTeb.exe` هماهنگ با
+8. **خروجی ساخت**: پاک‌سازی پوشهٔ build و تولید مجدد `build/DarmanPlus.exe` هماهنگ با
    سورس به‌روزشده.
 
 ---
@@ -3041,7 +3070,7 @@ admin.cpp, calculator.cpp, app.h, app.rc}` + `update/version.txt` (← 1.1.0)
   راست به چپ، دکمه‌های ماشین‌حساب/پذیرش جدید سمت چپ نوار اطلاعات).
   فقط ListView جدول کاربران ادمین (که رسم سفارشی ندارد) RTL سیستمی ماند.
 - **هم‌پوشانی صفحه اصلی** (`main.cpp`): کارت‌های «پذیرش درمانگاه» و
-  «پنل مدیریت» روی متن «آزادی طب» می‌افتادند چون مختصات WM_PAINT و WM_SIZE
+  «پنل مدیریت» روی متن «درمان پلاس» می‌افتادند چون مختصات WM_PAINT و WM_SIZE
   جداگانه محاسبه می‌شد. حالا هر دو از یک پشته عمودی واحد استفاده می‌کنند:
   لوگو(۸۸) ← عنوان(۴۴) ← زیرعنوان(۲۸) ← فاصله(۳۶) ← کارت‌ها(۱۷۰) — همگی
   وسط‌چین عمودی و بدون هیچ هم‌پوشانی روی هر اندازه مانیتور.

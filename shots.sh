@@ -27,10 +27,10 @@ $CXX -std=c++17 -O2 -municode -mwindows -DAZ_DEBUG_BUILD \
     -D_WIN32_IE=0x0700 -static -static-libgcc -static-libstdc++ \
     -Wall -Wno-unused-variable -Wno-misleading-indentation -Wno-unused-function \
     $SRCS obj/app.res \
-    -o build/AzadiTeb_dbg.exe \
+    -o build/DarmanPlus_dbg.exe \
     -lcomctl32 -lcomdlg32 -lgdi32 -lgdiplus -luser32 -lshlwapi -lwininet \
     -ladvapi32 -lshell32 -lwinspool -lole32 -luuid >/tmp/dbgbuild.log 2>&1 || { tail -30 /tmp/dbgbuild.log; exit 1; }
-i686-w64-mingw32-strip build/AzadiTeb_dbg.exe
+i686-w64-mingw32-strip build/DarmanPlus_dbg.exe
 echo "[build dbg] OK"
 
 # ensure Xvfb
@@ -42,7 +42,7 @@ fi
 for SCREEN in "${SCREENS[@]}"; do
   OUT="shots/shot_${SCREEN}.png"
   export AZ_DEBUG_SCREEN="$SCREEN"
-  wine build/AzadiTeb_dbg.exe >/dev/null 2>&1 &
+  wine build/DarmanPlus_dbg.exe >/dev/null 2>&1 &
   WPID=$!
   sleep 8
   import -window root "$OUT" 2>/dev/null || xwd -root -silent -display :99 | convert xwd:- "$OUT" 2>/dev/null || true

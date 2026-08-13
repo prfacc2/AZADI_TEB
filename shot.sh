@@ -22,12 +22,12 @@ SRCS="src/main.cpp src/util.cpp src/handlers.cpp src/theme.cpp src/users.cpp \
 $CXX -std=c++17 -O2 -municode -mwindows -DAZ_DEBUG_BUILD \
     -D_WIN32_IE=0x0700 -static -static-libgcc -static-libstdc++ \
     -Wall -Wno-unused-variable $SRCS obj/app.res \
-    -o build/AzadiTeb_dbg.exe \
+    -o build/DarmanPlus_dbg.exe \
     -lcomctl32 -lcomdlg32 -lgdi32 -lgdiplus -lmsimg32 -ldwmapi -luxtheme \
     -luser32 -lshlwapi -lwininet -ladvapi32 -lshell32 -lwinspool \
     -lole32 -luuid -lversion -lwinmm -ldbghelp \
     -lwinhttp -lurlmon -lcrypt32 -lwintrust -lwtsapi32 -lpsapi -lws2_32 -loleaut32 >/dev/null
-i686-w64-mingw32-strip build/AzadiTeb_dbg.exe
+i686-w64-mingw32-strip build/DarmanPlus_dbg.exe
 
 export WINEDEBUG=-all
 export AZ_DEBUG_SCREEN="$SCREEN"
@@ -37,7 +37,7 @@ sleep 0.5
 Xvfb :99 -screen 0 ${RESO}x24 >/dev/null 2>&1 &
 XVFB=$!
 sleep 1.5
-wine build/AzadiTeb_dbg.exe >/dev/null 2>&1 &
+wine build/DarmanPlus_dbg.exe >/dev/null 2>&1 &
 WPID=$!
 sleep 9
 import -window root "$OUT" 2>/dev/null || xwd -root -silent | convert xwd:- "$OUT" 2>/dev/null || \
@@ -47,7 +47,7 @@ if [ ! -f "$OUT" ]; then
   DISPLAY=:99 import -window root "$OUT" 2>/dev/null || true
 fi
 sleep 0.5
-pkill -f AzadiTeb_dbg 2>/dev/null || true
+pkill -f DarmanPlus_dbg 2>/dev/null || true
 kill $XVFB 2>/dev/null || true
 echo "Saved $OUT"
 ls -la "$OUT" 2>/dev/null || echo "NO SCREENSHOT"

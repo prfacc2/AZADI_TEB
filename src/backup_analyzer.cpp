@@ -19,7 +19,7 @@
 //    • ZIP       → enumerates entries (name, raw vs compressed size, ratio).
 //    • SQL dump  → counts CREATE TABLE / INSERT INTO per table, statements.
 //    • JSON      → object/array/key counts.
-//    • AzadiTeb «.aztbk» / plain text → patient-store summary when recognisable.
+//    • DarmanPlus «.aztbk» / plain text → patient-store summary when recognisable.
 //    • Anything else → byte/line stats + printable-ratio heuristic.
 //
 //  Progress is REAL (bytes processed / total bytes), reported via a callback so
@@ -284,7 +284,7 @@ static void analyzeSqlite(const std::wstring& path, BkAnalysis& A,
             BkSection s; s.title=L"تحلیل دامنه: جدول بیماران";
             s.body =L"جدول بیماران شناسایی شد: "+(patientName.empty()?std::wstring(L"patients"):patientName)+L"\r\n";
             s.body+=L"تعداد ستون‌ها: "+bkNum(patientCols)+L"\r\n";
-            s.body+=L"این پشتیبان شامل ساختار اطلاعات بیماران سازگار با آزادی‌طب است.";
+            s.body+=L"این پشتیبان شامل ساختار اطلاعات بیماران سازگار با درمان‌پلاس است.";
             A.sections.push_back(s);
         }
     }
@@ -297,7 +297,7 @@ static void analyzeSqlite(const std::wstring& path, BkAnalysis& A,
     }
     {
         BkSection s; s.title=L"پیش‌نیازها و روش وارد کردن";
-        s.body =L"نسخهٔ موردنیاز برنامه: آزادی‌طب نسخهٔ فعلی یا بالاتر\r\n";
+        s.body =L"نسخهٔ موردنیاز برنامه: درمان‌پلاس نسخهٔ فعلی یا بالاتر\r\n";
         s.body+=L"فضای دیسک موردنیاز: حداقل "+bkHuman(dbSize*2)+L" (برای بازیابی امن)\r\n";
         s.body+=L"دسترسی: نوشتن در پوشهٔ data برنامه\r\n";
         s.body+=L"روش وارد کردن: پنجرهٔ پشتیبان‌گیری ← «بازیابی از پشتیبان» ← انتخاب همین فایل ← انتخاب دسته‌ها ← «بازیابی».";
@@ -390,7 +390,7 @@ static void analyzeZip(const std::wstring& path, BkAnalysis& A,
 //  the front of the file (never loading a multi-GB .bak wholesale) and walk the
 //  DBLK chain to recover the media/backup-set names, software vendor/version,
 //  and the embedded database file list (MSCI/DBDB). This is a *read-only,
-//  forensic* description: AzadiTeb does not (and cannot) restore a SQL Server
+//  forensic* description: DarmanPlus does not (and cannot) restore a SQL Server
 //  database — that requires a running SQL Server instance — so the report is
 //  explicit about the honest import path (restore via SQL Server / SSMS, then
 //  export the patient data and import the result here).
@@ -495,11 +495,11 @@ static void analyzeMtf(const std::wstring& path, BkAnalysis& A,
     }
     {
         BkSection s; s.title=L"پیش‌نیازها و روش وارد کردن (مهم)";
-        s.body =L"این یک پشتیبان بومی SQL Server است و آزادی‌طب به‌تنهایی قادر به بازیابی مستقیم آن نیست؛ بازیابی نیازمند یک نمونهٔ SQL Server است.\r\n\r\n";
+        s.body =L"این یک پشتیبان بومی SQL Server است و درمان‌پلاس به‌تنهایی قادر به بازیابی مستقیم آن نیست؛ بازیابی نیازمند یک نمونهٔ SQL Server است.\r\n\r\n";
         s.body+=L"روش درست و صادقانه:\r\n";
         s.body+=L"۱) فایل .bak را در SQL Server / SSMS با دستور RESTORE DATABASE بازیابی کنید.\r\n";
         s.body+=L"۲) داده‌های بیماران را از پایگاه‌دادهٔ بازیابی‌شده به CSV/SQL خروجی بگیرید.\r\n";
-        s.body+=L"۳) خروجی را از مسیر «بازیابی از پشتیبان» در آزادی‌طب وارد کنید.";
+        s.body+=L"۳) خروجی را از مسیر «بازیابی از پشتیبان» در درمان‌پلاس وارد کنید.";
         A.sections.push_back(s);
     }
     {
@@ -573,7 +573,7 @@ static void analyzeText(const std::wstring& path, BkAnalysis& A, int kind,
             if(pipes>=6){ rows++; withPipe++; }
         }
         { BkSection s; s.title=L"نوع بکاپ و نسخهٔ فرمت";
-          s.body=(rows>0)?L"نوع: مخزن متنی بیماران آزادی‌طب (سازگار)":L"نوع: فایل متنی عمومی";
+          s.body=(rows>0)?L"نوع: مخزن متنی بیماران درمان‌پلاس (سازگار)":L"نوع: فایل متنی عمومی";
           A.sections.push_back(s); }
         if(rows>0){
             BkSection s; s.title=L"خلاصهٔ بیماران";

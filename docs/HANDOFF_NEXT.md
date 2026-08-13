@@ -1,4 +1,4 @@
-# گزارش تحویل برای مدل بعدی — آزادی طب (Azadi-Teb) v1.63.0
+# گزارش تحویل برای مدل بعدی — درمان پلاس (DarmanPlus) v1.63.0
 
 > این فایل را **قبل از هر کاری** بخوان. وضعیت دقیق پروژه، کارهای انجام‌شده،
 > کارهای باقی‌مانده، و نقطهٔ دقیق ادامه را توضیح می‌دهد.
@@ -9,17 +9,17 @@
 
 ## ۱) معرفی پروژه
 
-- **آزادی طب**: نرم‌افزار دسکتاپ پذیرش/مدیریت درمانگاه، فارسی و راست‌به‌چپ (RTL).
+- **درمان پلاس**: نرم‌افزار دسکتاپ پذیرش/مدیریت درمانگاه، فارسی و راست‌به‌چپ (RTL).
 - **زبان/فناوری**: C++17 خالص با Win32 API + GDI/GDI+ (بدون Qt/MFC/.NET) + صفحهٔ پذیرش HTML تعبیه‌شده (MSHTML/WebView2 هیبرید).
-- **خروجی**: یک فایل EXE استاتیک (PE32 i686) برای ویندوز ۷ تا ۱۱، در `build/AzadiTeb.exe` (~۴.۳ مگابایت).
-- **کامپایل**: `./build.sh` → `i686-w64-mingw32-g++` با `-std=c++17 -O2 -s -municode -mwindows -static -Wall -Wextra -Werror`، سپس strip و تولید `build/AzadiTeb.exe.sha256`.
+- **خروجی**: یک فایل EXE استاتیک (PE32 i686) برای ویندوز ۷ تا ۱۱، در `build/DarmanPlus.exe` (~۴.۳ مگابایت).
+- **کامپایل**: `./build.sh` → `i686-w64-mingw32-g++` با `-std=c++17 -O2 -s -municode -mwindows -static -Wall -Wextra -Werror`، سپس strip و تولید `build/DarmanPlus.exe.sha256`.
 - **مخزن**: https://github.com/prfacc2/AZADI_TEB — برنچ‌ها: `main` (اصلی)، `dev` (آینه)، `genspark_ai_developer` (کاری).
 
 ### قواعد الزامی کاربر (تغییرناپذیر)
 
 1. بعد از **هر بخش**، فوراً کامیت + پوش روی گیت‌هاب (نه به‌صورت دسته‌ای).
 2. توضیح/سؤال اضافی به کاربر نده؛ کار را تا ۱۰۰٪ کامل کن.
-3. EXE جدید باید جایگزین `build/AzadiTeb.exe` شود.
+3. EXE جدید باید جایگزین `build/DarmanPlus.exe` شود.
 4. `docs/CHANGELOG.md` را برای هر نسخه به‌روز کن.
 5. RTL دستی است (بدون `WS_EX_LAYOUTRTL`).
 6. چرخهٔ انتشار کامل: build → push به `main` و `dev` → PR + اشتراک لینک → ریلیز جدید با EXE → **حذف ریلیز/تگ قبلی** → گزارش ۴ بخشی (CHANGED / UNCHANGED / STILL NEEDING WORK / REMAINING).
@@ -126,7 +126,7 @@ sudo apt-get install -y g++-mingw-w64-i686 binutils-mingw-w64-i686
 ```bash
 cd /home/user/webapp
 ./build.sh                                     # باید Build OK بدهد
-strings build/AzadiTeb.exe | grep 1.63.0       # تأیید نسخه در باینری
+strings build/DarmanPlus.exe | grep 1.63.0       # تأیید نسخه در باینری
 python3 scripts/test_admission_assets.py       # 7/7 PASS
 python3 scripts/test_builtin_templates.py      # all PASS
 node --check assets/admission/admission.js     # OK
@@ -143,7 +143,7 @@ gh pr create --base main --head genspark_ai_developer --title "..." --body "..."
 # لینک PR را به کاربر بده
 gh pr merge --merge
 git push origin main:dev                        # آینه
-gh release create v1.63.0 build/AzadiTeb.exe build/AzadiTeb.exe.sha256 -t "..." -n "..."
+gh release create v1.63.0 build/DarmanPlus.exe build/DarmanPlus.exe.sha256 -t "..." -n "..."
 gh release delete v1.62.0 --cleanup-tag -y      # حذف نسخهٔ قبلی
 ```
 

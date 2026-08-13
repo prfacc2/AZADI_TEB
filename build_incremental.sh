@@ -1,8 +1,8 @@
 #!/bin/bash
 # ============================================================================
-#  Azadi-Teb INCREMENTAL build (low-memory, per-file compilation)
+#  DarmanPlus INCREMENTAL build (low-memory, per-file compilation)
 #  Compiles each .cpp -> obj/*.o one at a time so peak RAM stays low on
-#  memory-constrained build hosts, then links to build/AzadiTeb.exe.
+#  memory-constrained build hosts, then links to build/DarmanPlus.exe.
 #  Functionally identical output to build.sh (same flags/libs).
 # ============================================================================
 set -e
@@ -53,15 +53,15 @@ echo "[3/3] Linking..."
 $CXX -municode -mwindows \
     -static -static-libgcc -static-libstdc++ \
     $OBJS obj/app.res \
-    -o build/AzadiTeb.exe \
+    -o build/DarmanPlus.exe \
     $LIBS
 
-i686-w64-mingw32-strip build/AzadiTeb.exe
+i686-w64-mingw32-strip build/DarmanPlus.exe
 
 if command -v sha256sum >/dev/null 2>&1; then
-    ( cd build && printf '%s  AzadiTeb.exe\n' "$(sha256sum AzadiTeb.exe | awk '{print $1}')" > AzadiTeb.exe.sha256 )
-    echo "SHA-256 -> build/AzadiTeb.exe.sha256"
+    ( cd build && printf '%s  DarmanPlus.exe\n' "$(sha256sum DarmanPlus.exe | awk '{print $1}')" > DarmanPlus.exe.sha256 )
+    echo "SHA-256 -> build/DarmanPlus.exe.sha256"
 fi
 
-ls -lh build/AzadiTeb.exe
-echo "Build OK -> build/AzadiTeb.exe"
+ls -lh build/DarmanPlus.exe
+echo "Build OK -> build/DarmanPlus.exe"

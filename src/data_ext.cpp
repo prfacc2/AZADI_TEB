@@ -368,7 +368,7 @@ ImportResult importPatientsFromFile(const std::wstring& path){
 // ----------------------------------------------------------------------------
 static std::string regHttpGet(const std::wstring& url, bool* okOut){
     *okOut=false; std::string body;
-    HINTERNET net=InternetOpenW(L"AzadiTeb/1.7", INTERNET_OPEN_TYPE_PRECONFIG,NULL,NULL,0);
+    HINTERNET net=InternetOpenW(L"DarmanPlus/1.7", INTERNET_OPEN_TYPE_PRECONFIG,NULL,NULL,0);
     if(!net) return body;
     // short timeouts so a missing/slow server never freezes the UI
     DWORD to=4000;

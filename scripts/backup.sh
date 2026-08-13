@@ -1,12 +1,12 @@
 #!/bin/bash
 # ============================================================================
-#  Azadi-Teb (آزادی‌طب) — source backup script
+#  DarmanPlus (درمان‌پلاس) — source backup script
 # ----------------------------------------------------------------------------
 #  Creates a versioned, dated ZIP archive of the project SOURCE (and docs /
 #  assets / fonts / build scripts) under  backup/  so every release can be
 #  restored later. The archive name follows the existing convention:
 #
-#      AzadiTeb_v<VERSION>_source_backup_<YYYY-MM-DD>.zip
+#      DarmanPlus_v<VERSION>_source_backup_<YYYY-MM-DD>.zip
 #
 #  The VERSION is read automatically from src/app.h (APP_VERSION_W) unless you
 #  pass one explicitly:
@@ -102,9 +102,9 @@ if [ "$DATA_MODE" -eq 1 ]; then
         echo "   pass it explicitly:  ./scripts/backup.sh --data /path/to/data"
         exit 1
     fi
-    ARCHIVE="$OUT_DIR/AzadiTeb_v${VERSION}_data_backup_${DATE}.zip"
+    ARCHIVE="$OUT_DIR/DarmanPlus_v${VERSION}_data_backup_${DATE}.zip"
     echo "============================================================"
-    echo "  Azadi-Teb LIVE data backup"
+    echo "  DarmanPlus LIVE data backup"
     echo "  version : v${VERSION}"
     echo "  data    : ${DATA_DIR}"
     echo "  date    : ${DATE}"
@@ -129,13 +129,13 @@ if [ "$DATA_MODE" -eq 1 ]; then
 fi
 
 if [ "$WITH_ASSETS" -eq 1 ]; then
-    ARCHIVE="$OUT_DIR/AzadiTeb_v${VERSION}_full_backup_${DATE}.zip"
+    ARCHIVE="$OUT_DIR/DarmanPlus_v${VERSION}_full_backup_${DATE}.zip"
 else
-    ARCHIVE="$OUT_DIR/AzadiTeb_v${VERSION}_source_backup_${DATE}.zip"
+    ARCHIVE="$OUT_DIR/DarmanPlus_v${VERSION}_source_backup_${DATE}.zip"
 fi
 
 echo "============================================================"
-echo "  Azadi-Teb backup"
+echo "  DarmanPlus backup"
 echo "  version : v${VERSION}"
 echo "  date    : ${DATE}"
 echo "  assets  : $([ "$WITH_ASSETS" -eq 1 ] && echo included || echo excluded)"

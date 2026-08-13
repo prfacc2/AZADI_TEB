@@ -1,6 +1,6 @@
-# 🏥 آزادی طب (Azadi-Teb)
+# 🏥 درمان پلاس (DarmanPlus)
 
-**سامانه پذیرش و مدیریت درمانگاه — نسخه ۱.۶۳.۰**
+**سامانه پذیرش و مدیریت درمانگاه — نسخه ۱.۶۴.۰**
 
 برنامه دسکتاپ ویندوز با C++ خالص (Win32 API) — بدون هیچ وابستگی خارجی، یک فایل EXE واحد.
 
@@ -72,7 +72,7 @@
 
 ## 📦 دانلود و اجرا
 
-فایل اجرایی آماده: [`build/AzadiTeb.exe`](build/AzadiTeb.exe)
+فایل اجرایی آماده: [`build/DarmanPlus.exe`](build/DarmanPlus.exe)
 
 - یک فایل EXE واحد — **هم روی ویندوز 32 بیتی و هم 64 بیتی** اجرا می‌شود.
 - سازگار با ویندوز **7 / 8 / 8.1 / 10 / 11** و جدیدتر.
@@ -80,7 +80,7 @@
 - روی سخت‌افزار ضعیف (RAM 2GB / CPU دو هسته‌ای) هم روان کار می‌کند.
 
 ### شروع سریع
-1. `AzadiTeb.exe` را اجرا کنید (تمام‌صفحه باز می‌شود).
+1. `DarmanPlus.exe` را اجرا کنید (تمام‌صفحه باز می‌شود).
 2. در صفحه اصلی `Ctrl + P + N` را نگه دارید → پنل ادمین → ورود با `prf` / `prf123`.
 3. کاربر بسازید (مثلاً بخش: «دندانپزشکی»، نوع: پذیرش).
 4. خروج (دکمه ✕ بالا راست) → «پذیرش درمانگاه» → ورود با کاربر ساخته‌شده → انتخاب شیفت → ثبت پذیرش.
@@ -90,7 +90,7 @@
 ```bash
 # روی لینوکس (Debian/Ubuntu):
 sudo apt install g++-mingw-w64-i686
-./build.sh        # خروجی: build/AzadiTeb.exe
+./build.sh        # خروجی: build/DarmanPlus.exe
 ```
 
 روی ویندوز با MSYS2/MinGW32 هم همان فرمان‌های داخل `build.sh` قابل اجراست.
@@ -110,8 +110,8 @@ sudo apt install g++-mingw-w64-i686
 
 فایل `update/version.txt` در این مخزن (یا هر سرور HTTP دیگر):
 ```
-1.63.0
-https://github.com/prfacc2/AZADI_TEB/releases/download/v1.63.0/AzadiTeb.exe
+1.64.0
+https://github.com/prfacc2/AZADI_TEB/releases/download/v1.64.0/DarmanPlus.exe
 ```
 (خط اول = آخرین نسخه، خط دوم = لینک دانلود EXE جدید.)
 آدرس پیش‌فرض، raw گیت‌هاب همین مخزن است؛ برای تغییر، در `data/settings.ini` کلید `update_url` را تنظیم کنید.
@@ -124,4 +124,4 @@ https://github.com/prfacc2/AZADI_TEB/releases/download/v1.63.0/AzadiTeb.exe
 - چاپ روی پرینتر حرارتی ۸ سانتی فیش‌زن
 
 ---
-**مجوز:** اختصاصی — © Azadi-Teb
+**مجوز:** اختصاصی — © DarmanPlus
