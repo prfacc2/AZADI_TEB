@@ -383,20 +383,27 @@ static LRESULT CALLBACK homeProc(HWND h, UINT m, WPARAM w, LPARAM l){
         }
 
         // ---- 3. brand mark --------------------------------------------------
+        // v1.64.0 (درمان پلاس): the real circular brand logo is now drawn here.
+        // A soft accent halo + ring frame the logo; if the embedded PNG is ever
+        // unavailable we fall back to the gradient disc + medical-cross glyph.
         {
             int d  = g.logo.right-g.logo.left;
             int rr = d/2;
-            // soft accent halo, then the gradient disc, then a light inner ring
             RECT halo=g.logo; InflateRect(&halo,S(7),S(7));
             gpFillAlpha(dc, halo, (d+S(14))/2,
                         blendColor(g_theme.accent, pTop, 55), g_dark?70:52);
             gpShadow(dc, g.logo, rr, S(9), g_dark?110:78);
-            gpGradRoundRect(dc, g.logo, rr, g_theme.accent2, g_theme.accent, CLR_INVALID);
-            RECT ring=g.logo; InflateRect(&ring,-S(4),-S(4));
-            gpRoundRect(dc, ring, (d-S(8))/2, CLR_INVALID,
-                        blendColor(g_theme.accent, RGB(255,255,255), 55));
-            RECT gi=g.logo; InflateRect(&gi,-d/4,-d/4);
-            drawIcon(dc, ICO_CROSS_MED, gi, RGB(255,255,255), S(2)+1);
+            if(!gpDrawImageResCircle(dc, IMG_LOGO, g.logo)){
+                gpGradRoundRect(dc, g.logo, rr, g_theme.accent2, g_theme.accent, CLR_INVALID);
+                RECT ring=g.logo; InflateRect(&ring,-S(4),-S(4));
+                gpRoundRect(dc, ring, (d-S(8))/2, CLR_INVALID,
+                            blendColor(g_theme.accent, RGB(255,255,255), 55));
+                RECT gi=g.logo; InflateRect(&gi,-d/4,-d/4);
+                drawIcon(dc, ICO_CROSS_MED, gi, RGB(255,255,255), S(2)+1);
+            }
+            // a thin accent ring around the logo for a crisp, branded edge
+            gpRoundRect(dc, g.logo, rr, CLR_INVALID,
+                        blendColor(g_theme.accent, g_theme.border, 30));
         }
 
         // ---- 4. title + tagline --------------------------------------------
@@ -417,7 +424,7 @@ static LRESULT CALLBACK homeProc(HWND h, UINT m, WPARAM w, LPARAM l){
             SelectObject(dc, g_fUI);
             SetTextColor(dc, g_dark?RGB(168,180,197):g_theme.textDim);
             RECT sr=g.sub;
-            DrawTextW(dc, L"درمانگاه شبانه‌روزی آزادی طب  ·  حساب کاربری خود را انتخاب کنید",
+            DrawTextW(dc, L"درمانگاه شبانه‌روزی درمان پلاس  ·  حساب کاربری خود را انتخاب کنید",
                 -1, &sr, DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
         }
 
@@ -758,9 +765,15 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         int logoCx = rc.right - exitW - S(16) - logoR;
         int logoCy = mainBarH()/2;
         RECT lc={logoCx-logoR,logoCy-logoR,logoCx+logoR,logoCy+logoR};
-        gpGradRoundRect(dc,lc,logoR,g_theme.accent2,g_theme.accent,CLR_INVALID);
-        RECT li={lc.left+S(7),lc.top+S(7),lc.right-S(7),lc.bottom-S(7)};
-        drawIcon(dc,ICO_CROSS_MED,li,RGB(255,255,255),S(2));
+        // v1.64.0 (درمان پلاس): draw the real circular logo in the header; fall
+        // back to the gradient disc + medical cross if the resource is missing.
+        if(!gpDrawImageResCircle(dc, IMG_LOGO, lc)){
+            gpGradRoundRect(dc,lc,logoR,g_theme.accent2,g_theme.accent,CLR_INVALID);
+            RECT li={lc.left+S(7),lc.top+S(7),lc.right-S(7),lc.bottom-S(7)};
+            drawIcon(dc,ICO_CROSS_MED,li,RGB(255,255,255),S(2));
+        }
+        gpRoundRect(dc, lc, logoR, CLR_INVALID,
+                    blendColor(g_theme.accent, g_theme.border, 30));
 
         int idRight = logoCx-logoR-S(12);
         bool loggedIn = !g_session.user.username.empty();
@@ -1152,12 +1165,12 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
     installCrashHandler();           // crash handler
     detectSpec();                    // speed handler
     BackupLog_Init();                // dedicated Backup Log channel (A.3)
-    logLine(L"=== Azadi-Teb start v" APP_VERSION_W L" ===");
+    logLine(L"=== DarmanPlus start v" APP_VERSION_W L" ===");
     writeSchemaVersion();            // §I: stamp data\.schema_version (informational only)
 
     // single instance — capture GetLastError() IMMEDIATELY after CreateMutexW,
     // before any other call can clobber the thread's last-error value (§G).
-    CreateMutexW(NULL, TRUE, L"AzadiTeb_SingleInstance");
+    CreateMutexW(NULL, TRUE, L"DarmanPlus_SingleInstance");
     DWORD muErr = GetLastError();
     if(muErr==ERROR_ALREADY_EXISTS){
         HWND ex=FindWindowW(APP_CLASS_W,NULL);
@@ -1467,6 +1480,6 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
     }
     gdipShutdown();
     BackupLog_Shutdown();
-    logLine(L"=== Azadi-Teb exit ===");
+    logLine(L"=== DarmanPlus exit ===");
     return 0;
 }

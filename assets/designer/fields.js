@@ -76,7 +76,7 @@ window.AZ_FIELD_CATS = [
     { key:"{cashier}",  label:"صندوقدار", sample:"صندوق ۱" },
   ]},
   { title:"درمانگاه / سامانه", items:[
-    { key:"{clinic}",     label:"نام درمانگاه", sample:"درمانگاه آزادی طب" },
+    { key:"{clinic}",     label:"نام درمانگاه", sample:"درمانگاه درمان پلاس" },
     { key:"{clinicaddr}", label:"آدرس درمانگاه", sample:"تهران، میدان آزادی…" },
     { key:"{clinicphone}",label:"تلفن درمانگاه", sample:"۰۲۱۶۶۰۰۰۰۰۰" },
     { key:"{clinicmgr}",  label:"مسئول فنی", sample:"دکتر …" },

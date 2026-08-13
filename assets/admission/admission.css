@@ -1451,3 +1451,121 @@ body.theme-dark{background:#0e1622;background:linear-gradient(180deg,#131d2c 0%,
 .theme-dark .tab.active{color:#7fb3f7;border-bottom-color:#7fb3f7;}
 .theme-dark .queue-hub-btn{background:#243149;border-color:#4f6884;color:#e9f2ff;}
 .theme-dark .print-grid .btn-print{background:#1e2a3c;border-color:#4f6884;color:#e9f2ff;}
+
+/* ============================================================================
+   v1.64.0 (درمان پلاس) — full-screen queue overlay + action-rail navigation
+   + synced, coherent colour palette. Appended last so it wins the cascade.
+   Trident-safe: literal colours, no custom properties, no grid, no flex `gap`,
+   no logical properties, and every modern flex prop carries its -ms- pair.
+   ---------------------------------------------------------------------------- */
+.inp,select.inp{color:#1f2d3d;background:#f5f8fd;border:1px solid #d7e2f1;border-radius:9px;}
+.inp:focus{border-color:#1976f3;outline:none;box-shadow:0 0 0 3px rgba(25,118,243,.14);}
+
+/* ---- action rail: navigation row + nav buttons (replaces new/cancel) ---- */
+.queue-nav-row{display:-ms-flexbox;display:flex;-ms-flex-align:stretch;align-items:stretch;
+  margin-top:10px;}
+.queue-nav-row .btn-nav{display:-ms-inline-flexbox;display:inline-flex;
+  -ms-flex-align:center;align-items:center;-ms-flex-pack:center;justify-content:center;
+  -ms-flex:1 1 0;flex:1 1 0;height:42px;margin:0;font-size:13px;font-weight:700;
+  background:#eef4fd;border:1px solid #d7e2f1;color:#1976f3;border-radius:11px;cursor:pointer;}
+.queue-nav-row .btn-nav + .btn-nav{margin-right:8px;}
+.queue-nav-row .btn-nav:hover{background:#dbe8fc;border-color:#1976f3;color:#13489e;}
+.queue-nav-row .btn-nav .i{display:-ms-inline-flexbox;display:inline-flex;}
+
+.action-card .btn-danger.btn-block{height:46px;font-size:15px;font-weight:700;
+  display:-ms-inline-flexbox;display:inline-flex;-ms-flex-align:center;align-items:center;
+  -ms-flex-pack:center;justify-content:center;}
+.action-card .btn-submit.btn-block{height:48px;font-size:15.5px;font-weight:800;
+  letter-spacing:.1px;margin-bottom:8px;}
+
+/* ---- full-screen queue overlay (sized to the user's monitor) ------------- */
+.queue-backdrop{display:none;position:fixed;top:0;right:0;bottom:0;left:0;z-index:1600;
+  background:rgba(15,28,48,.46);}
+.queue-backdrop.open{display:block;}
+.queue-overlay{display:none;position:fixed;top:0;right:0;bottom:0;left:0;z-index:1650;
+  background:#ffffff;color:#1f2d3d;-ms-flex-direction:column;flex-direction:column;
+  box-shadow:0 24px 70px rgba(15,35,65,.30);}
+.queue-overlay.open{display:-ms-flexbox;display:flex;}
+.queue-overlay[aria-hidden="true"]{display:none;}
+.queue-overlay-head{display:-ms-flexbox;display:flex;-ms-flex-align:center;align-items:center;
+  padding:12px 18px;min-height:56px;background:#1976f3;color:#ffffff;-ms-flex-wrap:wrap;
+  flex-wrap:wrap;}
+.queue-overlay-head .qov-title{display:-ms-inline-flexbox;display:inline-flex;
+  -ms-flex-align:center;align-items:center;font-size:16px;font-weight:800;white-space:nowrap;}
+.queue-overlay-head .qov-title .i,.queue-overlay-head .qov-title svg{margin-left:9px;}
+.queue-overlay-head .tabs{display:-ms-inline-flexbox;display:inline-flex;
+  background:rgba(255,255,255,.16);border-radius:10px;padding:3px;margin-right:14px;}
+.queue-overlay-head .tab{border:0;background:transparent;color:#eaf2ff;padding:7px 14px;
+  border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;margin-left:4px;}
+.queue-overlay-head .tab.active{background:#ffffff;color:#1976f3;}
+.queue-overlay-head .head-tools{display:-ms-inline-flexbox;display:inline-flex;
+  -ms-flex-align:center;align-items:center;margin-right:auto;}
+.queue-overlay-head .head-tools .inp{background:rgba(255,255,255,.92);
+  border:1px solid rgba(255,255,255,.4);color:#1f2d3d;}
+.queue-overlay-head .head-tools .inp + .inp,
+.queue-overlay-head .head-tools .with-ico + .inp,
+.queue-overlay-head .head-tools .inp + .with-ico,
+.queue-overlay-head .head-tools .with-ico + .with-ico,
+.queue-overlay-head .head-tools .btn + .btn,
+.queue-overlay-head .head-tools .inp + .btn,
+.queue-overlay-head .head-tools .with-ico + .btn,
+.queue-overlay-head .head-tools .btn + .inp,
+.queue-overlay-head .head-tools .btn + .with-ico{margin-right:8px;}
+.queue-overlay-head .qov-close{background:rgba(255,255,255,.18);
+  border:1px solid rgba(255,255,255,.45);color:#fff;font-size:20px;width:38px;height:38px;}
+.queue-overlay-head .qov-close:hover{background:rgba(255,255,255,.30);}
+.queue-overlay-body{display:-ms-flexbox;display:flex;-ms-flex-direction:column;
+  flex-direction:column;-ms-flex:1 1 auto;flex:1 1 auto;overflow:auto;padding:16px 18px;}
+.queue-overlay-body .tbl-wrap{-ms-flex:1 1 auto;flex:1 1 auto;overflow:auto;
+  border:1px solid #d7e2f1;border-radius:12px;background:#fff;}
+.queue-overlay-body .q-tbl{width:100%;}
+.queue-overlay-body .queue-foot{display:-ms-flexbox;display:flex;-ms-flex-align:center;
+  align-items:center;-ms-flex-pack:justify;justify-content:space-between;padding:12px 4px 2px;}
+.q-count{font-weight:700;color:#5b6b80;}
+.q-count b{color:#1976f3;}
+.link-btn{background:transparent;border:0;color:#1976f3;font-weight:700;cursor:pointer;
+  display:-ms-inline-flexbox;display:inline-flex;-ms-flex-align:center;align-items:center;
+  padding:6px 8px;border-radius:8px;}
+.link-btn:hover{background:#eef4fd;}
+.link-btn .i,.link-btn svg{margin-left:6px;}
+
+.queue-overlay-body .tbl thead th{background:#eef4fd;color:#1f2d3d;
+  border-color:#d7e2f1;font-weight:800;padding:12px 14px;position:sticky;top:0;}
+.queue-overlay-body .tbl tbody td{padding:11px 14px;border-color:#eef3fb;}
+.queue-overlay-body .tbl tbody tr:nth-child(even){background:#f7faff;}
+.queue-overlay-body .tbl tbody tr:hover{background:#eaf3ff;}
+.queue-overlay-body .tbl-wrap.collapsed{max-height:none;}
+
+.q-tbl .q-act-btn{background:#fff;border:1px solid #d7e2f1;color:#e24c4b;border-radius:8px;
+  padding:5px 12px;font-weight:700;cursor:pointer;font-size:12px;}
+.q-tbl .q-act-btn:hover{background:#fdeaec;border-color:#e24c4b;}
+
+/* ---- block modal: synced + the new «رفع مسدودی» button ------------------ */
+.modal-card{max-width:440px;}
+.modal-actions{display:-ms-flexbox;display:flex;-ms-flex-wrap:wrap;flex-wrap:wrap;}
+.modal-actions .btn{-ms-flex:1 1 140px;flex:1 1 140px;height:44px;font-weight:700;
+  margin-left:10px;margin-bottom:6px;}
+.modal-actions .btn:first-child{margin-left:0;}
+#blockUnblock{background:#16c47f;border:1px solid #11a869;color:#fff;}
+#blockUnblock:hover{background:#12b274;}
+#blockOverride{background:#e24c4b;border:1px solid #c83f3e;color:#fff;}
+#blockOverride:hover{background:#d23f3e;}
+#blockClose{background:#fff;border:1px solid #d7e2f1;color:#1f2d3d;}
+#blockClose:hover{background:#eef4fd;}
+
+@media (max-width:720px){
+  .queue-overlay-head{-ms-flex-wrap:wrap;flex-wrap:wrap;padding:10px 12px;}
+  .queue-overlay-head .head-tools{-ms-flex:1 1 100%;flex:1 1 100%;margin-right:0;}
+  .queue-nav-row{-ms-flex-direction:column;flex-direction:column;}
+  .queue-nav-row .btn-nav + .btn-nav{margin-right:0;margin-top:8px;}
+}
+
+.theme-dark .queue-overlay{background:#1d2735;color:#e5edf7;}
+.theme-dark .queue-overlay-body .tbl thead th{background:#27364d;color:#eef5ff;border-color:#46586f;}
+.theme-dark .queue-overlay-body .tbl tbody tr:nth-child(even){background:#212e42;}
+.theme-dark .queue-overlay-body .tbl tbody tr:hover{background:#283a54;}
+.theme-dark .queue-overlay-body .tbl-wrap{border-color:#46586f;}
+.theme-dark .queue-overlay-head .head-tools .inp{background:rgba(20,30,48,.9);color:#e5edf7;}
+.theme-dark .btn-nav{background:#253246;border:1px solid #526a88;color:#cfe4ff;}
+.theme-dark .btn-nav:hover{background:#2c3c55;border-color:#7fb3f7;color:#eaf2ff;}
+.theme-dark #blockClose{background:#1e2a3c;border:1px solid #4a5c74;color:#e7eff9;}

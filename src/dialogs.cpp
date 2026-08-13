@@ -138,16 +138,23 @@ static LRESULT CALLBACK loginProc(HWND h, UINT m, WPARAM w, LPARAM l){
             blendColor(g_theme.border,roleCol,22));
 
         SetBkMode(dc,TRANSPARENT);
-        // role badge — glowing gradient disc with a coloured halo
+        // role badge — v1.64.0 (درمان پلاس): the circular brand logo now fills
+        // this disc, framed by a role-tinted halo + ring (danger red for the
+        // hidden admin, accent blue otherwise). Falls back to the gradient disc
+        // + glyph if the embedded logo resource is unavailable.
         int ir=S(28);
         RECT ic={cx+cw/2-ir,cy+S(26),cx+cw/2+ir,cy+S(26)+2*ir};
         { RECT halo=ic; InflateRect(&halo,S(7),S(7));
           gpFillAlpha(dc,halo,(halo.bottom-halo.top)/2,roleCol,g_dark?70:52); }
         gpShadowColor(dc,ic,ir,S(9),120,roleCol);
-        gpGradRoundRect(dc,ic,ir,
-            blendColor(roleCol,RGB(255,255,255),26),roleCol,CLR_INVALID);
-        RECT ii={ic.left+S(14),ic.top+S(14),ic.right-S(14),ic.bottom-S(14)};
-        drawIcon(dc, (d&&d->role==2)?ICO_SHIELD:ICO_USER, ii, RGB(255,255,255), S(2)+1);
+        if(!gpDrawImageResCircle(dc, IMG_LOGO, ic)){
+            gpGradRoundRect(dc,ic,ir,
+                blendColor(roleCol,RGB(255,255,255),26),roleCol,CLR_INVALID);
+            RECT ii={ic.left+S(14),ic.top+S(14),ic.right-S(14),ic.bottom-S(14)};
+            drawIcon(dc, (d&&d->role==2)?ICO_SHIELD:ICO_USER, ii, RGB(255,255,255), S(2)+1);
+        }
+        gpRoundRect(dc, ic, ir, CLR_INVALID,
+                    blendColor(roleCol, g_theme.border, 30));
 
         SetTextColor(dc,g_theme.text);
         SelectObject(dc,g_fTitle);

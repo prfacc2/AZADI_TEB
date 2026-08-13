@@ -1,5 +1,5 @@
 // ============================================================================
-//  Azadi-Teb  (آزادی طب)
+//  DarmanPlus  (درمان پلاس)
 //  Clinic Reception & Management System
 //  Core shared header
 //  Target: Windows 7/8/8.1/10/11+  (single x86 exe, runs on x86 & x64)
@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.63.0"
+#define APP_VERSION_W   L"1.64.0"
 
 // ----------------------------------------------------------- logging policy -
 //  RELEASE 1.2.0 (Section A): all general user-behavior logging is gated behind
@@ -29,8 +29,8 @@
 #ifndef AZ_DEBUG_LOGS
 #define AZ_DEBUG_LOGS 0
 #endif
-#define APP_NAME_W      L"\u0622\u0632\u0627\u062f\u06cc \u0637\u0628"   // آزادی طب
-#define APP_CLASS_W     L"AzadiTebFrame"
+#define APP_NAME_W      L"\u062f\u0631\u0645\u0627\u0646 \u067e\u0644\u0627\u0633"   // درمان پلاس
+#define APP_CLASS_W     L"DarmanPlusFrame"
 
 // ----------------------------------------------------------------- globals -
 extern HINSTANCE g_hInst;
@@ -202,6 +202,10 @@ void gpFreeBackgroundCache();
 //  recoloured to `tint`. Used for the print-action buttons. Returns false if
 //  GDI+ / resource unavailable so callers fall back to the vector drawIcon().
 bool gpDrawTintedImageRes(HDC dc, int resId, RECT rc, COLORREF tint);
+//  v1.64.0 (درمان پلاس): draw an embedded RCDATA PNG (the brand logo) cover-
+//  fitted into a CIRCLE that fits `rc`. Returns false if GDI+/resource is off so
+//  callers can fall back to a vector glyph.
+bool gpDrawImageResCircle(HDC dc, int resId, RECT rc);
 bool gpDrawImageFileCircle(HDC dc, const std::wstring& path, RECT rc);
 // v1.20.0: aspect-fit an image (file path OR data:base64 URI) into a rect.
 bool gpDrawImageRectAny(HDC dc, const std::wstring& src, RECT rc);
@@ -219,6 +223,8 @@ bool gpDrawImageRectFit(HDC dc, const std::wstring& src, RECT rc, int fit, int p
 //  v1.8.0: header settings (gear) + calculator raster icons.
 #define IMG_IC_SETTINGS 205
 #define IMG_IC_CALC     206
+//  v1.64.0 (درمان پلاس): the circular brand logo (RCDATA 207).
+#define IMG_LOGO        207
 //  Crisp anti-aliased line / circle helpers used by the new header clock etc.
 void gpLine(HDC dc, int x1,int y1,int x2,int y2, COLORREF col, float w, int alpha=255);
 
@@ -408,6 +414,8 @@ std::vector<BlacklistEntry> Blacklist_Load();
 bool Blacklist_Add(const BlacklistEntry& entry, std::wstring& err);
 bool Blacklist_FindActive(const std::wstring& nationalId, BlacklistEntry& out);
 std::vector<BlacklistEntry> Blacklist_Search(const std::wstring& query);
+//  v1.64.0 (درمان پلاس): permanently remove every entry for a national id.
+int  Blacklist_Remove(const std::wstring& nationalId);
 void Blacklist_AuditOverride(const BlacklistEntry& entry,
                              const std::wstring& operatorName);
 long long Blacklist_NowEpochMinutes();

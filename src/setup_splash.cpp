@@ -43,7 +43,7 @@ struct SetupState {
 };
 static SetupState* g_ss = nullptr;
 
-static const wchar_t* SS_CLASS = L"AzadiTebSetupSplash";
+static const wchar_t* SS_CLASS = L"DarmanPlusSetupSplash";
 
 // ----------------------------------------------------------------------------
 //  Helpers
@@ -223,18 +223,27 @@ static LRESULT CALLBACK ssProc(HWND h, UINT m, WPARAM w, LPARAM l){
 
         SetBkMode(mem,TRANSPARENT);
 
-        // brand glyph circle
+        // brand glyph circle — v1.64.0 (درمان پلاس): draw the real circular
+        // logo on a white disc; fall back to the «آ» glyph if unavailable.
         int cx=W/2, cyTop=43;
         HBRUSH wb=CreateSolidBrush(RGB(255,255,255));
         HPEN   np=(HPEN)GetStockObject(NULL_PEN);
         HGDIOBJ opn=SelectObject(mem,np); HGDIOBJ obr=SelectObject(mem,wb);
         Ellipse(mem, cx-26, cyTop-26, cx+26, cyTop+26);
         SelectObject(mem,opn); SelectObject(mem,obr); DeleteObject(wb);
+        RECT logoRc={cx-24, cyTop-24, cx+24, cyTop+24};
+        HFONT fBrandGlyph=NULL;
+        if(!gpDrawImageResCircle(mem, IMG_LOGO, logoRc)){
+            fBrandGlyph=CreateFontW(34,0,0,0,FW_BOLD,0,0,0,DEFAULT_CHARSET,
+                OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,
+                DEFAULT_PITCH,L"Vazirmatn");
+            // brand glyph «آ» (blue on white circle)
+            SelectObject(mem,fBrandGlyph); SetTextColor(mem,RGB(43,109,244));
+            RECT rg={cx-26,cyTop-22,cx+26,cyTop+26};
+            DrawTextW(mem,L"\u0622",-1,&rg,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
+        }
 
         // fonts
-        HFONT fBrandGlyph=CreateFontW(34,0,0,0,FW_BOLD,0,0,0,DEFAULT_CHARSET,
-            OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,
-            DEFAULT_PITCH,L"Vazirmatn");
         HFONT fTitle=CreateFontW(22,0,0,0,FW_BOLD,0,0,0,DEFAULT_CHARSET,
             OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,
             DEFAULT_PITCH,L"Vazirmatn");
@@ -244,11 +253,6 @@ static LRESULT CALLBACK ssProc(HWND h, UINT m, WPARAM w, LPARAM l){
         HFONT fPct=CreateFontW(13,0,0,0,FW_BOLD,0,0,0,DEFAULT_CHARSET,
             OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,
             DEFAULT_PITCH,L"Vazirmatn");
-
-        // brand glyph «آ» (blue on white circle)
-        SelectObject(mem,fBrandGlyph); SetTextColor(mem,RGB(43,109,244));
-        RECT rg={cx-26,cyTop-22,cx+26,cyTop+26};
-        DrawTextW(mem,L"\u0622",-1,&rg,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
 
         // title
         SelectObject(mem,fTitle); SetTextColor(mem,RGB(31,42,68));
@@ -289,7 +293,7 @@ static LRESULT CALLBACK ssProc(HWND h, UINT m, WPARAM w, LPARAM l){
         // blit
         BitBlt(dc,0,0,W,H,mem,0,0,SRCCOPY);
 
-        DeleteObject(fBrandGlyph); DeleteObject(fTitle);
+        if(fBrandGlyph) DeleteObject(fBrandGlyph); DeleteObject(fTitle);
         DeleteObject(fStep); DeleteObject(fPct);
         SelectObject(mem,ob); DeleteObject(bm); DeleteDC(mem);
         EndPaint(h,&ps);

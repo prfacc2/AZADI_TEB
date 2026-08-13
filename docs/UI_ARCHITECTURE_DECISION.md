@@ -19,7 +19,7 @@ interaction.
 1. **Still a single static 32-bit EXE, no shipped DLLs.** `MSHTML.dll` /
    `ieframe.dll` are OS components present on **every** Windows 7→11 install.
    We `CoCreateInstance` the system WebBrowser control — nothing is bundled,
-   nothing is downloaded, the "one self-contained `AzadiTeb.exe`" guarantee is
+   nothing is downloaded, the "one self-contained `DarmanPlus.exe`" guarantee is
    intact.
 2. **Windows 7 → 11, x86 + x64, offline.** Trident has shipped in-box since IE;
    it works on the oldest clinic PCs with zero runtime install and zero internet
@@ -65,7 +65,7 @@ The product's hard, non-negotiable constraints make a web frontend the *wrong*
 engineering choice here:
 
 1. **Single static 32-bit PE32 EXE, no DLLs.** The whole app ships as one
-   `AzadiTeb.exe` built with `-static -static-libgcc -static-libstdc++`. A
+   `DarmanPlus.exe` built with `-static -static-libgcc -static-libstdc++`. A
    WebView2 frontend requires the **WebView2 Runtime / Edge** to be installed
    and reachable, plus shipping the loader DLL — that breaks the
    "one self-contained EXE" guarantee.

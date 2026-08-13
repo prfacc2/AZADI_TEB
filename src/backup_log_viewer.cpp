@@ -1,7 +1,7 @@
 // ============================================================================
 //  backup_log_viewer.cpp — RELEASE 1.4.0, §7.2
 //  A read-only viewer for the ONLY on-disk log channel: backup.log.
-//  Reads %LOCALAPPDATA%/AzadiTeb/backup_logs/backup.log (and rotated siblings
+//  Reads %LOCALAPPDATA%/DarmanPlus/backup_logs/backup.log (and rotated siblings
 //  backup.log.1 .. backup.log.5, plain ones; gzipped ones are skipped because
 //  the app does not link a gz reader here) and shows entries newest-first in a
 //  ListView. Filter chips switch between همه / موفق / ناموفق. A details pane at
@@ -50,11 +50,11 @@ struct ViewerWin {
 #define IDC_BLV_REFRESH 8213
 #define IDC_BLV_CLOSE   8214
 
-// Reconstruct %LOCALAPPDATA%\AzadiTeb\backup_logs (mirrors backup_log.cpp).
+// Reconstruct %LOCALAPPDATA%\DarmanPlus\backup_logs (mirrors backup_log.cpp).
 static std::wstring logDir(){
     wchar_t local[MAX_PATH]={0};
     if(SHGetFolderPathW(NULL,CSIDL_LOCAL_APPDATA,NULL,0,local)!=S_OK) return L"";
-    return std::wstring(local)+L"\\AzadiTeb\\backup_logs";
+    return std::wstring(local)+L"\\DarmanPlus\\backup_logs";
 }
 
 // Read a whole (small) text file as UTF-8 → wstring.

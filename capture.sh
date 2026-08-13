@@ -11,7 +11,7 @@ if ! pgrep -f "Xvfb :99" >/dev/null; then
   Xvfb :99 -screen 0 1600x900x24 >/tmp/xvfb.log 2>&1 &
   sleep 3
 fi
-env "${ENVS[@]}" wine build/AzadiTeb_dbg.exe >/dev/null 2>&1 &
+env "${ENVS[@]}" wine build/DarmanPlus_dbg.exe >/dev/null 2>&1 &
 WPID=$!
 sleep 8
 import -window root "$OUT" 2>/dev/null || true

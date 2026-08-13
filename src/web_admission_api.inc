@@ -691,6 +691,19 @@ static std::string admissionApi(const std::string& verb, const std::string& body
         return "{\"ok\":true}";
     }
 
+    // ---- blacklist.remove (v1.64.0 درمان پلاس) — «رفع مسدودی» ---------------
+    //   Permanently deletes every blacklist entry for the given national id so
+    //   the patient can be admitted normally from now on.
+    if(verb=="blacklist.remove"){
+        std::string nidU; jsonGetString(body,"nid",nidU);
+        std::wstring nid=normDigits(trim(u82w(nidU)));
+        if(nid.empty()) return "{\"ok\":false,\"err\":\"کد ملی خالی است\"}";
+        int n=Blacklist_Remove(nid);
+        logLine(L"blacklist removed nid="+nid+L" rows="+std::to_wstring(n));
+        return n>0 ? "{\"ok\":true,\"removed\":"+jnum(n)+"}"
+                   : "{\"ok\":false,\"err\":\"موردی برای این کد ملی یافت نشد\"}";
+    }
+
     // ---- admission.save: persist + PRINT per the Management print design ----
     if(verb=="admission.save"){
         AdPatient p=adReadPatient(body);

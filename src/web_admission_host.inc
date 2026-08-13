@@ -206,7 +206,7 @@ struct EnvHandler : public ICoreWebView2CreateCoreWebView2EnvironmentCompletedHa
 static std::wstring adUserDataFolder(){
     wchar_t buf[MAX_PATH]={0};
     if(SUCCEEDED(SHGetFolderPathW(NULL,CSIDL_LOCAL_APPDATA,NULL,0,buf))){
-        std::wstring p=buf; p+=L"\\AzadiTeb\\WebView2";
+        std::wstring p=buf; p+=L"\\DarmanPlus\\WebView2";
         return p;
     }
     return L"";

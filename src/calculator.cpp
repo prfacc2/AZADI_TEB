@@ -309,7 +309,7 @@ void openCalculator(HWND owner){
     RECT scr; SystemParametersInfoW(SPI_GETWORKAREA,0,&scr,0);
     int x = scr.right - w - S(60), y = (scr.bottom-hgt)/2;
     HWND c = CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW, CALC_CLASS,
-        L"ماشین حساب — آزادی طب",
+        L"ماشین حساب — درمان پلاس",
         WS_POPUP|WS_CAPTION|WS_SYSMENU|WS_VISIBLE,
         x,y,w,hgt, owner, NULL, g_hInst, NULL);
     SetForegroundWindow(c);

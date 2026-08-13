@@ -1,7 +1,7 @@
 #!/bin/bash
 # ============================================================================
-#  Azadi-Teb build script (cross-compile from Linux with MinGW-w64)
-#  Output: build/AzadiTeb.exe  — single 32-bit exe that runs on BOTH
+#  DarmanPlus build script (cross-compile from Linux with MinGW-w64)
+#  Output: build/DarmanPlus.exe  — single 32-bit exe that runs on BOTH
 #  x86 and x64 Windows (7 / 8 / 8.1 / 10 / 11+), fully static (no DLLs).
 # ============================================================================
 set -e
@@ -43,23 +43,23 @@ $CXX -std=c++17 -O2 -s -municode -mwindows \
     -Wno-misleading-indentation -Wno-unused-function \
     -Wno-missing-field-initializers \
     $SRCS obj/app.res \
-    -o build/AzadiTeb.exe \
+    -o build/DarmanPlus.exe \
     -lcomctl32 -lcomdlg32 -lgdi32 -lgdiplus -lmsimg32 -ldwmapi -luxtheme \
     -luser32 -lshlwapi -lwininet -ladvapi32 -lshell32 -lwinspool \
     -lole32 -loleaut32 -luuid -lversion -lwinmm -ldbghelp \
     -lwinhttp -lurlmon -lcrypt32 -lwintrust -lwtsapi32 -lpsapi -lws2_32
 
 echo "[3/3] Stripping..."
-i686-w64-mingw32-strip build/AzadiTeb.exe
+i686-w64-mingw32-strip build/DarmanPlus.exe
 
 # Drop a SHA-256 sidecar next to the exe (used by the in-app updater / verify).
 if command -v sha256sum >/dev/null 2>&1; then
-    ( cd build && printf '%s  AzadiTeb.exe\n' "$(sha256sum AzadiTeb.exe | awk '{print $1}')" > AzadiTeb.exe.sha256 )
-    echo "SHA-256 -> build/AzadiTeb.exe.sha256"
+    ( cd build && printf '%s  DarmanPlus.exe\n' "$(sha256sum DarmanPlus.exe | awk '{print $1}')" > DarmanPlus.exe.sha256 )
+    echo "SHA-256 -> build/DarmanPlus.exe.sha256"
 fi
 
-ls -lh build/AzadiTeb.exe
-echo "Build OK -> build/AzadiTeb.exe"
+ls -lh build/DarmanPlus.exe
+echo "Build OK -> build/DarmanPlus.exe"
 
 # ----------------------------------------------------------------------------
 # §D.5: OPTIONAL headless print-designer smoke test. Gated behind AZ_SMOKE so
@@ -67,7 +67,7 @@ echo "Build OK -> build/AzadiTeb.exe"
 # AZ_DEBUG_BUILD hook, runs it under Wine with AZ_DEBUG_SCREEN=print_designer
 # (which seeds the section/design stores and exits 0 if the open path is
 # healthy), and fails the build on a non-zero exit code. The production
-# build/AzadiTeb.exe above is NOT affected by this debug binary.
+# build/DarmanPlus.exe above is NOT affected by this debug binary.
 # ----------------------------------------------------------------------------
 if [ -n "$AZ_SMOKE" ]; then
     echo "[smoke] Building debug binary for print_designer smoke test..."
@@ -80,14 +80,14 @@ if [ -n "$AZ_SMOKE" ]; then
         -Wno-misleading-indentation -Wno-unused-function \
         -Wno-missing-field-initializers \
         $SRCS obj/app.res \
-        -o build/AzadiTeb_smoke.exe \
+        -o build/DarmanPlus_smoke.exe \
         -lcomctl32 -lcomdlg32 -lgdi32 -lgdiplus -lmsimg32 -ldwmapi -luxtheme \
         -luser32 -lshlwapi -lwininet -ladvapi32 -lshell32 -lwinspool \
         -lole32 -loleaut32 -luuid -lversion -lwinmm -ldbghelp \
         -lwinhttp -lurlmon -lcrypt32 -lwintrust -lwtsapi32 -lpsapi -lws2_32
     if command -v wine >/dev/null 2>&1; then
         echo "[smoke] Running print_designer open/close path under Wine..."
-        AZ_DEBUG_SCREEN=print_designer wine build/AzadiTeb_smoke.exe
+        AZ_DEBUG_SCREEN=print_designer wine build/DarmanPlus_smoke.exe
         rc=$?
         if [ "$rc" -ne 0 ]; then
             echo "[smoke] FAILED: print_designer smoke exited $rc" >&2
@@ -97,5 +97,5 @@ if [ -n "$AZ_SMOKE" ]; then
     else
         echo "[smoke] Wine not available — debug binary built but not executed."
     fi
-    rm -f build/AzadiTeb_smoke.exe
+    rm -f build/DarmanPlus_smoke.exe
 fi

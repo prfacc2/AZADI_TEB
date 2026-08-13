@@ -18,7 +18,7 @@ static std::wstring ensureDir(const std::wstring& d){
 // terminals + the management station read/write the SAME files (designs,
 // messages, settings-change requests) → live sync across the network.
 //   • create  <exe>\dataroot.ini  containing a single line with a UNC/drive path
-//     e.g.  \\SERVER\AzadiTeb\data    or   Z:\AzadiTeb\data
+//     e.g.  \\SERVER\DarmanPlus\data    or   Z:\DarmanPlus\data
 //   • if absent (or unreachable) we fall back to the local  <exe>\data  folder.
 static std::wstring readDataRootOverride(){
     std::wstring cfg = exeDir()+L"\\dataroot.ini";

@@ -2,7 +2,7 @@
 //  update.cpp — remote update over HTTPS (WinINet, works on Win7+)
 //  Checks   data\update_url  (default: GitHub raw)  for  version.txt
 //  Format:  line1 = latest version,  line2 = download URL of new exe
-//  If newer → downloads to AzadiTeb_new.exe + writes update.bat that swaps
+//  If newer → downloads to DarmanPlus_new.exe + writes update.bat that swaps
 //  the exe on next run. Fully offline-safe (silent fail when no internet).
 // ============================================================================
 #include "app.h"
@@ -15,7 +15,7 @@ static const wchar_t* DEFAULT_UPDATE_URL =
 static std::string httpGet(const std::wstring& url, bool* okOut){
     *okOut = false;
     std::string body;
-    HINTERNET net = InternetOpenW(L"AzadiTeb/1.0", INTERNET_OPEN_TYPE_PRECONFIG,
+    HINTERNET net = InternetOpenW(L"DarmanPlus/1.0", INTERNET_OPEN_TYPE_PRECONFIG,
                                   NULL, NULL, 0);
     if(!net) return body;
     HINTERNET f = InternetOpenUrlW(net, url.c_str(), NULL, 0,
@@ -93,7 +93,7 @@ void checkRemoteUpdate(HWND owner){
             L"به‌روزرسانی", MB_OK|MB_ICONWARNING);
         return;
     }
-    std::wstring newExe = exeDir() + L"\\AzadiTeb_new.exe";
+    std::wstring newExe = exeDir() + L"\\DarmanPlus_new.exe";
     SetCursor(LoadCursor(NULL, IDC_WAIT));
     bool dl = downloadTo(dlUrl, newExe);
     SetCursor(LoadCursor(NULL, IDC_ARROW));

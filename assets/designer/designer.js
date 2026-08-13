@@ -1,5 +1,5 @@
 /* ===========================================================================
-   designer.js — Azadi-Teb professional print designer engine (v1.21.0)
+   designer.js — DarmanPlus professional print designer engine (v1.21.0)
    Dependency-free, RTL-aware WYSIWYG editor. Talks to C++ over the loopback
    HTTP host (/api/*) using ASYNCHRONOUS XHR.
 

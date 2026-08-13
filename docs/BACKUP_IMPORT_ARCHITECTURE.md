@@ -1,7 +1,7 @@
 # Backup Analysis & Patient-Import Architecture (v1.12.0)
 
 This document is the single engineering reference for §10–§15 of the 1.12.0
-work order: how Azadi-Teb reads a **real SQL Server `.bak`**, how a patient
+work order: how DarmanPlus reads a **real SQL Server `.bak`**, how a patient
 import is staged and reconciled, and how the data layer is shaped so it can move
 to a network server / REST service later **without rewriting the UI**.
 

@@ -246,7 +246,7 @@ static void doAbout(HWND h){
     std::wstring msg=std::wstring(APP_NAME_W)+L"\n"
         L"سامانه پذیرش و مدیریت درمانگاه\n\n"
         L"نسخه: "+toFaDigits(APP_VERSION_W)+L"\n"
-        L"اجرای تک‌فایل، سازگار با ویندوز ۷ تا ۱۱\n\n© آزادی طب";
+        L"اجرای تک‌فایل، سازگار با ویندوز ۷ تا ۱۱\n\n© درمان پلاس";
     MessageBoxW(h,msg.c_str(),L"درباره برنامه",MB_OK|MB_ICONINFORMATION);
 }
 // reception profile editing (name+photo) — pending management approval -------

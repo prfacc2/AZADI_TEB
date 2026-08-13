@@ -344,7 +344,6 @@ bool gpDrawTintedImageRes(HDC dc, int resId, RECT rc, COLORREF tint){
     if(!s_gdipOK) return false;
     Image* img = cachedResImage(resId);
     if(!img) return false;
-
     Graphics g(dc);
     g.SetInterpolationMode(InterpolationModeHighQualityBicubic);
     g.SetPixelOffsetMode(PixelOffsetModeHalf);
@@ -368,6 +367,36 @@ bool gpDrawTintedImageRes(HDC dc, int resId, RECT rc, COLORREF tint){
         r,gg,b,0,1 };
     ImageAttributes ia; ia.SetColorMatrix(&cm);
     g.DrawImage(img, RectF(dx,dy,dw,dh), 0,0,iw,ih, UnitPixel, &ia);
+    return true;
+}
+
+//  v1.64.0 (درمان پلاس): draw an embedded RCDATA PNG cover-fitted into a circle.
+//  Used for the brand logo on the welcome screen, the login card and the header.
+bool gpDrawImageResCircle(HDC dc, int resId, RECT rc){
+    if(!s_gdipOK) return false;
+    Image* img = cachedResImage(resId);
+    if(!img) return false;
+    REAL iw=(REAL)img->GetWidth(), ih=(REAL)img->GetHeight();
+    if(iw<=0||ih<=0) return false;
+    int W=rc.right-rc.left, H=rc.bottom-rc.top;
+    if(W<=0||H<=0) return false;
+
+    Graphics g(dc);
+    g.SetInterpolationMode(InterpolationModeHighQualityBicubic);
+    g.SetPixelOffsetMode(PixelOffsetModeHalf);
+    g.SetSmoothingMode(SmoothingModeAntiAlias);
+
+    // circular clip
+    GraphicsPath clip;
+    clip.AddEllipse(rc.left, rc.top, W-1, H-1);
+    g.SetClip(&clip);
+
+    // cover-fit (fill the circle, crop overflow)
+    REAL scale = (W/iw > H/ih) ? W/iw : H/ih;
+    REAL dw=iw*scale, dh=ih*scale;
+    REAL dx=rc.left+(W-dw)/2, dy=rc.top+(H-dh)/2;
+    g.DrawImage(img, RectF(dx,dy,dw,dh), 0,0,iw,ih, UnitPixel);
+    g.ResetClip();
     return true;
 }
 

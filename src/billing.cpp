@@ -457,7 +457,7 @@ bool printReceipt(const ReceptionRecord& r, int kind, HWND owner){
         pLine(dc,y,x,w, L"امضا و مهر پزشک", fN);
     }
     y += 10;
-    pLine(dc,y,x,w, L"نرم‌افزار آزادی طب — این رسید را نزد خود نگه دارید", fN, true);
+    pLine(dc,y,x,w, L"نرم‌افزار درمان پلاس — این رسید را نزد خود نگه دارید", fN, true);
 
     EndPage(dc);
     EndDoc(dc);

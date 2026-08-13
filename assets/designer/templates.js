@@ -1,5 +1,5 @@
 /* ===========================================================================
-   templates.js — Azadi-Teb ready-made print designs  (v1.62.0 — FULL REWRITE)
+   templates.js — DarmanPlus ready-made print designs  (v1.62.0 — FULL REWRITE)
 
    ★ این فایل دقیقاً همان ۳۰ قالب داخلی C++ (src/print_designer_templates.inc)
      است تا گالری دیزاینر وب با آنچه موتور چاپ واقعاً seed می‌کند یکی باشد.
@@ -160,7 +160,7 @@
   }
 
   /* ------------------------------------------------------------- captions */
-  var FA_CLINIC   = "درمانگاه شبانه‌روزی آزادی طب";
+  var FA_CLINIC   = "درمانگاه شبانه‌روزی درمان پلاس";
   var FA_SUBTITLE = "سامانه پذیرش و مدیریت درمانگاه";
   var FA_SVCLIST  = "لیست خدمات ارائه‌شده";
   var FA_NAME     = "نام: ";

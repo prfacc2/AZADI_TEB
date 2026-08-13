@@ -121,6 +121,38 @@ std::vector<BlacklistEntry> Blacklist_Search(const std::wstring& query){
     return out;
 }
 
+//  v1.64.0 (درمان پلاس): permanently remove EVERY blacklist entry for a given
+//  national id so the patient can be admitted normally again. Returns the number
+//  of rows removed. Used by the admission «رفع مسدودی» button and by the
+//  settings blacklist page.
+int Blacklist_Remove(const std::wstring& nationalId){
+    std::wstring nid=normNid(nationalId);
+    if(nid.empty()) return 0;
+    std::lock_guard<std::mutex> lk(g_blacklistMx);
+    auto rows=loadUnlocked();
+    std::vector<BlacklistEntry> keep;
+    int removed=0;
+    for(const auto& r:rows){
+        if(normNid(r.nid)==nid){ removed++; continue; }
+        keep.push_back(r);
+    }
+    if(removed>0){
+        // rewrite the whole file with the surviving rows
+        std::wstring all;
+        for(const auto& r:keep){
+            wchar_t created[32],expires[32];
+            swprintf(created,32,L"%lld",r.createdEpochMin);
+            swprintf(expires,32,L"%lld",r.expiresEpochMin);
+            all+=esc(r.nid)+L"|"+esc(r.first)+L"|"+esc(r.last)+L"|"+
+                esc(r.father)+L"|"+esc(r.mobile)+L"|"+esc(r.reason)+L"|"+
+                esc(r.durationLabel)+L"|"+created+L"|"+expires+L"|"+
+                esc(r.createdText)+L"|"+esc(r.createdBy)+L"|1\r\n";
+        }
+        writeFileUtf8(path(),all,false);
+    }
+    return removed;
+}
+
 void Blacklist_AuditOverride(const BlacklistEntry& r,const std::wstring& operatorName){
     SYSTEMTIME st=iranNow();
     std::wstring when=jalaliDateShort(st)+L" "+iranTimeStr(st,true);

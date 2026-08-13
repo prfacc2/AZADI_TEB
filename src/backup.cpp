@@ -186,10 +186,10 @@ static std::wstring askOpenBackup(HWND owner){
 }
 static std::wstring askSaveBackup(HWND owner){
     SYSTEMTIME st=iranNow(); wchar_t def[128];
-    swprintf(def,128,L"AzadiTeb_%04d-%02d-%02d.aztbk",st.wYear,st.wMonth,st.wDay);
+    swprintf(def,128,L"DarmanPlus_%04d-%02d-%02d.aztbk",st.wYear,st.wMonth,st.wDay);
     wchar_t buf[1024]={0}; wcscpy(buf,def);
     OPENFILENAMEW ofn={0}; ofn.lStructSize=sizeof(ofn); ofn.hwndOwner=owner;
-    ofn.lpstrFilter=L"پشتیبان آزادی‌طب\0*.aztbk\0";
+    ofn.lpstrFilter=L"پشتیبان درمان‌پلاس\0*.aztbk\0";
     ofn.lpstrFile=buf; ofn.nMaxFile=1024; ofn.lpstrDefExt=L"aztbk";
     ofn.Flags=OFN_OVERWRITEPROMPT|OFN_PATHMUSTEXIST|OFN_EXPLORER;
     if(GetSaveFileNameW(&ofn)) return buf;
@@ -1080,7 +1080,7 @@ static void bkAnImportPatients(HWND h){
 static std::wstring bkAnFullReport(){
     std::wstring out;
     if(s_bs && s_bs->anResult){
-        out+=L"گزارش تحلیل پشتیبان آزادی‌طب\r\n";
+        out+=L"گزارش تحلیل پشتیبان درمان‌پلاس\r\n";
         out+=L"فایل: "+s_bs->anPath+L"\r\n\r\n";
         for(auto& s:s_bs->anResult->sections){
             out+=L"■ "+s.title+L"\r\n"+s.body+L"\r\n\r\n";
@@ -1350,7 +1350,7 @@ static LRESULT CALLBACK bkProc(HWND h, UINT m, WPARAM w, LPARAM l){
           if(!wcscmp(dm,L"restore")){
               s_bs->mode=BK_MODE_RESTORE;
               // synthesise a ready scan so the restore layout is fully populated
-              s_bs->pickedPath=L"C:\\backups\\AzadiTeb_1405-03-29.aztbk";
+              s_bs->pickedPath=L"C:\\backups\\DarmanPlus_1405-03-29.aztbk";
               BackupInfo bi; bi.path=s_bs->pickedPath; bi.totalBytes=58LL*1024*1024;
               long long demo[4]={32LL*1024*1024,20LL*1024*1024,4LL*1024*1024,2LL*1024*1024};
               long long recs[4]={1280,0,0,0};

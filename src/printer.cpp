@@ -465,7 +465,7 @@ void kickCashDrawer(){
     if(prn.empty()) return;
     HANDLE hp=NULL;
     if(!OpenPrinterW((LPWSTR)prn.c_str(),&hp,NULL) || !hp) return;
-    DOC_INFO_1W di; di.pDocName=(LPWSTR)L"AzadiTeb-Drawer";
+    DOC_INFO_1W di; di.pDocName=(LPWSTR)L"DarmanPlus-Drawer";
     di.pOutputFile=NULL; di.pDatatype=(LPWSTR)L"RAW";
     if(StartDocPrinterW(hp,1,(LPBYTE)&di)){
         StartPagePrinter(hp);
@@ -526,7 +526,7 @@ static void doTestPrint(HWND h){
         MessageBoxW(h,L"اتصال به چاپگر برقرار نشد.\nبررسی کنید چاپگر روشن و متصل باشد.",
             L"تست چاپگر",MB_OK|MB_ICONERROR); return;
     }
-    DOCINFOW di={sizeof(di)}; di.lpszDocName=L"آزادی طب — تست چاپ";
+    DOCINFOW di={sizeof(di)}; di.lpszDocName=L"درمان پلاس — تست چاپ";
     if(StartDocW(dc,&di)>0){
         StartPage(dc);
         int dpiY=GetDeviceCaps(dc,LOGPIXELSY);
@@ -536,7 +536,7 @@ static void doTestPrint(HWND h){
         SetBkMode(dc,TRANSPARENT);
         SetTextAlign(dc,TA_RIGHT|TA_RTLREADING);
         RECT r={dpiY/2,dpiY/2,GetDeviceCaps(dc,HORZRES)-dpiY/2,dpiY*3};
-        DrawTextW(dc,L"تست چاپ موفق بود — آزادی طب\nچاپگر به‌درستی کار می‌کند.",-1,&r,
+        DrawTextW(dc,L"تست چاپ موفق بود — درمان پلاس\nچاپگر به‌درستی کار می‌کند.",-1,&r,
             DT_RIGHT|DT_WORDBREAK|DT_RTLREADING|DT_NOPREFIX);
         SelectObject(dc,of); DeleteObject(f);
         EndPage(dc); EndDoc(dc);
@@ -1414,7 +1414,7 @@ static std::wstring pdFieldValue(const ReceptionRecord& r, const std::wstring& t
     if(tok==L"{appttime}") return toFaDigits(r.apptTime);
     if(tok==L"{appttype}") return r.patientType;
     if(tok==L"{user}")     return r.userName;
-    if(tok==L"{clinic}")   return L"درمانگاه آزادی طب";
+    if(tok==L"{clinic}")   return L"درمانگاه درمان پلاس";
     if(tok==L"{receiptNo}"){ wchar_t b[16]; swprintf(b,16,L"%d",r.queueNo); return toFaDigits(b); }
     if(tok==L"{total}")    return toFaDigits(formatMoney(r.total))+L" ریال";
     if(tok==L"{insshare}") return toFaDigits(formatMoney(r.mainShare))+L" ریال";

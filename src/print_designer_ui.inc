@@ -584,7 +584,7 @@ static void designer_paint(HWND h){
 // ============================================================================
 //  Inspector — v1.18.3 FULL REWRITE.
 //  ROOT-CAUSE FIX of the deterministic "open editor" ACCESS_VIOLATION
-//  (AzadiTeb.exe+0x12789, every run at the same address): the inspector used
+//  (DarmanPlus.exe+0x12789, every run at the same address): the inspector used
 //  the custom owner-drawn uikit controls (AzNumberSpinner / AzColorPicker /
 //  AzSwitch). Their per-instance heap state + the global handle table + the
 //  WM_COMMAND routing back into them is what faulted on the Management path.
@@ -1092,7 +1092,7 @@ static LRESULT CALLBACK DesignerProc(HWND h,UINT m,WPARAM w,LPARAM l){
         case IDC_DSG_DOWNLOAD:{
             wchar_t file[MAX_PATH]=L"design.aztpl";
             OPENFILENAMEW ofn; ZeroMemory(&ofn,sizeof(ofn)); ofn.lStructSize=sizeof(ofn);
-            ofn.hwndOwner=h; ofn.lpstrFilter=L"AzadiTeb Template\0*.aztpl\0";
+            ofn.hwndOwner=h; ofn.lpstrFilter=L"DarmanPlus Template\0*.aztpl\0";
             ofn.lpstrDefExt=L"aztpl"; ofn.lpstrFile=file; ofn.nMaxFile=MAX_PATH;
             ofn.Flags=OFN_OVERWRITEPROMPT;
             if(GetSaveFileNameW(&ofn)){
@@ -1541,7 +1541,7 @@ static LRESULT CALLBACK RestoreProc(HWND h,UINT m,WPARAM w,LPARAM l){
         if(id==IDC_RST_PICK){
             wchar_t file[MAX_PATH]={0};
             OPENFILENAMEW ofn; ZeroMemory(&ofn,sizeof(ofn)); ofn.lStructSize=sizeof(ofn);
-            ofn.hwndOwner=h; ofn.lpstrFilter=L"AzadiTeb Template\0*.aztpl;*.json\0";
+            ofn.hwndOwner=h; ofn.lpstrFilter=L"DarmanPlus Template\0*.aztpl;*.json\0";
             ofn.lpstrFile=file; ofn.nMaxFile=MAX_PATH; ofn.Flags=OFN_FILEMUSTEXIST;
             if(GetOpenFileNameW(&ofn)) restore_loadFile(h,st,file);
         } else if(id==IDC_RST_APPLY){
@@ -1595,7 +1595,7 @@ void RestoreDesign_Open(HWND hMain){
     int mgn=S(14);
     uikit::AzDropZone_Create(h,IDC_RST_DROP,
         L"\u0641\u0627\u06cc\u0644 .aztpl \u0631\u0627 \u0627\u06cc\u0646\u062c\u0627 \u0631\u0647\u0627 \u06a9\u0646\u06cc\u062f \u06cc\u0627 \u06a9\u0644\u06cc\u06a9 \u06a9\u0646\u06cc\u062f",
-        L"AzadiTeb Template\0*.aztpl;*.json\0",mgn,mgn,W-2*mgn,S(120));
+        L"DarmanPlus Template\0*.aztpl;*.json\0",mgn,mgn,W-2*mgn,S(120));
     createFlatButton(h,IDC_RST_PICK,L"\u0627\u0646\u062a\u062e\u0627\u0628 \u0641\u0627\u06cc\u0644",ICO_SAVE,BS_OUTLINE,
         mgn,mgn+S(130),S(140),S(30));
     st.hStatus=CreateWindowExW(0,L"STATIC",
