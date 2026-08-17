@@ -483,7 +483,9 @@ bool printLastReceipt(HWND owner){
         for(const auto& s:sections){ if(s.is_active && s.kind==L"reception"){ sectionId=s.id; break; } }
     }
     if(sectionId==0){ for(const auto& s:sections){ if(s.is_active){ sectionId=s.id; break; } } }
-    if(sectionId>0 && printPrintDesign(r,sectionId,owner)) return true;
+    // v1.65.0: attempt the services-capable print-design even when the stored
+    // department no longer matches a section (sectionId==0 → first builtin).
+    if(printPrintDesign(r,sectionId,owner)) return true;
     if(printDesignedReceipt(r,0,owner)) return true;
     return printReceipt(r,2,owner);
 }
