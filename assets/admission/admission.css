@@ -848,14 +848,8 @@ body{background:#eef3fa;background:linear-gradient(180deg,#f7fafe 0%,#e3ecf7 100
 .free-rate{display:block;white-space:nowrap;font-size:11px;}
 .free-rate input{vertical-align:middle;margin-left:4px;}
 
-/* Draggable queue mini-page (صندوق نرفته‌ها).
-   v1.60.0 FIX: raised above every column/layer (was 800 and slid UNDER the
-   invoice/queue surfaces — the "invisible layer" bug) and the JS now docks
-   it fully INSIDE the viewport with clamped dragging. */
-.mini-page{display:none;position:fixed;z-index:1500;left:28px;bottom:28px;width:780px;max-width:calc(100% - 56px);max-height:72vh;background:#fff;box-shadow:0 18px 55px rgba(15,35,65,.28);}
-.mini-page.open{display:block;}
-.mini-drag{height:42px;padding:0 12px;display:-ms-flexbox;display:flex;-ms-flex-align:center;align-items:center;-ms-flex-pack:justify;justify-content:space-between;background:#173b70;color:#fff;font-weight:800;cursor:move;}
-.mini-drag .btn{color:#fff;border-color:rgba(255,255,255,.4);background:transparent;}
+/* v1.65.0: the draggable queue mini-page (صندوق نرفته‌ها) is fully retired —
+   the queue lives in the FULL-SCREEN overlay (.queue-overlay) since v1.64.0. */
 .queue-card .tbl-wrap{max-height:330px;}
 
 /* Blacklist warning dialog. */
@@ -870,7 +864,7 @@ body{background:#eef3fa;background:linear-gradient(180deg,#f7fafe 0%,#e3ecf7 100
 
 /* Complete dark palette for the embedded surface. */
 body.theme-dark{background:#111827;color:#e5edf7;}
-.theme-dark .card,.theme-dark .modal-card,.theme-dark .mini-page{background:#1d2735;border-color:#344357;color:#e5edf7;}
+.theme-dark .card,.theme-dark .modal-card{background:#1d2735;border-color:#344357;color:#e5edf7;}
 .theme-dark .card-head{background:#253246;border-color:#3b4a5e;}
 .theme-dark .card-title,.theme-dark .pf-name,.theme-dark .inv-line b,.theme-dark .sf-cell b,.theme-dark .q-count b{color:#f3f7fc;}
 .theme-dark .fld>span,.theme-dark .inv-line span,.theme-dark .chk,.theme-dark .ps-cap{color:#c0ccdc;}
@@ -894,7 +888,6 @@ body.theme-dark{background:#111827;color:#e5edf7;}
   .col-action,.col-right,.col-center,.col-left{width:100%;-ms-flex:0 0 100%;flex:0 0 100%;margin:0;}
   .col-left{-ms-flex-direction:column;flex-direction:column;}.col-left>.card{width:100%;margin-left:0;}
   .grid-4>.fld,.grid-2>.fld,.row-3>.card{width:100%;-ms-flex:0 0 100%;flex:0 0 100%;}
-  .mini-page{left:10px;bottom:10px;max-width:calc(100% - 20px);width:calc(100% - 20px);}
 }
 
 /* ============================================================================
@@ -1067,8 +1060,8 @@ body.theme-warm{background:#f4f0ea;}
      2. Readable typography everywhere: one ink scale, never grey-on-grey.
      3. Inputs, containers and buttons rebuilt with a single consistent
         language (10px radius, 1.5px border, soft inner fill, blue focus ring).
-     4. The صندوق نرفته‌ها mini-page is repaired: it can no longer open cut off,
-        slide under an invisible layer, or resist dragging.
+     4. The صندوق نرفته‌ها queue opens as a covering overlay (full-screen since
+        v1.64.0) — no draggable mini-page remains.
      5. Services live at the BOTTOM-CENTRE of the workspace and always keep a
         usable height.
    Still strictly Trident-safe: no custom properties, no grid, no flex `gap`,
@@ -1274,8 +1267,7 @@ select.inp{background:#fbfdff;}
 /* ------------------------------------- 8. SERVICES: BOTTOM-CENTRE ANCHOR --- */
 /* The centre column is a flex COLUMN. Pushing the services card with an auto
    top margin parks it at the BOTTOM of the workspace, and `align-self:center`
-   plus a max-width keeps it visually CENTRED rather than edge-to-edge. The
-   queue mini-page is position:fixed so it does not participate here. */
+   plus a max-width keeps it visually CENTRED rather than edge-to-edge. */
 .col-center{-ms-flex-pack:start;justify-content:flex-start;}
 .col-center > .svc-card{
   margin-top:auto;margin-bottom:0;
@@ -1336,73 +1328,11 @@ select.inp{background:#fbfdff;}
 }
 
 /* ============================================================================
-   11. صندوق نرفته‌ها MINI-PAGE — the reported bug, fixed properly.
-   ----------------------------------------------------------------------------
-   Symptoms the user reported: it opened cut off half-way down the screen, it
-   could not be dragged, and it slid under an "invisible layer" and vanished.
-   Root causes, all addressed here:
-     a) it was anchored with `bottom:28px` while its own content could exceed
-        the remaining height → the head (the drag handle) was pushed off-screen,
-        which is exactly why it looked cut off AND became undraggable.
-        → now anchored from the TOP with a hard `max-height:80vh` and the panel
-          is a flex COLUMN so only the table body scrolls, never the handle.
-     b) `overflow:hidden` on the ancestor columns clipped it. → z-index raised
-        far above every rail and the panel is a direct viewport-fixed layer with
-        its own backdrop, so no ancestor can clip or cover it.
-     c) nothing visually separated it from the page, so when another surface
-        painted over it the panel appeared to "disappear". → an explicit dim
-        backdrop (.mini-backdrop) now sits directly beneath it.
+   11. صندوق نرفته‌ها — v1.65.0: the draggable mini-page is fully RETIRED.
+   The queue is presented exclusively in the full-screen overlay
+   (.queue-overlay + .queue-backdrop, §v1.64.0 block below), which can never
+   open cut off, slide under another layer, or need dragging at all.
    ============================================================================ */
-.mini-backdrop{
-  display:none;position:fixed;z-index:4000;top:0;right:0;bottom:0;left:0;
-  background:#0b1a30;
-  filter:alpha(opacity=34);         /* Trident */
-  opacity:.34;
-}
-.mini-backdrop.open{display:block;}
-.mini-page{
-  display:none;position:fixed;z-index:4001;
-  top:64px;left:auto;right:auto;bottom:auto;
-  width:860px;max-width:96%;
-  max-height:80vh;                  /* never taller than the viewport */
-  background:#ffffff;
-  border:1px solid #b6cae6;border-radius:14px;
-  -webkit-box-shadow:0 26px 70px rgba(9,24,48,.42);
-  box-shadow:0 26px 70px rgba(9,24,48,.42);
-  overflow:hidden;                  /* clip to the rounded corners */
-  margin:0;
-}
-.mini-page.open{
-  display:-ms-flexbox;display:flex;
-  -ms-flex-direction:column;flex-direction:column;
-}
-/* the drag handle is a fixed-height flex item → it can NEVER be pushed off */
-.mini-page > .mini-drag{
-  -ms-flex:0 0 auto;flex:0 0 auto;
-  height:46px;padding:0 14px;
-  background:-webkit-linear-gradient(top,#215ec9 0%,#153c78 100%);
-  background:linear-gradient(180deg,#215ec9 0%,#153c78 100%);
-  color:#ffffff;font-weight:900;font-size:14px;cursor:move;
-  -ms-user-select:none;user-select:none;-webkit-user-select:none;
-}
-.mini-page > .mini-drag .btn{
-  color:#ffffff;background:rgba(255,255,255,.14);
-  border-color:rgba(255,255,255,.45);font-weight:900;
-}
-.mini-page > .mini-drag .btn:hover{background:rgba(255,255,255,.26);color:#ffffff;}
-.mini-page > .card-head{-ms-flex:0 0 auto;flex:0 0 auto;border-radius:0;}
-/* only the body scrolls */
-.mini-page > .card-body{
-  -ms-flex:1 1 auto;flex:1 1 auto;min-height:0;
-  overflow:auto;padding:0;
-}
-.mini-page .tbl-wrap,
-.mini-page .tbl-wrap.collapsed,
-.mini-page .tbl-wrap.expanded{max-height:none;border-left:none;border-right:none;}
-.mini-page .queue-foot{-ms-flex:0 0 auto;flex:0 0 auto;}
-@media (max-width:900px){
-  .mini-page{width:96%;top:44px;max-height:86vh;}
-}
 
 /* --------------------------------------------------- 12. DARK PARITY --- */
 body.theme-dark{background:#0e1622;background:linear-gradient(180deg,#131d2c 0%,#0c1420 100%);color:#e7eff9;}
@@ -1445,8 +1375,6 @@ body.theme-dark{background:#0e1622;background:linear-gradient(180deg,#131d2c 0%,
 .theme-dark .inv-gtitle{color:#8ab4ef;border-color:#3a4a60;}
 .theme-dark .inv-line span{color:#bccbdd;}
 .theme-dark .inv-remain{border-color:#3a4a60;}
-.theme-dark .mini-page{background:#1e2a3c;border-color:#46586f;}
-.theme-dark .mini-page > .mini-drag{background:linear-gradient(180deg,#22528f 0%,#152f56 100%);}
 .theme-dark .tab{color:#a7b8cd;}
 .theme-dark .tab.active{color:#7fb3f7;border-bottom-color:#7fb3f7;}
 .theme-dark .queue-hub-btn{background:#243149;border-color:#4f6884;color:#e9f2ff;}
@@ -1569,3 +1497,154 @@ body.theme-dark{background:#0e1622;background:linear-gradient(180deg,#131d2c 0%,
 .theme-dark .btn-nav{background:#253246;border:1px solid #526a88;color:#cfe4ff;}
 .theme-dark .btn-nav:hover{background:#2c3c55;border-color:#7fb3f7;color:#eaf2ff;}
 .theme-dark #blockClose{background:#1e2a3c;border:1px solid #4a5c74;color:#e7eff9;}
+
+/* ============================================================================
+   v1.65.0 — WHITE + BLUE POLISH PASS (appended last → wins the cascade).
+   ----------------------------------------------------------------------------
+   Requests addressed: sharper typography and contrast, cleaner white surfaces
+   with ONE blue accent family, calmer field/button language, and clearer
+   section rhythm — all without moving any element or changing any behaviour.
+   Trident-safe as ever: literal colours, no custom properties, no grid,
+   no flex `gap`, no logical props; -ms- prefixes carried where flex is used.
+   ============================================================================ */
+
+/* ------------------------------------------------------------- PAGE INK --- */
+body{
+  background:#f2f6fc;
+  background:-webkit-linear-gradient(top,#fafcff 0%,#e9f0f9 100%);
+  background:linear-gradient(180deg,#fafcff 0%,#e9f0f9 100%);
+  color:#16293f;
+}
+.body{border-top:1px solid #dbe5f1;}
+
+/* rails: near-white trays; centre pure white so the work area reads first */
+.col-action,.col-left{
+  background:#f6f9fd;
+  background:-webkit-linear-gradient(top,#fcfdff 0%,#f0f5fc 100%);
+  background:linear-gradient(180deg,#fcfdff 0%,#f0f5fc 100%);
+  border-color:#d7e2f0;
+}
+.col-center{
+  background:#ffffff;
+  background:-webkit-linear-gradient(top,#ffffff 0%,#f8fbff 100%);
+  background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);
+  border-color:#d7e2f0;
+}
+
+/* ------------------------------------------------------------ CARD SKIN --- */
+.card{border-color:#dae4f1;border-radius:14px;
+  -webkit-box-shadow:0 1px 1px rgba(16,40,76,.04),0 4px 14px rgba(16,40,76,.06);
+  box-shadow:0 1px 1px rgba(16,40,76,.04),0 4px 14px rgba(16,40,76,.06);}
+.card-head{
+  min-height:45px;padding:11px 15px;
+  background:#fbfdff;
+  background:-webkit-linear-gradient(top,#ffffff 0%,#f4f8fe 100%);
+  background:linear-gradient(180deg,#ffffff 0%,#f4f8fe 100%);
+  border-bottom:1px solid #e6edf7;
+  -webkit-box-shadow:inset 2px 0 0 #1f6feb;box-shadow:inset 2px 0 0 #1f6feb;
+}
+.card-title{font-size:14px;font-weight:900;color:#102a4d;}
+.ct-ico{color:#1f6feb;}
+
+/* ----------------------------------------------------------- TYPOGRAPHY --- */
+.fld > span{font-size:12.5px;font-weight:800;color:#31465f;margin-bottom:6px;}
+.pf-name{font-size:16px;color:#102a4d;}
+.pf-file{font-size:12.5px;color:#54677f;}
+.inv-line span{color:#3c5270;}
+.inv-line b{color:#102a4d;}
+.sf-cell span{color:#48607c;}
+.sf-cell b{color:#102a4d;}
+
+/* ------------------------------------------------------------- CONTROLS --- */
+.inp,select.inp{
+  height:39px;border:1.5px solid #c9d7e8;border-radius:10px;
+  background:#fbfdff;color:#10233e;font-size:14px;font-weight:700;
+  -webkit-box-shadow:inset 0 1px 2px rgba(16,40,76,.04);
+  box-shadow:inset 0 1px 2px rgba(16,40,76,.04);
+}
+.inp:hover,select.inp:hover{border-color:#9cb6d9;background:#ffffff;}
+.inp:focus,select.inp:focus{
+  border-color:#1f6feb;background:#ffffff;
+  -webkit-box-shadow:0 0 0 3px rgba(31,111,235,.15);
+  box-shadow:0 0 0 3px rgba(31,111,235,.15);
+}
+.inp[readonly]{background:#f3f7fd;color:#1a3f74;}
+.inp[disabled]{background:#eff3f9;color:#7e8ea3;border-color:#dae4f1;}
+.inp-sm{height:34px;}
+
+.btn{border-radius:10px;font-weight:800;}
+.btn-primary{
+  border-color:#1a5fd0;
+  background:#1f6feb;
+  background:-webkit-linear-gradient(top,#348af5 0%,#1c5fd6 100%);
+  background:linear-gradient(180deg,#348af5 0%,#1c5fd6 100%);
+  -webkit-box-shadow:0 2px 7px rgba(31,111,235,.25);box-shadow:0 2px 7px rgba(31,111,235,.25);
+}
+.btn-primary:hover{
+  background:-webkit-linear-gradient(top,#2c7bef 0%,#1653bd 100%);
+  background:linear-gradient(180deg,#2c7bef 0%,#1653bd 100%);
+}
+.btn-outline{border-color:#c9d7e8;color:#1a3a66;}
+.btn-outline:hover{border-color:#1f6feb;color:#1c5fd6;background:#f3f8ff;}
+
+/* «ثبت قبض و صدور» — the page's single strongest control, always BLUE. */
+.btn-submit{
+  border:1.5px solid #164ea8;border-radius:12px;
+  background:#1f6feb;
+  background:-webkit-linear-gradient(top,#3b87f4 0%,#1c5cc9 100%);
+  background:linear-gradient(180deg,#3b87f4 0%,#1c5cc9 100%);
+  -webkit-box-shadow:0 4px 14px rgba(31,111,235,.30);box-shadow:0 4px 14px rgba(31,111,235,.30);
+}
+.btn-submit:hover{
+  background:-webkit-linear-gradient(top,#2f78ec 0%,#1550b4 100%);
+  background:linear-gradient(180deg,#2f78ec 0%,#1550b4 100%);
+}
+
+/* nav / queue buttons pick up the same blue family */
+.queue-nav-row .btn-nav{border-color:#d3e0f2;color:#1c5fd6;background:#f1f6fe;}
+.queue-nav-row .btn-nav:hover{background:#e3eefc;border-color:#1f6feb;color:#12448f;}
+.queue-hub-btn{border-color:#aac4ea;color:#12448f;}
+.queue-hub-btn:hover{border-color:#1f6feb;color:#1c5fd6;}
+
+/* payable / totals: one blue, consistent with the submit family */
+.payable-card{
+  border-color:#164ea8;
+  background:-webkit-linear-gradient(top,#3b87f4 0%,#164a9e 100%);
+  background:linear-gradient(180deg,#3b87f4 0%,#164a9e 100%);
+}
+.tc-strip{
+  background:-webkit-linear-gradient(top,#3b87f4 0%,#1c5cc9 100%);
+  background:linear-gradient(180deg,#3b87f4 0%,#1c5cc9 100%);
+}
+
+/* tables: airier cells, clearer header band */
+.tbl thead th{background:#e9f1fb;color:#102a4d;border-bottom:2px solid #c9d7e8;}
+.tbl tbody td{padding:9px 8px;}
+.tbl tbody tr:nth-child(even){background:#f8fbff;}
+.tbl tbody tr:hover{background:#ebf3fe;}
+
+/* queue overlay head aligns with the same blue */
+.queue-overlay-head{background:#1f6feb;}
+.queue-overlay-head .tab.active{color:#1f6feb;}
+.q-count b{color:#1c5fd6;}
+.link-btn{color:#1c5fd6;}
+.tab.active{color:#1f6feb;border-bottom-color:#1f6feb;}
+
+/* datetime card: quiet, clearly separated, side-by-side + responsive (the
+   flex-wrap rules from §9 still govern the wrapping behaviour). */
+.datetime-card{border-color:#d3e0f2;}
+.datetime-card .dt-ico{background:#e9f1fd;color:#1f6feb;border:1px solid #d3e2f9;}
+.datetime-card .inp{background:#f3f8fe;border-color:#c9d7e8;color:#123c72;}
+
+/* focus ring parity for keyboard navigation on buttons */
+.btn:focus{outline:none;-webkit-box-shadow:0 0 0 3px rgba(31,111,235,.22);box-shadow:0 0 0 3px rgba(31,111,235,.22);}
+.btn-submit:focus{-webkit-box-shadow:0 0 0 3px rgba(31,111,235,.30),0 4px 14px rgba(31,111,235,.30);box-shadow:0 0 0 3px rgba(31,111,235,.30),0 4px 14px rgba(31,111,235,.30);}
+
+/* dark theme parity for the retuned accents */
+.theme-dark .card-head{-webkit-box-shadow:inset 2px 0 0 #4f92f0;box-shadow:inset 2px 0 0 #4f92f0;}
+.theme-dark .btn-primary{background:#2456c4;border-color:#1c4aad;}
+.theme-dark .btn-submit{background:#2456c4;border-color:#1c4aad;}
+.theme-dark .queue-overlay-head{background:#1d3f7d;}
+.theme-dark .payable-card{background:#174c9f;border-color:#4a8de7;}
+.theme-dark .tc-strip{background:#1d3f7d;}
+.theme-dark .queue-nav-row .btn-nav{background:#253246;border-color:#526a88;color:#cfe4ff;}
