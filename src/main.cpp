@@ -1191,6 +1191,17 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
     gdipStartup();                   // v1.3.0: GDI+ rendering layer
     seedDefaultDepts();              // v1.4.1: ensure «پذیرش» category exists
 
+    // v1.65.0: seed the Sections registry + the 30 built-in print templates AT
+    // STARTUP. They were previously seeded only when the operator opened the
+    // Settings window or the Print Designer — so on a fresh install the very
+    // first admission print found an EMPTY design store, SectionDesign_Resolve
+    // failed, and the receipt silently degraded to the legacy label-only layout
+    // (no services table). Seeding here (idempotent, version-gated migration)
+    // guarantees the first print already renders the real services-capable
+    // design. printPrintDesign also seeds lazily as a belt-and-braces guard.
+    { void Sections_Init(); void Designs_Init();
+      Sections_Init(); Designs_Init(); }
+
     // v1.33.0: start the embedded Patient-Admission loopback host EAGERLY at
     // launch (instead of lazily on first tab open). Makes the HTML surface come
     // up instantly when «پذیرش بیمار» is clicked and guarantees the /api bridge

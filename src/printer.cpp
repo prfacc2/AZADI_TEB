@@ -13,6 +13,7 @@
 // ============================================================================
 #include "app.h"
 #include "print_designer.h"   // §3: new vector designer (PrintDesigner_Open)
+#include "sections.h"         // v1.65.0: lazy seeding in the print path
 #include <stdio.h>
 
 // ----------------------------------------------------------------------------
@@ -2278,8 +2279,25 @@ static HDC pdCreatePrinterDC(const std::wstring& prn, const PrintDesign& d){
 }
 
 bool printPrintDesign(const ReceptionRecord& r, int sectionId, HWND owner){
+    // v1.65.0 SERVICES-PRINT FIX. Root cause of «قبض فقط برچسب چاپ می‌کند»:
+    // Designs_Init() was only ever called from the Settings window / the Print
+    // Designer, so a fresh install that never opened either had ZERO seeded
+    // design files → SectionDesign_Resolve() failed → every receipt fell back
+    // to the LEGACY label-only layout (printDesignedReceipt) which cannot render
+    // the admission services table. Seed the section registry + the 30 built-in
+    // templates lazily right here (cheap no-op once seeded, guarded static), so
+    // the FIRST print of a fresh install already uses the real services-capable
+    // design.
+    { static bool s_printSeeded=false;
+      if(!s_printSeeded){ Sections_Init(); Designs_Init(); s_printSeeded=true; } }
     PrintDesign d;
-    if(!SectionDesign_Resolve(sectionId, d)) return false;   // no design → caller falls back
+    if(!SectionDesign_Resolve(sectionId, d)){
+        // Last resort (design store unwritable → nothing could be seeded):
+        // build template #1 ENTIRELY IN MEMORY. The receipt still prints with
+        // the live services table instead of degrading to the label-only
+        // legacy layout.
+        d = Design_BuiltinTemplate(0);
+    }
     if(d.items.empty()) return false;
     if(d.paperW<=0 || d.paperH<=0){
         double pw,ph; if(Paper_Dims(d.paper,pw,ph)){ d.paperW=pw; d.paperH=ph;

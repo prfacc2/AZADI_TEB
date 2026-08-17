@@ -2768,7 +2768,10 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
                     //  3) classic GDI receipt
                     int sid=recResolveSectionId();
                     bool done=false;
-                    if(sid>0) done=printPrintDesign(rec,sid,h);
+                    // v1.65.0: try the services-capable print-design even when
+                    // sid==0 (resolver maps 0 → first builtin; store now seeds
+                    // lazily inside printPrintDesign).
+                    done=printPrintDesign(rec,sid,h);
                     if(!done) done=printDesignedReceipt(rec,0,h);
                     if(!done) printReceipt(rec,2,h);
                     kickCashDrawer();   // pulse drawer if enabled in printer settings

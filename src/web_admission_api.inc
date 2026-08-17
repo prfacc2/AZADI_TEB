@@ -752,10 +752,13 @@ static std::string admissionApi(const std::string& verb, const std::string& body
         std::wstring printMode=L"none";
         RunOnUiThreadSync([&](){
             bool done=false;
-            if(sid>0){
-                done=printPrintDesign(r,sid,owner);
-                if(done) printMode=L"print-design section="+std::to_wstring(sid);
-            }
+            // v1.65.0: ALWAYS try the services-capable print-design first —
+            // even when sid==0 (SectionDesign_Resolve maps sid<=0 to the first
+            // builtin, and printPrintDesign now seeds the design store lazily).
+            // Previously sid==0 or an unseeded store silently degraded to the
+            // legacy label-only receipt, which cannot render the services table.
+            done=printPrintDesign(r,sid,owner);
+            if(done) printMode=L"print-design section="+std::to_wstring(sid);
             if(!done){
                 done=printDesignedReceipt(r,0,owner);
                 if(done) printMode=L"designed-receipt idx=0";
@@ -800,8 +803,11 @@ static std::string admissionApi(const std::string& verb, const std::string& body
             if(verb=="print.insurance"){ printReceipt(r,0,owner); }
             else if(verb=="print.rx"){   printReceipt(r,1,owner); }
             else if(verb=="print.receipt"){
+                // v1.65.0: same order as admission.save — services-capable
+                // design first (works for sid==0 too), legacy label layout
+                // only as an explicit fallback.
                 int sid=adResolveSectionId(); bool done=false;
-                if(sid>0) done=printPrintDesign(r,sid,owner);
+                done=printPrintDesign(r,sid,owner);
                 if(!done) done=printDesignedReceipt(r,0,owner);
                 if(!done) printReceipt(r,2,owner);
             }

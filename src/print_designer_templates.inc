@@ -962,3 +962,7 @@ void Designs_Init(){
         stamp();
     }
 }
+
+// v1.65.0 — public in-memory accessor for the print path's last-resort
+// fallback (see printPrintDesign). No file I/O, no store mutation.
+PrintDesign Design_BuiltinTemplate(int idx){ return buildTemplate(idx); }
