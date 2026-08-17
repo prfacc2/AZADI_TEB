@@ -1202,11 +1202,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
     { void Sections_Init(); void Designs_Init();
       Sections_Init(); Designs_Init(); }
 
-    // v1.33.0: start the embedded Patient-Admission loopback host EAGERLY at
-    // launch (instead of lazily on first tab open). Makes the HTML surface come
-    // up instantly when «پذیرش بیمار» is clicked and guarantees the /api bridge
-    // is already listening. Cheap: one loopback socket + a single accept thread.
-    WebAdmission_EnsureHost();
+    // v1.66.0: prepare the embedded Patient-Admission surface EAGERLY at
+    // launch — registers the shared page verbs and pre-builds the fully
+    // inlined HTML page (serverless: attached to the program, no loopback
+    // host / port at all), so «پذیرش بیمار» opens instantly.
+    WebAdmission_Prepare();
 
     // responsive scale: based on monitor size + DPI
     HDC sdc=GetDC(NULL);
@@ -1266,50 +1266,44 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
                                                switchScreen(SC_MANAGE);
                                                openBackupManager(f); }
             else if(!wcscmp(dbg,L"shift")){    int sh=0; showShiftDialog(f,sh); }
-            // §D.6: headless verification that the EMBEDDED admission page host
-            // actually serves the HTML/CSS/JS bundle + /api bridge. Starts the
-            // loopback host, then self-connects over 127.0.0.1 to GET
-            // /index.html and POST /api/init, logging the results and an
-            // AZ_ADMISSION_PROBE=OK/FAIL marker, then exits. Lets us confirm the
-            // HTML surface loads without needing a full GUI/WebBrowser render.
+            // §D.6: headless verification of the SERVERLESS embedded admission
+            // surface (v1.66.0). Builds the fully-inlined page for both engine
+            // variants and asserts every asset actually made it inline (styles,
+            // all four scripts, closing </html>, and the data:-URI font for the
+            // WebView2 variant), then opens a real embedded view and pumps until
+            // the bundled JS reaches the `init` verb through the bridge. A JS
+            // syntax error would stop the script before it ever called the
+            // bridge, so a non-zero init-hit count proves the ES5 JS parsed and
+            // executed under the real engine. Writes AZ_ADMISSION_PROBE=OK/FAIL.
             else if(!wcscmp(dbg,L"admission_probe")){
-                int port = WebAdmission_EnsureHost();
-                logLine(L"PROBE admission: host port = " + std::to_wstring(port));
-                bool ok = false;
-                if(port>0){
-                    auto httpGet=[&](const std::string& reqLine, const std::string& body)->std::string{
-                        SOCKET s=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);
-                        if(s==INVALID_SOCKET) return "";
-                        sockaddr_in a={}; a.sin_family=AF_INET;
-                        a.sin_addr.s_addr=htonl(INADDR_LOOPBACK); a.sin_port=htons((u_short)port);
-                        if(connect(s,(sockaddr*)&a,sizeof(a))!=0){ closesocket(s); return ""; }
-                        std::string req=reqLine;
-                        req+="Host: 127.0.0.1\r\nConnection: close\r\n";
-                        if(!body.empty()){ char cl[64]; sprintf(cl,"Content-Length: %d\r\n",(int)body.size()); req+=cl; }
-                        req+="\r\n"; req+=body;
-                        send(s,req.data(),(int)req.size(),0);
-                        std::string resp; char buf[2048]; int n;
-                        while((n=recv(s,buf,sizeof(buf),0))>0) resp.append(buf,n);
-                        closesocket(s); return resp;
-                    };
-                    std::string idx=httpGet("GET /index.html HTTP/1.1\r\n","");
-                    std::string api=httpGet("POST /api/init HTTP/1.1\r\n","{}");
-                    bool idxOk = idx.find("200")!=std::string::npos &&
-                                 (idx.find("<html")!=std::string::npos || idx.find("<!DOCTYPE")!=std::string::npos ||
-                                  idx.find("admission")!=std::string::npos);
-                    bool apiOk = api.find("200")!=std::string::npos && api.find("{")!=std::string::npos;
-                    logLine(L"PROBE index.html len=" + std::to_wstring(idx.size()) + (idxOk?L" OK":L" FAIL"));
-                    logLine(L"PROBE api/init  len=" + std::to_wstring(api.size()) + (apiOk?L" OK":L" FAIL"));
-                    ok = idxOk && apiOk;
-                }
-                // Now verify the embedded VIEW (MSHTML/WebView2) actually
-                // creates a real child window AND that the bundled JS runs end to
-                // end: we pump messages for up to ~10s and check that the page
-                // reached /api/init through the Bridge. A JS *syntax error* (the
-                // bug we are fixing) would stop the script before it ever calls
-                // the bridge, so a non-zero init-hit count proves the ES5 JS
-                // parsed and executed under the real engine.
                 long WebAdmission_DebugInitHits();
+                std::string WebAdmission_DebugInlinePage(bool);
+                WebAdmission_Prepare();
+                auto pageOk=[&](const std::string& pg, bool wantFont)->bool{
+                    if(pg.empty()) return false;
+                    bool ok = pg.find("</html>")!=std::string::npos &&
+                              pg.find("<style>")!=std::string::npos &&
+                              pg.find("AzBridge")!=std::string::npos &&   // common.js
+                              pg.find("azAdmissionReceive")!=std::string::npos && // bridge.js
+                              pg.find("contextmenu")!=std::string::npos && // contextmenu.js
+                              pg.find("admission")!=std::string::npos &&
+                              pg.find("<link")==std::string::npos &&      // no dead links
+                              pg.find("src=\"")==std::string::npos;       // no external scripts
+                    // font: WebView2 variant must carry the data:-URI face; the
+                    // MSHTML variant must NOT (it uses the process memory font).
+                    if(wantFont) ok = ok && pg.find("data:font/ttf;base64,")!=std::string::npos;
+                    else         ok = ok && pg.find("data:font/ttf;base64,")==std::string::npos;
+                    return ok;
+                };
+                std::string pgM=WebAdmission_DebugInlinePage(false);
+                std::string pgW=WebAdmission_DebugInlinePage(true);
+                bool inlineOk = pageOk(pgM,false) && pageOk(pgW,true);
+                logLine(L"PROBE inline mshtml len=" + std::to_wstring(pgM.size()) +
+                        L" webview2 len=" + std::to_wstring(pgW.size()) +
+                        (inlineOk?L" OK":L" FAIL"));
+                // Now verify the embedded VIEW (MSHTML/WebView2) actually
+                // creates a real child window AND that the bundled JS runs end
+                // to end (init reached through the serverless bridge).
                 bool viewOk=false, jsOk=false;
                 if(WebAdmission_Available()){
                     HWND v = WebAdmission_CreateView(f);
@@ -1327,13 +1321,14 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
                         WebAdmission_DestroyView(v);
                     }
                 }
-                ok = ok && viewOk && jsOk;
+                bool ok = inlineOk && viewOk && jsOk;
                 logLine(ok ? L"AZ_ADMISSION_PROBE=OK" : L"AZ_ADMISSION_PROBE=FAIL");
                 // also drop a plain marker file so headless runners can read it
                 {
                     std::wstring marker;
-                    marker += std::wstring(L"host=") + (port>0?L"OK":L"FAIL") + L" port=" + std::to_wstring(port) + L"\r\n";
-                    marker += std::wstring(L"assets=") + (ok||true?L"":L"") ;
+                    marker += std::wstring(L"inline=") + (inlineOk?L"OK":L"FAIL") +
+                              L" mshtmlLen=" + std::to_wstring(pgM.size()) +
+                              L" webview2Len=" + std::to_wstring(pgW.size()) + L"\r\n";
                     marker += std::wstring(L"view=") + (viewOk?L"OK":L"FAIL") + L"\r\n";
                     marker += std::wstring(L"jsBridge=") + (jsOk?L"OK":L"FAIL") +
                               L" initHits=" + std::to_wstring(WebAdmission_DebugInitHits()) + L"\r\n";

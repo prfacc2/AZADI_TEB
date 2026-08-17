@@ -78,12 +78,13 @@ struct MsgHandler : public ICoreWebView2WebMessageReceivedEventHandler {
         LPWSTR js=nullptr;
         if(FAILED(args->get_WebMessageAsJson(&js))||!js) return S_OK;
         std::string body=w2u8(js); CoTaskMemFree(js);
-        // body = {"verb":"...","id":"...","payload":{...}}
-        std::string verb,id;
+        // body = {"verb":"...","id":"...","page":"...","payload":{...}}
+        std::string verb,id,page;
         jsonGetString(body,"verb",verb);
         jsonGetString(body,"id",id);
+        jsonGetString(body,"page",page);
         std::string payload; if(!jsonGetRaw(body,"payload",payload)) payload="{}";
-        std::string result=admissionApi(verb,payload);
+        std::string result=AdmissionDispatchVerb(verb,payload,page);
         // reply: {"id":"<id>","result":<result>}
         std::string reply="{\"id\":"+jstr(u82w(id))+",\"result\":"+result+"}";
         if(sender) sender->PostWebMessageAsJson(u82w(reply).c_str());
@@ -160,13 +161,14 @@ struct CtrlHandler : public ICoreWebView2CreateCoreWebView2ControllerCompletedHa
                     MsgHandler* mh=new MsgHandler(host);
                     v->web->add_WebMessageReceived(mh, &v->msgTok);
                     mh->Release();
-                    // size + navigate to the loopback bundle
+                    // size + load the fully-inlined page DIRECTLY (v1.66.0:
+                    // serverless — no loopback host, no ports, no sockets).
                     RECT rc; GetClientRect(host,&rc);
                     ctrl->put_Bounds(rc);
                     ctrl->put_IsVisible(TRUE);
-                    int port=WebAdmission_EnsureHost();
-                    wchar_t url[96]; swprintf(url,96,L"http://127.0.0.1:%d/index.html",port);
-                    v->web->Navigate(url);
+                    const std::string& page=AdmissionInlinePage(true);
+                    if(!page.empty())
+                        v->web->NavigateToString(u82w(page).c_str());
                 }
             }
         }
@@ -235,8 +237,8 @@ static HWND WV2_CreateView(HWND parent){
     adLoadLoader();
     if(!pCreateEnv) return nullptr;
 
-    // ensure the asset host is up before we navigate
-    if(!WebAdmission_EnsureHost()) return nullptr;
+    // v1.66.0: serverless — the page is inlined from RCDATA, no host needed.
+    if(AdmissionInlinePage(true).empty()) return nullptr;
 
     // COM must be initialised on this (UI) thread for WebView2.
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
@@ -299,9 +301,9 @@ static void WV2_PushEvent(const char* eventName, const std::string& jsonData){
     // format: {"event":"name","data":<jsonData>}
     std::string msg="{\"event\":"+jstr(u82w(eventName))+",\"data\":"+
         (jsonData.empty()?std::string("{}"):jsonData)+"}";
-    // HTTP fallback queue
-    adLock(); g_adEventQ.push_back(msg); adUnlock();
-    // direct push to every live embedded view
+    // direct push to every live embedded WebView2 view (v1.66.0: the old HTTP
+    // /api/poll fallback queue is gone — MSHTML views get the same event via
+    // the dispatch layer's per-view execScript broadcast).
     std::lock_guard<std::mutex> lk(g_adViewsMx);
     for(auto& kv:g_adViews){
         AdView* v=kv.second;

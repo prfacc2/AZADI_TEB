@@ -2,7 +2,7 @@
 //  web_pages.h — multi-page embedded-web PAGE REGISTRY (v1.40.0)
 //
 //  A tiny, dependency-free registry that lets the single loopback HTTP host
-//  (src/web_admission_http.inc) serve MANY embedded pages — not just the
+//  (formerly the loopback host; v1.66.0 serverless embed) serve MANY embedded pages — not just the
 //  admission bundle — from RCDATA blobs, and route /api/<verb> requests to the
 //  page module that owns that verb.
 //

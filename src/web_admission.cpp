@@ -1,24 +1,24 @@
 // ============================================================================
-//  web_admission.cpp — embedded WebView2 Patient-Admission surface (v1.33.0).
+//  web_admission.cpp — embedded Patient-Admission surface (v1.66.0 SERVERLESS).
 //
-//  * Loopback (127.0.0.1) HTTP host serves the bundled admission assets from
-//    RCDATA + a JSON /api bridge backed by the REAL C++ data layer.
-//  * A WebView2 control is embedded as a child of the reception tab and loads
-//    that page. C++ <-> JS is bridged BOTH ways: JS posts structured messages
-//    (chrome.webview.postMessage) which we route to the same /api handlers; C++
-//    pushes events back with PostWebMessageAsJson.
-//  * Graceful fallback: if WebView2 is not installed the caller keeps the
-//    proven native GDI reception form (WebAdmission_Available() == false).
+//  * The admission page (HTML/CSS/JS from RCDATA) is fully INLINED into one
+//    string at startup and handed directly to the engine — WebView2 via
+//    NavigateToString, MSHTML via about:blank + IHTMLDocument2::write. There
+//    is NO local server, NO loopback socket and NO port: the page is attached
+//    to the program, so it can never show "Can't reach this page 127.0.0.1".
+//  * C++ <-> JS is bridged BOTH ways, transport-native per engine:
+//      WebView2 : chrome.webview.postMessage  /  PostWebMessageAsJson
+//      MSHTML   : window.external.azCall(...)  /  execScript push
+//  * Graceful fallback: if neither engine can host, the caller keeps the
+//    proven native GDI reception form.
 //  * Offline-first: assets are embedded, the API reads the local stores; the
 //    layered design leaves room for a future external insurance API adapter.
 // ============================================================================
 #include "app.h"
 #include "web_admission.h"
 #include "web_pages.h"          // v1.40.0: multi-page registry (generic dispatch)
-#include "web_thread_pool.h"    // v1.40.0: bounded worker pool for the host
+#include "web_thread_pool.h"    // RunOnUiThreadSync (UI-thread marshalling)
 #include "sections.h"
-#include <winsock2.h>
-#include <ws2tcpip.h>
 #include <shlobj.h>
 #include <string>
 #include <vector>
@@ -136,7 +136,7 @@ static std::mutex g_adLastNidMx;
 static std::string g_adLastFilledNid;
 
 #include "web_admission_api.inc"
-#include "web_admission_http.inc"
+#include "web_admission_embed.inc"
 #include "web_admission_host.inc"
 #include "web_admission_mshtml.inc"
 #include "web_admission_dispatch.inc"
