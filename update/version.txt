@@ -1,2 +1,2 @@
-1.64.0
-https://github.com/prfacc2/AZADI_TEB/releases/download/v1.64.0/DarmanPlus.exe
+1.65.0
+https://github.com/prfacc2/AZADI_TEB/releases/download/v1.65.0/DarmanPlus.exe
