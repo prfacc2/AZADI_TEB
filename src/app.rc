@@ -1,6 +1,11 @@
 // DarmanPlus resources: embedded Vazirmatn fonts + version info + manifest
 #include <windows.h>
 
+// v1.66.0: application icon — multi-size (16/24/32/48/64/128/256) circular
+// «درمان پلاس» logo. Lowest-ID ICON resource = the icon Explorer shows on the
+// EXE; also loaded at runtime for the window class + taskbar (WM_SETICON).
+1 ICON "../assets/icons/app.ico"
+
 101 RCDATA "../fonts/Vazir-Regular.ttf"
 102 RCDATA "../fonts/Vazir-Bold.ttf"
 

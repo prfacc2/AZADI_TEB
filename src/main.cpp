@@ -1232,12 +1232,26 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
     wc.hInstance   = hInst;
     wc.hCursor     = LoadCursor(NULL,IDC_ARROW);
     wc.lpszClassName = APP_CLASS_W;
-    wc.hIcon       = LoadIcon(NULL,IDI_APPLICATION);
+    // v1.66.0: the embedded multi-size app icon (resource id 1 — the circular
+    // «درمان پلاس» logo). Falls back to the stock icon only if the resource is
+    // somehow missing. Drives Explorer/Alt-Tab/taskbar imagery.
+    wc.hIcon       = LoadIconW(hInst, MAKEINTRESOURCEW(1));
+    if(!wc.hIcon) wc.hIcon = LoadIcon(NULL,IDI_APPLICATION);
     RegisterClassW(&wc);
 
     // true fullscreen borderless: WS_POPUP covering whole monitor, no menu bar
     HWND f = CreateWindowExW(0, APP_CLASS_W, APP_NAME_W,
         WS_POPUP|WS_CLIPCHILDREN, 0,0,sw,sh, NULL,NULL,hInst,NULL);
+    // v1.66.0: explicit big+small window icons (taskbar / Alt-Tab / title
+    // areas). LR_DEFAULTSIZE picks the right frame from the multi-size .ico.
+    {
+        HICON hBig  =(HICON)LoadImageW(hInst,MAKEINTRESOURCEW(1),IMAGE_ICON,
+                        GetSystemMetrics(SM_CXICON),GetSystemMetrics(SM_CYICON),LR_DEFAULTCOLOR);
+        HICON hSmall=(HICON)LoadImageW(hInst,MAKEINTRESOURCEW(1),IMAGE_ICON,
+                        GetSystemMetrics(SM_CXSMICON),GetSystemMetrics(SM_CYSMICON),LR_DEFAULTCOLOR);
+        if(hBig)   SendMessageW(f,WM_SETICON,ICON_BIG,(LPARAM)hBig);
+        if(hSmall) SendMessageW(f,WM_SETICON,ICON_SMALL,(LPARAM)hSmall);
+    }
     ShowWindow(f, SW_SHOW);
     UpdateWindow(f);
     switchScreen(SC_HOME);

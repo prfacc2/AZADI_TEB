@@ -222,7 +222,9 @@
     return true;
   }
   function callWebView(verb, payload) {
-    var id = 'r' + (seq++);
+    /* 'c' prefix: keeps AzBridge request ids disjoint from bridge.js ('r'),
+       since BOTH register chrome.webview listeners on the admission page. */
+    var id = 'c' + (seq++);
     var d = new Deferred();
     pending[id] = d;
     try {
