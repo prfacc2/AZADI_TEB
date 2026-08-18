@@ -1,6 +1,11 @@
 // DarmanPlus resources: embedded Vazirmatn fonts + version info + manifest
 #include <windows.h>
 
+// v1.66.0: application icon — multi-size (16/24/32/48/64/128/256) circular
+// «درمان پلاس» logo. Lowest-ID ICON resource = the icon Explorer shows on the
+// EXE; also loaded at runtime for the window class + taskbar (WM_SETICON).
+1 ICON "../assets/icons/app.ico"
+
 101 RCDATA "../fonts/Vazir-Regular.ttf"
 102 RCDATA "../fonts/Vazir-Bold.ttf"
 
@@ -64,8 +69,8 @@
 1 24 "app.manifest"
 
 VS_VERSION_INFO VERSIONINFO
-  FILEVERSION 1,64,0,0
-  PRODUCTVERSION 1,64,0,0
+  FILEVERSION 1,66,0,0
+  PRODUCTVERSION 1,65,0,0
   FILEFLAGSMASK 0x3fL
   FILEFLAGS 0x0L
   FILEOS 0x40004L
@@ -78,11 +83,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "DarmanPlus"
             VALUE "FileDescription", "DarmanPlus Clinic Reception & Management System"
-            VALUE "FileVersion", "1.64.0.0"
+            VALUE "FileVersion", "1.66.0.0"
             VALUE "InternalName", "DarmanPlus"
             VALUE "OriginalFilename", "DarmanPlus.exe"
             VALUE "ProductName", "DarmanPlus"
-            VALUE "ProductVersion", "1.64.0"
+            VALUE "ProductVersion", "1.66.0"
         END
     END
     BLOCK "VarFileInfo"

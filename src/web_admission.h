@@ -3,8 +3,9 @@
 //
 //  The «پذیرش بیمار» screen is rendered by a modern Chromium engine (Microsoft
 //  WebView2) embedded *inside* the reception tab — NOT in an external browser.
-//  A tiny loopback (127.0.0.1) HTTP host serves the bundled admission assets
-//  from RCDATA; a two-way JSON IPC bridge keeps C++ and the page fully synced:
+//  v1.66.0: the page is fully INLINED from RCDATA and handed directly to the
+//  engine (NavigateToString / document.write) — NO local server, NO loopback,
+//  NO ports. A two-way JSON IPC bridge keeps C++ and the page fully synced:
 //
 //    JS -> C++ :  patient.lookup / patient.search / service.search /
 //                 admission.save / print.* / ui.toggle* / doctor.search …
@@ -20,8 +21,11 @@
 // True when a WebView2 runtime (Evergreen or fixed) is detected on this box.
 bool WebAdmission_Available();
 
-// Start (idempotent) the loopback asset/API host. Returns the port, or 0.
-int  WebAdmission_EnsureHost();
+// v1.66.0 SERVERLESS bootstrap (idempotent): registers the shared page verbs
+// (ping / client.log / client.metrics) and pre-builds the fully-inlined
+// admission page variants so the first tab open is instant. Replaces the old
+// loopback WebAdmission_EnsureHost() — there is no local server anymore.
+void WebAdmission_Prepare();
 
 // Create the embedded WebView2 view as a child of `parent`, sized to fill it,
 // and load the admission page. Returns the WebView host HWND on success, or

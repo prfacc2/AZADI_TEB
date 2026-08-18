@@ -281,12 +281,14 @@ static double hdrBand(PrintDesign& d,const std::wstring& title,unsigned accent,
     return y;
 }
 // Split header: clinic identity right, document identity left, thick rule.
+// v1.65.0: the receipt number was REMOVED from this header — every family that
+// uses hdrSplit also prints it in its meta strip/grid, so it appeared TWICE on
+// the same page (the «آیتم تکراری» complaint on templates 07-09 / 22-24).
 static double hdrSplit(PrintDesign& d,const std::wstring& title,unsigned accent,
                        const std::wstring& docLabel){
     d.items.push_back(mkLabel(PG_M+PG_CW*0.40,PG_M,PG_CW*0.60,10,title,15.5,true,0));
     d.items.push_back(mkLabel(PG_M+PG_CW*0.40,PG_M+10,PG_CW*0.60,5.5,FA_SUBTITLE,8.5,false,0));
-    d.items.push_back(mkLabelC(PG_M,PG_M+1,PG_CW*0.38,8,docLabel,13,true,2,accent));
-    d.items.push_back(mkField(PG_M,PG_M+10,PG_CW*0.38,6,L"receiptNo",FA_RECEIPT,9,2));
+    d.items.push_back(mkLabelC(PG_M,PG_M+4,PG_CW*0.38,9,docLabel,13.5,true,2,accent));
     double y=PG_M+19;
     d.items.push_back(mkHLineC(PG_M,y,PG_CW,1.2,accent)); y+=4;
     return y;
@@ -372,12 +374,14 @@ static double patientCard(PrintDesign& d,double y,double pt,unsigned tint,
     return y+h+3;
 }
 // Patient block with a photo box on the LEFT and the identity grid on the right.
-static double patientPhoto(PrintDesign& d,double y,double pt,bool qr){
+// v1.65.0: the optional QR was removed — family 6 already prints the receipt
+// barcode in its footer, so the QR duplicated the same receipt identity on the
+// page (the «بارکد/کد دوبار» complaint). One code carrier per page.
+static double patientPhoto(PrintDesign& d,double y,double pt){
     double pw=24, ph=30;
     d.items.push_back(mkPhoto(PG_M,y,pw,ph));
     d.items.push_back(mkLabel(PG_M,y+ph+0.5,pw,4,L"عکس بیمار",7.5,false,1));
     double gx=PG_M+pw+4, gw=PG_CW-pw-4;
-    if(qr){ d.items.push_back(mkQR(PG_M+PG_CW-22,y,22)); gw-=25; }
     double c=gw/2;
     d.items.push_back(mkFieldB(gx+c,y,c-2,7,L"fullName",FA_FULL,pt,0));
     d.items.push_back(mkField (gx  ,y,c-2,7,L"nationalCode",FA_NID,pt,0));
@@ -405,7 +409,7 @@ static double servicesBlock(PrintDesign& d,double y,double pt,int preset,
     }
     double h = footY - reserve - y;
     if(h < 40) h = 40;                       // never collapse the table
-    if(h > 200) h = 200;
+    if(h > 120) h = 120;                     // v1.66.0: compact (was 200)
     double headerH = rowH + 0.8;
     d.items.push_back(mkServices(PG_M,y,PG_CW,h,pt-0.5,preset,headFill,bw,rowH,headerH));
     return y+h+3;
@@ -421,7 +425,7 @@ static double servicesBlockAt(PrintDesign& d,double x,double w,double y,double p
     }
     double h = footY - reserve - y;
     if(h < 40) h = 40;
-    if(h > 200) h = 200;
+    if(h > 120) h = 120;                     // v1.66.0: compact (was 200)
     double headerH = rowH + 0.8;
     PrintItem it=mkServices(x,y,w,h,pt-0.5,preset,headFill,bw,rowH,headerH);
     d.items.push_back(it);
@@ -520,17 +524,19 @@ static void footCentered(PrintDesign& d,double footY){
     d.items.push_back(mkField(PG_M,y+15,PG_CW,5.5,L"clinicaddr",L"",8.5,1));
     d.items.push_back(mkField(PG_M,y+20.5,PG_CW,5.5,L"clinicphone",FA_PHONE,8.5,1));
 }
-// Barcode + QR pair on a tinted strip.
+// Tinted footer strip: ONE barcode + the clinic contact block.
+// v1.65.0: this used to pair a QR AND a barcode — the same receipt code
+// printed twice on one page (the «بارکد دوبار» complaint). One deterministic
+// Code128 carrier remains; the contact block got the freed width.
 static void footDual(PrintDesign& d,double footY,unsigned tint,unsigned border){
     double y=footY-1;
     d.items.push_back(mkTint(PG_M,y,PG_CW,30,tint,border,0.3,1.5));
-    d.items.push_back(mkQR(PG_M+2.5,y+2.5,25));
     double bcW=PG_CW*0.42, bcX=PG_M+PG_CW-bcW-2.5;
     d.items.push_back(mkBarcode(bcX,y+3,bcW,15));
     d.items.push_back(mkLabel(bcX,y+18.5,bcW,4,FA_BARCODE_CAP,8,false,1));
-    d.items.push_back(mkField(PG_M+31,y+3,PG_CW-bcW-36,6,L"clinicphone",FA_PHONE,8.5,0));
-    d.items.push_back(mkField(PG_M+31,y+10,PG_CW-bcW-36,6,L"clinicaddr",L"نشانی: ",8.5,0));
-    d.items.push_back(mkLabel(PG_M+31,y+18,PG_CW-bcW-36,5,FA_KEEP,8,false,0));
+    d.items.push_back(mkField(PG_M+2.5,y+3,PG_CW-bcW-10,6,L"clinicphone",FA_PHONE,8.5,0));
+    d.items.push_back(mkField(PG_M+2.5,y+10,PG_CW-bcW-10,6,L"clinicaddr",L"نشانی: ",8.5,0));
+    d.items.push_back(mkLabel(PG_M+2.5,y+18,PG_CW-bcW-10,5,FA_KEEP,8,false,0));
 }
 // Minimal: a hairline plus a small right-hand barcode only.
 static void footMinimal(PrintDesign& d,double footY){
@@ -569,36 +575,36 @@ struct TplSpec {
 };
 
 static const TplSpec TPL[30] = {
-  /* 01 */ {0,0, SVC4_ROW , 0x1F6FEB, 0xF2F6FC, 0xE8EDF4, 0.40, 7.2, false},
-  /* 02 */ {0,1, SVC5     , 0x0B5ED7, 0xF1F5FB, 0xE4EBF5, 0.40, 7.0, false},
-  /* 03 */ {0,2, SVC3     , 0x2F6F4E, 0xF1F7F3, 0x000000, 0.30, 7.6, false},
-  /* 04 */ {1,0, SVC5     , 0x0B5ED7, 0xF3F7FD, 0xDDE7F6, 0.40, 7.0, false},
-  /* 05 */ {1,1, SVC6_INS , 0x1F6FEB, 0xF2F6FC, 0xE1E9F5, 0.40, 6.8, false},
-  /* 06 */ {1,2, SVC4_CAT , 0x6A0DAD, 0xF6F2FA, 0xEAE1F4, 0.40, 7.2, false},
-  /* 07 */ {2,0, SVC7     , 0x14532D, 0xF2F7F3, 0xE6EDE8, 0.35, 6.6, true },
-  /* 08 */ {2,1, SVC6_FIN , 0x0B5ED7, 0xF2F6FC, 0xE4EBF5, 0.35, 6.6, true },
-  /* 09 */ {2,2, SVC5_CODE, 0x8A2E2E, 0xFAF2F2, 0xF0E3E3, 0.35, 6.8, true },
-  /* 10 */ {3,0, SVC5     , 0x1F6FEB, 0xEFF4FB, 0xE2EAF5, 0.35, 7.0, false},
-  /* 11 */ {3,1, SVC4_ROW , 0x0F766E, 0xEFF7F6, 0xE0EEEC, 0.35, 7.2, false},
-  /* 12 */ {3,2, SVC6_FIN , 0x6A0DAD, 0xF5F1FA, 0xE9E0F3, 0.35, 6.8, false},
-  /* 13 */ {4,0, SVC4_ROW , 0x000000, 0xFFFFFF, 0x000000, 0.30, 7.4, false},
-  /* 14 */ {4,1, SVC5     , 0x000000, 0xFFFFFF, 0x000000, 0.45, 7.2, true },
-  /* 15 */ {4,2, SVC7     , 0x000000, 0xFFFFFF, 0x000000, 0.30, 6.6, false},
-  /* 16 */ {5,0, SVC5     , 0x1F6FEB, 0xF3F7FD, 0xE4ECF7, 0.35, 7.0, false},
-  /* 17 */ {5,1, SVC4_CAT , 0x0F766E, 0xF0F7F6, 0xE1EFEC, 0.35, 7.2, false},
-  /* 18 */ {5,2, SVC6_INS , 0xB45309, 0xFDF6EC, 0xF6E9D2, 0.35, 6.8, false},
-  /* 19 */ {6,0, SVC4_ROW , 0x1F6FEB, 0xF2F6FC, 0xE6EDF6, 0.40, 7.2, false},
-  /* 20 */ {6,1, SVC5     , 0x14532D, 0xF1F6F2, 0xE4EDE7, 0.40, 7.0, false},
-  /* 21 */ {6,2, SVC3     , 0x6A0DAD, 0xF6F2FA, 0x000000, 0.30, 7.6, false},
-  /* 22 */ {7,0, SVC6_FIN , 0x0B5ED7, 0xF2F6FC, 0xE2EAF5, 0.35, 6.8, false},
-  /* 23 */ {7,1, SVC6_INS , 0x8A2E2E, 0xFAF2F2, 0xEFE2E2, 0.35, 6.8, false},
-  /* 24 */ {7,2, SVC7     , 0x14532D, 0xF1F6F2, 0xE3ECE6, 0.30, 6.4, true },
-  /* 25 */ {8,0, SVC4_ROW , 0x1F6FEB, 0xF2F6FC, 0xE6EDF6, 0.40, 7.0, false},
-  /* 26 */ {8,1, SVC5     , 0x0F766E, 0xEFF7F6, 0xDEEDEA, 0.40, 6.8, false},
-  /* 27 */ {8,2, SVC3     , 0x6A0DAD, 0xF6F2FA, 0xE9E0F3, 0.40, 7.2, false},
-  /* 28 */ {9,0, SVC5     , 0x1F6FEB, 0xF2F6FC, 0xE4ECF7, 0.40, 7.0, false},
-  /* 29 */ {9,1, SVC6_FIN , 0xB45309, 0xFDF6EC, 0xF6E9D2, 0.40, 6.8, false},
-  /* 30 */ {9,2, SVC5_CODE, 0x6A0DAD, 0xF6F2FA, 0xE9E0F3, 0.40, 7.0, true },
+  /* 01 */ {0,0, SVC4_ROW , 0x1F6FEB, 0xF2F6FC, 0xE8EDF4, 0.40, 5.8, false},
+  /* 02 */ {0,1, SVC5     , 0x0B5ED7, 0xF1F5FB, 0xE4EBF5, 0.40, 5.6, false},
+  /* 03 */ {0,2, SVC3     , 0x2F6F4E, 0xF1F7F3, 0x000000, 0.30, 6.2, false},
+  /* 04 */ {1,0, SVC5     , 0x0B5ED7, 0xF3F7FD, 0xDDE7F6, 0.40, 5.6, false},
+  /* 05 */ {1,1, SVC6_INS , 0x1F6FEB, 0xF2F6FC, 0xE1E9F5, 0.40, 5.4, false},
+  /* 06 */ {1,2, SVC4_CAT , 0x6A0DAD, 0xF6F2FA, 0xEAE1F4, 0.40, 5.8, false},
+  /* 07 */ {2,0, SVC7     , 0x14532D, 0xF2F7F3, 0xE6EDE8, 0.35, 5.2, true },
+  /* 08 */ {2,1, SVC6_FIN , 0x0B5ED7, 0xF2F6FC, 0xE4EBF5, 0.35, 5.2, true },
+  /* 09 */ {2,2, SVC5_CODE, 0x8A2E2E, 0xFAF2F2, 0xF0E3E3, 0.35, 5.4, true },
+  /* 10 */ {3,0, SVC5     , 0x0284C7, 0xEFF7FC, 0xDCEEF8, 0.35, 5.6, false},
+  /* 11 */ {3,1, SVC4_ROW , 0x0F766E, 0xEFF7F6, 0xE0EEEC, 0.35, 5.8, false},
+  /* 12 */ {3,2, SVC6_FIN , 0x6A0DAD, 0xF5F1FA, 0xE9E0F3, 0.35, 5.4, false},
+  /* 13 */ {4,0, SVC4_ROW , 0x000000, 0xFFFFFF, 0x000000, 0.30, 6.0, false},
+  /* 14 */ {4,1, SVC5     , 0x000000, 0xFFFFFF, 0x000000, 0.45, 5.8, true },
+  /* 15 */ {4,2, SVC7     , 0x000000, 0xFFFFFF, 0x000000, 0.30, 5.2, false},
+  /* 16 */ {5,0, SVC5     , 0x4F46E5, 0xF2F2FC, 0xE2E1F7, 0.35, 5.6, false},
+  /* 17 */ {5,1, SVC4_CAT , 0x0F766E, 0xF0F7F6, 0xE1EFEC, 0.35, 5.8, false},
+  /* 18 */ {5,2, SVC6_INS , 0xB45309, 0xFDF6EC, 0xF6E9D2, 0.35, 5.4, false},
+  /* 19 */ {6,0, SVC4_CAT , 0x0E7490, 0xEFF8FA, 0xDFF0F4, 0.40, 5.8, false},
+  /* 20 */ {6,1, SVC5     , 0x14532D, 0xF1F6F2, 0xE4EDE7, 0.40, 5.6, false},
+  /* 21 */ {6,2, SVC3     , 0x6A0DAD, 0xF6F2FA, 0x000000, 0.30, 6.2, false},
+  /* 22 */ {7,0, SVC6_FIN , 0x0B5ED7, 0xF2F6FC, 0xE2EAF5, 0.35, 5.4, false},
+  /* 23 */ {7,1, SVC6_INS , 0x8A2E2E, 0xFAF2F2, 0xEFE2E2, 0.35, 5.4, false},
+  /* 24 */ {7,2, SVC7     , 0x14532D, 0xF1F6F2, 0xE3ECE6, 0.30, 5.0, true },
+  /* 25 */ {8,0, SVC4_ROW , 0x334155, 0xF4F6F8, 0xE5E9EE, 0.40, 5.6, false},
+  /* 26 */ {8,1, SVC5     , 0x0F766E, 0xEFF7F6, 0xDEEDEA, 0.40, 5.4, false},
+  /* 27 */ {8,2, SVC3     , 0x6A0DAD, 0xF6F2FA, 0xE9E0F3, 0.40, 5.8, false},
+  /* 28 */ {9,0, SVC5     , 0x1F6FEB, 0xF2F6FC, 0xE4ECF7, 0.40, 5.6, false},
+  /* 29 */ {9,1, SVC6_FIN , 0xB45309, 0xFDF6EC, 0xF6E9D2, 0.40, 5.4, false},
+  /* 30 */ {9,2, SVC5_CODE, 0x6A0DAD, 0xF6F2FA, 0xE9E0F3, 0.40, 5.6, true },
 };
 
 // v1.62.0 — the 30 Persian gallery names. Previously these lived only in
@@ -615,22 +621,22 @@ static const wchar_t* const TPL_NAMES[30]={
     L"۰۷) فاکتور — هفت‌ستونه کامل",
     L"۰۸) فاکتور — ریز مالی با تخفیف",
     L"۰۹) فاکتور — کد خدمت و مبلغ",
-    L"۱۰) ستون کناری — QR و بارکد",
+    L"۱۰) ستون کناری — آبی آسمانی",
     L"۱۱) ستون کناری — سبز آبی",
     L"۱۲) ستون کناری — ریز مالی",
     L"۱۳) خط‌کشی — تک‌رنگ چهارستونه",
     L"۱۴) خط‌کشی — قاب‌دار پنج‌ستونه",
     L"۱۵) خط‌کشی — هفت‌ستونه فشرده",
-    L"۱۶) کارتی — گرد آبی",
+    L"۱۶) کارتی — گرد نیلی",
     L"۱۷) کارتی — فیروزه‌ای نوع خدمت",
     L"۱۸) کارتی — کهربایی سهم بیمه",
-    L"۱۹) عکس بیمار — چهارستونه",
+    L"۱۹) عکس بیمار — سبز دریایی نوع خدمت",
     L"۲۰) عکس بیمار — باند سبز",
-    L"۲۱) عکس بیمار — QR و تک‌رنگ",
+    L"۲۱) عکس بیمار — بنفش تک‌رنگ",
     L"۲۲) مالی — تخفیف و مبلغ واحد",
     L"۲۳) مالی — سهم بیمه و بیمار",
     L"۲۴) مالی — هفت‌ستونه قاب‌دار",
-    L"۲۵) فشرده — ته‌برگ نسخهٔ بیمار",
+    L"۲۵) فشرده — ته‌برگ دودی",
     L"۲۶) فشرده — ته‌برگ فیروزه‌ای",
     L"۲۷) فشرده — ته‌برگ سه‌ستونه",
     L"۲۸) دو بلوکی — باند آبی",
@@ -705,19 +711,26 @@ static PrintDesign buildTemplate(int idx){
     case 3: {
         double sbW=44, sbX=PG_M, mainX=PG_M+sbW+5, mainW=PG_CW-sbW-5;
         // sidebar panel spans header → footer
+        // v1.65.0: the sidebar used to carry BOTH a QR and a barcode — two
+        // scannable codes of the same receipt on one page (the «بارکد دوبار
+        // چاپ می‌شود» complaint). Exactly ONE deterministic Code128 barcode
+        // remains; the freed space now holds the clinic contact block.
         d.items.push_back(mkTint(sbX,PG_M,sbW,footY-PG_M-2,sp.tint,sp.accent,0.35,2.0));
         d.items.push_back(mkLogo(sbX+(sbW-26)/2,PG_M+4,26,26));
         d.items.push_back(mkLabelC(sbX+2,PG_M+33,sbW-4,10,FA_CLINIC,10,true,1,sp.accent));
         d.items.push_back(mkHLineC(sbX+3,PG_M+45,sbW-6,0.35,sp.accent));
-        d.items.push_back(mkQR(sbX+(sbW-30)/2,PG_M+48,30));
-        d.items.push_back(mkField(sbX+2,PG_M+80,sbW-4,6,L"receiptNo",FA_RECEIPT,9,1));
-        d.items.push_back(mkField(sbX+2,PG_M+86.5,sbW-4,6,L"date",FA_DATE,9,1));
-        d.items.push_back(mkField(sbX+2,PG_M+93,sbW-4,6,L"time",FA_TIME,9,1));
-        d.items.push_back(mkField(sbX+2,PG_M+99.5,sbW-4,6,L"shift",FA_SHIFT,9,1));
-        d.items.push_back(mkHLineC(sbX+3,PG_M+108,sbW-6,0.3,sp.accent));
-        d.items.push_back(mkField(sbX+2,PG_M+111,sbW-4,6,L"dept",FA_DEPT,9,1));
-        d.items.push_back(mkField(sbX+2,PG_M+117.5,sbW-4,6,L"userName",FA_USER,9,1));
-        d.items.push_back(mkBarcode(sbX+2,footY-PG_M-2+PG_M-46,sbW-4,26));
+        d.items.push_back(mkField(sbX+2,PG_M+48,sbW-4,6,L"receiptNo",FA_RECEIPT,9,1));
+        d.items.push_back(mkField(sbX+2,PG_M+54.5,sbW-4,6,L"date",FA_DATE,9,1));
+        d.items.push_back(mkField(sbX+2,PG_M+61,sbW-4,6,L"time",FA_TIME,9,1));
+        d.items.push_back(mkField(sbX+2,PG_M+67.5,sbW-4,6,L"shift",FA_SHIFT,9,1));
+        d.items.push_back(mkHLineC(sbX+3,PG_M+76,sbW-6,0.3,sp.accent));
+        d.items.push_back(mkField(sbX+2,PG_M+79,sbW-4,6,L"dept",FA_DEPT,9,1));
+        d.items.push_back(mkField(sbX+2,PG_M+85.5,sbW-4,6,L"userName",FA_USER,9,1));
+        d.items.push_back(mkHLineC(sbX+3,PG_M+94,sbW-6,0.3,sp.accent));
+        d.items.push_back(mkField(sbX+2,PG_M+97,sbW-4,6,L"clinicphone",FA_PHONE,8.5,1));
+        d.items.push_back(mkField(sbX+2,PG_M+103.5,sbW-4,10,L"clinicaddr",L"نشانی: ",8.5,1));
+        d.items.push_back(mkLabel(sbX+2,PG_M+115,sbW-4,10,FA_KEEP,8,false,1));
+        d.items.push_back(mkBarcode(sbX+2,footY-48,sbW-4,26));
         d.items.push_back(mkLabel(sbX+2,footY-19,sbW-4,4,FA_BARCODE_CAP,7.5,false,1));
         // main column
         double my=PG_M+1;
@@ -808,7 +821,7 @@ static PrintDesign buildTemplate(int idx){
         else if(sp.variant==1) y=hdrBand(d,FA_CLINIC,sp.accent,true,L"پروندهٔ پذیرش بیمار");
         else                   y=hdrCenterLogo(d,FA_CLINIC,17,true,0.5);
         y=metaStrip4(d,y,pt-0.5);
-        y=patientPhoto(d,y,pt-0.5,sp.variant==2);
+        y=patientPhoto(d,y,pt-0.5);
         d.items.push_back(mkHLineC(PG_M,y-1,PG_CW,0.4,sp.accent)); y+=2;
         y=servicesBlock(d,y,pt,sp.svc,sp.headFill,sp.bw,sp.rowH,32,true,footY);
         totalsBox(d,footY-31,pt,sp.tint,sp.accent,sp.accent);
@@ -870,7 +883,17 @@ static PrintDesign buildTemplate(int idx){
             PrintItem f=mkFieldB(PG_M+1.5,sy+17,PG_CW-3,7,L"paid",FA_FINAL,pt+1,0);
             f.textColor=sp.accent; d.items.push_back(f);
         }
-        footBarcode(d,footY+4);
+        // v1.65.0: the barcode is now PART of the patient stub (it used to
+        // float alone at the very bottom, detached from both copies). One
+        // deterministic barcode + the clinic contact line, directly under
+        // the tinted stub card.
+        {
+            double by=footY-20, bcW=PG_CW*0.40, bcX=PG_M+PG_CW-bcW;
+            d.items.push_back(mkBarcode(bcX,by,bcW,14));
+            d.items.push_back(mkLabel(bcX,by+14.5,bcW,4,FA_BARCODE_CAP,8,false,1));
+            d.items.push_back(mkField(PG_M,by+1,PG_CW*0.52,6,L"clinicphone",FA_PHONE,8.5,0));
+            d.items.push_back(mkField(PG_M,by+8,PG_CW*0.52,6,L"clinicaddr",L"نشانی: ",8.5,0));
+        }
     } break;
 
     // ================= 9 — دو بلوکی =======================================
@@ -937,6 +960,8 @@ void Designs_Init(){
     std::vector<PrintDesign> existing; Designs_Builtins(existing);
     const int N = 30;
     auto stamp=[](){
+        setSetting(L"tpl_migration_1_66", L"1");
+        setSetting(L"tpl_migration_1_65", L"1");
         setSetting(L"tpl_migration_1_62", L"1");
         setSetting(L"tpl_migration_1_61", L"1");
         setSetting(L"tpl_migration_1_60", L"1");
@@ -950,7 +975,22 @@ void Designs_Init(){
         stamp();
         return;
     }
-    if(getSetting(L"tpl_migration_1_62", L"0") != L"1"){
+    // v1.66.0 migration: compact services table — max height 120mm (was 200),
+    // reduced row heights (~5.0–6.2mm, was 6.4–7.6mm). Same overwrite-by-position
+    // contract; ids and section bindings preserved.
+    if(getSetting(L"tpl_migration_1_66", L"0") != L"1"){
+        for(int i=0;i<N;i++){
+            PrintDesign fresh=buildTemplate(i);
+            if(i<(int)existing.size()){ fresh.id=existing[i].id; Designs_Update(fresh); }
+            else Designs_Insert(fresh);
+        }
+        for(size_t i=N;i<existing.size();++i) Designs_Delete(existing[i].id);
+        stamp();
+    }
+    // v1.65.0 migration: rebuilt templates (single barcode per page, deduped
+    // hdrSplit receipt number, unique accents for 10/16/19/25). Same idempotent
+    // overwrite-by-position contract as 1.62 — ids and section bindings survive.
+    if(getSetting(L"tpl_migration_1_65", L"0") != L"1"){
         // Overwrite the first N stored builtins in order (preserving their
         // ids/bindings), insert any missing, DELETE surplus beyond N.
         for(int i=0;i<N;i++){
@@ -962,3 +1002,7 @@ void Designs_Init(){
         stamp();
     }
 }
+
+// v1.65.0 — public in-memory accessor for the print path's last-resort
+// fallback (see printPrintDesign). No file I/O, no store mutation.
+PrintDesign Design_BuiltinTemplate(int idx){ return buildTemplate(idx); }

@@ -366,8 +366,12 @@ bool gpDrawTintedImageRes(HDC dc, int resId, RECT rc, COLORREF tint){
         0,0,0,1,0,
         r,gg,b,0,1 };
     ImageAttributes ia; ia.SetColorMatrix(&cm);
-    g.DrawImage(img, RectF(dx,dy,dw,dh), 0,0,iw,ih, UnitPixel, &ia);
-    return true;
+    // v1.66.0: GDI+ decodes lazily at DRAW time — a corrupt/undecodable image
+    // returns non-Ok HERE even though loading "succeeded". Report failure so
+    // the caller draws the vector-glyph fallback instead of leaving the button
+    // face empty (white-on-white icons seen on some machines).
+    Status st = g.DrawImage(img, RectF(dx,dy,dw,dh), 0,0,iw,ih, UnitPixel, &ia);
+    return st==Ok;
 }
 
 //  v1.64.0 (درمان پلاس): draw an embedded RCDATA PNG cover-fitted into a circle.
@@ -395,9 +399,12 @@ bool gpDrawImageResCircle(HDC dc, int resId, RECT rc){
     REAL scale = (W/iw > H/ih) ? W/iw : H/ih;
     REAL dw=iw*scale, dh=ih*scale;
     REAL dx=rc.left+(W-dw)/2, dy=rc.top+(H-dh)/2;
-    g.DrawImage(img, RectF(dx,dy,dw,dh), 0,0,iw,ih, UnitPixel);
+    // v1.66.0: check the DRAW status — GDI+ decodes lazily, so a PNG that
+    // "loaded" fine can still fail here (seen as EMPTY logo circles on some
+    // machines). Returning false lets callers paint their disc+glyph fallback.
+    Status st = g.DrawImage(img, RectF(dx,dy,dw,dh), 0,0,iw,ih, UnitPixel);
     g.ResetClip();
-    return true;
+    return st==Ok;
 }
 
 //  v1.6.0: draw a profile photo from a file, cropped/scaled into a CIRCLE that

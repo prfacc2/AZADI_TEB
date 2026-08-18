@@ -230,11 +230,12 @@
     if (docLabel) { d.push(L(PG_M, y, PG_CW, 7, docLabel, 12.5, true, 1)); y += 9; }
     return y;
   }
+  /* v1.65.0: receipt number removed — every hdrSplit family also prints it
+     in its meta strip/grid, so it appeared twice on the page. */
   function hdrSplit(d, title, accent, docLabel) {
     d.push(L(PG_M + PG_CW * 0.40, PG_M, PG_CW * 0.60, 10, title, 15.5, true, 0));
     d.push(L(PG_M + PG_CW * 0.40, PG_M + 10, PG_CW * 0.60, 5.5, FA_SUBTITLE, 8.5, false, 0));
-    d.push(LC(PG_M, PG_M + 1, PG_CW * 0.38, 8, docLabel, 13, true, 2, accent));
-    d.push(F(PG_M, PG_M + 10, PG_CW * 0.38, 6, "receiptNo", FA_RECEIPT, 9, 2));
+    d.push(LC(PG_M, PG_M + 4, PG_CW * 0.38, 9, docLabel, 13.5, true, 2, accent));
     var y = PG_M + 19;
     d.push(HL(PG_M, y, PG_CW, 1.2, accent)); y += 4;
     return y;
@@ -313,12 +314,13 @@
     d.push(F (PG_M         + 1.5, iy, c - 3, 7, "dept", FA_DEPT, pt, 0));
     return y + h + 3;
   }
-  function patientPhoto(d, y, pt, qr) {
+  /* v1.65.0: QR removed — family 6 already prints the receipt barcode in its
+     footer, so the QR duplicated the same code on the page. */
+  function patientPhoto(d, y, pt) {
     var pw = 24, ph = 30, gx, gw, c;
     d.push(PHOTO(PG_M, y, pw, ph));
     d.push(L(PG_M, y + ph + 0.5, pw, 4, "عکس بیمار", 7.5, false, 1));
     gx = PG_M + pw + 4; gw = PG_CW - pw - 4;
-    if (qr) { d.push(QR(PG_M + PG_CW - 22, y, 22)); gw -= 25; }
     c = gw / 2;
     d.push(FB(gx + c, y, c - 2, 7, "fullName", FA_FULL, pt, 0));
     d.push(F (gx    , y, c - 2, 7, "nationalCode", FA_NID, pt, 0));
@@ -342,7 +344,7 @@
     }
     h = footY - reserve - y;
     if (h < 40) h = 40;
-    if (h > 200) h = 200;
+    if (h > 120) h = 120;                     // v1.66.0: compact (was 200)
     headerH = rowH + 0.8;
     d.push(SERVICES(x, y, w, h, pt - 0.5, preset, headFill, bw, rowH, headerH));
     return y + h + 3;
@@ -427,15 +429,15 @@
     d.push(F(PG_M, y + 15, PG_CW, 5.5, "clinicaddr", "", 8.5, 1));
     d.push(F(PG_M, y + 20.5, PG_CW, 5.5, "clinicphone", FA_PHONE, 8.5, 1));
   }
+  /* v1.65.0: the QR was removed — one deterministic barcode per page. */
   function footDual(d, footY, tint, border) {
     var y = footY - 1, bcW = PG_CW * 0.42, bcX = PG_M + PG_CW - bcW - 2.5;
     d.push(TINT(PG_M, y, PG_CW, 30, tint, border, 0.3, 1.5));
-    d.push(QR(PG_M + 2.5, y + 2.5, 25));
     d.push(BARCODE(bcX, y + 3, bcW, 15));
     d.push(L(bcX, y + 18.5, bcW, 4, FA_BARCODE, 8, false, 1));
-    d.push(F(PG_M + 31, y + 3, PG_CW - bcW - 36, 6, "clinicphone", FA_PHONE, 8.5, 0));
-    d.push(F(PG_M + 31, y + 10, PG_CW - bcW - 36, 6, "clinicaddr", "نشانی: ", 8.5, 0));
-    d.push(L(PG_M + 31, y + 18, PG_CW - bcW - 36, 5, FA_KEEP, 8, false, 0));
+    d.push(F(PG_M + 2.5, y + 3, PG_CW - bcW - 10, 6, "clinicphone", FA_PHONE, 8.5, 0));
+    d.push(F(PG_M + 2.5, y + 10, PG_CW - bcW - 10, 6, "clinicaddr", "نشانی: ", 8.5, 0));
+    d.push(L(PG_M + 2.5, y + 18, PG_CW - bcW - 10, 5, FA_KEEP, 8, false, 0));
   }
   function footMinimal(d, footY) {
     var y = footY + 4, bcW = PG_CW * 0.32, bcX = PG_M + PG_CW - bcW;
@@ -447,36 +449,36 @@
   /* ============================================ 30 designs / 10 families == */
   /* family, variant, svc preset, accent, tint, headFill(0=line-art), bw, rowH, frame */
   var TPL = [
-    { f: 0, v: 0, s: SVC4_ROW,  a: "#1F6FEB", t: "#F2F6FC", hf: "#E8EDF4", bw: 0.40, rh: 7.2, fr: false },
-    { f: 0, v: 1, s: SVC5,      a: "#0B5ED7", t: "#F1F5FB", hf: "#E4EBF5", bw: 0.40, rh: 7.0, fr: false },
-    { f: 0, v: 2, s: SVC3,      a: "#2F6F4E", t: "#F1F7F3", hf: 0,         bw: 0.30, rh: 7.6, fr: false },
-    { f: 1, v: 0, s: SVC5,      a: "#0B5ED7", t: "#F3F7FD", hf: "#DDE7F6", bw: 0.40, rh: 7.0, fr: false },
-    { f: 1, v: 1, s: SVC6_INS,  a: "#1F6FEB", t: "#F2F6FC", hf: "#E1E9F5", bw: 0.40, rh: 6.8, fr: false },
-    { f: 1, v: 2, s: SVC4_CAT,  a: "#6A0DAD", t: "#F6F2FA", hf: "#EAE1F4", bw: 0.40, rh: 7.2, fr: false },
-    { f: 2, v: 0, s: SVC7,      a: "#14532D", t: "#F2F7F3", hf: "#E6EDE8", bw: 0.35, rh: 6.6, fr: true  },
-    { f: 2, v: 1, s: SVC6_FIN,  a: "#0B5ED7", t: "#F2F6FC", hf: "#E4EBF5", bw: 0.35, rh: 6.6, fr: true  },
-    { f: 2, v: 2, s: SVC5_CODE, a: "#8A2E2E", t: "#FAF2F2", hf: "#F0E3E3", bw: 0.35, rh: 6.8, fr: true  },
-    { f: 3, v: 0, s: SVC5,      a: "#1F6FEB", t: "#EFF4FB", hf: "#E2EAF5", bw: 0.35, rh: 7.0, fr: false },
-    { f: 3, v: 1, s: SVC4_ROW,  a: "#0F766E", t: "#EFF7F6", hf: "#E0EEEC", bw: 0.35, rh: 7.2, fr: false },
-    { f: 3, v: 2, s: SVC6_FIN,  a: "#6A0DAD", t: "#F5F1FA", hf: "#E9E0F3", bw: 0.35, rh: 6.8, fr: false },
-    { f: 4, v: 0, s: SVC4_ROW,  a: "#000000", t: "#FFFFFF", hf: 0,         bw: 0.30, rh: 7.4, fr: false },
-    { f: 4, v: 1, s: SVC5,      a: "#000000", t: "#FFFFFF", hf: 0,         bw: 0.45, rh: 7.2, fr: true  },
-    { f: 4, v: 2, s: SVC7,      a: "#000000", t: "#FFFFFF", hf: 0,         bw: 0.30, rh: 6.6, fr: false },
-    { f: 5, v: 0, s: SVC5,      a: "#1F6FEB", t: "#F3F7FD", hf: "#E4ECF7", bw: 0.35, rh: 7.0, fr: false },
-    { f: 5, v: 1, s: SVC4_CAT,  a: "#0F766E", t: "#F0F7F6", hf: "#E1EFEC", bw: 0.35, rh: 7.2, fr: false },
-    { f: 5, v: 2, s: SVC6_INS,  a: "#B45309", t: "#FDF6EC", hf: "#F6E9D2", bw: 0.35, rh: 6.8, fr: false },
-    { f: 6, v: 0, s: SVC4_ROW,  a: "#1F6FEB", t: "#F2F6FC", hf: "#E6EDF6", bw: 0.40, rh: 7.2, fr: false },
-    { f: 6, v: 1, s: SVC5,      a: "#14532D", t: "#F1F6F2", hf: "#E4EDE7", bw: 0.40, rh: 7.0, fr: false },
-    { f: 6, v: 2, s: SVC3,      a: "#6A0DAD", t: "#F6F2FA", hf: 0,         bw: 0.30, rh: 7.6, fr: false },
-    { f: 7, v: 0, s: SVC6_FIN,  a: "#0B5ED7", t: "#F2F6FC", hf: "#E2EAF5", bw: 0.35, rh: 6.8, fr: false },
-    { f: 7, v: 1, s: SVC6_INS,  a: "#8A2E2E", t: "#FAF2F2", hf: "#EFE2E2", bw: 0.35, rh: 6.8, fr: false },
-    { f: 7, v: 2, s: SVC7,      a: "#14532D", t: "#F1F6F2", hf: "#E3ECE6", bw: 0.30, rh: 6.4, fr: true  },
-    { f: 8, v: 0, s: SVC4_ROW,  a: "#1F6FEB", t: "#F2F6FC", hf: "#E6EDF6", bw: 0.40, rh: 7.0, fr: false },
-    { f: 8, v: 1, s: SVC5,      a: "#0F766E", t: "#EFF7F6", hf: "#DEEDEA", bw: 0.40, rh: 6.8, fr: false },
-    { f: 8, v: 2, s: SVC3,      a: "#6A0DAD", t: "#F6F2FA", hf: "#E9E0F3", bw: 0.40, rh: 7.2, fr: false },
-    { f: 9, v: 0, s: SVC5,      a: "#1F6FEB", t: "#F2F6FC", hf: "#E4ECF7", bw: 0.40, rh: 7.0, fr: false },
-    { f: 9, v: 1, s: SVC6_FIN,  a: "#B45309", t: "#FDF6EC", hf: "#F6E9D2", bw: 0.40, rh: 6.8, fr: false },
-    { f: 9, v: 2, s: SVC5_CODE, a: "#6A0DAD", t: "#F6F2FA", hf: "#E9E0F3", bw: 0.40, rh: 7.0, fr: true  }
+    { f: 0, v: 0, s: SVC4_ROW,  a: "#1F6FEB", t: "#F2F6FC", hf: "#E8EDF4", bw: 0.40, rh: 5.8, fr: false },
+    { f: 0, v: 1, s: SVC5,      a: "#0B5ED7", t: "#F1F5FB", hf: "#E4EBF5", bw: 0.40, rh: 5.6, fr: false },
+    { f: 0, v: 2, s: SVC3,      a: "#2F6F4E", t: "#F1F7F3", hf: 0,         bw: 0.30, rh: 6.2, fr: false },
+    { f: 1, v: 0, s: SVC5,      a: "#0B5ED7", t: "#F3F7FD", hf: "#DDE7F6", bw: 0.40, rh: 5.6, fr: false },
+    { f: 1, v: 1, s: SVC6_INS,  a: "#1F6FEB", t: "#F2F6FC", hf: "#E1E9F5", bw: 0.40, rh: 5.4, fr: false },
+    { f: 1, v: 2, s: SVC4_CAT,  a: "#6A0DAD", t: "#F6F2FA", hf: "#EAE1F4", bw: 0.40, rh: 5.8, fr: false },
+    { f: 2, v: 0, s: SVC7,      a: "#14532D", t: "#F2F7F3", hf: "#E6EDE8", bw: 0.35, rh: 5.2, fr: true  },
+    { f: 2, v: 1, s: SVC6_FIN,  a: "#0B5ED7", t: "#F2F6FC", hf: "#E4EBF5", bw: 0.35, rh: 5.2, fr: true  },
+    { f: 2, v: 2, s: SVC5_CODE, a: "#8A2E2E", t: "#FAF2F2", hf: "#F0E3E3", bw: 0.35, rh: 5.4, fr: true  },
+    { f: 3, v: 0, s: SVC5,      a: "#0284C7", t: "#EFF7FC", hf: "#DCEEF8", bw: 0.35, rh: 5.6, fr: false },
+    { f: 3, v: 1, s: SVC4_ROW,  a: "#0F766E", t: "#EFF7F6", hf: "#E0EEEC", bw: 0.35, rh: 5.8, fr: false },
+    { f: 3, v: 2, s: SVC6_FIN,  a: "#6A0DAD", t: "#F5F1FA", hf: "#E9E0F3", bw: 0.35, rh: 5.4, fr: false },
+    { f: 4, v: 0, s: SVC4_ROW,  a: "#000000", t: "#FFFFFF", hf: 0,         bw: 0.30, rh: 6.0, fr: false },
+    { f: 4, v: 1, s: SVC5,      a: "#000000", t: "#FFFFFF", hf: 0,         bw: 0.45, rh: 5.8, fr: true  },
+    { f: 4, v: 2, s: SVC7,      a: "#000000", t: "#FFFFFF", hf: 0,         bw: 0.30, rh: 5.2, fr: false },
+    { f: 5, v: 0, s: SVC5,      a: "#4F46E5", t: "#F2F2FC", hf: "#E2E1F7", bw: 0.35, rh: 5.6, fr: false },
+    { f: 5, v: 1, s: SVC4_CAT,  a: "#0F766E", t: "#F0F7F6", hf: "#E1EFEC", bw: 0.35, rh: 5.8, fr: false },
+    { f: 5, v: 2, s: SVC6_INS,  a: "#B45309", t: "#FDF6EC", hf: "#F6E9D2", bw: 0.35, rh: 5.4, fr: false },
+    { f: 6, v: 0, s: SVC4_CAT,  a: "#0E7490", t: "#EFF8FA", hf: "#DFF0F4", bw: 0.40, rh: 5.8, fr: false },
+    { f: 6, v: 1, s: SVC5,      a: "#14532D", t: "#F1F6F2", hf: "#E4EDE7", bw: 0.40, rh: 5.6, fr: false },
+    { f: 6, v: 2, s: SVC3,      a: "#6A0DAD", t: "#F6F2FA", hf: 0,         bw: 0.30, rh: 6.2, fr: false },
+    { f: 7, v: 0, s: SVC6_FIN,  a: "#0B5ED7", t: "#F2F6FC", hf: "#E2EAF5", bw: 0.35, rh: 5.4, fr: false },
+    { f: 7, v: 1, s: SVC6_INS,  a: "#8A2E2E", t: "#FAF2F2", hf: "#EFE2E2", bw: 0.35, rh: 5.4, fr: false },
+    { f: 7, v: 2, s: SVC7,      a: "#14532D", t: "#F1F6F2", hf: "#E3ECE6", bw: 0.30, rh: 5.0, fr: true  },
+    { f: 8, v: 0, s: SVC4_ROW,  a: "#334155", t: "#F4F6F8", hf: "#E5E9EE", bw: 0.40, rh: 5.6, fr: false },
+    { f: 8, v: 1, s: SVC5,      a: "#0F766E", t: "#EFF7F6", hf: "#DEEDEA", bw: 0.40, rh: 5.4, fr: false },
+    { f: 8, v: 2, s: SVC3,      a: "#6A0DAD", t: "#F6F2FA", hf: "#E9E0F3", bw: 0.40, rh: 5.8, fr: false },
+    { f: 9, v: 0, s: SVC5,      a: "#1F6FEB", t: "#F2F6FC", hf: "#E4ECF7", bw: 0.40, rh: 5.6, fr: false },
+    { f: 9, v: 1, s: SVC6_FIN,  a: "#B45309", t: "#FDF6EC", hf: "#F6E9D2", bw: 0.40, rh: 5.4, fr: false },
+    { f: 9, v: 2, s: SVC5_CODE, a: "#6A0DAD", t: "#F6F2FA", hf: "#E9E0F3", bw: 0.40, rh: 5.6, fr: true  }
   ];
 
   var NAMES = [
@@ -489,22 +491,22 @@
     "۰۷) فاکتور — هفت‌ستونه کامل",
     "۰۸) فاکتور — ریز مالی با تخفیف",
     "۰۹) فاکتور — کد خدمت و مبلغ",
-    "۱۰) ستون کناری — QR و بارکد",
+    "۱۰) ستون کناری — آبی آسمانی",
     "۱۱) ستون کناری — سبز آبی",
     "۱۲) ستون کناری — ریز مالی",
     "۱۳) خط‌کشی — تک‌رنگ چهارستونه",
     "۱۴) خط‌کشی — قاب‌دار پنج‌ستونه",
     "۱۵) خط‌کشی — هفت‌ستونه فشرده",
-    "۱۶) کارتی — گرد آبی",
+    "۱۶) کارتی — گرد نیلی",
     "۱۷) کارتی — فیروزه‌ای نوع خدمت",
     "۱۸) کارتی — کهربایی سهم بیمه",
-    "۱۹) عکس بیمار — چهارستونه",
+    "۱۹) عکس بیمار — سبز دریایی نوع خدمت",
     "۲۰) عکس بیمار — باند سبز",
-    "۲۱) عکس بیمار — QR و تک‌رنگ",
+    "۲۱) عکس بیمار — بنفش تک‌رنگ",
     "۲۲) مالی — تخفیف و مبلغ واحد",
     "۲۳) مالی — سهم بیمه و بیمار",
     "۲۴) مالی — هفت‌ستونه قاب‌دار",
-    "۲۵) فشرده — ته‌برگ نسخهٔ بیمار",
+    "۲۵) فشرده — ته‌برگ دودی",
     "۲۶) فشرده — ته‌برگ فیروزه‌ای",
     "۲۷) فشرده — ته‌برگ سه‌ستونه",
     "۲۸) دو بلوکی — باند آبی",
@@ -572,15 +574,20 @@
       d.push(TINT(sbX, PG_M, sbW, footY - PG_M - 2, sp.t, sp.a, 0.35, 2.0));
       d.push(LOGO(sbX + (sbW - 26) / 2, PG_M + 4, 26, 26));
       d.push(LC(sbX + 2, PG_M + 33, sbW - 4, 10, FA_CLINIC, 10, true, 1, sp.a));
+      /* v1.65.0: the sidebar QR was removed (double code carrier); the freed
+         space carries the clinic contact block. ONE barcode remains. */
       d.push(HL(sbX + 3, PG_M + 45, sbW - 6, 0.35, sp.a));
-      d.push(QR(sbX + (sbW - 30) / 2, PG_M + 48, 30));
-      d.push(F(sbX + 2, PG_M + 80, sbW - 4, 6, "receiptNo", FA_RECEIPT, 9, 1));
-      d.push(F(sbX + 2, PG_M + 86.5, sbW - 4, 6, "date", FA_DATE, 9, 1));
-      d.push(F(sbX + 2, PG_M + 93, sbW - 4, 6, "time", FA_TIME, 9, 1));
-      d.push(F(sbX + 2, PG_M + 99.5, sbW - 4, 6, "shift", FA_SHIFT, 9, 1));
-      d.push(HL(sbX + 3, PG_M + 108, sbW - 6, 0.3, sp.a));
-      d.push(F(sbX + 2, PG_M + 111, sbW - 4, 6, "dept", FA_DEPT, 9, 1));
-      d.push(F(sbX + 2, PG_M + 117.5, sbW - 4, 6, "userName", FA_USER, 9, 1));
+      d.push(F(sbX + 2, PG_M + 48, sbW - 4, 6, "receiptNo", FA_RECEIPT, 9, 1));
+      d.push(F(sbX + 2, PG_M + 54.5, sbW - 4, 6, "date", FA_DATE, 9, 1));
+      d.push(F(sbX + 2, PG_M + 61, sbW - 4, 6, "time", FA_TIME, 9, 1));
+      d.push(F(sbX + 2, PG_M + 67.5, sbW - 4, 6, "shift", FA_SHIFT, 9, 1));
+      d.push(HL(sbX + 3, PG_M + 76, sbW - 6, 0.3, sp.a));
+      d.push(F(sbX + 2, PG_M + 79, sbW - 4, 6, "dept", FA_DEPT, 9, 1));
+      d.push(F(sbX + 2, PG_M + 85.5, sbW - 4, 6, "userName", FA_USER, 9, 1));
+      d.push(HL(sbX + 3, PG_M + 94, sbW - 6, 0.3, sp.a));
+      d.push(F(sbX + 2, PG_M + 97, sbW - 4, 6, "clinicphone", FA_PHONE, 8.5, 1));
+      d.push(F(sbX + 2, PG_M + 103.5, sbW - 4, 10, "clinicaddr", "نشانی: ", 8.5, 1));
+      d.push(L(sbX + 2, PG_M + 115, sbW - 4, 10, FA_KEEP, 8, false, 1));
       d.push(BARCODE(sbX + 2, footY - 48, sbW - 4, 26));
       d.push(L(sbX + 2, footY - 19, sbW - 4, 4, FA_BARCODE, 7.5, false, 1));
       my = PG_M + 1;
@@ -662,7 +669,7 @@
       else if (sp.v === 1) y = hdrBand(d, FA_CLINIC, sp.a, true, "پروندهٔ پذیرش بیمار");
       else                 y = hdrCenterLogo(d, FA_CLINIC, 17, true, 0.5);
       y = metaStrip4(d, y, pt - 0.5);
-      y = patientPhoto(d, y, pt - 0.5, sp.v === 2);
+      y = patientPhoto(d, y, pt - 0.5);
       d.push(HL(PG_M, y - 1, PG_CW, 0.4, sp.a)); y += 2;
       y = servicesBlock(d, y, pt, sp.s, sp.hf, sp.bw, sp.rh, 32, true, footY);
       totalsBox(d, footY - 31, pt, sp.t, sp.a, sp.a);
@@ -716,7 +723,13 @@
       d.push(F (PG_M         + 1.5, sy + 9.5, c - 3, 6.5, "insshare", FA_INSSHARE, pt - 0.5, 0));
       f = FB(PG_M + 1.5, sy + 17, PG_CW - 3, 7, "paid", FA_FINAL, pt + 1, 0);
       f.textColor = sp.a; d.push(f);
-      footBarcode(d, footY + 4);
+      /* v1.65.0: barcode is part of the patient stub now (used to float alone
+         at the very bottom, detached from both copies). */
+      ly = footY - 20; lw = PG_CW * 0.40; lx = PG_M + PG_CW - lw;
+      d.push(BARCODE(lx, ly, lw, 14));
+      d.push(L(lx, ly + 14.5, lw, 4, FA_BARCODE, 8, false, 1));
+      d.push(F(PG_M, ly + 1, PG_CW * 0.52, 6, "clinicphone", FA_PHONE, 8.5, 0));
+      d.push(F(PG_M, ly + 8, PG_CW * 0.52, 6, "clinicaddr", "نشانی: ", 8.5, 0));
       break;
 
     /* ---------------- 9 — دو بلوکی ------------------------------------- */

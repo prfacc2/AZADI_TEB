@@ -1093,7 +1093,8 @@
     on($('navAdmQ'),   'click', function () { openQueuePanel('admission'); });
     /* clicking the dim backdrop dismisses the full-screen overlay, like a modal. */
     on($('queueBackdrop'),  'click', function () { closeQueuePanel(); });
-    wireDrag($('queuePanel'), $('queueDrag'));
+    /* v1.65.0: the draggable mini-page (and its wireDrag/queueDrag plumbing)
+       is fully retired — the queue is a FULL-SCREEN overlay since v1.64.0. */
     /* v1.60.0: zoom in/out buttons REMOVED — fixed, readable scale. */
 
     /* v1.60.0: print cluster moved OUT of the native bottom bar INTO the page. */
@@ -1143,14 +1144,6 @@
     state.mode = mode === 'full' ? 'full' : 'simple';
     document.body.className = (document.body.className || '').replace(/\bmode-(simple|full)\b/g, '') + ' mode-' + state.mode;
   }
-  /* v1.60.0 FIX (صندوق نرفته‌ها): the queue mini-page previously opened cut
-     off mid-page, could not be dragged freely and vanished under an invisible
-     layer. Now the drag is CLAMPED to the viewport so the panel can never be
-     pushed outside the visible area or under another surface, and opening it
-     recentres it inside the window. */
-  function vw(){ return window.innerWidth  || document.documentElement.clientWidth  || 1024; }
-  function vh(){ return window.innerHeight || document.documentElement.clientHeight || 768;  }
-
   /* v1.64.0 (درمان پلاس) — the queue panel is now a FULL-SCREEN overlay sized
      to the user's monitor (not a fixed draggable box). open/close go through
      one pair of helpers so the overlay + its dim backdrop can never fall out of
@@ -1176,63 +1169,6 @@
     if (b) b.className = 'queue-backdrop';
   }
 
-  function wireDrag(panel, handle) {
-    if (!panel || !handle) return; var moving=false, sx=0, sy=0, left=0, top=0;
-    /* Clamp so the panel is ALWAYS fully inside the viewport. The 44px floor on
-       the vertical maximum guarantees the drag handle itself can never be pushed
-       past the bottom edge — losing the handle is what made the panel
-       undraggable once it had drifted. */
-    function clamp(l, t){
-      var w=panel.offsetWidth||420, h=panel.offsetHeight||320;
-      var ml=vw()-w-8, mt=vh()-h-8;
-      if(ml<8) ml=8;
-      if(mt<8) mt=8;
-      if(l<8) l=8;
-      if(l>ml) l=ml;
-      if(t<8) t=8;
-      if(t>mt) t=mt;
-      var maxT=vh()-44;             /* the drag handle must stay reachable */
-      if(t>maxT) t=maxT;
-      if(t<8) t=8;
-      return {l:l,t:t};
-    }
-    function reposition(){
-      if(!/open/.test(panel.className)) return;
-      var r=panel.getBoundingClientRect();
-      var p=clamp(r.left, r.top);
-      panel.style.left=p.l+'px'; panel.style.top=p.t+'px';
-    }
-    on(handle,'mousedown',function(e){
-      e=e||window.event; moving=true; sx=e.clientX; sy=e.clientY;
-      var r=panel.getBoundingClientRect(); left=r.left; top=r.top;
-      panel.style.left=left+'px'; panel.style.top=top+'px';
-      panel.style.right='auto'; panel.style.bottom='auto';
-      panel.style.margin='0';
-      if(e.preventDefault) e.preventDefault();
-      return false;                 /* stop Trident starting a text selection */
-    });
-    on(document,'mousemove',function(e){
-      if(!moving) return; e=e||window.event;
-      var p=clamp(left+e.clientX-sx, top+e.clientY-sy);
-      panel.style.left=p.l+'px'; panel.style.top=p.t+'px';
-      if(e.preventDefault) e.preventDefault();
-    });
-    on(document,'mouseup',function(){moving=false;});
-    /* if the mouse leaves the window mid-drag, stop cleanly instead of sticking */
-    on(window,'blur',function(){moving=false;});
-    /* keep the panel inside the viewport when the window is resized */
-    on(window,'resize',reposition);
-    /* on open: centre the panel horizontally and dock it near the top so its
-       full height (capped at 80vh by CSS) is always visible. */
-    panel._azDock = function(){
-      panel.style.right='auto'; panel.style.bottom='auto'; panel.style.margin='0';
-      var w=panel.offsetWidth||Math.min(860, vw()-40);
-      var h=panel.offsetHeight||Math.min(520, vh()-80);
-      var t=Math.round((vh()-h)/2); if(t<8) t=8;
-      var p=clamp(Math.round((vw()-w)/2), t);
-      panel.style.left=p.l+'px'; panel.style.top=p.t+'px';
-    };
-  }
   function showBlock(block) {
     var m=$('blockModal'); if(!m)return;
     setText($('blockReason'), (block && block.reason) || 'علت مسدودی ثبت نشده است');

@@ -47,6 +47,72 @@ static void mshtmlSetBrowserEmulation(){
 }
 
 // ============================================================================
+//  window.external IDispatch — the SERVERLESS JS -> C++ bridge (v1.66.0).
+//  The page calls  window.external.azCall(verb, payloadJson, page)  and gets
+//  the JSON reply back synchronously as a BSTR. Invoke arrives on the UI
+//  thread (Trident is single-threaded apartment), where the api layer's
+//  RunOnUiThreadSync already inlines safely.
+// ============================================================================
+struct MshtmlExternal : public IDispatch {
+    LONG rc=1;
+    static const DISPID DISPID_AZCALL=1;
+    virtual ~MshtmlExternal(){}
+
+    // ---- IUnknown ----
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override {
+        if(!ppv) return E_POINTER;
+        if(IsEqualIID(riid,IID_IUnknown)||IsEqualIID(riid,IID_IDispatch)){
+            *ppv=static_cast<IDispatch*>(this); AddRef(); return S_OK;
+        }
+        *ppv=nullptr; return E_NOINTERFACE;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&rc); }
+    ULONG STDMETHODCALLTYPE Release() override { LONG r=InterlockedDecrement(&rc); if(!r) delete this; return r; }
+
+    // ---- IDispatch ----
+    HRESULT STDMETHODCALLTYPE GetTypeInfoCount(UINT* n) override { if(n)*n=0; return S_OK; }
+    HRESULT STDMETHODCALLTYPE GetTypeInfo(UINT,LCID,ITypeInfo** t) override { if(t)*t=nullptr; return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE GetIDsOfNames(REFIID,LPOLESTR* names,UINT cNames,
+            LCID,DISPID* ids) override {
+        if(!names||!ids) return E_POINTER;
+        HRESULT hr=S_OK;
+        for(UINT i=0;i<cNames;++i){
+            if(names[i] && _wcsicmp(names[i],L"azCall")==0) ids[i]=DISPID_AZCALL;
+            else { ids[i]=DISPID_UNKNOWN; hr=DISP_E_UNKNOWNNAME; }
+        }
+        return hr;
+    }
+    HRESULT STDMETHODCALLTYPE Invoke(DISPID id,REFIID,LCID,WORD flags,
+            DISPPARAMS* dp,VARIANT* result,EXCEPINFO*,UINT*) override {
+        if(id!=DISPID_AZCALL || !(flags&DISPATCH_METHOD)) return DISP_E_MEMBERNOTFOUND;
+        // JS argument order azCall(verb, payload, page) arrives REVERSED in
+        // rgvarg: [argc-1]=verb … [0]=last. Coerce each to BSTR defensively.
+        auto argStr=[&](int jsIdx)->std::string{
+            if(!dp) return "";
+            int argc=(int)dp->cArgs;
+            int vbIdx=argc-1-jsIdx;               // JS index -> rgvarg index
+            if(vbIdx<0||vbIdx>=argc) return "";
+            VARIANT v; VariantInit(&v);
+            std::string out;
+            if(SUCCEEDED(VariantChangeType(&v,&dp->rgvarg[vbIdx],0,VT_BSTR)) && v.bstrVal)
+                out=w2u8(v.bstrVal);
+            VariantClear(&v);
+            return out;
+        };
+        std::string verb=argStr(0);
+        std::string payload=argStr(1); if(payload.empty()) payload="{}";
+        std::string page=argStr(2);
+        std::string reply=AdmissionDispatchVerb(verb,payload,page);
+        if(result){
+            VariantInit(result);
+            result->vt=VT_BSTR;
+            result->bstrVal=SysAllocString(u82w(reply).c_str());
+        }
+        return S_OK;
+    }
+};
+
+// ============================================================================
 //  Minimal OLE client site so the WebBrowser control can be hosted in-place.
 // ============================================================================
 struct MshtmlHost : public IOleClientSite, public IOleInPlaceSite,
@@ -56,9 +122,10 @@ struct MshtmlHost : public IOleClientSite, public IOleInPlaceSite,
     HWND hwnd=nullptr;             // container child window
     IOleObject* oleObj=nullptr;
     IWebBrowser2* wb=nullptr;
+    MshtmlExternal* external=nullptr;   // window.external bridge (owned)
 
-    MshtmlHost(HWND h):hwnd(h){}
-    virtual ~MshtmlHost(){}
+    MshtmlHost(HWND h):hwnd(h){ external=new MshtmlExternal(); }
+    virtual ~MshtmlHost(){ if(external){ external->Release(); external=nullptr; } }
 
     // ---- IUnknown ----
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override {
@@ -176,7 +243,12 @@ struct MshtmlHost : public IOleClientSite, public IOleInPlaceSite,
         if(ppDropTarget) *ppDropTarget=NULL; return E_NOTIMPL;
     }
     HRESULT STDMETHODCALLTYPE GetExternal(IDispatch** ppDispatch) override {
-        if(ppDispatch) *ppDispatch=NULL; return S_OK;
+        // v1.66.0: hand the page its serverless JS -> C++ bridge. MSHTML asks
+        // once per document; window.external.azCall(verb,payload,page) then
+        // routes synchronously into AdmissionDispatchVerb on the UI thread.
+        if(!ppDispatch) return E_POINTER;
+        if(external){ external->AddRef(); *ppDispatch=external; return S_OK; }
+        *ppDispatch=NULL; return S_FALSE;
     }
     HRESULT STDMETHODCALLTYPE TranslateUrl(DWORD,LPWSTR,LPWSTR* ppchURLOut) override {
         if(ppchURLOut) *ppchURLOut=NULL; return E_NOTIMPL;
@@ -229,7 +301,8 @@ static LRESULT CALLBACK mshtmlHostProc(HWND h, UINT m, WPARAM w, LPARAM l){
 // ---------------------------------------------------------------------------
 static HWND MshtmlAdmission_CreateView(HWND parent){
     if(!parent) return nullptr;
-    if(!WebAdmission_EnsureHost()) return nullptr;
+    // v1.66.0: serverless — the page is inlined from RCDATA, no host needed.
+    if(AdmissionInlinePage(false).empty()) return nullptr;
     mshtmlSetBrowserEmulation();
     if(FAILED(OleInitialize(NULL))) { /* may already be init'd */ }
 
@@ -291,12 +364,63 @@ static HWND MshtmlAdmission_CreateView(HWND parent){
         // Give the WebBrowser control keyboard focus so it owns the tab-stop
         // chain the moment the admission tab becomes visible.
         SetFocus(host);
-        int port=WebAdmission_EnsureHost();
-        wchar_t url[96]; swprintf(url,96,L"http://127.0.0.1:%d/index.html",port);
+        // v1.66.0 SERVERLESS: navigate to about:blank (no protocol, no zone
+        // lockdown, no network at all), pump until the blank document is
+        // READYSTATE_COMPLETE, then write the fully-inlined page into it.
+        // Writing into a NULL/still-loading document is the classic cause of a
+        // silently blank Trident view, hence the bounded readiness pump.
         VARIANT ve; VariantInit(&ve);
-        BSTR burl=SysAllocString(url);
+        BSTR burl=SysAllocString(L"about:blank");
         wb->Navigate(burl,&ve,&ve,&ve,&ve);
         SysFreeString(burl);
+        {
+            DWORD t0=GetTickCount(); MSG pm;
+            for(;;){
+                READYSTATE rs=READYSTATE_UNINITIALIZED;
+                if(SUCCEEDED(wb->get_ReadyState(&rs)) && rs==READYSTATE_COMPLETE) break;
+                if(GetTickCount()-t0>6000) break;
+                if(PeekMessageW(&pm,NULL,0,0,PM_REMOVE)){
+                    TranslateMessage(&pm); DispatchMessageW(&pm);
+                } else Sleep(5);
+            }
+        }
+        bool wrote=false;
+        {
+            IDispatch* dd=nullptr;
+            if(SUCCEEDED(wb->get_Document(&dd)) && dd){
+                IHTMLDocument2* doc=nullptr;
+                if(SUCCEEDED(dd->QueryInterface(IID_IHTMLDocument2,(void**)&doc)) && doc){
+                    const std::string& page=AdmissionInlinePage(false);
+                    std::wstring wpage=u82w(page);
+                    BSTR bpage=SysAllocStringLen(wpage.c_str(),(UINT)wpage.size());
+                    SAFEARRAY* sa=SafeArrayCreateVector(VT_VARIANT,0,1);
+                    if(sa && bpage){
+                        VARIANT* pv=nullptr;
+                        if(SUCCEEDED(SafeArrayAccessData(sa,(void**)&pv)) && pv){
+                            pv[0].vt=VT_BSTR; pv[0].bstrVal=bpage;
+                            SafeArrayUnaccessData(sa);
+                            doc->write(sa);
+                            doc->close();
+                            wrote=true;
+                        }
+                    }
+                    if(sa) SafeArrayDestroy(sa);   // frees bpage (owned by the array)
+                    else if(bpage) SysFreeString(bpage);
+                    doc->Release();
+                }
+                dd->Release();
+            }
+        }
+        if(!wrote){
+            // no document — tear down so the caller falls back to native GDI.
+            { std::lock_guard<std::mutex> lk(g_mshtmlMx); g_mshtmlViews.erase(host); }
+            if(v->ipao){ v->ipao->Release(); v->ipao=nullptr; }
+            wb->Stop(); wb->Release(); v->wb=nullptr;
+            oleObj->Close(OLECLOSE_NOSAVE); oleObj->SetClientSite(NULL);
+            oleObj->Release(); v->oleObj=nullptr;
+            DestroyWindow(host); site->Release(); delete v;
+            return nullptr;
+        }
         return host;
     }
 
@@ -325,8 +449,11 @@ static bool MshtmlAdmission_PushEvent(HWND host, const char* eventName,
     if(FAILED(hr) || !win) return false;
     std::string msg="{\"event\":"+jstr(u82w(eventName))+",\"data\":"+
         (jsonData.empty()?std::string("{}"):jsonData)+"}";
+    std::wstring wmsg=u82w(msg);
+    // deliver to BOTH bridges: the admission page's bridge.js entry point and
+    // the shared shell runtime (AzBridge.on listeners) from common.js.
     std::wstring script=L"if(window.azAdmissionReceive){window.azAdmissionReceive("+
-        u82w(msg)+L");}";
+        wmsg+L");}if(window.azShellReceive){window.azShellReceive("+wmsg+L");}";
     BSTR code=SysAllocString(script.c_str());
     BSTR lang=SysAllocString(L"JavaScript");
     VARIANT ret; VariantInit(&ret);

@@ -581,8 +581,12 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 // button's own colour so it feels like coloured light.
                 gpShadowColor(dc, rr, rad, hv?S(10):S(6), hv?96:60, glow);
             }
-            // guaranteed coloured base (never leaves a bare surface behind)
-            gpRoundRect(dc, rr, rad, bot, CLR_INVALID);
+            // v1.66.0: unconditional plain-GDI base painted FIRST — the GDI+
+            // path can fail per-call even when s_gdipOK is true (e.g. a
+            // LinearGradientBrush allocation failure), leaving the button body
+            // transparent and text invisible (white-on-white regression).
+            // fillRoundRect uses diameter (rad*2); gpRoundRect uses radius (rad).
+            fillRoundRect(dc, rr, rad*2, bot, CLR_INVALID);
             gpGradRoundRect(dc, rr, rad, top, bot, CLR_INVALID);
             // top sheen — a white wash over the upper 45 % of the body
             RECT sh = rr; sh.bottom = rr.top + (hgt*45)/100;
@@ -616,12 +620,16 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
                              : (hv ? blendColor(g_theme.surface, g_theme.accent, 8)
                                    : g_theme.surface);
             if(hv && !dn) gpShadow(dc, rr, rad, S(5), 40);
+            // v1.66.0: unconditional GDI base before GDI+ decoration
+            fillRoundRect(dc, rr, rad*2, f, CLR_INVALID);
             gpGradRoundRect(dc, rr, rad,
                 blendColor(g_theme.surfaceTop, f, 45), f, bd);
         } else if(st==BS_CARD){
             // v1.60.0 modern card: soft elevation shadow, then a gentle
             // surface gradient; hover lifts the card with an accent halo.
             gpShadow(dc, rr, rad, hv?S(12):S(7), hv?90:50);
+            // v1.66.0: unconditional GDI base before GDI+ decoration
+            fillRoundRect(dc, rr, rad*2, hv?g_theme.hover:g_theme.surface, CLR_INVALID);
             gpGradRoundRect(dc, rr, rad, g_theme.surfaceTop,
                 hv?g_theme.hover:g_theme.surface, bord);
             if(hv){
@@ -637,13 +645,19 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
             bool danger = (d && d->icon==ICO_X && hv);
             COLORREF acc = danger ? g_theme.danger : g_theme.accent;
             if(hv && !dn){
+                // v1.66.0: unconditional GDI base before GDI+ decoration
+                fillRoundRect(dc, rr, rad*2, fill, CLR_INVALID);
                 gpShadowColor(dc, rr, rad, S(5), 46, acc);
                 gpGradRoundRect(dc, rr, rad,
                     blendColor(fill, RGB(255,255,255), danger?0:16), fill,
                     blendColor(fill, acc, danger?0:34));
             } else if(dn){
+                // v1.66.0: unconditional GDI base before GDI+ decoration
+                fillRoundRect(dc, rr, rad*2, fill, CLR_INVALID);
                 gpRoundRect(dc, rr, rad, fill, blendColor(fill, acc, 22));
             } else {
+                // v1.66.0: unconditional GDI base before GDI+ decoration
+                fillRoundRect(dc, rr, rad*2, fill, CLR_INVALID);
                 gpRoundRect(dc, rr, rad, fill, bord);
             }
         }

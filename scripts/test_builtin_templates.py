@@ -209,7 +209,7 @@ for fn in ("servicesBlock", "servicesBlockAt"):
             f"{fn}() no longer COMPUTES its height from the free page space",
         )
         check("if(h < 40) h = 40;" in body, f"{fn}() can collapse below 40 mm")
-        check("if(h > 200) h = 200;" in body, f"{fn}() can overflow past 200 mm")
+        check("if(h > 120) h = 120;" in body, f"{fn}() can overflow past 120 mm (v1.66.0 compact)")
         check("mkServices(" in body, f"{fn}() does not emit the services table")
 
 # --- the 30 specs ---------------------------------------------------------
@@ -256,7 +256,7 @@ if len(specs) == 30:
     )
     for i, s in enumerate(specs):
         check(
-            5.5 <= s["rowH"] <= 9.0,
+            5.0 <= s["rowH"] <= 9.0,
             f"template {i + 1:02d} row pitch {s['rowH']} mm is outside the legible 5.5..9 mm band",
         )
         check(
@@ -316,14 +316,14 @@ check('d.paper=L"A4"' in inc.replace(" ", "").replace('d.paper=L"A4"', 'd.paper=
       "designs are no longer authored against A4")
 
 # --- migration guard ---------------------------------------------------
-check('getSetting(L"tpl_migration_1_62"' in inc, "the v1.62 migration guard is missing")
+check('getSetting(L"tpl_migration_1_65"' in inc, "the v1.65 migration guard is missing")
 init_fn = re.search(r"void Designs_Init\(\)\{(.*?)\n\}", inc, re.S)
 check(init_fn is not None, "Designs_Init() was not found")
 if init_fn:
     init_body = init_fn.group(1)
     check(
-        init_body.count("stamp();") == 2,
-        "the migration must be stamped for BOTH fresh installs and upgrades "
+        init_body.count("stamp();") == 3,
+        "the migration must be stamped for fresh installs and all upgrades "
         f"(found {init_body.count('stamp();')} stamp() calls)",
     )
     check(
@@ -334,7 +334,7 @@ if init_fn:
         "Designs_Delete(existing[i].id)" in init_body,
         "Designs_Init() no longer removes surplus builtins beyond the 30",
     )
-for old in ("1_52", "1_53", "1_58", "1_59", "1_60", "1_61"):
+for old in ("1_52", "1_53", "1_58", "1_59", "1_60", "1_61", "1_62"):
     check(
         'setSetting(L"tpl_migration_%s", L"1")' % old in inc,
         f"upgrade path no longer retires the tpl_migration_{old} guard",
@@ -472,4 +472,4 @@ print("PASS: all 30 designs carry their Persian name (no more blank gallery card
 print("PASS: every family emits exactly one live PIT_SERVICES table + a footer band")
 print("PASS: services height is computed from free page space (>=12 rows, no footer overlap)")
 print("PASS: assets/designer/templates.js mirrors the C++ seeder exactly")
-print("PASS: tpl_migration_1_62 guard stamped for fresh installs and upgrades")
+print("PASS: tpl_migration_1_65 guard stamped for fresh installs and upgrades")

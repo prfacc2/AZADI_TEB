@@ -17,9 +17,20 @@ bool WebAdmission_Available(){
     return true;
 }
 
+// v1.66.0 SERVERLESS BOOTSTRAP — replaces the old WebAdmission_EnsureHost().
+// Called once at startup (and defensively before the first view): registers
+// the multi-page verb handlers (ping / client.log / client.metrics) and
+// pre-builds both inlined page variants so the first «پذیرش بیمار» click is
+// instant. No sockets, no ports, no loopback host.
+void WebAdmission_Prepare(){
+    WebPages_RegisterBuiltins();
+    AdmissionInlinePage(false);   // MSHTML variant (no @font-face)
+    AdmissionInlinePage(true);    // WebView2 variant (data: URI font)
+}
+
 HWND WebAdmission_CreateView(HWND parent){
     if(!parent) return nullptr;
-    if(!WebAdmission_EnsureHost()) return nullptr;
+    WebAdmission_Prepare();
 
     // 1) modern Chromium engine when its runtime is present
     if(WV2_Available()){
@@ -41,9 +52,16 @@ void WebAdmission_Resize(HWND view, int w, int h){
 }
 
 void WebAdmission_PushEvent(const char* eventName, const std::string& jsonData){
-    // WebView2 push (direct). The MSHTML page consumes events via /api/poll,
-    // which the HTTP host already queues in WV2_PushEvent's shared queue.
+    // WebView2 views get a direct PostWebMessageAsJson push; MSHTML views get
+    // the same event injected per-view via execScript (v1.66.0: the old HTTP
+    // /api/poll queue is gone, so Trident must be pushed explicitly too).
     WV2_PushEvent(eventName,jsonData);
+    std::vector<HWND> hosts;
+    {
+        std::lock_guard<std::mutex> lk(g_mshtmlMx);
+        for(auto& kv:g_mshtmlViews) hosts.push_back(kv.first);
+    }
+    for(HWND h:hosts) MshtmlAdmission_PushEvent(h,eventName,jsonData);
 }
 
 void WebAdmission_PushEventTo(HWND view, const char* eventName,
@@ -62,8 +80,10 @@ void WebAdmission_PushEventTo(HWND view, const char* eventName,
 void WebAdmission_NotifyCatalogChanged(){
     // Only build/push when at least one embedded view is alive (cheap guard).
     {
-        std::lock_guard<std::mutex> lk(g_adViewsMx);
-        if(g_adViews.empty()) return;
+        bool any=false;
+        { std::lock_guard<std::mutex> lk(g_adViewsMx); any=!g_adViews.empty(); }
+        if(!any){ std::lock_guard<std::mutex> lk(g_mshtmlMx); any=!g_mshtmlViews.empty(); }
+        if(!any) return;
     }
     // Full active service catalog (Management is the single source of truth).
     std::string cat="{\"services\":[";
@@ -77,11 +97,11 @@ void WebAdmission_NotifyCatalogChanged(){
         }
     }
     cat+="]}";
-    WV2_PushEvent("catalog.update",cat);
+    WebAdmission_PushEvent("catalog.update",cat);
 
     // Insurance selectors (base + supplementary) may also change in Management.
     std::string ins="{\"main\":"+insurancesJson()+",\"supp\":"+suppInsurancesJson()+"}";
-    WV2_PushEvent("insurance.update",ins);
+    WebAdmission_PushEvent("insurance.update",ins);
 }
 
 void WebAdmission_DestroyView(HWND view){
@@ -102,10 +122,16 @@ bool WebAdmission_TranslateAccel(MSG* msg){
 }
 
 #ifdef AZ_DEBUG_BUILD
-// Headless diagnostics only: number of times the embedded page reached
-// /api/init. Proves the bundled ES5 JS parsed & ran (a syntax error would stop
-// the script before it ever called the bridge).
+// Headless diagnostics only: number of times the embedded page reached the
+// `init` verb. Proves the bundled ES5 JS parsed & ran (a syntax error would
+// stop the script before it ever called the bridge).
 long WebAdmission_DebugInitHits(){ return (long)g_adInitHits; }
+
+// Headless diagnostics only: the fully-inlined page for a given engine
+// variant, so the probe can assert every asset actually made it inline.
+std::string WebAdmission_DebugInlinePage(bool withFontFace){
+    return AdmissionInlinePage(withFontFace);
+}
 
 // Headless diagnostics only: national-id of the most recent SUCCESSFUL
 // patient.lookup. Empty until an Enter-on-#nid (or quick-search) actually

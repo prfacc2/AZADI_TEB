@@ -165,7 +165,7 @@
   var listeners = {};        /* event -> [handlers]                 */
   var inflight = {};         /* dedup key -> thenable (shared)      */
   var seq = 1;
-  var transport = null;      /* 'webview' | 'http' */
+  var transport = null;      /* 'webview' | 'external' | 'http' */
   var readyCbs = [];
   var isReady = false;
 
@@ -222,7 +222,9 @@
     return true;
   }
   function callWebView(verb, payload) {
-    var id = 'r' + (seq++);
+    /* 'c' prefix: keeps AzBridge request ids disjoint from bridge.js ('r'),
+       since BOTH register chrome.webview listeners on the admission page. */
+    var id = 'c' + (seq++);
     var d = new Deferred();
     pending[id] = d;
     try {
@@ -235,7 +237,43 @@
     return d.promise();
   }
 
-  /* ---- HTTP transport (MSHTML + dev) ---- */
+  /* ---- EXTERNAL transport (v1.66.0 serverless MSHTML) ----
+     window.external.azCall(verb, payloadJson, page) — synchronous IDispatch
+     into C++ on the UI thread; the JSON reply comes back as the return value.
+     Trident reports host methods as typeof 'unknown' (NOT 'function'), so the
+     feature-detect is a guarded probe call, never a typeof === 'function'. */
+  function externalUsable() {
+    var ext = global.external;
+    if (!ext) return false;
+    try {
+      if (typeof ext.azCall === 'undefined') return false;
+      var r = ext.azCall('bridge.probe', '{}', _pageId || '');
+      return typeof r === 'string' && r.indexOf('ok') >= 0;
+    } catch (e) { return false; }
+  }
+  function initExternal() {
+    if (!externalUsable()) return false;
+    transport = 'external';
+    bridgeReadyFire();
+    return true;
+  }
+  function callExternal(verb, payload) {
+    var d = new Deferred();
+    var body = '';
+    try { body = JSON.stringify(payload || {}); } catch (e0) { body = '{}'; }
+    setTimeout(function () {
+      var txt = null;
+      try { txt = global.external.azCall(verb, body, _pageId || ''); }
+      catch (e1) { d.reject(e1); return; }
+      var j = parseJson(txt);
+      if (j && j.error) { d.reject(new Error(j.error)); return; }
+      d.resolve(j != null ? j : {});
+    }, 0);
+    return d.promise();
+  }
+
+  /* ---- HTTP transport (dev harness only — the in-app loopback host was
+          removed in v1.66.0) ---- */
   function xhrPost(url, body, onOk, onErr) {
     var x;
     try { x = new XMLHttpRequest(); }
@@ -285,6 +323,7 @@
 
   function rawCall(verb, payload) {
     if (transport === 'webview') return callWebView(verb, payload);
+    if (transport === 'external') return callExternal(verb, payload);
     return callHttp(verb, payload);
   }
 
@@ -455,8 +494,9 @@
   /* ======================================================================= */
   _pageId = readPageId();
 
-  /* auto-select transport: prefer WebView2, else HTTP (MSHTML uses this). */
-  if (!initWebView()) initHttp();
+  /* auto-select transport: WebView2 → window.external (serverless MSHTML) →
+     HTTP (dev harness only). */
+  if (!initWebView()) { if (!initExternal()) initHttp(); }
 
   /* apply the persisted theme early (best-effort). */
   (function () {
@@ -471,6 +511,14 @@
     AzPerf.mark('page.load.' + (_pageId || 'unknown'));
     AzBridge.log('info', 'page loaded: ' + (_pageId || 'unknown'));
   });
+
+  /* v1.66.0: serverless C++ -> JS push entry point for the SHELL bridge (the
+     admission page's bridge.js keeps its own azAdmissionReceive; the native
+     host invokes BOTH so AzBridge.on listeners fire on every page). */
+  global.azShellReceive = function (msg) {
+    if (typeof msg === 'string') msg = parseJson(msg);
+    handleInbound(msg);
+  };
 
   /* publish. AzBridge is ALSO exposed as `Bridge` so pages written against the
      original admission bridge (Bridge.call/ready/on) keep working unchanged. */

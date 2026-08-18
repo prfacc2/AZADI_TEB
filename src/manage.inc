@@ -111,6 +111,13 @@ struct ManageState {
     std::wstring            svQuery;    // last search text
     std::wstring            svEditCode; // code currently loaded in the form ("" = new)
     bool                    svLoaded=false;
+    // v1.66.0: dashboard summary cache — the dash calls loadAllPatients(),
+    // loadUsers(), loadDepts(), countTodayReceptions(), unseen*Count() on
+    // every WM_PAINT (several times per frame with GDI+), and every call
+    // re-parses a potentially large JSON file. Compute once and reuse
+    // across paints; invalidate only on page-switch back to dash.
+    int  dashSec, dashEmp, dashOn, dashReq, dashPat, dashToday;
+    bool dashValid;
 };
 // background patient loader → UI thread marshal (no HWND access off-thread)
 #define WM_MG_PATIENTS_READY (WM_APP+74)
@@ -2938,13 +2945,31 @@ static void mgChip(HDC dc, RECT r, const wchar_t* txt, COLORREF fill, COLORREF t
 // ============================================================================
 //  PAGE PAINTERS
 // ============================================================================
+// v1.66.0: compute dashboard summary ONCE and cache it. The dash used to call
+// loadAllPatients(), loadUsers(), loadDepts(), countTodayReceptions(), and
+// unseen*Count() on every WM_PAINT (2–4 times per frame with GDI+ layers),
+// re-parsing the same JSON files each time — that I/O is the root cause of
+// the FPS drop/hang when entering the management page. The cache is invalidated
+// on every page switch (s_mg->dashValid=false) and refreshed lazily.
+static void mgRefreshDash(){
+    if(!s_mg) return;
+    s_mg->dashSec   = (int)loadDepts().size();
+    auto users       = loadUsers();
+    s_mg->dashEmp   = (int)users.size();
+    int nOn=0; for(auto&u:users) if(isUserOnline(u.username)) nOn++;
+    s_mg->dashOn    = nOn;
+    s_mg->dashReq   = unseenSetReqCount()+unseenProfReqCount();
+    s_mg->dashPat   = (int)loadAllPatients().size();
+    s_mg->dashToday = countTodayReceptions();
+    s_mg->dashValid = true;
+}
+
 static void mgPaintDash(HDC dc, HWND h){
     RECT a=mgContentRect(h);
-    int nSec=(int)loadDepts().size();
-    auto users=loadUsers();
-    int nEmp=(int)users.size(), nOn=0;
-    for(auto&u:users) if(isUserOnline(u.username)) nOn++;
-    int nReq=unseenSetReqCount()+unseenProfReqCount();
+    // v1.66.0: refresh dash cache once per visit (lazy, invalidated on page switch)
+    if(!s_mg->dashValid) mgRefreshDash();
+    int nSec=s_mg->dashSec,  nEmp=s_mg->dashEmp,  nOn=s_mg->dashOn;
+    int nReq=s_mg->dashReq,  nPat=s_mg->dashPat,  nToday=s_mg->dashToday;
     struct SumCard { const wchar_t* lbl; std::wstring val; COLORREF col; int ico; };
     SumCard cards[4]={
         { L"بخش‌ها",          toFaDigits(std::to_wstring(nSec)), g_infoAccent,    ICO_SHIELD },
@@ -3026,9 +3051,7 @@ static void mgPaintDash(HDC dc, HWND h){
             RECT tr={pr.left+S(16),pr.top+S(12),pr.right-S(16),pr.top+S(38)};
             DrawTextW(dc,L"یک نگاه به فعالیت کلینیک",-1,&tr,
                 DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
-            // data
-            int nPat=(int)loadAllPatients().size();
-            int nToday=countTodayReceptions();
+            // data — v1.66.0: using cached values (refreshed once per dash visit)
             int busiest=nToday;
             // two read-only metric chips (patients / today) — RTL, right→left
             struct AC{ const wchar_t* lbl; std::wstring val; COLORREF col; int ico; };
@@ -3580,6 +3603,7 @@ static void mgGoPage(HWND h, int page){
     // current page underneath (don't blank the content area).
     if(page==PG_PRINTCFG){ openPrintCfg(h); return; }
     s_mg->page=page; s_mg->secAddMode=false; s_mg->msg.clear();
+    s_mg->dashValid=false;  // v1.66.0: invalidate dash cache on page switch
     if(page==PG_SECTS){ mgLoadCats(); mgUpdateAutoIdPreview(); }
     else if(page==PG_EMPS){ mgLoadEmps(); mgFillDeptCombo(); }
     else if(page==PG_MSG){ mgLoadEmps(); }   // v1.22.0: show employee list
@@ -3607,6 +3631,7 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         s_mg->page=PG_DASH; s_mg->hot=0; s_mg->navHot=-1;
         s_mg->secAddMode=false; s_mg->autoId=true;
         s_mg->empSort=1; s_mg->msgCol=g_theme.textDim;
+        s_mg->dashValid=false;  // v1.66.0: dash cache
         DWORD es=WS_CHILD|WS_TABSTOP|ES_AUTOHSCROLL;
         s_mg->eName=CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)MG_E_NAME,g_hInst,0);
         s_mg->eMgr =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)MG_E_MGR,g_hInst,0);

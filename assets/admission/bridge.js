@@ -9,10 +9,14 @@
                                 it does NOT support ES2015+ syntax, which is why
                                 every earlier version threw "Syntax error".
 
-   Two transports, auto-selected at runtime:
+   Three transports, auto-selected at runtime:
      (A) WebView2  — window.chrome.webview.postMessage / addEventListener
-     (B) HTTP      — XMLHttpRequest POST /api/<verb> to the loopback host,
-                     with /api/poll long-ish polling for C++ -> JS push events.
+     (B) EXTERNAL  — window.external.azCall(verb, payloadJson, page): the
+                     v1.66.0 SERVERLESS bridge for the embedded MSHTML host
+                     (synchronous IDispatch on the UI thread; push events
+                     arrive via execScript -> window.azAdmissionReceive).
+     (C) HTTP      — XMLHttpRequest POST /api/<verb> (dev harness only; the
+                     in-app loopback host was removed in v1.66.0).
 
    Public API:
      Bridge.ready(cb)               -> called once the transport is up
@@ -76,7 +80,7 @@
   var pending = {};            /* id -> Deferred */
   var listeners = {};          /* event -> [handlers] */
   var seq = 1;
-  var transport = null;        /* 'webview' | 'http' */
+  var transport = null;        /* 'webview' | 'external' | 'http' */
   var readyCbs = [];
   var isReady = false;
 
@@ -146,6 +150,45 @@
     return d.promise();
   }
 
+  /* ---------------------------------------------------------------- EXTERNAL */
+  /* v1.66.0 serverless MSHTML bridge: window.external.azCall(verb, payload,
+     page) returns the JSON reply synchronously. NOTE: Trident reports host
+     methods as typeof 'unknown' (not 'function'), so feature-detect with a
+     guarded probe call instead of a typeof check. */
+  function externalUsable() {
+    var ext = global.external;
+    if (!ext) return false;
+    try {
+      if (typeof ext.azCall === 'undefined') return false;
+      var r = ext.azCall('bridge.probe', '{}', 'admission');
+      return typeof r === 'string' && r.indexOf('ok') >= 0;
+    } catch (e) { return false; }
+  }
+
+  function initExternal() {
+    if (!externalUsable()) return false;
+    transport = 'external';
+    fireReady();
+    return true;
+  }
+
+  function callExternal(verb, payload) {
+    var d = new Deferred();
+    var body = '';
+    try { body = JSON.stringify(payload || {}); } catch (e0) { body = '{}'; }
+    /* defer so the thenable is returned before resolution (keeps the async
+       contract admission.js expects even though azCall is synchronous). */
+    setTimeout(function () {
+      var txt = null;
+      try { txt = global.external.azCall(verb, body, 'admission'); }
+      catch (e1) { d.reject(e1); return; }
+      var j = parseJson(txt);
+      if (j && j.error) { d.reject(new Error(j.error)); return; }
+      d.resolve(j != null ? j : {});
+    }, 0);
+    return d.promise();
+  }
+
   /* -------------------------------------------------------------------- HTTP */
   /* Uses XMLHttpRequest (present in every engine incl. MSHTML). */
   function xhrPost(url, body, onOk, onErr) {
@@ -212,12 +255,13 @@
     },
     call: function (verb, payload) {
       if (transport === 'webview') return callWebView(verb, payload);
+      if (transport === 'external') return callExternal(verb, payload);
       return callHttp(verb, payload);
     }
   };
 
-  /* auto-init: prefer WebView2, fall back to HTTP (MSHTML uses this) */
-  if (!initWebView()) initHttp();
+  /* auto-init: WebView2 → window.external (serverless MSHTML) → HTTP (dev) */
+  if (!initWebView()) { if (!initExternal()) initHttp(); }
 
   /* Native host can target one embedded admission view without broadcasting to
      every open tab. The payload uses the same inbound envelope as WebView2. */
