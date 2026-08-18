@@ -209,7 +209,7 @@ for fn in ("servicesBlock", "servicesBlockAt"):
             f"{fn}() no longer COMPUTES its height from the free page space",
         )
         check("if(h < 40) h = 40;" in body, f"{fn}() can collapse below 40 mm")
-        check("if(h > 200) h = 200;" in body, f"{fn}() can overflow past 200 mm")
+        check("if(h > 120) h = 120;" in body, f"{fn}() can overflow past 120 mm (v1.66.0 compact)")
         check("mkServices(" in body, f"{fn}() does not emit the services table")
 
 # --- the 30 specs ---------------------------------------------------------
@@ -256,7 +256,7 @@ if len(specs) == 30:
     )
     for i, s in enumerate(specs):
         check(
-            5.5 <= s["rowH"] <= 9.0,
+            5.0 <= s["rowH"] <= 9.0,
             f"template {i + 1:02d} row pitch {s['rowH']} mm is outside the legible 5.5..9 mm band",
         )
         check(
@@ -322,8 +322,8 @@ check(init_fn is not None, "Designs_Init() was not found")
 if init_fn:
     init_body = init_fn.group(1)
     check(
-        init_body.count("stamp();") == 2,
-        "the migration must be stamped for BOTH fresh installs and upgrades "
+        init_body.count("stamp();") == 3,
+        "the migration must be stamped for fresh installs and all upgrades "
         f"(found {init_body.count('stamp();')} stamp() calls)",
     )
     check(

@@ -344,7 +344,7 @@
     }
     h = footY - reserve - y;
     if (h < 40) h = 40;
-    if (h > 200) h = 200;
+    if (h > 120) h = 120;                     // v1.66.0: compact (was 200)
     headerH = rowH + 0.8;
     d.push(SERVICES(x, y, w, h, pt - 0.5, preset, headFill, bw, rowH, headerH));
     return y + h + 3;
@@ -449,36 +449,36 @@
   /* ============================================ 30 designs / 10 families == */
   /* family, variant, svc preset, accent, tint, headFill(0=line-art), bw, rowH, frame */
   var TPL = [
-    { f: 0, v: 0, s: SVC4_ROW,  a: "#1F6FEB", t: "#F2F6FC", hf: "#E8EDF4", bw: 0.40, rh: 7.2, fr: false },
-    { f: 0, v: 1, s: SVC5,      a: "#0B5ED7", t: "#F1F5FB", hf: "#E4EBF5", bw: 0.40, rh: 7.0, fr: false },
-    { f: 0, v: 2, s: SVC3,      a: "#2F6F4E", t: "#F1F7F3", hf: 0,         bw: 0.30, rh: 7.6, fr: false },
-    { f: 1, v: 0, s: SVC5,      a: "#0B5ED7", t: "#F3F7FD", hf: "#DDE7F6", bw: 0.40, rh: 7.0, fr: false },
-    { f: 1, v: 1, s: SVC6_INS,  a: "#1F6FEB", t: "#F2F6FC", hf: "#E1E9F5", bw: 0.40, rh: 6.8, fr: false },
-    { f: 1, v: 2, s: SVC4_CAT,  a: "#6A0DAD", t: "#F6F2FA", hf: "#EAE1F4", bw: 0.40, rh: 7.2, fr: false },
-    { f: 2, v: 0, s: SVC7,      a: "#14532D", t: "#F2F7F3", hf: "#E6EDE8", bw: 0.35, rh: 6.6, fr: true  },
-    { f: 2, v: 1, s: SVC6_FIN,  a: "#0B5ED7", t: "#F2F6FC", hf: "#E4EBF5", bw: 0.35, rh: 6.6, fr: true  },
-    { f: 2, v: 2, s: SVC5_CODE, a: "#8A2E2E", t: "#FAF2F2", hf: "#F0E3E3", bw: 0.35, rh: 6.8, fr: true  },
-    { f: 3, v: 0, s: SVC5,      a: "#0284C7", t: "#EFF7FC", hf: "#DCEEF8", bw: 0.35, rh: 7.0, fr: false },
-    { f: 3, v: 1, s: SVC4_ROW,  a: "#0F766E", t: "#EFF7F6", hf: "#E0EEEC", bw: 0.35, rh: 7.2, fr: false },
-    { f: 3, v: 2, s: SVC6_FIN,  a: "#6A0DAD", t: "#F5F1FA", hf: "#E9E0F3", bw: 0.35, rh: 6.8, fr: false },
-    { f: 4, v: 0, s: SVC4_ROW,  a: "#000000", t: "#FFFFFF", hf: 0,         bw: 0.30, rh: 7.4, fr: false },
-    { f: 4, v: 1, s: SVC5,      a: "#000000", t: "#FFFFFF", hf: 0,         bw: 0.45, rh: 7.2, fr: true  },
-    { f: 4, v: 2, s: SVC7,      a: "#000000", t: "#FFFFFF", hf: 0,         bw: 0.30, rh: 6.6, fr: false },
-    { f: 5, v: 0, s: SVC5,      a: "#4F46E5", t: "#F2F2FC", hf: "#E2E1F7", bw: 0.35, rh: 7.0, fr: false },
-    { f: 5, v: 1, s: SVC4_CAT,  a: "#0F766E", t: "#F0F7F6", hf: "#E1EFEC", bw: 0.35, rh: 7.2, fr: false },
-    { f: 5, v: 2, s: SVC6_INS,  a: "#B45309", t: "#FDF6EC", hf: "#F6E9D2", bw: 0.35, rh: 6.8, fr: false },
-    { f: 6, v: 0, s: SVC4_CAT,  a: "#0E7490", t: "#EFF8FA", hf: "#DFF0F4", bw: 0.40, rh: 7.2, fr: false },
-    { f: 6, v: 1, s: SVC5,      a: "#14532D", t: "#F1F6F2", hf: "#E4EDE7", bw: 0.40, rh: 7.0, fr: false },
-    { f: 6, v: 2, s: SVC3,      a: "#6A0DAD", t: "#F6F2FA", hf: 0,         bw: 0.30, rh: 7.6, fr: false },
-    { f: 7, v: 0, s: SVC6_FIN,  a: "#0B5ED7", t: "#F2F6FC", hf: "#E2EAF5", bw: 0.35, rh: 6.8, fr: false },
-    { f: 7, v: 1, s: SVC6_INS,  a: "#8A2E2E", t: "#FAF2F2", hf: "#EFE2E2", bw: 0.35, rh: 6.8, fr: false },
-    { f: 7, v: 2, s: SVC7,      a: "#14532D", t: "#F1F6F2", hf: "#E3ECE6", bw: 0.30, rh: 6.4, fr: true  },
-    { f: 8, v: 0, s: SVC4_ROW,  a: "#334155", t: "#F4F6F8", hf: "#E5E9EE", bw: 0.40, rh: 7.0, fr: false },
-    { f: 8, v: 1, s: SVC5,      a: "#0F766E", t: "#EFF7F6", hf: "#DEEDEA", bw: 0.40, rh: 6.8, fr: false },
-    { f: 8, v: 2, s: SVC3,      a: "#6A0DAD", t: "#F6F2FA", hf: "#E9E0F3", bw: 0.40, rh: 7.2, fr: false },
-    { f: 9, v: 0, s: SVC5,      a: "#1F6FEB", t: "#F2F6FC", hf: "#E4ECF7", bw: 0.40, rh: 7.0, fr: false },
-    { f: 9, v: 1, s: SVC6_FIN,  a: "#B45309", t: "#FDF6EC", hf: "#F6E9D2", bw: 0.40, rh: 6.8, fr: false },
-    { f: 9, v: 2, s: SVC5_CODE, a: "#6A0DAD", t: "#F6F2FA", hf: "#E9E0F3", bw: 0.40, rh: 7.0, fr: true  }
+    { f: 0, v: 0, s: SVC4_ROW,  a: "#1F6FEB", t: "#F2F6FC", hf: "#E8EDF4", bw: 0.40, rh: 5.8, fr: false },
+    { f: 0, v: 1, s: SVC5,      a: "#0B5ED7", t: "#F1F5FB", hf: "#E4EBF5", bw: 0.40, rh: 5.6, fr: false },
+    { f: 0, v: 2, s: SVC3,      a: "#2F6F4E", t: "#F1F7F3", hf: 0,         bw: 0.30, rh: 6.2, fr: false },
+    { f: 1, v: 0, s: SVC5,      a: "#0B5ED7", t: "#F3F7FD", hf: "#DDE7F6", bw: 0.40, rh: 5.6, fr: false },
+    { f: 1, v: 1, s: SVC6_INS,  a: "#1F6FEB", t: "#F2F6FC", hf: "#E1E9F5", bw: 0.40, rh: 5.4, fr: false },
+    { f: 1, v: 2, s: SVC4_CAT,  a: "#6A0DAD", t: "#F6F2FA", hf: "#EAE1F4", bw: 0.40, rh: 5.8, fr: false },
+    { f: 2, v: 0, s: SVC7,      a: "#14532D", t: "#F2F7F3", hf: "#E6EDE8", bw: 0.35, rh: 5.2, fr: true  },
+    { f: 2, v: 1, s: SVC6_FIN,  a: "#0B5ED7", t: "#F2F6FC", hf: "#E4EBF5", bw: 0.35, rh: 5.2, fr: true  },
+    { f: 2, v: 2, s: SVC5_CODE, a: "#8A2E2E", t: "#FAF2F2", hf: "#F0E3E3", bw: 0.35, rh: 5.4, fr: true  },
+    { f: 3, v: 0, s: SVC5,      a: "#0284C7", t: "#EFF7FC", hf: "#DCEEF8", bw: 0.35, rh: 5.6, fr: false },
+    { f: 3, v: 1, s: SVC4_ROW,  a: "#0F766E", t: "#EFF7F6", hf: "#E0EEEC", bw: 0.35, rh: 5.8, fr: false },
+    { f: 3, v: 2, s: SVC6_FIN,  a: "#6A0DAD", t: "#F5F1FA", hf: "#E9E0F3", bw: 0.35, rh: 5.4, fr: false },
+    { f: 4, v: 0, s: SVC4_ROW,  a: "#000000", t: "#FFFFFF", hf: 0,         bw: 0.30, rh: 6.0, fr: false },
+    { f: 4, v: 1, s: SVC5,      a: "#000000", t: "#FFFFFF", hf: 0,         bw: 0.45, rh: 5.8, fr: true  },
+    { f: 4, v: 2, s: SVC7,      a: "#000000", t: "#FFFFFF", hf: 0,         bw: 0.30, rh: 5.2, fr: false },
+    { f: 5, v: 0, s: SVC5,      a: "#4F46E5", t: "#F2F2FC", hf: "#E2E1F7", bw: 0.35, rh: 5.6, fr: false },
+    { f: 5, v: 1, s: SVC4_CAT,  a: "#0F766E", t: "#F0F7F6", hf: "#E1EFEC", bw: 0.35, rh: 5.8, fr: false },
+    { f: 5, v: 2, s: SVC6_INS,  a: "#B45309", t: "#FDF6EC", hf: "#F6E9D2", bw: 0.35, rh: 5.4, fr: false },
+    { f: 6, v: 0, s: SVC4_CAT,  a: "#0E7490", t: "#EFF8FA", hf: "#DFF0F4", bw: 0.40, rh: 5.8, fr: false },
+    { f: 6, v: 1, s: SVC5,      a: "#14532D", t: "#F1F6F2", hf: "#E4EDE7", bw: 0.40, rh: 5.6, fr: false },
+    { f: 6, v: 2, s: SVC3,      a: "#6A0DAD", t: "#F6F2FA", hf: 0,         bw: 0.30, rh: 6.2, fr: false },
+    { f: 7, v: 0, s: SVC6_FIN,  a: "#0B5ED7", t: "#F2F6FC", hf: "#E2EAF5", bw: 0.35, rh: 5.4, fr: false },
+    { f: 7, v: 1, s: SVC6_INS,  a: "#8A2E2E", t: "#FAF2F2", hf: "#EFE2E2", bw: 0.35, rh: 5.4, fr: false },
+    { f: 7, v: 2, s: SVC7,      a: "#14532D", t: "#F1F6F2", hf: "#E3ECE6", bw: 0.30, rh: 5.0, fr: true  },
+    { f: 8, v: 0, s: SVC4_ROW,  a: "#334155", t: "#F4F6F8", hf: "#E5E9EE", bw: 0.40, rh: 5.6, fr: false },
+    { f: 8, v: 1, s: SVC5,      a: "#0F766E", t: "#EFF7F6", hf: "#DEEDEA", bw: 0.40, rh: 5.4, fr: false },
+    { f: 8, v: 2, s: SVC3,      a: "#6A0DAD", t: "#F6F2FA", hf: "#E9E0F3", bw: 0.40, rh: 5.8, fr: false },
+    { f: 9, v: 0, s: SVC5,      a: "#1F6FEB", t: "#F2F6FC", hf: "#E4ECF7", bw: 0.40, rh: 5.6, fr: false },
+    { f: 9, v: 1, s: SVC6_FIN,  a: "#B45309", t: "#FDF6EC", hf: "#F6E9D2", bw: 0.40, rh: 5.4, fr: false },
+    { f: 9, v: 2, s: SVC5_CODE, a: "#6A0DAD", t: "#F6F2FA", hf: "#E9E0F3", bw: 0.40, rh: 5.6, fr: true  }
   ];
 
   var NAMES = [

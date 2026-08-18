@@ -5,6 +5,38 @@
 
 ---
 
+## 1.66.0 — 2026-08-18 — پذیرش بدون سرور محلی + رفع باگ‌های ظاهری + جدول خدمات فشرده
+
+### Fixed — پذیرش بیمار بدون نیاز به HTTP محلی (serverless embedded UI)
+- **علت اصلی ارور «Can't reach 127.0.0.1:53622»:** `web_admission_http.inc` یک سرور HTTP گوش می‌داد که روی بسیاری از سیستم‌ها unreachable بود.
+- راه‌حل: HTML/CSS/JS کاملاً درون EXE embed شده؛ `AdmissionBuildInlinePage()` کل صفحه را یکجا می‌سازد و `NavigateToString`/`document.write` نمایش می‌دهد.
+- پشتیبانی از هر دو موتور (MSHTML/Trident + WebView2) با dispatch مشترک.
+- فایل حذف‌شده: `src/web_admission_http.inc`.
+
+### Fixed — لوگوی برنامه (آیکون EXE و لوگوی درون برنامه)
+- `assets/icons/app.ico`: آیکون ۷-سایز (16–256px) با فریم‌های BMP خالص.
+- `src/app.rc`: `1 ICON "../assets/icons/app.ico"` برای Explorer/taskbar.
+- `src/main.cpp`: `WM_SETICON` با `LoadImageW` برای آیکون بزرگ و کوچک.
+- `assets/icons/logo.png`: رمزگذاری مجدد بدون chunk مخرب `chromaticity`.
+- `src/gdiplus.cpp`: `gpDrawImageResCircle` و `gpDrawTintedImageRes` حالا `Status` عملیات `DrawImage` را بررسی می‌کنند (decode تنبل GDI+ ممکن است موقع draw شکست بخورد → فعال شدن fallback).
+
+### Fixed — دکمه‌های سفید با متن سفید در کل برنامه
+- `src/theme.cpp`: برای تمام style ها (PRIMARY/DANGER/INFO/OUTLINE/CARD/GHOST)، یک `fillRoundRect` سادهٔ GDI قبل از تزیینات GDI+ کشیده می‌شود.
+- حتی اگر `FillPath` گرادیانت در GDI+ بی‌صدا شکست بخورد، بدنهٔ دکمه رنگ پایه را از GDI دارد و متن خوانا می‌ماند.
+
+### Fixed — کاهش FPS / هنگ در صفحهٔ مدیریت
+- `src/manage.inc`: آمار داشبورد (تعداد بیماران، کارمندان، بخش‌ها...) یکبار محاسبه و روی `ManageState` کش می‌شود.
+- قبلاً `loadAllPatients()` و `countTodayReceptions()` روی هر `WM_PAINT` (چندبار در هر فریم) فایل JSON را دوباره پارس می‌کردند.
+
+### Fixed — آیکون‌های تم تاریک همگام‌سازی نشده
+- بررسی `Status` در `gpDrawTintedImageRes` → در صورت شکست PNG، `drawIcon` برداری فعال می‌شود (جلوگیری از آیکون خالی).
+
+### Changed — جدول خدمات فشرده در ۳۰ طرح آماده (tpl_migration_1_66)
+- `src/print_designer_templates.inc` + آینهٔ `assets/designer/templates.js`:
+  - حداکثر ارتفاع جدول خدمات: `120mm` (قبلاً `200mm`).
+  - ارتفاع ردیف‌ها: `5.0–6.2mm` (قبلاً `6.4–7.6mm`).
+  - طرح‌ها جمع‌وجورتر و خواناتر، بدون هدر رفتن فضای صفحه.
+
 ## 1.65.0 — 2026-08-17 — چاپ واقعی خدمات + بازنویسی ۳۰ طرح آماده + پالیش پذیرش
 
 > بزرگ‌ترین رفع این نسخه: **جدول خدمات حالا روی هر قبض واقعاً چاپ می‌شود** (اتصال کامل طرح‌های آماده به خدمات ثبت‌شدهٔ پذیرش)، بازنویسی هر ۳۰ طرح آماده (تک‌بارکد، حذف آیتم‌های تکراری، رنگ‌های یکتا) و پالیش سفید-آبی صفحهٔ پذیرش.
