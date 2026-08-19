@@ -2087,3 +2087,166 @@ body.theme-dark,.theme-dark body{
   }
   .col-left > .payable-card{margin-top:0;}
 }
+
+/* ============================================================================
+   v1.68.0 — ADMISSION REDESIGN: coordinated colour variety + polished invoice
+   ----------------------------------------------------------------------------
+   The white theme stays white/clean, but every clinical zone now carries its
+   own restrained accent so the eye is no longer locked onto a single blue.
+   The mapping is semantic (coordinated, never random):
+     · PROFILE card + insurance ......... TEAL     (patient identity + coverage)
+     · PATIENT form + performer ......... VIOLET   (clinical intake)
+     · DOCTOR + SERVICES + queue ........ BLUE     (the working surface)
+     · INVOICE (صورت حساب) ............. AMBER    (billing breakdown)
+     · PAYABLE (مبلغ نهایی) + payment ... EMERALD  (the final amount — the hero)
+     · date/shift metadata + print ...... SLATE    (calm neutral)
+   The final payable total is rebuilt as a distinct, high-contrast hero card
+   with a soft breathing glow, so it can never blend into its neighbours again.
+   Trident-safe: literal colours, no custom properties, no grid, no flex `gap`,
+   no logical properties; every modern flex prop carries its -ms- pair.
+   Animations use paired -webkit-/unprefixed keyframes (IE11 honours unprefixed).
+   The accent rules are guarded with chained :not() so the optional calm/warm/
+   dark palettes keep their own character untouched.
+   ============================================================================ */
+
+/* ------------------------------------------------------- ENTRANCE + MOTION --- */
+@-webkit-keyframes azFade{from{opacity:0}to{opacity:1}}
+@keyframes azFade{from{opacity:0}to{opacity:1}}
+/* slow, soft breathing glow reserved for the final-payable hero total */
+@-webkit-keyframes azGlow{0%,100%{-webkit-box-shadow:0 8px 22px rgba(5,150,105,.30);}50%{-webkit-box-shadow:0 12px 30px rgba(5,150,105,.46);}}
+@keyframes azGlow{0%,100%{box-shadow:0 8px 22px rgba(5,150,105,.30);}50%{box-shadow:0 12px 30px rgba(5,150,105,.46);}}
+
+/* one gentle fade-in for the workspace cards (opacity only → never blocks the
+   hover transform below; runs behind the loader so there is no flash). */
+.body .card{-webkit-animation:azFade .4s ease both;animation:azFade .4s ease both;}
+.body .card:nth-child(1){-webkit-animation-delay:.02s;animation-delay:.02s;}
+.body .card:nth-child(2){-webkit-animation-delay:.05s;animation-delay:.05s;}
+.body .card:nth-child(3){-webkit-animation-delay:.08s;animation-delay:.08s;}
+.body .card:nth-child(4){-webkit-animation-delay:.11s;animation-delay:.11s;}
+.body .card:nth-child(5){-webkit-animation-delay:.14s;animation-delay:.14s;}
+.body .card:nth-child(6){-webkit-animation-delay:.17s;animation-delay:.17s;}
+
+/* tactile press on every button */
+.btn:active,.btn-submit:active{-webkit-transform:translateY(1px);transform:translateY(1px);}
+
+/* hover lift reserved for the compact rail cards (keeps the dense centre still) */
+.col-action .card,.col-left .card{
+  -webkit-transition:-webkit-transform .16s ease,border-color .16s ease;
+  transition:transform .16s ease,border-color .16s ease;
+}
+.col-action .card:hover,.col-left .card:hover{
+  -webkit-transform:translateY(-2px);transform:translateY(-2px);
+}
+
+/* stable, aligned digits on Chromium (IE gracefully ignores this property) */
+.sf-cell b,.inv-line b,.inv-remain b,.payable-value b{font-variant-numeric:tabular-nums;}
+
+/* --------------------------------------- DEFAULT WHITE-THEME ACCENT MAP ---
+   (calm/warm/dark keep their own palettes — these accents are scoped to the
+   default white theme so they never bleed into the optional themes.) */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .card-head{
+  -webkit-box-shadow:inset -3px 0 0 #64748b;box-shadow:inset -3px 0 0 #64748b;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .ct-ico{color:#64748b;}
+
+/* PATIENT form + performer → VIOLET (clinical intake) */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .card-head,
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(3) .card-head{
+  -webkit-box-shadow:inset -3px 0 0 #7c3aed;box-shadow:inset -3px 0 0 #7c3aed;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .ct-ico,
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(3) .ct-ico{color:#7c3aed;}
+
+/* INSURANCE → TEAL (coverage, ties to the profile identity) */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(1) .card-head{
+  -webkit-box-shadow:inset -3px 0 0 #0d9488;box-shadow:inset -3px 0 0 #0d9488;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(1) .ct-ico{color:#0d9488;}
+
+/* DOCTOR + SERVICES → BLUE (the working surface stays blue) */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(2) .card-head,
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card > .card-head{
+  -webkit-box-shadow:inset -3px 0 0 #2563eb;box-shadow:inset -3px 0 0 #2563eb;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(2) .ct-ico,
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card > .card-head .ct-ico{color:#2563eb;}
+
+/* PAYMENT status → EMERALD (ties to the final amount) */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payment-card .card-head{
+  -webkit-box-shadow:inset -3px 0 0 #059669;box-shadow:inset -3px 0 0 #059669;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payment-card .ct-ico{color:#059669;}
+
+/* date + shift metadata → SLATE (quiet, clearly separated) */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .datetime-card .dt-ico{
+  background:#eef2f7;border:1px solid #dbe3ec;color:#475569;
+}
+
+/* ---------------------------------------------------- PROFILE CARD → TEAL ---
+   The top-right identity card kept its coloured surface, but the old single
+   blue is replaced with a calm clinical teal (one of the white-theme accents). */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card{
+  color:#ffffff;border:1px solid #0f766e;
+  background:#0d9488;
+  background:-webkit-linear-gradient(top,#14b8a6 0%,#0f766e 100%);
+  background:linear-gradient(180deg,#14b8a6 0%,#0f766e 100%);
+  -webkit-box-shadow:0 8px 22px rgba(13,148,136,.28);box-shadow:0 8px 22px rgba(13,148,136,.28);
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .avatar{color:#0f766e;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .rx-box,
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .ps-line{
+  background:rgba(2,40,38,.22);border-color:rgba(255,255,255,.20);
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .profile-state .dot{background:#6ee7a4;}
+
+/* ------------------------------------------------- INVOICE → AMBER (polished) */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .invoice-card{border-color:#e3c58c;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .invoice-card .card-head{
+  border-bottom:1px solid #b45309;
+  background:#f59e0b;
+  background:-webkit-linear-gradient(top,#fbbf24 0%,#b45309 100%);
+  background:linear-gradient(180deg,#fbbf24 0%,#b45309 100%);
+  -webkit-box-shadow:none;box-shadow:none;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .invoice-card .card-title,
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .invoice-card .ct-ico{color:#ffffff;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .invoice-card .btn-icon{
+  border-color:rgba(255,255,255,.45);background:rgba(255,255,255,.16);color:#ffffff;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .invoice-body{background:#fffdf6;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inv-gtitle{
+  color:#b45309;border-bottom:2px solid #f1d49a;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inv-line span{color:#8a6a3c;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inv-line b{color:#3a2912;}
+/* «مانده قابل پرداخت» reads as a clear amber pill inside the breakdown */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inv-remain{
+  margin-top:8px;padding:9px 11px;border:1px solid #f0d79a;border-radius:10px;
+  background:#fff4d8;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inv-remain span{color:#7a5621;font-weight:800;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inv-remain b{color:#b45309;font-weight:900;font-size:14px;}
+
+/* ----------------------------- PAYABLE (مبلغ نهایی) → EMERALD HERO TOTAL ---
+   The single most important number on the page: rebuilt as a distinct, high-
+   contrast emerald card with a large tabular figure and a soft breathing glow
+   so it stands cleanly apart from the amber invoice above it. */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payable-card{
+  margin-top:0;margin-bottom:10px;padding:16px 15px;text-align:right;color:#ffffff;
+  border:1px solid #047857;
+  background:#059669;
+  background:-webkit-linear-gradient(top,#10b981 0%,#047857 100%);
+  background:linear-gradient(180deg,#10b981 0%,#047857 100%);
+  -webkit-box-shadow:0 8px 22px rgba(5,150,105,.30);box-shadow:0 8px 22px rgba(5,150,105,.30);
+  -webkit-animation:azGlow 3.6s ease-in-out infinite;animation:azGlow 3.6s ease-in-out infinite;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payable-caption{
+  color:#d1fae5;font-size:12px;font-weight:800;letter-spacing:.2px;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payable-value{margin:6px 0 2px;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payable-value b{
+  color:#ffffff;font-size:30px;font-weight:900;line-height:1.2;letter-spacing:.3px;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payable-value span{
+  padding-bottom:5px;color:#bbf7d0;font-size:11px;font-weight:800;
+}

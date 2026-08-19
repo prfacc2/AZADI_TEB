@@ -118,9 +118,17 @@ struct ManageState {
     // across paints; invalidate only on page-switch back to dash.
     int  dashSec, dashEmp, dashOn, dashReq, dashPat, dashToday;
     bool dashValid;
+    // v1.69.0: subtle staggered fade-in + count-up entrance for the dashboard.
+    // Advances 0→1 over ~350 ms via a WM_TIMER; jumps to 1 instantly on weak
+    // hardware (g_lowSpec). At steady state (==1) every colour is drawn at full
+    // strength, so the entrance adds ZERO per-paint GDI+ cost once it settles.
+    float dashAnim;        // 0..1 entrance progress
+    bool  dashAnimOn;      // entrance timer running?
 };
 // background patient loader → UI thread marshal (no HWND access off-thread)
 #define WM_MG_PATIENTS_READY (WM_APP+74)
+// v1.69.0 dashboard entrance-animation timer id (kept clear of 0xB1 debounce).
+#define MG_DASH_ANIM_TIMER 0xD1
 static ManageState* s_mg=NULL;
 static HWND g_hManage=NULL;
 static void mgRefreshReqBadge();
@@ -2811,7 +2819,7 @@ static RECT mgSummaryRect(HWND h, int i){      // i=0..3 across the top
     int cw=(totW-gap*(n-1))/n;
     int x=a.right-S(12)-(i+1)*cw-i*gap;        // RTL
     int y=a.top+mgHeadH()+S(16);
-    RECT r={x,y,x+cw,y+S(96)}; return r;
+    RECT r={x,y,x+cw,y+S(100)}; return r;
 }
 static RECT mgQuickRect(HWND h, int i){        // i=0..3 quick-action buttons
     RECT a=mgContentRect(h);
@@ -2819,8 +2827,8 @@ static RECT mgQuickRect(HWND h, int i){        // i=0..3 quick-action buttons
     int totW=a.right-a.left-S(24);
     int cw=(totW-gap*(n-1))/n;
     int x=a.right-S(12)-(i+1)*cw-i*gap;
-    int y=a.top+mgHeadH()+S(150);
-    RECT r={x,y,x+cw,y+S(110)}; return r;
+    int y=a.top+mgHeadH()+S(162);
+    RECT r={x,y,x+cw,y+S(108)}; return r;
 }
 
 // ---- layout: show/hide controls per page -----------------------------------
@@ -3029,47 +3037,112 @@ static void mgRefreshDash(){
     s_mg->dashValid = true;
 }
 
+// ----------------------------------------------------------------------------
+//  v1.69.0 DASHBOARD ENTRANCE ANIMATION.
+//  A subtle, performant "materialise" effect: the KPI cards, quick-action tiles
+//  and activity panel fade in from the card surface in a short staggered
+//  sequence, and the KPI figures count up from 0. It is realised WITHOUT any
+//  alpha-compositing / offscreen bitmap (the codebase double-buffers with plain
+//  BitBlt) — instead each element's fill, border, shadow and text colour is
+//  blended toward the card surface by (1-progress), so a low factor dissolves
+//  the element into its background and a factor of 1 draws it at full strength.
+//  Skipped on g_lowSpec; zero added cost once settled (progress == 1).
+// ----------------------------------------------------------------------------
+static float mgEase(float p){           // smoothstep — ease-in/out
+    if(p<0)p=0; if(p>1)p=1;
+    return p*p*(3.0f-2.0f*p);
+}
+// Per-group entrance factor in 0..1: `delay`/`span` are fractions of the whole
+// timeline, so groups appear in sequence (KPIs → tiles → activity panel).
+static float mgDashGroup(float anim, float delay, float span){
+    if(span<=0.0f) return mgEase(anim);
+    float p=(anim-delay)/span;
+    return mgEase(p);
+}
+// Blend a colour toward the card surface by (1-f); f=1 leaves it untouched.
+static COLORREF mgFade(COLORREF c, float f){
+    int pct=(int)((1.0f-f)*100.0f); if(pct<0)pct=0; if(pct>100)pct=100;
+    return blendColor(c, g_theme.surface, pct);
+}
+static void mgDashAnimStart(HWND h){
+    if(!s_mg) return;
+    if(g_lowSpec){ s_mg->dashAnim=1.0f; s_mg->dashAnimOn=false; return; }
+    s_mg->dashAnim=0.0f; s_mg->dashAnimOn=true;
+    SetTimer(h,MG_DASH_ANIM_TIMER,16,NULL);
+}
+static void mgDashAnimStop(HWND h){
+    if(!s_mg) return;
+    if(s_mg->dashAnimOn){ s_mg->dashAnimOn=false; KillTimer(h,MG_DASH_ANIM_TIMER); }
+    s_mg->dashAnim=1.0f;
+}
+
 static void mgPaintDash(HDC dc, HWND h){
     RECT a=mgContentRect(h);
     // v1.66.0: refresh dash cache once per visit (lazy, invalidated on page switch)
     if(!s_mg->dashValid) mgRefreshDash();
     int nSec=s_mg->dashSec,  nEmp=s_mg->dashEmp,  nOn=s_mg->dashOn;
     int nReq=s_mg->dashReq,  nPat=s_mg->dashPat,  nToday=s_mg->dashToday;
-    struct SumCard { const wchar_t* lbl; std::wstring val; COLORREF col; int ico; };
+    float anim = s_mg ? s_mg->dashAnim : 1.0f;   // v1.69.0 entrance factor
+    SetBkMode(dc,TRANSPARENT);
+
+    // ====================================================== KPI SUMMARY CARDS
+    // v1.69.0: each card materialises from the surface (staggered fade) and its
+    // figure counts up from 0; a thin glowing baseline pill in the metric's own
+    // colour anchors the card (design-language «پیل درخشان»). At rest (ef==1)
+    // every colour is full-strength, so steady state costs nothing extra.
+    struct SumCard { const wchar_t* lbl; int raw; COLORREF col; int ico; };
     SumCard cards[4]={
-        { L"بخش‌ها",          toFaDigits(std::to_wstring(nSec)), g_infoAccent,    ICO_SHIELD },
-        { L"کارمندان",         toFaDigits(std::to_wstring(nEmp)), g_theme.accent,  ICO_USER },
-        { L"آنلاین",          toFaDigits(std::to_wstring(nOn)),  g_theme.success, ICO_BELL },
-        { L"درخواست‌های نو",  toFaDigits(std::to_wstring(nReq)), nReq>0?g_infoAccent2:g_theme.textDim, ICO_GEAR },
+        { L"بخش‌ها",         nSec, g_infoAccent,    ICO_SHIELD },
+        { L"کارمندان",        nEmp, g_theme.accent,  ICO_USER  },
+        { L"برخط",           nOn,  g_theme.success, ICO_BELL   },
+        { L"درخواست‌های نو", nReq, nReq>0?g_infoAccent2:g_theme.textDim, ICO_GEAR },
     };
     for(int i=0;i<4;i++){
+        float ef=mgDashGroup(anim, 0.00f+(float)i*0.05f, 0.40f);
+        if(ef<=0.001f) continue;            // not yet on stage → leave surface
         RECT r=mgSummaryRect(h,i);
-        // v1.63.0 KPI TILE. Was a flat surface box; now an elevated card whose
-        // glyph sits in a medallion tinted with that metric's OWN colour, so the
-        // four KPIs are distinguishable at a glance instead of looking identical.
-        gpShadow(dc,r,S(14),S(7),g_dark?66:44);
-        gpGradRoundRectBg(dc,r,S(14),
-            blendColor(g_theme.surfaceTop,g_theme.surface,45),
-            g_theme.surface,
-            blendColor(g_theme.border,cards[i].col,26), g_theme.bg);
+        int shA=(int)((g_dark?66:44)*ef);
+        if(shA>2) gpShadow(dc,r,S(14),S(7),shA);
+        COLORREF top=blendColor(g_theme.surfaceTop,g_theme.surface,45);
+        COLORREF bord=blendColor(g_theme.border,cards[i].col,26);
+        gpGradRoundRectBg(dc,r,S(14), mgFade(top,ef), mgFade(g_theme.surface,ef),
+                          mgFade(bord,ef), g_theme.bg);
+        // glyph medallion (top-right) tinted with the metric's own colour
         RECT ir={r.right-S(56),r.top+S(16),r.right-S(20),r.top+S(52)};
         { RECT md=ir; InflateRect(&md,S(7),S(7));
           int mr2=(md.bottom-md.top)/2;
           COLORREF medFill=blendColor(g_theme.surface,cards[i].col,g_dark?27:18);
-          gpRoundRectBg(dc,md,mr2,medFill,
-              blendColor(g_theme.border,cards[i].col,48),g_theme.surface); }
-        drawIcon(dc,cards[i].ico,ir,cards[i].col,S(2));
-        SetTextColor(dc,g_theme.text); SelectObject(dc,g_fHuge);
+          COLORREF medBord=blendColor(g_theme.border,cards[i].col,48);
+          gpRoundRectBg(dc,md,mr2, mgFade(medFill,ef), mgFade(medBord,ef), g_theme.surface); }
+        drawIcon(dc,cards[i].ico,ir, mgFade(cards[i].col,ef), S(2));
+        // count-up figure (ticks 0 → cached value as the card materialises)
+        int shown=(int)((float)cards[i].raw * ef + 0.5f);
+        SetTextColor(dc, mgFade(g_theme.text,ef)); SelectObject(dc,g_fHuge);
         RECT vr={r.left+S(16),r.top+S(12),r.right-S(60),r.top+S(58)};
-        DrawTextW(dc,cards[i].val.c_str(),-1,&vr,DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
-        SetTextColor(dc,g_theme.textDim); SelectObject(dc,g_fSmall);
-        RECT lr={r.left+S(16),r.bottom-S(30),r.right-S(16),r.bottom-S(8)};
-        DrawTextW(dc,cards[i].lbl,-1,&lr,DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+        DrawTextW(dc,toFaDigits(std::to_wstring(shown)).c_str(),-1,&vr,
+            DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+        // label (kept clear of the baseline pill on the left)
+        SetTextColor(dc, mgFade(g_theme.textDim,ef)); SelectObject(dc,g_fSmall);
+        RECT lr={r.left+S(76),r.bottom-S(30),r.right-S(16),r.bottom-S(8)};
+        DrawTextW(dc,cards[i].lbl,-1,&lr,
+            DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
+        // glowing baseline pill (bottom-left) in the metric's colour
+        if(ef>0.02f){
+            RECT pill={r.left+S(16),r.bottom-S(13),r.left+S(16)+S(48),r.bottom-S(9)};
+            gpShadowColor(dc,pill,S(2),S(4),(int)(96*ef),cards[i].col);
+            gpRoundRect(dc,pill,S(2),mgFade(cards[i].col,ef),CLR_INVALID);
+        }
     }
-    // quick actions title
-    SetTextColor(dc,g_theme.text); SelectObject(dc,g_fUIB);
-    { RECT qr={a.left+S(12),a.top+mgHeadH()+S(124),a.right-S(12),a.top+mgHeadH()+S(148)};
-      DrawTextW(dc,L"دسترسی سریع",-1,&qr,DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX); }
+
+    // ======================================================== QUICK-ACTION TILES
+    RECT q0=mgQuickRect(h,0);
+    float efT=mgDashGroup(anim, 0.14f, 0.28f);     // section title
+    if(efT>0.001f){
+        SetTextColor(dc, mgFade(g_theme.text,efT)); SelectObject(dc,g_fUIB);
+        RECT qr={a.left+S(12), q0.top-S(30), a.right-S(12), q0.top-S(8)};
+        DrawTextW(dc,L"دسترسی سریع",-1,&qr,
+            DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+    }
     struct QA { const wchar_t* lbl; const wchar_t* sub; int ico; int page; };
     QA qa[4]={
         { L"ایجاد بخش",       L"افزودن بخش جدید",        ICO_PLUS,  PG_SECTS },
@@ -3078,78 +3151,119 @@ static void mgPaintDash(HDC dc, HWND h){
         { L"درخواست‌ها",      L"بررسی درخواست‌ها",       ICO_GEAR,  PG_REQS  },
     };
     for(int i=0;i<4;i++){
+        float ef=mgDashGroup(anim, 0.18f+(float)i*0.05f, 0.42f);
+        if(ef<=0.001f) continue;
         RECT r=mgQuickRect(h,i);
         bool hot=(s_mg&&s_mg->hot==MG_QA_BASE+i);
         mgRowShell(dc,r,hot,S(14),g_infoAccent);
-        RECT ir={r.left+(r.right-r.left)/2-S(18),r.top+S(18),r.left+(r.right-r.left)/2+S(18),r.top+S(54)};
-        // v1.63.0: centred glyph medallion; hover brightens the wash so the
-        // tile responds as one object rather than only changing its border.
+        RECT ir={r.left+(r.right-r.left)/2-S(18),r.top+S(18),
+                 r.left+(r.right-r.left)/2+S(18),r.top+S(54)};
+        // centred glyph medallion; hover brightens the wash so the tile responds
         { RECT md=ir; InflateRect(&md,S(8),S(8));
           int mr2=(md.bottom-md.top)/2;
           COLORREF medAcc=hot?g_infoAccent:g_theme.accent;
           COLORREF medFill=blendColor(g_theme.surface,medAcc,hot?29:20);
-          gpRoundRectBg(dc,md,mr2,medFill,
-              blendColor(g_theme.border,medAcc,hot?60:38),g_theme.surface); }
-        drawIcon(dc,qa[i].ico,ir,hot?g_infoAccent:g_theme.accent,S(2));
-        SetTextColor(dc,g_theme.text); SelectObject(dc,g_fUIB);
+          COLORREF medBord=blendColor(g_theme.border,medAcc,hot?60:38);
+          gpRoundRectBg(dc,md,mr2, mgFade(medFill,ef), mgFade(medBord,ef), g_theme.surface); }
+        drawIcon(dc,qa[i].ico,ir, mgFade(hot?g_infoAccent:g_theme.accent,ef), S(2));
+        SetTextColor(dc, mgFade(g_theme.text,ef)); SelectObject(dc,g_fUIB);
         RECT lr={r.left+S(8),r.top+S(60),r.right-S(8),r.top+S(84)};
         DrawTextW(dc,qa[i].lbl,-1,&lr,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
-        SetTextColor(dc,g_theme.textDim); SelectObject(dc,g_fSmall);
+        SetTextColor(dc, mgFade(g_theme.textDim,ef)); SelectObject(dc,g_fSmall);
         RECT sr={r.left+S(8),r.top+S(84),r.right-S(8),r.bottom-S(8)};
         DrawTextW(dc,qa[i].sub,-1,&sr,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
     }
 
-    // ------------------------------------------------------------------------
-    // CRM-style read-only activity panel: total patient roster and today's
-    // completed reception records, sourced only from the reception store.
-    {
-        int panelTop = a.top+mgHeadH()+S(150)+S(110)+S(20);   // below quick tiles
+    // =================================================== CLINIC-AT-A-GLANCE PANEL
+    // v1.69.0: replaced the flat two-chip + always-full «workload» bar with a
+    // real dashboard footer — a Jalali date / shift pill, three mini-stat tiles
+    // and a meaningful staff-presence gauge (online / total). Everything is read
+    // from the cached dash values, so no file/JSON I/O happens per paint.
+    float efP=mgDashGroup(anim, 0.30f, 0.50f);
+    if(efP>0.001f){
+        int panelTop = q0.bottom + S(18);          // derived from the tiles → never overlaps
         int panelBot = a.bottom-S(12);
-        if(panelBot - panelTop >= S(120)){
+        if(panelBot - panelTop >= S(150)){
             RECT pr={a.left+S(12),panelTop,a.right-S(12),panelBot};
-            gpRoundRectBg(dc,pr,S(14),g_theme.surface,g_theme.border,g_theme.bg);
-            // title
-            SetTextColor(dc,g_theme.text); SelectObject(dc,g_fUIB);
-            RECT tr={pr.left+S(16),pr.top+S(12),pr.right-S(16),pr.top+S(38)};
+            int shA=(int)((g_dark?60:40)*efP);
+            if(shA>2) gpShadow(dc,pr,S(14),S(7),shA);
+            gpGradRoundRectBg(dc,pr,S(14),
+                mgFade(blendColor(g_theme.surfaceTop,g_theme.surface,30),efP),
+                mgFade(g_theme.surface,efP), mgFade(g_theme.border,efP), g_theme.bg);
+            // ---- header: title (right) + Jalali date/shift pill (left) ----
+            int pillW=S(196), pillH=S(26), hy=pr.top+S(12);
+            RECT pp={pr.left+S(16),hy,pr.left+S(16)+pillW,hy+pillH};
+            if(efP>0.02f){
+                COLORREF ppFill=blendColor(g_theme.surface,g_theme.accent,g_dark?14:9);
+                gpShadowColor(dc,pp,pillH/2,S(4),(int)(80*efP),g_theme.accent);
+                gpRoundRectBg(dc,pp,pillH/2, mgFade(ppFill,efP),
+                    mgFade(blendColor(g_theme.border,g_theme.accent,45),efP), g_theme.surface);
+            }
+            SYSTEMTIME now=iranNow();
+            std::wstring ds=toFaDigits(jalaliDateShort(now))+L"  •  "+shiftName(detectShift());
+            SetTextColor(dc, mgFade(g_theme.accent,efP)); SelectObject(dc,g_fSmall);
+            DrawTextW(dc,ds.c_str(),-1,&pp,
+                DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+            SetTextColor(dc, mgFade(g_theme.text,efP)); SelectObject(dc,g_fUIB);
+            RECT tr={pp.right+S(12),hy,pr.right-S(16),hy+pillH};
             DrawTextW(dc,L"یک نگاه به فعالیت کلینیک",-1,&tr,
                 DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
-            // data — v1.66.0: using cached values (refreshed once per dash visit)
-            int busiest=nToday;
-            // two read-only metric chips (patients / today) — RTL, right→left
-            struct AC{ const wchar_t* lbl; std::wstring val; COLORREF col; int ico; };
-            AC ac[2]={
-                { L"کل بیماران ثبت‌شده", toFaDigits(std::to_wstring(nPat)),   g_theme.accent, ICO_USER },
-                { L"پذیرش‌های امروز",    toFaDigits(std::to_wstring(nToday)), g_infoAccent,   ICO_RECEIPT },
+            // ---- three mini-stat tiles ----
+            struct AC{ const wchar_t* lbl; int raw; COLORREF col; int ico; };
+            AC ac[3]={
+                { L"کل بیماران ثبت‌شده", nPat,   g_theme.accent,  ICO_USER   },
+                { L"پذیرش‌های امروز",    nToday, g_infoAccent,    ICO_RECEIPT },
+                { L"کارمندان برخط",     nOn,    g_theme.success, ICO_BELL    },
             };
-            int cy=pr.top+S(48);
-            int cellW=(pr.right-pr.left-S(32))/2;
-            for(int i=0;i<2;i++){
-                int cx=pr.right-S(16)-(i+1)*cellW;          // RTL
-                RECT cr={cx,cy,cx+cellW-S(8),cy+S(56)};
-                RECT ico={cr.right-S(44),cr.top+S(8),cr.right-S(14),cr.top+S(38)};
-                drawIcon(dc,ac[i].ico,ico,ac[i].col,S(2));
-                SetTextColor(dc,g_theme.text); SelectObject(dc,g_fTitle);
-                RECT vr={cr.left+S(6),cr.top+S(4),cr.right-S(48),cr.top+S(36)};
-                DrawTextW(dc,ac[i].val.c_str(),-1,&vr,DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
-                SetTextColor(dc,g_theme.textDim); SelectObject(dc,g_fSmall);
-                RECT lr={cr.left+S(6),cr.bottom-S(20),cr.right-S(6),cr.bottom};
-                DrawTextW(dc,ac[i].lbl,-1,&lr,DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
-            }
-            // workload bar: today vs busiest day on record
-            int barTop=cy+S(64);
-            if(barTop+S(24) <= pr.bottom-S(10)){
-                SetTextColor(dc,g_theme.textDim); SelectObject(dc,g_fSmall);
-                RECT wl={pr.left+S(16),barTop,pr.right-S(16),barTop+S(18)};
-                DrawTextW(dc,L"حجم کاری امروز نسبت به شلوغ‌ترین روز ثبت‌شده",-1,&wl,
+            int cy=pr.top+S(48), gap=S(14);
+            // purely gap-derived width (no visual floor): adjacent tiles are
+            // always separated by exactly `gap`, so they can NEVER overlap,
+            // however narrow the panel gets. The min-1 only guards against a
+            // negative-width rect on absurdly small windows.
+            int cellW=(pr.right-pr.left-S(32)-2*gap)/3; if(cellW<1) cellW=1;
+            for(int i=0;i<3;i++){
+                int cx=pr.right-S(16)-(i+1)*cellW-i*gap;     // RTL
+                RECT cr={cx,cy,cx+cellW,cy+S(64)};
+                gpRoundRectBg(dc,cr,S(12),
+                    mgFade(blendColor(g_theme.surface,ac[i].col,g_dark?12:8),efP),
+                    mgFade(blendColor(g_theme.border,ac[i].col,38),efP), g_theme.surface);
+                RECT md={cr.right-S(12)-S(36),cr.top+S(14),cr.right-S(12),cr.top+S(14)+S(36)};
+                int mr2=(md.bottom-md.top)/2;
+                COLORREF mf=blendColor(g_theme.surface,ac[i].col,g_dark?26:17);
+                COLORREF mb=blendColor(g_theme.border,ac[i].col,46);
+                gpRoundRectBg(dc,md,mr2, mgFade(mf,efP), mgFade(mb,efP), g_theme.surface);
+                RECT ico={md.left+S(6),md.top+S(6),md.right-S(6),md.bottom-S(6)};
+                drawIcon(dc,ac[i].ico,ico, mgFade(ac[i].col,efP), S(2));
+                int shown=(int)((float)ac[i].raw * efP + 0.5f);
+                SetTextColor(dc, mgFade(g_theme.text,efP)); SelectObject(dc,g_fTitle);
+                RECT vr={cr.left+S(12),cr.top+S(10),cr.right-S(12)-S(36)-S(8),cr.top+S(38)};
+                DrawTextW(dc,toFaDigits(std::to_wstring(shown)).c_str(),-1,&vr,
                     DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
-                RECT track={pr.left+S(16),barTop+S(20),pr.right-S(16),barTop+S(30)};
-                gpRoundRectBg(dc,track,S(5),g_theme.surface2,g_theme.border,g_theme.surface);
-                int den=busiest>0?busiest:1;
-                double frac=(double)nToday/(double)den; if(frac>1.0)frac=1.0; if(frac<0)frac=0;
+                SetTextColor(dc, mgFade(g_theme.textDim,efP)); SelectObject(dc,g_fSmall);
+                RECT lr={cr.left+S(12),cr.top+S(38),cr.right-S(12)-S(36)-S(8),cr.top+S(58)};
+                DrawTextW(dc,ac[i].lbl,-1,&lr,
+                    DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
+            }
+            // ---- staff-presence gauge (online / total) ----
+            int barTop=cy+S(64)+S(16);
+            if(barTop+S(34) <= pr.bottom-S(10)){
+                int den=nEmp>0?nEmp:1;
+                double frac=(double)nOn/(double)den; if(frac>1.0)frac=1.0; if(frac<0)frac=0;
+                std::wstring gl=L"حضور کارمندان — "+toFaDigits(std::to_wstring(nOn))+
+                    L" از "+toFaDigits(std::to_wstring(nEmp))+L" برخط";
+                SetTextColor(dc, mgFade(g_theme.textDim,efP)); SelectObject(dc,g_fSmall);
+                RECT wl={pr.left+S(16),barTop,pr.right-S(16),barTop+S(18)};
+                DrawTextW(dc,gl.c_str(),-1,&wl,
+                    DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+                RECT track={pr.left+S(16),barTop+S(22),pr.right-S(16),barTop+S(32)};
+                gpRoundRectBg(dc,track,S(5),
+                    mgFade(g_theme.surface2,efP), mgFade(g_theme.border,efP), g_theme.surface);
                 int fillW=(int)((track.right-track.left)*frac);
                 if(fillW>0){
-                    RECT fillr={track.right-fillW,track.top,track.right,track.bottom}; // RTL fill
-                    gpRoundRectBg(dc,fillr,S(5),g_infoAccent,g_infoAccent,g_theme.surface2);
+                    RECT fillr={track.right-fillW,track.top,track.right,track.bottom};
+                    if(efP>0.02f) gpShadowColor(dc,fillr,S(5),S(4),(int)(90*efP),g_theme.success);
+                    gpRoundRectBg(dc,fillr,S(5), mgFade(g_theme.success,efP),
+                        mgFade(g_theme.success,efP), g_theme.surface2);
                 }
             }
         }
@@ -3670,6 +3784,9 @@ static void mgGoPage(HWND h, int page){
     else if(page==PG_MSG){ mgLoadEmps(); }   // v1.22.0: show employee list
     else if(page==PG_PATIENTS){ mgPatientsLoadAsync(h); }
     else if(page==PG_SERVICES){ mgServicesClearForm(); mgServicesReload(); }
+    // v1.69.0: replay the subtle dashboard entrance each time the dash is shown;
+    // stop it (and the timer) whenever we navigate away.
+    if(page==PG_DASH) mgDashAnimStart(h); else mgDashAnimStop(h);
     mgLayout(h);
     InvalidateRect(h,NULL,TRUE);
 }
@@ -3693,6 +3810,7 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         s_mg->secAddMode=false; s_mg->autoId=true;
         s_mg->empSort=1; s_mg->msgCol=g_theme.textDim;
         s_mg->dashValid=false;  // v1.66.0: dash cache
+        s_mg->dashAnim=1.0f; s_mg->dashAnimOn=false;  // v1.69.0 entrance (started by mgGoPage)
         DWORD es=WS_CHILD|WS_TABSTOP|ES_AUTOHSCROLL;
         s_mg->eName=CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)MG_E_NAME,g_hInst,0);
         s_mg->eMgr =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)MG_E_MGR,g_hInst,0);
@@ -3816,6 +3934,7 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
 #endif
         return 0; }
     case WM_NCDESTROY: if(g_hManage==h) g_hManage=NULL;
+        if(s_mg && s_mg->dashAnimOn) KillTimer(h,MG_DASH_ANIM_TIMER);  // v1.69.0
         mgFreeShadowCache();   // v1.68.0: release cached modal shadow DC
         if(s_mg){ delete s_mg->ptAll; s_mg->ptAll=nullptr;
                   delete s_mg; s_mg=NULL; } break;
@@ -3851,6 +3970,14 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             KillTimer(h,0xB1);
             wchar_t b[256]={0}; if(s_mg->ptSearch) GetWindowTextW(s_mg->ptSearch,b,256);
             s_mg->ptQuery=b; mgPatientsFilter();
+            return 0;
+        }
+        // v1.69.0: dashboard staggered entrance — advance 0→1 (~350 ms), repaint
+        // while running, then stop the timer so steady state has zero overhead.
+        if(s_mg && w==MG_DASH_ANIM_TIMER){
+            s_mg->dashAnim += 0.045f;
+            if(s_mg->dashAnim>=1.0f){ s_mg->dashAnim=1.0f; mgDashAnimStop(h); }
+            InvalidateRect(h,NULL,FALSE);
             return 0;
         }
         break;
