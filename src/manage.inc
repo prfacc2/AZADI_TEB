@@ -523,8 +523,8 @@ static LRESULT CALLBACK mgdProc(HWND h, UINT m, WPARAM w, LPARAM l){
         gpFillAlpha(dc,rc,0,g_dark?RGB(0,0,0):RGB(20,28,40),120);
         RECT c=mgdCard(h);
         gpShadow(dc,c,S(20),S(22),80);
-        { HBRUSH pb=CreateSolidBrush(g_theme.surface); FillRect(dc,&c,pb); DeleteObject(pb); }
-        gpGradRoundRect(dc,c,S(18),g_theme.surfaceTop,g_theme.surface,g_theme.border);
+        gpGradRoundRectBg(dc,c,S(18),g_theme.surfaceTop,g_theme.surface,g_theme.border,
+            g_dark?RGB(6,9,14):RGB(28,36,48));
         SetBkMode(dc,TRANSPARENT);
         // close
         { RECT cb={c.left+S(14),c.top+S(14),c.left+S(40),c.top+S(40)};
@@ -703,8 +703,8 @@ static LRESULT CALLBACK mrProc(HWND h, UINT m, WPARAM w, LPARAM l){
         gpFillAlpha(dc,rc,0,g_dark?RGB(0,0,0):RGB(20,28,40),120);
         RECT c=mrCard(h);
         gpShadow(dc,c,S(20),S(22),80);
-        { HBRUSH pb=CreateSolidBrush(g_theme.surface); FillRect(dc,&c,pb); DeleteObject(pb); }
-        gpGradRoundRect(dc,c,S(18),g_theme.surfaceTop,g_theme.surface,g_theme.border);
+        gpGradRoundRectBg(dc,c,S(18),g_theme.surfaceTop,g_theme.surface,g_theme.border,
+            g_dark?RGB(6,9,14):RGB(28,36,48));
         SetBkMode(dc,TRANSPARENT);
         // close
         { RECT cb={c.left+S(14),c.top+S(14),c.left+S(40),c.top+S(40)};
@@ -937,8 +937,8 @@ static LRESULT CALLBACK prProc(HWND h, UINT m, WPARAM w, LPARAM l){
         gpFillAlpha(dc,rc,0,g_dark?RGB(0,0,0):RGB(20,28,40),120);
         RECT c=prCard(h);
         gpShadow(dc,c,S(20),S(22),80);
-        { HBRUSH pb=CreateSolidBrush(g_theme.surface); FillRect(dc,&c,pb); DeleteObject(pb); }
-        gpGradRoundRect(dc,c,S(18),g_theme.surfaceTop,g_theme.surface,g_theme.border);
+        gpGradRoundRectBg(dc,c,S(18),g_theme.surfaceTop,g_theme.surface,g_theme.border,
+            g_dark?RGB(6,9,14):RGB(28,36,48));
         SetBkMode(dc,TRANSPARENT);
         { RECT cb={c.left+S(14),c.top+S(14),c.left+S(40),c.top+S(40)};
           RECT ci={cb.left+S(5),cb.top+S(5),cb.right-S(5),cb.bottom-S(5)};
@@ -1331,6 +1331,8 @@ static LRESULT CALLBACK mmProc(HWND h, UINT m, WPARAM w, LPARAM l){
         s_ms->bSend  =createFlatButton(h,MM_B_SEND,L"ارسال پیام",ICO_BELL,BS_PRIMARY,0,0,10,10);
         s_ms->bCancel=createFlatButton(h,MM_B_CANCEL,L"انصراف",ICO_X,BS_OUTLINE,0,0,10,10);
         s_ms->bViewEmp=createFlatButton(h,MM_B_VIEWEMP,L"مشاهدهٔ کارمندان",ICO_USER,BS_OUTLINE,0,0,10,10);
+        HWND cardBtns[]={s_ms->bAttach,s_ms->bSend,s_ms->bCancel,s_ms->bViewEmp};
+        for(HWND b:cardBtns) setFlatButtonBg(b,g_theme.surface);
         s_ms->eEmpSrch=CreateWindowExW(0,L"EDIT",L"",
             WS_CHILD|WS_TABSTOP|ES_AUTOHSCROLL,0,0,10,10,h,(HMENU)MM_E_EMPSRCH,g_hInst,0);
         SendMessageW(s_ms->eEmpSrch,EM_SETCUEBANNER,TRUE,(LPARAM)L"جستجوی کارمند…");
@@ -1738,12 +1740,8 @@ static LRESULT CALLBACK neProc(HWND h, UINT m, WPARAM w, LPARAM l){
         SendMessageW(s_nes->eSto,EM_SETCUEBANNER,TRUE,(LPARAM)L"تا (۱۶:۰۰)");
         SendMessageW(s_nes->eHours,EM_SETCUEBANNER,TRUE,(LPARAM)L"ساعت/هفته");
         SendMessageW(s_nes->eHire,EM_SETCUEBANNER,TRUE,(LPARAM)L"۱۴۰۴/۰۳/۲۸");
-        s_nes->cDept=CreateWindowExW(0,L"COMBOBOX",L"",
-            WS_CHILD|WS_VISIBLE|WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL,
-            0,0,10,10,h,(HMENU)NE_CB_DEPT,g_hInst,0);
-        s_nes->cRole=CreateWindowExW(0,L"COMBOBOX",L"",
-            WS_CHILD|WS_VISIBLE|WS_TABSTOP|CBS_DROPDOWNLIST,
-            0,0,10,10,h,(HMENU)NE_CB_ROLE,g_hInst,0);
+        s_nes->cDept=createThemedCombo(h,NE_CB_DEPT);
+        s_nes->cRole=createThemedCombo(h,NE_CB_ROLE);
         SendMessageW(s_nes->cDept,WM_SETFONT,(WPARAM)g_fUI,TRUE);
         SendMessageW(s_nes->cRole,WM_SETFONT,(WPARAM)g_fUI,TRUE);
         s_nes->depts=loadDepts();
@@ -1765,6 +1763,8 @@ static LRESULT CALLBACK neProc(HWND h, UINT m, WPARAM w, LPARAM l){
         s_nes->bPhoto =createFlatButton(h,NE_B_PHOTO, L"بارگذاری عکس پرسنلی",ICO_USER,BS_OUTLINE,0,0,10,10);
         s_nes->bOk=createFlatButton(h,NE_B_OK,L"ثبت کارمند",ICO_PLUS,BS_PRIMARY,0,0,10,10);
         s_nes->bCancel=createFlatButton(h,NE_B_CANCEL,L"انصراف",ICO_X,BS_OUTLINE,0,0,10,10);
+        HWND cardBtns[]={s_nes->bIdCard,s_nes->bPhoto,s_nes->bOk,s_nes->bCancel};
+        for(HWND b:cardBtns) setFlatButtonBg(b,g_theme.surface);
         neLayout(h);
         return 0; }
     case WM_SIZE: neLayout(h); return 0;
@@ -1777,6 +1777,9 @@ static LRESULT CALLBACK neProc(HWND h, UINT m, WPARAM w, LPARAM l){
     case WM_CTLCOLORSTATIC:{ HDC dc=(HDC)w;
         SetTextColor(dc,g_theme.text); SetBkColor(dc,g_theme.surface);
         return (LRESULT)g_brSurface; }
+    case WM_DRAWITEM:
+        if(drawThemedComboItem((LPDRAWITEMSTRUCT)l)) return TRUE;
+        break;
     case WM_COMMAND:{ int id=LOWORD(w);
         if(id==NE_B_OK) neDoCreate(h);
         else if(id==NE_B_CANCEL) neClose();
@@ -1970,12 +1973,9 @@ static LRESULT CALLBACK npProc(HWND h, UINT m, WPARAM w, LPARAM l){
         s_nps->eBirth=mk(NP_E_BIRTH,0); s_nps->eMobile=mk(NP_E_MOBILE,0);
         s_nps->eLand=mk(NP_E_LAND,0); s_nps->eAddr=mk(NP_E_ADDR,0);
         SendMessageW(s_nps->eBirth,EM_SETCUEBANNER,TRUE,(LPARAM)L"۱۳۷۰/۰۵/۲۰");
-        s_nps->cGender=CreateWindowExW(0,L"COMBOBOX",L"",
-            WS_CHILD|WS_VISIBLE|WS_TABSTOP|CBS_DROPDOWNLIST,0,0,10,10,h,(HMENU)NP_CB_GENDER,g_hInst,0);
-        s_nps->cIns=CreateWindowExW(0,L"COMBOBOX",L"",
-            WS_CHILD|WS_VISIBLE|WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL,0,0,10,10,h,(HMENU)NP_CB_INS,g_hInst,0);
-        s_nps->cSupp=CreateWindowExW(0,L"COMBOBOX",L"",
-            WS_CHILD|WS_VISIBLE|WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL,0,0,10,10,h,(HMENU)NP_CB_SUPP,g_hInst,0);
+        s_nps->cGender=createThemedCombo(h,NP_CB_GENDER);
+        s_nps->cIns=createThemedCombo(h,NP_CB_INS);
+        s_nps->cSupp=createThemedCombo(h,NP_CB_SUPP);
         for(HWND cb:{s_nps->cGender,s_nps->cIns,s_nps->cSupp})
             SendMessageW(cb,WM_SETFONT,(WPARAM)g_fUI,TRUE);
         SendMessageW(s_nps->cGender,CB_ADDSTRING,0,(LPARAM)L"مرد");
@@ -1987,6 +1987,8 @@ static LRESULT CALLBACK npProc(HWND h, UINT m, WPARAM w, LPARAM l){
         SendMessageW(s_nps->cSupp,CB_SETCURSEL,0,0);
         s_nps->bOk=createFlatButton(h,NP_B_OK,L"ثبت بیمار",ICO_PLUS,BS_PRIMARY,0,0,10,10);
         s_nps->bCancel=createFlatButton(h,NP_B_CANCEL,L"انصراف",ICO_X,BS_OUTLINE,0,0,10,10);
+        setFlatButtonBg(s_nps->bOk,g_theme.surface);
+        setFlatButtonBg(s_nps->bCancel,g_theme.surface);
         npLayout(h); SetFocus(s_nps->eFirst);
         return 0; }
     case WM_SIZE: npLayout(h); return 0;
@@ -1999,6 +2001,9 @@ static LRESULT CALLBACK npProc(HWND h, UINT m, WPARAM w, LPARAM l){
     case WM_CTLCOLORSTATIC:{ HDC dc=(HDC)w;
         SetTextColor(dc,g_theme.text); SetBkColor(dc,g_theme.surface);
         return (LRESULT)g_brSurface; }
+    case WM_DRAWITEM:
+        if(drawThemedComboItem((LPDRAWITEMSTRUCT)l)) return TRUE;
+        break;
     case WM_COMMAND:{ int id=LOWORD(w);
         if(id==NP_B_OK) npDoSave(h);
         else if(id==NP_B_CANCEL) npClose();
@@ -2199,9 +2204,8 @@ static bool pcParseServicesModel(const std::wstring& jsonW, PcServicesModel& m){
     if((int)m.widths.size()!=m.cols) m.widths.assign(m.cols,1.0);
     if(m.labels.empty()){
         m.labels.clear();
-        const wchar_t* def[4]={L"ردیف",L"نام خدمت",L"کد",L"مبلغ"};
-        int nc=m.cols>4?m.cols:4;
-        for(int i=0;i<nc;++i) m.labels.push_back(i<4?std::wstring(def[i]):L"");
+        const wchar_t* def[4]={L"نام خدمت",L"شرح خدمت",L"تعداد",L"مبلغ کل"};
+        for(int i=0;i<m.cols;++i) m.labels.push_back(i<4?std::wstring(def[i]):L"");
     }
     return true;
 }
@@ -2209,47 +2213,56 @@ static void pcDrawServices(HDC dc, const PrintItem& it, const RECT& box, double 
     PcServicesModel m; if(!pcParseServicesModel(it.text,m)) return;
     int X0=box.left,Y0=box.top,X1=box.right,Y1=box.bottom;
     int W=X1-X0,H=Y1-Y0; if(W<=0||H<=0) return;
-    int nData=1;                                   // preview: one placeholder row
-    int total=(m.header?1:0)+nData; if(total<1) return;
     double sumw=0; for(double w:m.widths) sumw+=w; if(sumw<=0) sumw=m.cols;
-    std::vector<int> cx; cx.push_back(X1); double acc=0;
-    for(int c=0;c<m.cols;++c){ acc+=m.widths[c]; cx.push_back(X1-(int)(W*(acc/sumw))); }
-    std::vector<int> ry;
-    if(m.header){ int hh=(int)(H*0.16); if(hh<14)hh=14;   // §1.52.0: WYSIWYG — match pdDrawServices (printer.cpp) 16% header band
-        ry.push_back(Y0); ry.push_back(Y0+hh); ry.push_back(Y1); }
-    else { ry.push_back(Y0); ry.push_back(Y1); }
-    if(m.header){ RECT hr={cx[m.cols],ry[0],cx[0],ry[1]};
-        HBRUSH hb=CreateSolidBrush(RGB(31,95,214)); FillRect(dc,&hr,hb); DeleteObject(hb); }
+    std::vector<int> cx; cx.reserve(m.cols+1); cx.push_back(X1); double acc=0;
+    for(int c=0;c<m.cols;++c){
+        acc+=m.widths[c]; cx.push_back(c==m.cols-1?X0:X1-(int)(W*(acc/sumw)));
+    }
+
     double fontPt=it.fontPt>0?it.fontPt:8.5;
-    int lf=-(int)(fontPt*scPxMm*25.4/72.0 + 0.5); if(lf>-2) lf=-2;
-    HFONT fN=CreateFontW(lf,0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,
-        it.fontName.empty()?L"Vazirmatn":it.fontName.c_str());
+    int lf=-(int)(fontPt*scPxMm*25.4/72.0+0.5); if(lf>-2) lf=-2;
     HFONT fH=CreateFontW(lf,0,0,0,FW_BOLD,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,
         it.fontName.empty()?L"Vazirmatn":it.fontName.c_str());
-    int pad=S(3);
-    if(m.header){ HGDIOBJ of=SelectObject(dc,fH); SetTextColor(dc,RGB(255,255,255));
-        for(int c=0;c<m.cols;++c){ std::wstring cell=(c<(int)m.labels.size())?m.labels[c]:L"";
+    int hh=it.headerH>0?(int)(it.headerH*scPxMm+0.5):(int)(H*0.16);
+    if(hh<14) hh=14; if(hh>H) hh=H;
+    int rh=it.rowH>0?(int)(it.rowH*scPxMm+0.5):hh;
+    if(rh<12) rh=12; if(hh+rh>H) rh=H-hh;
+    if(rh<0) rh=0;
+    int total=m.header?1:0;
+    if(rh>0) ++total;
+    std::vector<int> ry; ry.reserve(total+1); ry.push_back(Y0);
+    if(m.header) ry.push_back(Y0+hh);
+    if(rh>0) ry.push_back((m.header?Y0+hh:Y0)+rh);
+    if((int)ry.size()!=total+1){ DeleteObject(fH); return; }
+
+    if(m.header){
+        DWORD fill=it.fillTransparent?0xEFEFEFu:(DWORD)it.fillColor;
+        int lum=(int)((((fill>>16)&0xFF)*30+((fill>>8)&0xFF)*59+(fill&0xFF)*11)/100);
+        RECT hr={cx[m.cols],ry[0],cx[0],ry[1]};
+        HBRUSH hb=CreateSolidBrush(pcCR((int)fill)); FillRect(dc,&hr,hb); DeleteObject(hb);
+        HGDIOBJ of=SelectObject(dc,fH);
+        SetTextColor(dc,lum<140?RGB(255,255,255):pcCR(it.textColor));
+        int pad=S(3);
+        for(int c=0;c<m.cols;++c){
+            std::wstring cell=c<(int)m.labels.size()?m.labels[c]:L"";
             RECT cr={cx[c+1]+pad,ry[0],cx[c]-pad,ry[1]};
             if(cr.right<=cr.left||cr.bottom<=cr.top) continue;
-            DrawTextW(dc,cell.c_str(),-1,&cr,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_END_ELLIPSIS|DT_NOPREFIX);
-        } SelectObject(dc,of); }
-    { HGDIOBJ of=SelectObject(dc,fN); SetTextColor(dc,pcCR(it.textColor));
-      const wchar_t* ph[4]={L"۱",L"نمونهٔ خدمت",L"۰۰۱",L"۱۰۰٬۰۰۰ ریال"};
-      int y0r=m.header?ry[1]:ry[0], y1r=m.header?ry[2]:ry[1];
-      for(int c=0;c<m.cols;++c){ std::wstring cell=(c<4)?std::wstring(ph[c]):L"";
-          RECT cr={cx[c+1]+pad,y0r,cx[c]-pad,y1r};
-          if(cr.right<=cr.left||cr.bottom<=cr.top) continue;
-          UINT al=(c==1)?(DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_END_ELLIPSIS|DT_NOPREFIX)
-                        :(DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_END_ELLIPSIS|DT_NOPREFIX);
-          DrawTextW(dc,cell.c_str(),-1,&cr,al);
-      } SelectObject(dc,of); }
-    DeleteObject(fN); DeleteObject(fH);
-    int bw=1; HPEN pen=CreatePen(PS_SOLID,bw,pcCR(it.borderColor)); HGDIOBJ op=SelectObject(dc,pen);
+            DrawTextW(dc,cell.c_str(),-1,&cr,
+                DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_END_ELLIPSIS|DT_NOPREFIX);
+        }
+        SelectObject(dc,of);
+    }
+    DeleteObject(fH);
+
+    // Recordless ready-template preview: show structure without fabricated
+    // service names, codes, quantities or prices. One compact blank row keeps
+    // the table editable and the unused page visibly blank.
+    int bw=(int)(it.borderWidth*scPxMm); if(bw<1) bw=1;
+    HPEN pen=CreatePen(PS_SOLID,bw,pcCR(it.borderColor)); HGDIOBJ op=SelectObject(dc,pen);
     for(int c=0;c<=m.cols;++c){ MoveToEx(dc,cx[c],ry[0],0); LineTo(dc,cx[c],ry[total]); }
     for(int rr=0;rr<=total;++rr){ MoveToEx(dc,cx[m.cols],ry[rr],0); LineTo(dc,cx[0],ry[rr]); }
     SelectObject(dc,op); DeleteObject(pen);
 }
-
 // preview-mode table: shows raw cell text (no live record substitution)
 static void pcDrawTable(HDC dc, const PrintItem& it, const RECT& box, double scPxMm){
     PcTable t; if(!pcParseTable(it.text,t)) return;
@@ -2525,7 +2538,10 @@ static LRESULT CALLBACK pcProc(HWND h, UINT m, WPARAM w, LPARAM l){
         s_pcs->bUpload  =createFlatButton(h,PC_B_UPLOAD,  L"بارگذاری",  ICO_ID,     BS_OUTLINE,0,0,10,10);
         s_pcs->bApply   =createFlatButton(h,PC_B_APPLY,   L"اعمال",     ICO_PLUS,   BS_PRIMARY,0,0,10,10);
         s_pcs->bClose   =createFlatButton(h,PC_B_CLOSE,   L"بستن",      ICO_X,      BS_OUTLINE,0,0,10,10);
-        if(!s_pcs->sects.empty()){ SendMessageW(s_pcs->list,LB_SETCURSEL,0,0);
+        HWND cardBtns[]={s_pcs->bZoomOut,s_pcs->bZoomIn,s_pcs->bEnlarge,
+            s_pcs->bDesign,s_pcs->bDownload,s_pcs->bUpload,s_pcs->bApply,s_pcs->bClose};
+        for(HWND b:cardBtns) setFlatButtonBg(b,g_theme.surface);
+        if(!s_pcs->sects.empty()){  SendMessageW(s_pcs->list,LB_SETCURSEL,0,0);
             s_pcs->sel=0; pcLoadPreview(); }
         pcLayout(h);
         return 0; }
@@ -2684,10 +2700,9 @@ static void mgEmptyState(HDC dc, RECT a, int icon, const wchar_t* head,
     int blockH=med+gap+hl+S(6)+sl;
     int by=cy-blockH/2; if(by<top+S(16)) by=top+S(16);
     RECT mr={cx-med/2,by,cx+med/2,by+med};
-    gpFillAlpha(dc,mr,med/2,blendColor(g_infoAccent,g_theme.surface,55),
-                g_dark?76:50);
-    gpRoundRect(dc,mr,med/2,CLR_INVALID,
-                blendColor(g_theme.border,g_infoAccent,42));
+    COLORREF medFill=blendColor(g_theme.surface,g_infoAccent,g_dark?25:18);
+    gpRoundRectBg(dc,mr,med/2,medFill,
+                  blendColor(g_theme.border,g_infoAccent,42),g_theme.surface);
     int isz=(med*44)/100;
     RECT ir={cx-isz/2,by+(med-isz)/2,cx+isz/2,by+(med-isz)/2+isz};
     drawIcon(dc,icon,ir,blendColor(g_infoAccent,g_theme.text,12),S(2)+1);
@@ -2990,10 +3005,9 @@ static void mgPaintDash(HDC dc, HWND h){
         RECT ir={r.right-S(56),r.top+S(16),r.right-S(20),r.top+S(52)};
         { RECT md=ir; InflateRect(&md,S(7),S(7));
           int mr2=(md.bottom-md.top)/2;
-          gpFillAlpha(dc,md,mr2,blendColor(cards[i].col,g_theme.surface,50),
-                      g_dark?80:48);
-          gpRoundRect(dc,md,mr2,CLR_INVALID,
-                      blendColor(g_theme.border,cards[i].col,48)); }
+          COLORREF medFill=blendColor(g_theme.surface,cards[i].col,g_dark?27:18);
+          gpRoundRectBg(dc,md,mr2,medFill,
+              blendColor(g_theme.border,cards[i].col,48),g_theme.surface); }
         drawIcon(dc,cards[i].ico,ir,cards[i].col,S(2));
         SetTextColor(dc,g_theme.text); SelectObject(dc,g_fHuge);
         RECT vr={r.left+S(16),r.top+S(12),r.right-S(60),r.top+S(58)};
@@ -3022,12 +3036,10 @@ static void mgPaintDash(HDC dc, HWND h){
         // tile responds as one object rather than only changing its border.
         { RECT md=ir; InflateRect(&md,S(8),S(8));
           int mr2=(md.bottom-md.top)/2;
-          gpFillAlpha(dc,md,mr2,
-              blendColor(hot?g_infoAccent:g_theme.accent,g_theme.surface,
-                         hot?42:56), hot?(g_dark?96:66):(g_dark?76:44));
-          gpRoundRect(dc,md,mr2,CLR_INVALID,
-              blendColor(g_theme.border,hot?g_infoAccent:g_theme.accent,
-                         hot?60:38)); }
+          COLORREF medAcc=hot?g_infoAccent:g_theme.accent;
+          COLORREF medFill=blendColor(g_theme.surface,medAcc,hot?29:20);
+          gpRoundRectBg(dc,md,mr2,medFill,
+              blendColor(g_theme.border,medAcc,hot?60:38),g_theme.surface); }
         drawIcon(dc,qa[i].ico,ir,hot?g_infoAccent:g_theme.accent,S(2));
         SetTextColor(dc,g_theme.text); SelectObject(dc,g_fUIB);
         RECT lr={r.left+S(8),r.top+S(60),r.right-S(8),r.top+S(84)};
@@ -3125,10 +3137,9 @@ static void mgPaintSects(HDC dc, HWND h){
         // v1.63.0: the section glyph sits in its own tinted medallion
         { RECT md=ir; InflateRect(&md,S(6),S(6));
           int mr2=(md.bottom-md.top)/2;
-          gpFillAlpha(dc,md,mr2,blendColor(g_infoAccent,g_theme.surface,52),
-                      g_dark?76:46);
-          gpRoundRect(dc,md,mr2,CLR_INVALID,
-                      blendColor(g_theme.border,g_infoAccent,45)); }
+          COLORREF medFill=blendColor(g_theme.surface,g_infoAccent,g_dark?25:17);
+          gpRoundRectBg(dc,md,mr2,medFill,
+              blendColor(g_theme.border,g_infoAccent,45),g_theme.surface); }
         drawIcon(dc,ICO_SHIELD,ir,g_infoAccent,S(2));
         SetTextColor(dc,g_theme.text); SelectObject(dc,g_fUIB);
         RECT nr={r.left+S(14),r.top+S(16),r.right-S(56),r.top+S(46)};
@@ -3526,8 +3537,8 @@ static void mgPaintShell(HDC dc, HWND h){
     // v1.63.0: the page title now sits on a faint accent wash band that spans
     // the header, so the card has a real titlebar instead of floating text.
     { RECT hb={a.left+S(1),a.top+S(1),a.right-S(1),a.top+mgHeadH()};
-      gpFillAlpha(dc,hb,S(16),
-          blendColor(g_infoAccent,g_theme.surface,g_dark?72:84),g_dark?70:120); }
+      COLORREF headerFill=blendColor(g_theme.surface,g_infoAccent,g_dark?12:7);
+      gpRoundRectBg(dc,hb,S(16),headerFill,CLR_INVALID,g_theme.surface); }
     SetTextColor(dc,g_theme.text); SelectObject(dc,g_fBig);
     RECT hr={a.left+S(24),a.top+S(16),a.right-S(24),a.top+mgHeadH()-S(8)};
     DrawTextW(dc,mgCardTitle(s_mg?s_mg->page:0),-1,&hr,DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
@@ -3660,11 +3671,13 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             WS_CHILD|WS_TABSTOP|ES_AUTOHSCROLL,0,0,10,10,h,(HMENU)MG_PT_SEARCH,g_hInst,0);
         SendMessageW(s_mg->ptSearch,WM_SETFONT,(WPARAM)g_fUI,TRUE);
         s_mg->ptAdd=createFlatButton(h,MG_PT_ADD,L"افزودن بیمار",ICO_PLUS,BS_PRIMARY,0,0,10,10);
-        s_mg->ptList=CreateWindowExW(WS_EX_CLIENTEDGE,WC_LISTVIEWW,L"",
+        s_mg->ptList=CreateWindowExW(0,WC_LISTVIEWW,L"",
             WS_CHILD|WS_TABSTOP|LVS_OWNERDATA|LVS_REPORT|LVS_SHOWSELALWAYS|LVS_SINGLESEL,
             0,0,10,10,h,(HMENU)MG_PT_LIST,g_hInst,0);
+        // Native GRIDLINES use fixed system-light colors under Wine; omit them
+        // so the themed body stays clean in both dark and light modes.
         ListView_SetExtendedListViewStyle(s_mg->ptList,
-            LVS_EX_FULLROWSELECT|LVS_EX_DOUBLEBUFFER|LVS_EX_GRIDLINES);
+            LVS_EX_FULLROWSELECT|LVS_EX_DOUBLEBUFFER);
         SendMessageW(s_mg->ptList,WM_SETFONT,(WPARAM)g_fUI,TRUE);
         {   // RTL report columns (rightmost first): #, name, nid, mobile,
             // v1.40.0 landline, gender, birth.
@@ -3675,6 +3688,7 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             for(int i=0;i<7;i++){ lc.pszText=(LPWSTR)cols[i].t; lc.cx=cols[i].w;
                 ListView_InsertColumn(s_mg->ptList,i,&lc); }
         }
+        applyThemedListView(s_mg->ptList);
         // ---- services page controls (v1.28.0) ----
         s_mg->svCode  =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)MG_SV_CODE,g_hInst,0);
         s_mg->svName  =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)MG_SV_NAME,g_hInst,0);
@@ -3690,13 +3704,18 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         s_mg->svEdit  =createFlatButton(h,MG_SV_EDIT,  L"ویرایش", ICO_GEAR, BS_OUTLINE,0,0,10,10);
         s_mg->svDelete=createFlatButton(h,MG_SV_DELETE,L"حذف",    ICO_TRASH,BS_DANGER, 0,0,10,10);
         s_mg->svClear =createFlatButton(h,MG_SV_CLEAR, L"فرم جدید",ICO_PLUS, BS_OUTLINE,0,0,10,10);
+        HWND pageBtns[]={s_mg->bAdd,s_mg->bAutoId,s_mg->bSecNew,s_mg->bSecBack,
+            s_mg->bAbc,s_mg->bNew,s_mg->bCreated,s_mg->bAddEmp,s_mg->bMsg,
+            s_mg->bReqs,s_mg->bProfReqs,s_mg->bNoteAttach,s_mg->bNoteSend,
+            s_mg->ptAdd,s_mg->svSave,s_mg->svEdit,s_mg->svDelete,s_mg->svClear};
+        for(HWND b:pageBtns) setFlatButtonBg(b,g_theme.surface);
         s_mg->svSearch=CreateWindowExW(0,L"EDIT",L"",
             WS_CHILD|WS_TABSTOP|ES_AUTOHSCROLL,0,0,10,10,h,(HMENU)MG_SV_SEARCH,g_hInst,0);
-        s_mg->svList  =CreateWindowExW(WS_EX_CLIENTEDGE,WC_LISTVIEWW,L"",
+        s_mg->svList  =CreateWindowExW(0,WC_LISTVIEWW,L"",
             WS_CHILD|WS_TABSTOP|LVS_OWNERDATA|LVS_REPORT|LVS_SHOWSELALWAYS|LVS_SINGLESEL,
             0,0,10,10,h,(HMENU)MG_SV_LIST,g_hInst,0);
         ListView_SetExtendedListViewStyle(s_mg->svList,
-            LVS_EX_FULLROWSELECT|LVS_EX_DOUBLEBUFFER|LVS_EX_GRIDLINES);
+            LVS_EX_FULLROWSELECT|LVS_EX_DOUBLEBUFFER);
         SendMessageW(s_mg->svList,WM_SETFONT,(WPARAM)g_fUI,TRUE);
         {   // RTL columns (rightmost first): کد | نام | دسته | مبلغ | وضعیت | ویرایش
             struct { const wchar_t* t; int w; } cols[]={
@@ -3706,6 +3725,7 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             for(int i=0;i<6;i++){ lc.pszText=(LPWSTR)cols[i].t; lc.cx=cols[i].w;
                 ListView_InsertColumn(s_mg->svList,i,&lc); }
         }
+        applyThemedListView(s_mg->svList);
         SendMessageW(s_mg->svSearch,WM_SETFONT,(WPARAM)g_fUI,TRUE);
         { HWND se[]={s_mg->svCode,s_mg->svName,s_mg->svCat,s_mg->svPrice,s_mg->svDesc};
           for(HWND e:se){ SendMessageW(e,WM_SETFONT,(WPARAM)g_fUI,TRUE); enableEnterNavigation(e); }
@@ -3749,7 +3769,17 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         if(s_mg){ delete s_mg->ptAll; s_mg->ptAll=nullptr;
                   delete s_mg; s_mg=NULL; } break;
     case WM_SIZE: if(s_mg) mgLayout(h); return 0;
-    case WM_APP_THEME: InvalidateRect(h,NULL,TRUE); return 0;
+    case WM_APP_THEME:
+        if(s_mg){
+            HWND pageBtns[]={s_mg->bAdd,s_mg->bAutoId,s_mg->bSecNew,s_mg->bSecBack,
+                s_mg->bAbc,s_mg->bNew,s_mg->bCreated,s_mg->bAddEmp,s_mg->bMsg,
+                s_mg->bReqs,s_mg->bProfReqs,s_mg->bNoteAttach,s_mg->bNoteSend,
+                s_mg->ptAdd,s_mg->svSave,s_mg->svEdit,s_mg->svDelete,s_mg->svClear};
+            for(HWND b:pageBtns) setFlatButtonBg(b,g_theme.surface);
+            applyThemedListView(s_mg->ptList);
+            applyThemedListView(s_mg->svList);
+        }
+        InvalidateRect(h,NULL,TRUE); return 0;
     case WM_CTLCOLOREDIT:{ HDC dc=(HDC)w; SetTextColor(dc,g_theme.inputText);
         SetBkColor(dc,g_theme.inputBg); return (LRESULT)g_brInput; }
     case WM_CTLCOLORLISTBOX:{ HDC dc=(HDC)w; SetTextColor(dc,g_theme.inputText);
@@ -3772,9 +3802,15 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             return 0;
         }
         break;
+    case WM_DRAWITEM:
+        if(drawThemedComboItem((LPDRAWITEMSTRUCT)l)) return TRUE;
+        break;
     case WM_NOTIFY:{
         if(!s_mg) break;
         NMHDR* nh=(NMHDR*)l;
+        LRESULT headerResult=0;
+        if(nh && drawThemedListViewHeader((LPNMCUSTOMDRAW)l,&headerResult))
+            return headerResult;
         if(nh && nh->hwndFrom==s_mg->ptList){
             if(nh->code==LVN_GETDISPINFOW){
                 NMLVDISPINFOW* di=(NMLVDISPINFOW*)l;

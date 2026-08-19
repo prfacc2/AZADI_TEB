@@ -13,6 +13,8 @@
 // ============================================================================
 #include "app.h"
 #include "print_designer.h"   // §3: new vector designer (PrintDesigner_Open)
+#include "print_services_pagination.h"
+#include "print_services_policy.h"
 #include "sections.h"         // v1.65.0: lazy seeding in the print path
 #include <stdio.h>
 
@@ -1671,10 +1673,9 @@ static void pdDrawTable(HDC dc, const PrintItem& it, const RECT& box,
 // `cols`/`labels`/`widths` describe the table header; rows are filled from the
 // live ReceptionRecord.services vector (variable count) at render time.
 struct PdServicesModel {
-    // v1.55.0: the real paper receipt has exactly THREE columns, right→left:
-    //   نام خدمت | شرح خدمت | تعداد
-    // so that is now the default shape (no ردیف / کد / مبلغ columns).
-    int cols=3;
+    // Mandatory receipt defaults, right→left:
+    //   نام خدمت | شرح خدمت | تعداد | مبلغ کل
+    int cols=4;
     bool header=true;
     std::vector<double> widths;
     std::vector<std::wstring> labels;   // header captions (RTL order, col0=right)
@@ -1711,7 +1712,11 @@ static PdSvcCol pdSvcColOf(const std::wstring& labIn, int idx){
     auto has=[&](const wchar_t* n){ return L.find(n)!=std::wstring::npos; };
     if(L.empty()){
         // an unlabelled column falls back to positional defaults
-        switch(idx){ case 0: return PSC_NAME; case 1: return PSC_DESC; case 2: return PSC_QTY; default: return PSC_NONE; }
+        switch(idx){
+            case 0: return PSC_NAME; case 1: return PSC_DESC;
+            case 2: return PSC_QTY;  case 3: return PSC_LINE;
+            default: return PSC_NONE;
+        }
     }
     if(has(L"شرح")||has(L"توضیح"))                       return PSC_DESC;
     if(has(L"نوع"))                                       return PSC_CAT;
@@ -1757,19 +1762,17 @@ static bool pdParseServicesModel(const std::wstring& jsonW, PdServicesModel& m){
         ws(); if(p<s.size()&&s[p]==','){++p;continue;} ws(); if(p<s.size()&&s[p]=='}'){++p;break;}
         if(p>=s.size())break;
     }
-    if(m.cols<1) m.cols=3;
+    if(m.cols<1) m.cols=4;
     if((int)m.widths.size()!=m.cols){
-        // v1.55.0 default proportions of the real receipt: نام خدمت is wide,
-        // شرح خدمت a little narrower, تعداد a thin trailing column.
-        if(m.cols==3){ m.widths.clear(); m.widths.push_back(0.55); m.widths.push_back(0.30); m.widths.push_back(0.15); }
-        else m.widths.assign(m.cols,1.0);
+        if(m.cols==4){
+            m.widths.clear(); m.widths.push_back(0.39); m.widths.push_back(0.29);
+            m.widths.push_back(0.10); m.widths.push_back(0.22);
+        } else m.widths.assign(m.cols,1.0);
     }
     if(m.labels.empty()){
-        // v1.55.0 default Persian header (RTL order, col0 = RIGHTMOST):
-        //   نام خدمت | شرح خدمت | تعداد
         m.labels.clear();
-        const wchar_t* def[3]={L"نام خدمت",L"شرح خدمت",L"تعداد"};
-        for(int i=0;i<m.cols;++i) m.labels.push_back(i<3?std::wstring(def[i]):L"");
+        const wchar_t* def[4]={L"نام خدمت",L"شرح خدمت",L"تعداد",L"مبلغ کل"};
+        for(int i=0;i<m.cols;++i) m.labels.push_back(i<4?std::wstring(def[i]):L"");
     }
     while((int)m.labels.size()<m.cols) m.labels.push_back(L"");
     return true;
@@ -1795,211 +1798,257 @@ static std::wstring pdSvcCellValue(PdSvcCol kind, const ServiceLine& s, int rowI
         default:        return L"";
     }
 }
-// Preview placeholder for the same column kind (designer canvas, no record).
-static std::wstring pdSvcCellSample(PdSvcCol kind, int rowIdx){
-    switch(kind){
-        case PSC_NAME:  return rowIdx==0? L"ویزیت پزشک عمومی" : (rowIdx==1? L"تزریق عضلانی" : L"نوار قلب");
-        case PSC_DESC:  return rowIdx==0? L"عمومی" : (rowIdx==1? L"خدمات پرستاری" : L"تشخیصی");
-        case PSC_QTY:   return rowIdx==0? L"۱" : (rowIdx==1? L"۲" : L"۱");
-        case PSC_CODE:  return rowIdx==0? L"۹۰۱۰۱" : (rowIdx==1? L"۹۰۲۱۴" : L"۹۰۳۰۷");
-        case PSC_ROW: { wchar_t b[16]; swprintf(b,16,L"%d",rowIdx+1); return toFaDigits(b); }
-        case PSC_PRICE: case PSC_LINE: case PSC_INS: case PSC_PAT: return L"۰";
-        case PSC_DISC:  return L"—";
-        case PSC_CAT:   return L"عمومی";
-        default:        return L"";
+// Precomputed geometry shared by pagination and drawing. Keeping row measurement
+// in one helper guarantees that a page break can never disagree with the rows
+// later painted on that page.
+struct PdServicesLayout {
+    PdServicesModel model;
+    std::vector<PdSvcCol> kinds;
+    std::vector<int> cx;
+    std::vector<int> rowHeights;
+    int pad=2;
+    int textLineH=1;
+    int baseRowH=1;
+    int headH=0;
+};
+static bool pdBuildServicesLayout(HDC dc, const PrintItem& it, const RECT& box,
+                                  double pxPerMmX, double pxPerMmY,
+                                  double fontPxPerPt, const ReceptionRecord* live,
+                                  PdServicesLayout& out){
+    pdParseServicesModel(it.text, out.model);
+    int X0=box.left, X1=box.right;
+    int W=X1-X0, H=box.bottom-box.top; if(W<=0||H<=0) return false;
+
+    double sumw=0; for(double w:out.model.widths) sumw+=w;
+    if(sumw<=0) sumw=out.model.cols;
+    out.cx.reserve(out.model.cols+1); out.cx.push_back(X1);
+    double acc=0;
+    for(int c=0;c<out.model.cols;++c){
+        acc+=out.model.widths[c];
+        out.cx.push_back(c==out.model.cols-1 ? X0 : X1-(int)(W*(acc/sumw)));
     }
+    out.kinds.assign(out.model.cols,PSC_NONE);
+    for(int c=0;c<out.model.cols;++c)
+        out.kinds[c]=pdSvcColOf(c<(int)out.model.labels.size()?out.model.labels[c]:std::wstring(),c);
+
+    double fontPt=it.fontPt>0?it.fontPt:8.5;
+    int lf=-(int)(fontPt*fontPxPerPt);
+    HFONT fNorm=CreateFontW(lf,0,0,0,FW_NORMAL,it.italic?1:0,0,0,DEFAULT_CHARSET,0,0,
+        CLEARTYPE_QUALITY,0,it.fontName.empty()?L"Vazirmatn":it.fontName.c_str());
+    out.pad=(int)(1.2*pxPerMmX); if(out.pad<2) out.pad=2;
+    TEXTMETRICW tm={0};
+    HGDIOBJ oldFont=SelectObject(dc,fNorm);
+    GetTextMetricsW(dc,&tm);
+    int textLineH=tm.tmHeight>0?tm.tmHeight:(int)(fontPt*fontPxPerPt+0.5);
+    out.textLineH=textLineH>0?textLineH:1;
+    out.baseRowH=(it.rowH>0)?(int)(it.rowH*pxPerMmY+0.5):textLineH+out.pad;
+    if(out.baseRowH<textLineH+out.pad) out.baseRowH=textLineH+out.pad;
+    if(out.model.header){
+        int requested=(it.headerH>0)?(int)(it.headerH*pxPerMmY+0.5):out.baseRowH;
+        if(requested<textLineH+out.pad) requested=textLineH+out.pad;
+        pdPrintableDataHeight(H,requested,out.baseRowH,&out.headH);
+    }
+
+    int nLive=live?(int)live->services.size():0;
+    out.rowHeights.reserve(nLive);
+    for(int rowIdx=0;rowIdx<nLive;++rowIdx){
+        const ServiceLine& svc=live->services[rowIdx];
+        int wanted=out.baseRowH;
+        for(int c=0;c<out.model.cols;++c){
+            if(out.kinds[c]!=PSC_NAME && out.kinds[c]!=PSC_DESC && out.kinds[c]!=PSC_CAT) continue;
+            std::wstring cell=pdSvcCellValue(out.kinds[c],svc,rowIdx);
+            int cw=out.cx[c]-out.cx[c+1]-2*out.pad; if(cw<4) continue;
+            RECT mr={0,0,cw,1000000};
+            DrawTextW(dc,cell.c_str(),-1,&mr,
+                DT_RIGHT|DT_TOP|DT_WORDBREAK|DT_RTLREADING|DT_NOPREFIX|DT_CALCRECT);
+            int h=(mr.bottom-mr.top)+out.pad;
+            if(h>wanted) wanted=h;
+        }
+        out.rowHeights.push_back(wanted);
+    }
+    SelectObject(dc,oldFont); DeleteObject(fNorm);
+    return true;
+}
+static std::vector<PdServicesPageSlice> pdPlanServicePages(
+        HDC dc,const PrintItem& it,const RECT& box,double pxPerMmX,double pxPerMmY,
+        double fontPxPerPt,const ReceptionRecord* live){
+    PdServicesLayout layout;
+    if(!pdBuildServicesLayout(dc,it,box,pxPerMmX,pxPerMmY,fontPxPerPt,live,layout))
+        return std::vector<PdServicesPageSlice>(1);
+    int available=(box.bottom-box.top)-layout.headH;
+    int firstInset=layout.pad/2; if(firstInset<0) firstInset=0;
+    return pdSliceServiceRows(layout.rowHeights,available,layout.textLineH,firstInset);
 }
 
-// §1.51.0: draw a dynamic services table inside `box` (device px).
-// Renders one header row (optional) + one row per ReceptionRecord.services entry.
-// Columns (RTL, col0=rightmost):
-//   0 = ردیف (row number), 1 = نام خدمت (name), 2 = کد (code), 3 = مبلغ (line total)
-// If cols>4, extra columns render empty. If cols<4, only the first `cols` render.
-// `live` is the record whose services vector we render; if NULL or empty we show
-// a placeholder row so the designer preview still looks like a real table.
-static void pdDrawServices(HDC dc, const PrintItem& it, const RECT& box,
-                           double pxPerMmX, double pxPerMmY,
-                           double fontPxPerPt, const ReceptionRecord* live){
-    PdServicesModel m; pdParseServicesModel(it.text, m);
-    int X0=box.left, Y0=box.top, X1=box.right, Y1=box.bottom;
-    int W=X1-X0, H=Y1-Y0; if(W<=0||H<=0) return;
-
-    // §1.53.0 (Bug E): force a consistent RTL text-alignment baseline so mixed
-    // Persian/number content in the services table never flips visually.
-    SetTextAlign(dc, TA_RTLREADING|TA_TOP|TA_LEFT);
-
-    // v1.61.0 — services table row planning.
-    //   * A live record with services draws EXACTLY those rows (never a blank).
-    //   * A live record with NO services draws one honest «خدمتی ثبت نشده» row
-    //     instead of a silent, empty, meaningless grid line.
-    //   * The designer canvas (live == NULL) keeps the sample rows so the user
-    //     can see what a real print looks like while laying the table out.
-    int nLive = live ? (int)live->services.size() : 0;
-    bool emptyLive = (live && nLive==0);
-    int nDataRows = live ? (nLive>0? nLive : 1) : 3;
-    // The design pins a row height; make sure the printed table never claims
-    // fewer rows than the frame was drawn for, so short bills still look like
-    // the template the operator designed (empty trailing rows stay ruled).
-    int minRows = 0;
-    if(it.rowH>0){
-        int headMm = m.header ? (int)((it.headerH>0? it.headerH : 7.5)) : 0;
-        double availMm = (double)(Y1-Y0)/(pxPerMmY>0?pxPerMmY:1.0) - headMm;
-        if(availMm>0) minRows = (int)(availMm/it.rowH + 0.02);
-        if(minRows>40) minRows=40;
+static void pdPaintServiceLogicalRow(HDC dc,const PrintItem& it,
+        const PdServicesLayout& layout,const ServiceLine& svc,int rowIdx,
+        int xShift,int top,int fullHeight,HFONT fNorm,bool fillBackground,
+        int cellMode){ // 0=all, 1=prose only, 2=numeric/non-prose only
+    const PdServicesModel& m=layout.model;
+    int left=layout.cx[m.cols]+xShift, right=layout.cx[0]+xShift;
+    if(fillBackground){
+        COLORREF bg=RGB(255,255,255);
+        if(!it.fillTransparent && (rowIdx&1)){
+            DWORD headFill=(DWORD)it.fillColor;
+            int br=(int)((headFill>>16)&0xFF), bgc=(int)((headFill>>8)&0xFF), bb=(int)(headFill&0xFF);
+            bg=RGB(br+(int)((255-br)*0.78),bgc+(int)((255-bgc)*0.78),bb+(int)((255-bb)*0.78));
+        }
+        RECT rowBg={left,top,right,top+fullHeight};
+        HBRUSH brush=CreateSolidBrush(bg); FillRect(dc,&rowBg,brush); DeleteObject(brush);
+    } else if(cellMode==0 && !it.fillTransparent && (rowIdx&1)){
+        DWORD headFill=(DWORD)it.fillColor;
+        int br=(int)((headFill>>16)&0xFF), bgc=(int)((headFill>>8)&0xFF), bb=(int)(headFill&0xFF);
+        RECT rowBg={left,top,right,top+fullHeight};
+        HBRUSH brush=CreateSolidBrush(RGB(br+(int)((255-br)*0.78),
+            bgc+(int)((255-bgc)*0.78),bb+(int)((255-bb)*0.78)));
+        FillRect(dc,&rowBg,brush); DeleteObject(brush);
     }
-    if(minRows>nDataRows) nDataRows=minRows;
-    int totalRows = (m.header?1:0) + nDataRows;
-    if(totalRows<1) return;
 
-    // column x-boundaries (RTL: col 0 starts at the right edge)
-    double sumw=0; for(double w:m.widths) sumw+=w; if(sumw<=0) sumw=m.cols;
-    std::vector<int> cx; cx.reserve(m.cols+1);
-    cx.push_back(X1);
-    double acc=0;
-    for(int c=0;c<m.cols;++c){ acc+=m.widths[c]; cx.push_back(X1-(int)(W*(acc/sumw))); }
-    // ---- row y-boundaries (top → bottom) --------------------------------
-    // v1.55.0: the design may pin an EXACT header height (it.headerH, mm) and
-    // an EXACT data-row height (it.rowH, mm) — that is what the designer's
-    // "ارتفاع سطر / ارتفاع سرستون" controls (and the drag grips) write. When a
-    // value is 0 the old proportional behaviour is kept, so v1.54 designs are
-    // byte-for-byte identical. When the pinned heights would overflow the box
-    // the whole table is scaled down uniformly rather than clipped.
-    int headH = 0;
-    if(m.header){
-        headH = (it.headerH>0) ? (int)(it.headerH*pxPerMmY) : (int)(H*0.16);
-        if(headH<10) headH=10;
-    }
-    int rowHpx = (it.rowH>0) ? (int)(it.rowH*pxPerMmY) : 0;
-    if(rowHpx>0){
-        int need = headH + rowHpx*nDataRows;
-        if(need>H && need>0){                  // shrink to fit the frame
-            double k=(double)H/(double)need;
-            headH=(int)(headH*k); rowHpx=(int)(rowHpx*k);
-            if(rowHpx<4) rowHpx=4;
+    HGDIOBJ oldFont=SelectObject(dc,fNorm);
+    SetBkMode(dc,TRANSPARENT); SetTextAlign(dc,TA_RTLREADING|TA_TOP|TA_LEFT);
+    SetTextColor(dc,pdCR(it.textColor));
+    for(int c=0;c<m.cols;++c){
+        PdSvcCol kind=layout.kinds[c];
+        std::wstring cell=pdSvcCellValue(kind,svc,rowIdx);
+        RECT cr={layout.cx[c+1]+xShift+layout.pad,top+layout.pad/2,
+                 layout.cx[c]+xShift-layout.pad,top+fullHeight-layout.pad/2};
+        if(cr.right<=cr.left||cr.bottom<=cr.top||cell.empty()) continue;
+        bool prose=(kind==PSC_NAME||kind==PSC_DESC||kind==PSC_CAT);
+        if(cellMode==1&&!prose) continue;
+        if(cellMode==2&&prose) continue;
+        if(cellMode==3) continue;
+        if(prose){
+            RECT mr={0,0,cr.right-cr.left,1000000};
+            DrawTextW(dc,cell.c_str(),-1,&mr,
+                DT_RIGHT|DT_TOP|DT_WORDBREAK|DT_RTLREADING|DT_NOPREFIX|DT_CALCRECT);
+            int mh=mr.bottom-mr.top;
+            RECT dr=cr; int off=((cr.bottom-cr.top)-mh)/2; if(off>0) dr.top+=off;
+            DrawTextW(dc,cell.c_str(),-1,&dr,
+                DT_RIGHT|DT_TOP|DT_WORDBREAK|DT_RTLREADING|DT_NOPREFIX);
+        } else {
+            DrawTextW(dc,cell.c_str(),-1,&cr,
+                DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_END_ELLIPSIS|DT_NOPREFIX);
         }
     }
-    std::vector<int> ry; ry.reserve(totalRows+1);
-    ry.push_back(Y0);
-    if(m.header) ry.push_back(Y0+headH);
-    if(rowHpx>0){
-        for(int rr=1; rr<=nDataRows; ++rr) ry.push_back(Y0+headH+rowHpx*rr);
-    } else {
-        int avail=H-headH; if(avail<nDataRows) avail=nDataRows;
-        for(int rr=1; rr<=nDataRows; ++rr)
-            ry.push_back(Y0+headH+(int)((double)avail*rr/nDataRows));
-        ry.back()=Y1;                          // exact bottom alignment
+    SelectObject(dc,oldFont);
+}
+
+static void pdDrawServiceRowFragment(HDC dc,const PrintItem& it,
+        const PdServicesLayout& layout,const ServiceLine& svc,int rowIdx,
+        int destTop,int offset,int fragmentHeight,HFONT fNorm){
+    int fullHeight=layout.rowHeights[rowIdx];
+    int X0=layout.cx[layout.model.cols], W=layout.cx[0]-X0;
+    if(offset==0 && fragmentHeight==fullHeight){
+        pdPaintServiceLogicalRow(dc,it,layout,svc,rowIdx,0,destTop,fullHeight,fNorm,false,0);
+        return;
     }
 
-    // fonts
-    double fontPt = it.fontPt>0 ? it.fontPt : 8.5;
+    // Paint the visible prose strip through a clipped, vertically shifted
+    // logical row. Numeric identity (row/code/qty/amount) is emitted on the
+    // first fragment only; wrapped name/description pixels are emitted exactly
+    // once across the contiguous fragments.
+    int saved=SaveDC(dc);
+    IntersectClipRect(dc,X0,destTop,X0+W,destTop+fragmentHeight);
+    pdPaintServiceLogicalRow(dc,it,layout,svc,rowIdx,0,destTop-offset,fullHeight,fNorm,
+                             false,1);
+    RestoreDC(dc,saved);
+    if(offset==0)
+        pdPaintServiceLogicalRow(dc,it,layout,svc,rowIdx,0,destTop,fragmentHeight,fNorm,
+                                 false,2);
+}
+
+// Draw one pre-planned page of service-row fragments inside `box`. The page
+// header repeats; vertical fragments reconstruct every oversized wrapped row
+// without clipping or substituting an “N more” marker.
+static void pdDrawServices(HDC dc, const PrintItem& it, const RECT& box,
+                           double pxPerMmX, double pxPerMmY,
+                           double fontPxPerPt, const ReceptionRecord* live,
+                           const PdServicesPageSlice& slice){
+    PdServicesLayout layout;
+    if(!pdBuildServicesLayout(dc,it,box,pxPerMmX,pxPerMmY,fontPxPerPt,live,layout)) return;
+    PdServicesModel& m=layout.model;
+    std::vector<int>& cx=layout.cx;
+    int Y0=box.top, Y1=box.bottom, H=Y1-Y0;
+    SetTextAlign(dc,TA_RTLREADING|TA_TOP|TA_LEFT);
+
+    int nLive=live?(int)live->services.size():0;
+    std::vector<PdServicesRowFragment> fragments;
+    if(nLive>0){
+        for(size_t i=0;i<slice.rows.size();++i){
+            const PdServicesRowFragment& f=slice.rows[i];
+            if(f.row>=0&&f.row<nLive&&f.height>0) fragments.push_back(f);
+        }
+    }
+    bool emptyRow=(nLive==0);
+    int available=H-layout.headH; if(available<1) available=1;
+    int dataRows=emptyRow?1:(int)fragments.size();
+    int totalRows=(m.header?1:0)+dataRows;
+    if(totalRows<1) return;
+
+    std::vector<int> rowHeights;
+    if(emptyRow) rowHeights.push_back(available<layout.baseRowH?available:layout.baseRowH);
+    else for(size_t i=0;i<fragments.size();++i) rowHeights.push_back(fragments[i].height);
+    std::vector<int> ry; ry.reserve(totalRows+1); ry.push_back(Y0);
+    if(m.header) ry.push_back(Y0+layout.headH);
+    for(int rr=0;rr<dataRows;++rr){
+        int next=ry.back()+rowHeights[rr]; if(next>Y1) next=Y1;
+        ry.push_back(next);
+    }
+    if((int)ry.size()!=totalRows+1) return;
+
+    double fontPt=it.fontPt>0?it.fontPt:8.5;
     int lf=-(int)(fontPt*fontPxPerPt);
     HFONT fNorm=CreateFontW(lf,0,0,0,FW_NORMAL,it.italic?1:0,0,0,DEFAULT_CHARSET,0,0,
         CLEARTYPE_QUALITY,0,it.fontName.empty()?L"Vazirmatn":it.fontName.c_str());
     HFONT fHead=CreateFontW(lf,0,0,0,FW_BOLD,0,0,0,DEFAULT_CHARSET,0,0,
         CLEARTYPE_QUALITY,0,it.fontName.empty()?L"Vazirmatn":it.fontName.c_str());
-    int pad=(int)(1.2*pxPerMmX); if(pad<2)pad=2;
+    DWORD headFill=!it.fillTransparent?(DWORD)it.fillColor:0xEFEFEFu;
+    int lum=(int)((((headFill>>16)&0xFF)*30+((headFill>>8)&0xFF)*59+(headFill&0xFF)*11)/100);
+    COLORREF headTxt=(lum<140)?RGB(255,255,255):pdCR(it.textColor);
 
-    // ---- header / banding colours ---------------------------------------
-    // v1.55.0: the table is no longer hard-wired to a blue corporate band. The
-    // header fill comes from the item's own fillColor (which the 30 new ready-
-    // made designs set to a light GREY, or leave transparent) so a monochrome
-    // design prints monochrome on a black-and-white laser printer. The header
-    // caption colour is chosen automatically for contrast against that fill.
-    bool   hasFill  = !it.fillTransparent;
-    DWORD  headFill = hasFill ? (DWORD)it.fillColor : 0xEFEFEFu;   // default light grey
-    int    lum      = (int)((((headFill>>16)&0xFF)*30 + ((headFill>>8)&0xFF)*59 + (headFill&0xFF)*11)/100);
-    COLORREF headTxt = (lum<140) ? RGB(255,255,255) : pdCR(it.textColor);
     if(m.header){
-        RECT hr={cx[m.cols], ry[0], cx[0], ry[1]};
-        HBRUSH hb=CreateSolidBrush(pdCR((int)headFill));
-        FillRect(dc,&hr,hb); DeleteObject(hb);
-    }
-    // Alternating row banding: only when the design explicitly asked for a
-    // header fill (i.e. it is a "banded" style). Pure line-art designs stay
-    // completely un-shaded, exactly like the paper receipt.
-    if(hasFill){
-        int br_,bg_,bb_;
-        br_=(int)((headFill>>16)&0xFF); bg_=(int)((headFill>>8)&0xFF); bb_=(int)(headFill&0xFF);
-        // 22% tint of the header colour towards white → a very light band
-        int zr=br_+(int)((255-br_)*0.78), zg=bg_+(int)((255-bg_)*0.78), zb=bb_+(int)((255-bb_)*0.78);
-        for(int rr=0; rr<nDataRows; ++rr){
-            if((rr&1)==0) continue;       // band every other data row
-            int y0r = m.header ? ry[1+rr] : ry[rr];
-            int y1r = m.header ? ry[2+rr] : ry[rr+1];
-            RECT br={cx[m.cols], y0r, cx[0], y1r};
-            HBRUSH hb=CreateSolidBrush(RGB(zr,zg,zb));
-            FillRect(dc,&br,hb); DeleteObject(hb);
-        }
-    }
-
-    // v1.55.0: classify every column ONCE from its caption, so the data loop
-    // below never guesses meaning from the column index.
-    std::vector<PdSvcCol> kinds(m.cols, PSC_NONE);
-    for(int c=0;c<m.cols;++c)
-        kinds[c] = pdSvcColOf(c<(int)m.labels.size()? m.labels[c] : std::wstring(), c);
-
-    SetTextColor(dc, m.header ? headTxt : pdCR(it.textColor));
-    // header cells
-    if(m.header){
-        HGDIOBJ of=SelectObject(dc,fHead);
+        RECT hr={cx[m.cols],ry[0],cx[0],ry[1]};
+        HBRUSH hb=CreateSolidBrush(pdCR((int)headFill)); FillRect(dc,&hr,hb); DeleteObject(hb);
+        HGDIOBJ oldFont=SelectObject(dc,fHead); SetTextColor(dc,headTxt);
         for(int c=0;c<m.cols;++c){
-            std::wstring cell = (c<(int)m.labels.size()) ? m.labels[c] : L"";
-            // §1.53.0 (Bug E): convert any ASCII digits the user typed in a
-            // header label to Persian digits so the receipt reads uniformly.
-            cell = toFaDigits(cell);
-            RECT cr={cx[c+1]+pad, ry[0]+pad/2, cx[c]-pad, ry[1]-pad/2};
+            std::wstring cell=toFaDigits(c<(int)m.labels.size()?m.labels[c]:L"");
+            RECT cr={cx[c+1]+layout.pad,ry[0]+layout.pad/2,
+                     cx[c]-layout.pad,ry[1]-layout.pad/2};
             if(cr.right<=cr.left||cr.bottom<=cr.top) continue;
             DrawTextW(dc,cell.c_str(),-1,&cr,
                 DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_END_ELLIPSIS|DT_NOPREFIX);
         }
-        SelectObject(dc,of);
-        SetTextColor(dc, pdCR(it.textColor));
+        SelectObject(dc,oldFont);
     }
-    // data rows
-    {
-        HGDIOBJ of=SelectObject(dc,fNorm);
-        for(int rr=0; rr<nDataRows; ++rr){
-            const ServiceLine* sln = (live && rr<(int)live->services.size()) ? &live->services[rr] : NULL;
-            int ry0 = m.header ? ry[1+rr] : ry[rr];
-            int ry1 = m.header ? ry[2+rr] : ry[rr+1];
-            for(int c=0;c<m.cols;++c){
-                // v1.55.0: LABEL-driven cell resolution — the caption decides
-                // what goes here, so the designer may reorder / drop columns.
-                // Never fabricate example service text on a real print job. Sample
-                // values are for the designer canvas only (`live == NULL`).
-                std::wstring cell;
-                if(sln)            cell = pdSvcCellValue(kinds[c], *sln, rr);
-                else if(!live)     cell = pdSvcCellSample(kinds[c], rr);
-                else if(emptyLive && rr==0){
-                    // Honest, readable empty state — never a mystery blank row.
-                    if(kinds[c]==PSC_NAME)      cell = L"خدمتی ثبت نشده است";
-                    else if(kinds[c]==PSC_ROW)  cell = L"۱";
-                }
-                RECT cr={cx[c+1]+pad, ry0+pad/2, cx[c]-pad, ry1-pad/2};
-                if(cr.right<=cr.left||cr.bottom<=cr.top) continue;
-                // §1.53.0 (Bug E) / v1.55.0: Persian prose columns (نام خدمت،
-                // شرح خدمت، نوع خدمت) hug the RIGHT edge; numeric columns are
-                // centered. EVERY cell gets DT_RTLREADING so mixed Persian +
-                // Latin/digit content never flips visually.
-                bool prose = (kinds[c]==PSC_NAME || kinds[c]==PSC_DESC || kinds[c]==PSC_CAT);
-                UINT al = (prose ? DT_RIGHT : DT_CENTER)
-                        | DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_END_ELLIPSIS|DT_NOPREFIX;
-                DrawTextW(dc,cell.c_str(),-1,&cr,al);
+
+    int dataStart=m.header?1:0;
+    if(emptyRow){
+        HGDIOBJ oldFont=SelectObject(dc,fNorm); SetTextColor(dc,pdCR(it.textColor));
+        if(live){
+            for(int c=0;c<m.cols;++c) if(layout.kinds[c]==PSC_NAME){
+                RECT cr={cx[c+1]+layout.pad,ry[dataStart]+layout.pad/2,
+                         cx[c]-layout.pad,ry[dataStart+1]-layout.pad/2};
+                DrawTextW(dc,L"خدمتی ثبت نشده است",-1,&cr,
+                    DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+                break;
             }
         }
-        SelectObject(dc,of);
+        SelectObject(dc,oldFont);
+    } else {
+        for(int rr=0;rr<dataRows;++rr){
+            const PdServicesRowFragment& f=fragments[rr];
+            pdDrawServiceRowFragment(dc,it,layout,live->services[f.row],f.row,
+                                     ry[dataStart+rr],f.offset,f.height,fNorm);
+        }
     }
     DeleteObject(fNorm); DeleteObject(fHead);
 
-    // grid lines
-    int bw=(int)(it.borderWidth*pxPerMmX); if(bw<1)bw=1;
-    HPEN pen=CreatePen(PS_SOLID,bw,pdCR(it.borderColor));
-    HGDIOBJ op=SelectObject(dc,pen);
+    int bw=(int)(it.borderWidth*pxPerMmX); if(bw<1) bw=1;
+    HPEN pen=CreatePen(PS_SOLID,bw,pdCR(it.borderColor)); HGDIOBJ oldPen=SelectObject(dc,pen);
     for(int c=0;c<=m.cols;++c){ MoveToEx(dc,cx[c],ry[0],0); LineTo(dc,cx[c],ry[totalRows]); }
     for(int rr=0;rr<=totalRows;++rr){ MoveToEx(dc,cx[m.cols],ry[rr],0); LineTo(dc,cx[0],ry[rr]); }
-    SelectObject(dc,op); DeleteObject(pen);
+    SelectObject(dc,oldPen); DeleteObject(pen);
 }
-
 // ===========================================================================
 //  v1.55.0 — REAL 1-D BARCODE ENGINE (PIT_BARCODE)
 //  A genuine, standards-conformant symbol generator: Code 128-B, Code 39 and
@@ -2367,19 +2416,55 @@ bool printPrintDesign(const ReceptionRecord& r, int sectionId, HWND owner){
                 L"چاپ طرح",MB_OK|MB_ICONWARNING);
             DeleteDC(dc); return false; }
     }
-    StartPage(dc);
-    SetBkMode(dc,TRANSPARENT);
-
-    // paint items in z-order
+    // Paint in z-order on every planned page. Service pagination is computed
+    // before the first StartPage so the same measured slices drive page count
+    // and rendering.
     std::vector<const PrintItem*> ord;
     for(const auto& it:d.items) ord.push_back(&it);
     // simple insertion sort by z (avoids pulling in <algorithm>; item counts are tiny)
     for(size_t i=1;i<ord.size();++i){ const PrintItem* k=ord[i]; size_t j=i;
         while(j>0 && ord[j-1]->z > k->z){ ord[j]=ord[j-1]; --j; } ord[j]=k; }
 
-    for(const PrintItem* pit : ord){
+    const PrintItem* serviceItem=NULL;
+    for(const PrintItem* pit:ord) if(pit->type==PIT_SERVICES){ serviceItem=pit; break; }
+    RECT serviceBox={0,0,0,0};
+    std::vector<PdServicesPageSlice> servicePages(1);
+    if(serviceItem){
+        serviceBox.left=mmX(serviceItem->x);
+        serviceBox.top=mmY(serviceItem->y);
+        serviceBox.right=mmX(serviceItem->x+serviceItem->w);
+        serviceBox.bottom=mmY(serviceItem->y+serviceItem->h);
+        int minimumFrame=(int)(12.0*sy*pscale+0.5); if(minimumFrame<2) minimumFrame=2;
+        PdServicesFrame safe=pdEnsureServicesFrame(serviceBox.top,serviceBox.bottom,
+            mmY(0),mmY(d.paperH),minimumFrame);
+        serviceBox.top=safe.top; serviceBox.bottom=safe.bottom;
+        servicePages=pdPlanServicePages(dc,*serviceItem,serviceBox,sx*pscale,sy*pscale,
+                                        (dpiY/72.0)*pscale,&r);
+        if(servicePages.empty()) servicePages.push_back(PdServicesPageSlice());
+    }
+
+    for(size_t pageNo=0;pageNo<servicePages.size();++pageNo){
+        bool multiPage=servicePages.size()>1;
+        bool finalPage=pageNo+1==servicePages.size();
+        if(StartPage(dc)<=0){ AbortDoc(dc); DeleteDC(dc); return false; }
+        SetBkMode(dc,TRANSPARENT);
+
+        for(const PrintItem* pit : ord){
         const PrintItem& it=*pit;
+        // On continuation pages repeat the page shell and all patient/template
+        // context above the services table. Totals, signatures, tear-off stubs,
+        // QR/barcode and other footer items appear once, on the final page.
+        if(multiPage && serviceItem && pit!=serviceItem && !finalPage){
+            std::wstring normalizedField=(it.type==PIT_FIELD)?pdNormalizeField(it.field):L"";
+            PdContinuationItemKind repeatKind=PDCI_OTHER;
+            if(it.type==PIT_FRAME) repeatKind=PDCI_FRAME;
+            else if(it.type==PIT_LOGO) repeatKind=PDCI_LOGO;
+            else if(it.type==PIT_PHOTO) repeatKind=PDCI_PHOTO;
+            else if(it.type==PIT_FIELD) repeatKind=PDCI_FIELD;
+            if(!pdContinuationRepeatAllowed(repeatKind,normalizedField)) continue;
+        }
         int x0=mmX(it.x), y0=mmY(it.y), x1=mmX(it.x+it.w), y1=mmY(it.y+it.h);
+        if(pit==serviceItem){ y0=serviceBox.top; y1=serviceBox.bottom; }
         if(it.type==PIT_TABLE){
             RECT rr={x0,y0,x1,y1};
             // §1.52.0: scale the internal font/cell px-per-mm so an A4-authored
@@ -2388,7 +2473,9 @@ bool printPrintDesign(const ReceptionRecord& r, int sectionId, HWND owner){
         } else if(it.type==PIT_SERVICES){
             // §1.51.0: dynamic services list rendered from the live record.
             RECT rr={x0,y0,x1,y1};
-            pdDrawServices(dc, it, rr, sx*pscale, sy*pscale, (dpiY/72.0)*pscale, &r);
+            const PdServicesPageSlice& slice=servicePages[pageNo];
+            pdDrawServices(dc, it, rr, sx*pscale, sy*pscale, (dpiY/72.0)*pscale,
+                           &r, slice);
         } else if(it.type==PIT_BARCODE){
             // v1.55.0: a REAL scannable barcode. The payload is resolved from
             // the bound field token (default {receiptbarcode}) so it always
@@ -2501,8 +2588,11 @@ bool printPrintDesign(const ReceptionRecord& r, int sectionId, HWND owner){
             DrawTextW(dc,s.c_str(),-1,&dr,base|DT_TOP|DT_NOCLIP);
             if(of) SelectObject(dc,of); if(f) DeleteObject(f);
         }
+        }
+        if(EndPage(dc)<=0){ AbortDoc(dc); DeleteDC(dc); return false; }
     }
-    EndPage(dc); EndDoc(dc); DeleteDC(dc);
-    logLine(L"print_designer design printed for section "+std::to_wstring(sectionId));
+    EndDoc(dc); DeleteDC(dc);
+    logLine(L"print_designer design printed for section "+std::to_wstring(sectionId)+
+            L" ("+std::to_wstring(servicePages.size())+L" page(s))");
     return true;
 }

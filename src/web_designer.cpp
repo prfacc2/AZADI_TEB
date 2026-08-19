@@ -1,30 +1,18 @@
 // ============================================================================
-//  web_designer.cpp — loopback HTTP host for the HTML/CSS/JS print designer
-//  (release 1.19.1).
+//  web_designer.cpp — compatibility JSON conversion for print designs.
 //
-//  Design goals:
-//   * NO external dependency — uses Winsock (already linked) only.
-//   * Crash/hang-proof — the designer page is opened in the operator's DEFAULT
-//     BROWSER (ShellExecute on the loopback URL). The fragile embedded Trident
-//     control (blank screen / "not responding") was removed in 1.19.1.
-//   * Light & stable — the HTTP host is a single blocking-accept thread (no
-//     polling/busy loop); the page itself is a tiny static app.
-//   * Fully synced with C++ — the page persists through /api/save which writes
-//     the section design and posts WM_APP_DESIGN_PUSHED so reception picks the
-//     new layout up immediately.
-//   * Safe fallback — if the loopback host can't start, WebDesigner_Open
-//     returns false and the caller opens the proven native GDI designer.
+//  The browser/loopback designer runtime is retired. Production always opens
+//  the self-contained native GDI designer; this translation unit remains in the
+//  build so existing JS-shaped design files can still be imported/exported.
 // ============================================================================
-#include "app.h"
 #include "web_designer.h"
 #include "print_designer.h"
-#include "sections.h"
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#include <shellapi.h>
+#include <algorithm>
+#include <cctype>
+#include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
-#include <map>
 
 // ----------------------------------------------------------------------------
 //  small utils
@@ -40,16 +28,6 @@ static std::wstring u82w(const std::string& s){
     int n=MultiByteToWideChar(CP_UTF8,0,s.c_str(),(int)s.size(),NULL,0);
     std::wstring w(n,0); MultiByteToWideChar(CP_UTF8,0,s.c_str(),(int)s.size(),&w[0],n);
     return w;
-}
-
-// load an embedded RCDATA asset as raw bytes
-static bool loadRes(int id, std::string& out){
-    HRSRC h=FindResourceW(g_hInst,MAKEINTRESOURCEW(id),RT_RCDATA);
-    if(!h) return false;
-    HGLOBAL g=LoadResource(g_hInst,h); if(!g) return false;
-    void* p=LockResource(g); DWORD sz=SizeofResource(g_hInst,h);
-    if(!p||!sz) return false;
-    out.assign((const char*)p,(size_t)sz); return true;
 }
 
 // ----------------------------------------------------------------------------
@@ -271,38 +249,10 @@ static bool webJsonToDesign(const std::string& json, PrintDesign& out){
     return j.ok;
 }
 
-// v1.21.1: public wrappers so the native UI (Print Settings import/export) can
-// round-trip the very files the browser designer downloads.
+// Public compatibility wrappers used by native Print Settings import/export.
 std::string Design_ToWebJson(const PrintDesign& d){ return designToWebJson(d); }
 bool Design_FromWebJson(const std::string& json, PrintDesign& out){ return webJsonToDesign(json,out); }
 
-// extract a string value of `key` from a flat JSON object (top-level only)
-static bool jsonGetObject(const std::string& json, const std::string& key, std::string& out){
-    // find "key" then capture the following {...} balanced block
-    std::string pat="\""+key+"\"";
-    size_t k=json.find(pat); if(k==std::string::npos) return false;
-    size_t c=json.find(':',k+pat.size()); if(c==std::string::npos) return false;
-    size_t p=c+1; while(p<json.size()&&(json[p]==' '||json[p]=='\t'||json[p]=='\n'||json[p]=='\r'))++p;
-    if(p>=json.size()||json[p]!='{') return false;
-    int depth=0; bool instr=false; size_t st=p;
-    for(; p<json.size(); ++p){ char ch=json[p];
-        if(instr){ if(ch=='\\'){++p;continue;} if(ch=='"')instr=false; continue; }
-        if(ch=='"') instr=true; else if(ch=='{')++depth; else if(ch=='}'){ if(--depth==0){ out=json.substr(st,p-st+1); return true; } } }
-    return false;
-}
-
-// v1.22.0: extract a top-level numeric value: "key": 123  (or 123.4)
-static bool jsonGetNumber(const std::string& json, const std::string& key, double& out){
-    std::string pat="\""+key+"\"";
-    size_t k=json.find(pat); if(k==std::string::npos) return false;
-    size_t c=json.find(':',k+pat.size()); if(c==std::string::npos) return false;
-    size_t p=c+1; while(p<json.size()&&(json[p]==' '||json[p]=='\t'||json[p]=='\n'||json[p]=='\r'))++p;
-    size_t st=p;
-    while(p<json.size()&&(isdigit((unsigned char)json[p])||json[p]=='-'||json[p]=='+'||json[p]=='.'||json[p]=='e'||json[p]=='E'))++p;
-    if(p==st) return false;
-    out=atof(json.substr(st,p-st).c_str());
-    return true;
-}
-
-#include "web_designer_http.inc"
-#include "web_designer_host.inc"
+// The browser entry point remains as a safe stub for any older source caller.
+// Returning false guarantees that callers use the native GDI designer.
+bool WebDesigner_Open(HWND, const std::vector<int>&){ return false; }

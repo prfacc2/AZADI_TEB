@@ -136,6 +136,9 @@ static LRESULT CALLBACK PickerProc(HWND h,UINT m,WPARAM w,LPARAM l){
     case WM_NOTIFY:{
         if(!st) return 0;
         LPNMHDR nh=(LPNMHDR)l;
+        LRESULT headerResult=0;
+        if(nh && drawThemedListViewHeader((LPNMCUSTOMDRAW)l,&headerResult))
+            return headerResult;
         if(nh->idFrom==IDC_DZ_LIST && nh->code==LVN_ITEMCHANGED){
             NMLISTVIEW* nv=(NMLISTVIEW*)l;
             if(nv->uChanged & LVIF_STATE) picker_syncSel(st);
@@ -187,11 +190,11 @@ static bool RunSectionPicker(HWND owner, DesignerLaunch& out){
         WS_CHILD|WS_VISIBLE|ES_AUTOHSCROLL,mgn,mgn+S(20),cw,S(26),h,
         (HMENU)IDC_DZ_SEARCH,g_hInst,NULL);
     SendMessageW(st.hSearch,WM_SETFONT,(WPARAM)g_fUI,TRUE);
-    st.hList=CreateWindowExW(WS_EX_CLIENTEDGE,WC_LISTVIEWW,L"",
+    st.hList=CreateWindowExW(0,WC_LISTVIEWW,L"",
         WS_CHILD|WS_VISIBLE|LVS_REPORT|LVS_SINGLESEL,
         mgn,mgn+S(54),cw,H-S(54)-S(96),h,(HMENU)IDC_DZ_LIST,g_hInst,NULL);
     ListView_SetExtendedListViewStyle(st.hList,
-        LVS_EX_CHECKBOXES|LVS_EX_FULLROWSELECT|LVS_EX_GRIDLINES);
+        LVS_EX_CHECKBOXES|LVS_EX_FULLROWSELECT|LVS_EX_DOUBLEBUFFER);
     SendMessageW(st.hList,WM_SETFONT,(WPARAM)g_fUI,TRUE);
     LVCOLUMNW col; ZeroMemory(&col,sizeof(col)); col.mask=LVCF_TEXT|LVCF_WIDTH;
     struct C{const wchar_t* t;int w;} cols[]={
@@ -201,16 +204,19 @@ static bool RunSectionPicker(HWND owner, DesignerLaunch& out){
         {L"\u0641\u0639\u0627\u0644",S(80)} };
     for(int i=0;i<4;i++){ col.pszText=(LPWSTR)cols[i].t; col.cx=cols[i].w;
         ListView_InsertColumn(st.hList,i,&col); }
+    applyThemedListView(st.hList);
     st.hCount=CreateWindowExW(0,L"STATIC",L"",WS_CHILD|WS_VISIBLE|SS_RIGHT,
         mgn,H-S(82),cw,S(20),h,NULL,g_hInst,NULL);
     SendMessageW(st.hCount,WM_SETFONT,(WPARAM)g_fSmall,TRUE);
     st.hOk=createFlatButton(h,IDC_DZ_OK,
         L"\u0627\u062f\u0627\u0645\u0647",ICO_CHECK,BS_PRIMARY,
         W-mgn-S(120),H-S(56),S(120),S(34));
+    setFlatButtonBg(st.hOk,g_theme.surface);
     EnableWindow(st.hOk,FALSE);
-    createFlatButton(h,IDC_DZ_CANCEL,
+    HWND cancel=createFlatButton(h,IDC_DZ_CANCEL,
         L"\u0627\u0646\u0635\u0631\u0627\u0641",ICO_X,BS_OUTLINE,
         mgn,H-S(56),S(110),S(34));
+    setFlatButtonBg(cancel,g_theme.surface);
 
     Sections_Init();
     picker_reload(&st); picker_syncSel(&st);
@@ -307,53 +313,84 @@ extern "C" {}
 // some Windows configurations leaves the FontFamily in an error state, and
 // constructing a Font from it (or DrawString-ing with it) can raise a hardware
 // fault inside gdiplus.dll — which is exactly what produced the contained
-// "open editor" crash. makeSafeFont() guarantees a USABLE family every time by
-// degrading deterministically: requested name -> Vazirmatn -> GenericSansSerif.
-// The returned Font is heap-owned (caller deletes). `pxSize` is the final glyph
-// size in PIXELS (we always build with UnitPixel). We test each candidate
-// family's status before building a Font from it, then verify the Font itself.
+// "open editor" crash.
+//
+// Wine-specific readability: AddFontMemResourceEx makes the embedded Vazirmatn
+// faces available to Win32/GDI, but Wine's GDI+ does not consistently enumerate
+// those process fonts. Keep a designer-only PrivateFontCollection backed by the
+// same embedded resources. Resource memory remains valid for the module lifetime;
+// the deliberately process-lifetime collection is not destroyed after GDI+
+// shutdown. This changes neither persisted font names nor printer rendering.
+static const Gdiplus::PrivateFontCollection* designerEmbeddedFonts(){
+    using namespace Gdiplus;
+    static PrivateFontCollection* fonts=[]()->PrivateFontCollection*{
+        PrivateFontCollection* c=new PrivateFontCollection();
+        if(!c || c->GetLastStatus()!=Ok){ delete c; return nullptr; }
+        const int ids[2]={101,102};
+        bool added=false;
+        for(int id:ids){
+            HRSRC hr=FindResourceW(g_hInst,MAKEINTRESOURCEW(id),RT_RCDATA);
+            if(!hr) continue;
+            HGLOBAL hg=LoadResource(g_hInst,hr);
+            DWORD sz=SizeofResource(g_hInst,hr);
+            const void* data=LockResource(hg);
+            if(data && sz>0 && sz<0x7FFFFFFFu &&
+               c->AddMemoryFont(data,(INT)sz)==Ok) added=true;
+        }
+        if(!added){ delete c; return nullptr; }
+        return c;
+    }();
+    return fonts;
+}
+
+// makeSafeFont() guarantees a USABLE family every time by degrading
+// deterministically: requested name -> embedded Vazirmatn -> installed
+// Vazirmatn -> GenericSansSerif. The returned Font is heap-owned (caller
+// deletes). `pxSize` is the final glyph size in PIXELS (UnitPixel).
 static Gdiplus::Font* makeSafeFont(const std::wstring& reqName,double pxSize,int gdiStyle){
     using namespace Gdiplus;
-    static FontFamily s_vazir(L"Vazirmatn");                 // may or may not be Ok
     REAL px=(REAL)((pxSize>0?pxSize:10.0));
     if(px<1)   px=1;
     if(px>4000)px=4000;                  // absurd zoom * pt → clamp before GDI+
-    // 1) try the requested family (only if a real name was given)
-    if(!reqName.empty()){
+    auto build=[&](const FontFamily& family)->Font*{
+        if(family.GetLastStatus()!=Ok || !family.IsAvailable()) return nullptr;
+        Font* f=new Font(&family,px,(FontStyle)gdiStyle,UnitPixel);
+        if(f && f->GetLastStatus()==Ok) return f;
+        delete f;
+        // Some faces do not advertise a synthetic italic/bold combination.
+        // Retain bold when possible, otherwise prefer readable regular glyphs.
+        int fallbackStyle=(gdiStyle&FontStyleBold)?FontStyleBold:FontStyleRegular;
+        f=new Font(&family,px,(FontStyle)fallbackStyle,UnitPixel);
+        if(f && f->GetLastStatus()==Ok) return f;
+        delete f; return nullptr;
+    };
+    bool wantsVazir=reqName.empty() || reqName==L"Vazirmatn" || reqName==L"Vazir";
+    // 1) honour a genuinely installed custom face.
+    if(!wantsVazir){
         FontFamily ff(reqName.c_str());
-        if(ff.GetLastStatus()==Ok && ff.IsAvailable()){
-            Font* f=new Font(&ff,px,(FontStyle)gdiStyle,UnitPixel);
-            if(f && f->GetLastStatus()==Ok) return f;
-            delete f;
-        }
+        if(Font* f=build(ff)) return f;
     }
-    // 2) try Vazirmatn
-    if(s_vazir.GetLastStatus()==Ok && s_vazir.IsAvailable()){
-        Font* f=new Font(&s_vazir,px,(FontStyle)gdiStyle,UnitPixel);
-        if(f && f->GetLastStatus()==Ok) return f;
-        delete f;
+    // 2) use the exact bundled Persian face, including under Wine.
+    const PrivateFontCollection* embedded=designerEmbeddedFonts();
+    if(embedded){
+        FontFamily ff(L"Vazirmatn",embedded);
+        if(Font* f=build(ff)) return f;
     }
-    // 3) generic sans-serif. GenericSansSerif() returns a process-wide singleton
-    //    that is normally non-null, but on a GDI+ that failed to start it can be
-    //    null or in an error state — guard it so we NEVER construct a Font from a
-    //    bad family (that was a real DrawString-time access violation source).
-    const FontFamily* generic = FontFamily::GenericSansSerif();
-    if(generic && generic->GetLastStatus()==Ok){
-        Font* f=new Font(generic,px,(FontStyle)gdiStyle,UnitPixel);
-        if(f && f->GetLastStatus()==Ok) return f;
-        delete f;
-    }
-    // 4) last resort: build from a generic family name directly. If even this
-    //    fails we return nullptr and EVERY caller already null-checks `f`.
+    // 3) native Windows normally sees the per-user/process-installed face.
     {
-        FontFamily fam(L"Arial");
-        if(fam.GetLastStatus()==Ok){
-            Font* f=new Font(&fam,px,(FontStyle)gdiStyle,UnitPixel);
-            if(f && f->GetLastStatus()==Ok) return f;
-            delete f;
-        }
+        FontFamily ff(L"Vazirmatn");
+        if(Font* f=build(ff)) return f;
     }
-    return nullptr;
+    // 4) if the requested Vazir alias resolved independently, still honour it.
+    if(wantsVazir && !reqName.empty() && reqName!=L"Vazirmatn"){
+        FontFamily ff(reqName.c_str());
+        if(Font* f=build(ff)) return f;
+    }
+    // 5) guarded platform fallbacks.
+    const FontFamily* generic=FontFamily::GenericSansSerif();
+    if(generic){ if(Font* f=build(*generic)) return f; }
+    FontFamily arial(L"Arial");
+    return build(arial);
 }
 
 // ---- GDI+ rendering of one item into canvas px coords ----------------------
@@ -384,12 +421,20 @@ static void drawItemGdip(Graphics& g,DesignerState* st,const PrintItem& it,bool 
     }
     Color tc(255,(it.textColor>>16)&0xFF,(it.textColor>>8)&0xFF,it.textColor&0xFF);
     Color bc(255,(it.borderColor>>16)&0xFF,(it.borderColor>>8)&0xFF,it.borderColor&0xFF);
+    // Some pre-native/web exports persisted a service model while degrading the
+    // numeric item type. Recognise the model signature for canvas display only;
+    // the item itself, its JSON, and every save/print path remain untouched.
+    int canvasType=it.type;
+    if(canvasType!=PIT_TABLE && it.text.find(L"\"labels\"")!=std::wstring::npos &&
+       it.text.find(L"\"widths\"")!=std::wstring::npos)
+        canvasType=PIT_SERVICES;
     // fill
-    if(!it.fillTransparent && it.type!=PIT_HLINE && it.type!=PIT_VLINE){
+    if(!it.fillTransparent && canvasType!=PIT_HLINE && canvasType!=PIT_VLINE &&
+       canvasType!=PIT_SERVICES){
         Color fc(255,(it.fillColor>>16)&0xFF,(it.fillColor>>8)&0xFF,it.fillColor&0xFF);
         SolidBrush fb(fc); g.FillRectangle(&fb,x,y,w,hgt);
     }
-    switch(it.type){
+    switch(canvasType){
     case PIT_HLINE:{ Pen p(bc,(REAL)std::max(1.0,it.borderWidth*st->zoom));
         g.DrawLine(&p,x,y+hgt/2,x+w,y+hgt/2); break; }
     case PIT_VLINE:{ Pen p(bc,(REAL)std::max(1.0,it.borderWidth*st->zoom));
@@ -405,6 +450,155 @@ static void drawItemGdip(Graphics& g,DesignerState* st,const PrintItem& it,bool 
         for(int i=0;i<7;i++)for(int j=0;j<7;j++)
             if(((i+j)%2)==0 || i==0||j==0||i==6||j==6)
                 g.FillRectangle(&b,x+i*cell,y+j*cell,cell,cell);
+        break; }
+    case PIT_SERVICES:{
+#ifdef AZ_DEBUG_BUILD
+        { static bool logged=false; if(!logged){ logged=true;
+          writeFileUtf8(exeDir()+L"\\designer_services_branch.txt",
+              L"PIT_SERVICES branch entered\r\n",false); } }
+#endif
+        // Designer-only structural preview. The JSON remains the persisted model
+        // and the printer still fills rows exclusively from ReceptionRecord.
+        // Here we render configured labels/widths/row geometry and neutral blank
+        // rows, so no receipt data is implied or fabricated on the canvas.
+        struct Model {
+            int cols=4; bool header=true;
+            std::vector<double> widths;
+            std::vector<std::wstring> labels;
+        } m;
+        std::string json=js_esc(L""); // reserve no alternate serialization path
+        {
+            int n=WideCharToMultiByte(CP_UTF8,0,it.text.c_str(),(int)it.text.size(),NULL,0,NULL,NULL);
+            json.assign(n,0);
+            if(n) WideCharToMultiByte(CP_UTF8,0,it.text.c_str(),(int)it.text.size(),&json[0],n,NULL,NULL);
+        }
+        size_t pos=0;
+        auto ws=[&]{ while(pos<json.size() && (json[pos]==' '||json[pos]=='\t'||json[pos]=='\r'||json[pos]=='\n')) ++pos; };
+        auto str=[&](std::string& out)->bool{
+            ws(); if(pos>=json.size()||json[pos]!='"') return false; ++pos;
+            while(pos<json.size()&&json[pos]!='"'){
+                char c=json[pos++];
+                if(c=='\\'&&pos<json.size()){
+                    char e=json[pos++];
+                    switch(e){
+                    case 'n':out+='\n';break; case 'r':out+='\r';break;
+                    case 't':out+='\t';break; case '"':out+='"';break;
+                    case '\\':out+='\\';break; case '/':out+='/';break;
+                    case 'u':{
+                        if(pos+4<=json.size()){
+                            unsigned v=(unsigned)strtoul(json.substr(pos,4).c_str(),NULL,16); pos+=4;
+                            if(v<0x80) out+=(char)v;
+                            else if(v<0x800){ out+=(char)(0xC0|(v>>6)); out+=(char)(0x80|(v&0x3F)); }
+                            else { out+=(char)(0xE0|(v>>12)); out+=(char)(0x80|((v>>6)&0x3F)); out+=(char)(0x80|(v&0x3F)); }
+                        } break; }
+                    default:out+=e;break;
+                    }
+                } else out+=c;
+            }
+            if(pos<json.size()&&json[pos]=='"') ++pos;
+            return true;
+        };
+        auto number=[&]()->double{
+            ws(); size_t begin=pos;
+            while(pos<json.size() && (isdigit((unsigned char)json[pos])||json[pos]=='-'||
+                  json[pos]=='+'||json[pos]=='.'||json[pos]=='e'||json[pos]=='E')) ++pos;
+            return atof(json.substr(begin,pos-begin).c_str());
+        };
+        ws(); if(pos<json.size()&&json[pos]=='{') ++pos;
+        while(pos<json.size()){
+            ws(); if(pos<json.size()&&json[pos]=='}'){ ++pos; break; }
+            std::string key; if(!str(key)) break;
+            ws(); if(pos<json.size()&&json[pos]==':') ++pos;
+            if(key=="cols") m.cols=(int)number();
+            else if(key=="header"){
+                ws();
+                if(json.compare(pos,4,"true")==0){m.header=true;pos+=4;}
+                else if(json.compare(pos,5,"false")==0){m.header=false;pos+=5;}
+                else number();
+            } else if(key=="widths"){
+                ws(); if(pos<json.size()&&json[pos]=='['){ ++pos;
+                    while(pos<json.size()){
+                        ws(); if(pos<json.size()&&json[pos]==']'){++pos;break;}
+                        m.widths.push_back(number()); ws();
+                        if(pos<json.size()&&json[pos]==','){++pos;continue;}
+                        if(pos<json.size()&&json[pos]==']'){++pos;break;} break;
+                    }
+                }
+            } else if(key=="labels"){
+                ws(); if(pos<json.size()&&json[pos]=='['){ ++pos;
+                    while(pos<json.size()){
+                        ws(); if(pos<json.size()&&json[pos]==']'){++pos;break;}
+                        std::string value;
+                        if(str(value)) m.labels.push_back(js_utf8_to_w(value));
+                        ws(); if(pos<json.size()&&json[pos]==','){++pos;continue;}
+                        if(pos<json.size()&&json[pos]==']'){++pos;break;} break;
+                    }
+                }
+            } else {
+                ws();
+                if(pos<json.size()&&json[pos]=='"'){ std::string ignored; str(ignored); }
+                else if(pos<json.size()&&(json[pos]=='['||json[pos]=='{')){
+                    char open=json[pos], close=open=='['?']':'}'; int depth=0;
+                    do { if(json[pos]==open) ++depth; else if(json[pos]==close) --depth; ++pos; }
+                    while(pos<json.size()&&depth>0);
+                } else number();
+            }
+            ws(); if(pos<json.size()&&json[pos]==',') ++pos;
+        }
+        if(m.cols<1) m.cols=4;
+        if((int)m.widths.size()!=m.cols) m.widths.assign(m.cols,1.0);
+        if(m.labels.empty()){
+            const wchar_t* def[4]={L"نام خدمت",L"شرح خدمت",L"تعداد",L"مبلغ کل"};
+            for(int c=0;c<m.cols;++c) m.labels.push_back(c<4?std::wstring(def[c]):L"");
+        }
+        while((int)m.labels.size()<m.cols) m.labels.push_back(L"");
+        double sum=0; for(double width:m.widths) if(width>0) sum+=width;
+        if(sum<=0){ m.widths.assign(m.cols,1.0); sum=m.cols; }
+        std::vector<REAL> cx(m.cols+1); cx[0]=x+w;
+        double acc=0;
+        for(int c=0;c<m.cols;++c){
+            acc+=m.widths[c]>0?m.widths[c]:0;
+            cx[c+1]=(c==m.cols-1)?x:(REAL)(x+w-w*(acc/sum));
+        }
+        double pxPerMillimetre=pxPerMm(st);
+        REAL headH=m.header?(REAL)((it.headerH>0?it.headerH:6.0)*pxPerMillimetre):0;
+        REAL rowH=(REAL)((it.rowH>0?it.rowH:6.0)*pxPerMillimetre);
+        if(headH<1&&m.header) headH=1;
+        if(rowH<1) rowH=1;
+        if(headH>hgt) headH=hgt;
+        int blankRows=(int)((hgt-headH)/rowH);
+        if(blankRows<1 && hgt-headH>0) blankRows=1;
+        if(blankRows>4) blankRows=4;       // structural preview, not page-filling data
+        REAL tableH=headH+blankRows*rowH;
+        if(tableH>hgt) tableH=hgt;
+        if(m.header){
+            unsigned fill=it.fillTransparent?0xEFEFEF:it.fillColor;
+            SolidBrush hb(Color(255,(fill>>16)&0xFF,(fill>>8)&0xFF,fill&0xFF));
+            g.FillRectangle(&hb,x,y,w,headH);
+            int lum=(int)((((fill>>16)&0xFF)*30+((fill>>8)&0xFF)*59+(fill&0xFF)*11)/100);
+            SolidBrush textBrush(lum<140?Color(255,255,255,255):tc);
+            int style=FontStyleBold|(it.italic?FontStyleItalic:0);
+            double pt=(it.fontPt>0)?it.fontPt:8.5;
+            Font* font=makeSafeFont(it.fontName,pt*1.333*(st->zoom>0?st->zoom:1.0),style);
+            if(font){
+                StringFormat sf; sf.SetAlignment(StringAlignmentCenter);
+                sf.SetLineAlignment(StringAlignmentCenter);
+                sf.SetFormatFlags(StringFormatFlagsDirectionRightToLeft|StringFormatFlagsNoWrap);
+                for(int c=0;c<m.cols;++c){
+                    REAL pad=(REAL)std::max(1.0,it.padding*pxPerMillimetre);
+                    RectF cell(cx[c+1]+pad,y,cx[c]-cx[c+1]-2*pad,headH);
+                    if(cell.Width>0) g.DrawString(m.labels[c].c_str(),-1,font,cell,&sf,&textBrush);
+                }
+                delete font;
+            }
+        }
+        Pen grid(bc,(REAL)std::max(1.0,it.borderWidth*pxPerMillimetre));
+        for(int c=0;c<=m.cols;++c) g.DrawLine(&grid,cx[c],y,cx[c],y+tableH);
+        if(m.header) g.DrawLine(&grid,x,y+headH,x+w,y+headH);
+        for(int r=0;r<=blankRows;++r){
+            REAL yy=y+headH+r*rowH; if(yy>y+tableH) yy=y+tableH;
+            g.DrawLine(&grid,x,yy,x+w,yy);
+        }
         break; }
     case PIT_BARCODE:{
         // v1.55.0 — representative 1-D barcode preview. The real symbol is
@@ -537,9 +731,13 @@ static void designer_paint(HWND h){
     int inspW=(int)((rc.right)*0.30);
     RECT canvas={0,canvasTop,rc.right-inspW,rc.bottom};
 
-    // canvas background
+    // Canvas plus explicit toolbar/inspector surfaces. AzFlatBtn controls use
+    // the same live page token for their rounded-corner clearing.
     HBRUSH cb=CreateSolidBrush(blendColor(g_theme.bg,g_theme.surface,40));
     FillRect(mem.dc,&canvas,cb); DeleteObject(cb);
+    RECT inspector={rc.right-inspW,canvasTop,rc.right,rc.bottom};
+    HBRUSH ib=CreateSolidBrush(g_theme.bg);
+    FillRect(mem.dc,&inspector,ib); DeleteObject(ib);
 
     // GDI+ on a clipped region
     {
@@ -678,11 +876,12 @@ static void designer_buildInspector(HWND h){
             {L"\u0639\u06a9\u0633 \u067e\u0631\u0633\u0646\u0644\u06cc \u0628\u06cc\u0645\u0627\u0631",PIT_PHOTO},
         };
         for(const auto& p:pal){
-            // plain standard push-button (no custom flat-button owner state)
-            HWND b=CreateWindowExW(0,L"BUTTON",p.t,
-                WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,x0,y,w,S(26),h,
-                (HMENU)(INT_PTR)(5000+p.type),g_hInst,NULL);
-            if(b) SendMessageW(b,WM_SETFONT,(WPARAM)fUI,TRUE);
+            // Theme-aware native action: unlike a system BUTTON this remains
+            // legible in dark mode and clears its rounded corners to the live
+            // inspector surface.
+            HWND b=createFlatButton(h,5000+p.type,p.t,ICO_PLUS,BS_OUTLINE,
+                x0,y,w,S(26));
+            setFlatButtonBg(b,g_theme.bg);
             add(b);
             y+=S(30);
         }
@@ -779,15 +978,13 @@ static void designer_buildInspector(HWND h){
             SendMessageW(cb,BM_SETCHECK,it->locked?BST_CHECKED:BST_UNCHECKED,0); }
         add(cb); y+=S(30);
     }
-    {   // delete / duplicate as plain standard buttons
-        HWND bd=CreateWindowExW(0,L"BUTTON",L"\u062d\u0630\u0641 \u0622\u06cc\u062a\u0645",
-            WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,x0,y,w/2-S(2),S(28),h,
-            (HMENU)6011,g_hInst,NULL);
-        if(bd) SendMessageW(bd,WM_SETFONT,(WPARAM)fUI,TRUE); add(bd);
-        HWND bc=CreateWindowExW(0,L"BUTTON",L"\u06a9\u067e\u06cc \u0622\u06cc\u062a\u0645",
-            WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,x0+w/2+S(2),y,w/2-S(2),S(28),h,
-            (HMENU)6012,g_hInst,NULL);
-        if(bc) SendMessageW(bc,WM_SETFONT,(WPARAM)fUI,TRUE); add(bc);
+    {   // destructive and duplicate actions use the shared themed control
+        HWND bd=createFlatButton(h,6011,L"\u062d\u0630\u0641 \u0622\u06cc\u062a\u0645",ICO_TRASH,BS_DANGER,
+            x0,y,w/2-S(2),S(28));
+        setFlatButtonBg(bd,g_theme.bg); add(bd);
+        HWND bc=createFlatButton(h,6012,L"\u06a9\u067e\u06cc \u0622\u06cc\u062a\u0645",ICO_PLUS,BS_OUTLINE,
+            x0+w/2+S(2),y,w/2-S(2),S(28));
+        setFlatButtonBg(bc,g_theme.bg); add(bc);
         y+=S(32);
     }
 }
@@ -1135,8 +1332,9 @@ static LRESULT CALLBACK DesignerProc(HWND h,UINT m,WPARAM w,LPARAM l){
     case WM_CTLCOLOREDIT:{ HDC dc=(HDC)w; SetBkColor(dc,g_theme.inputBg);
         SetTextColor(dc,g_theme.text); return (LRESULT)g_brSurface; }
     case WM_DRAWITEM:{
-        // owner-draw colour buttons (6007 text, 6009 border)
         LPDRAWITEMSTRUCT di=(LPDRAWITEMSTRUCT)l;
+        if(drawThemedComboItem(di)) return TRUE;
+        // owner-draw colour buttons (6007 text, 6009 border)
         if(di && st && (di->CtlID==6007 || di->CtlID==6009)){
             PrintItem* it=findItem(st,st->selId);
             COLORREF c=RGB(0,0,0);
@@ -1293,21 +1491,19 @@ static void OpenDesignerWindow(HWND owner,const DesignerLaunch& launch,
     }
     SetWindowLongPtrW(h,GWLP_USERDATA,(LONG_PTR)st);
 
-    createFlatButton(h,IDC_DSG_SAVE,L"\u0630\u062e\u06cc\u0631\u0647",ICO_SAVE,BS_PRIMARY,0,0,10,10);
-    createFlatButton(h,IDC_DSG_SAVEAS,L"\u0630\u062e\u06cc\u0631\u0647 \u0628\u0647 \u0639\u0646\u0648\u0627\u0646 \u062c\u062f\u06cc\u062f",ICO_SAVE,BS_OUTLINE,0,0,10,10);
-    createFlatButton(h,IDC_DSG_DOWNLOAD,L"\u062f\u0627\u0646\u0644\u0648\u062f \u062f\u06cc\u0632\u0627\u06cc\u0646",ICO_SAVE,BS_OUTLINE,0,0,10,10);
-    createFlatButton(h,IDC_DSG_EXIT,L"\u062e\u0631\u0648\u062c",ICO_X,BS_DANGER,0,0,10,10);
-    st->hPaperCombo=CreateWindowExW(0,L"COMBOBOX",L"",
-        WS_CHILD|WS_VISIBLE|CBS_DROPDOWNLIST|WS_VSCROLL,0,0,10,200,h,
-        (HMENU)IDC_DSG_PAPER,g_hInst,NULL);
+    HWND bSave=createFlatButton(h,IDC_DSG_SAVE,L"\u0630\u062e\u06cc\u0631\u0647",ICO_SAVE,BS_PRIMARY,0,0,10,10);
+    HWND bSaveAs=createFlatButton(h,IDC_DSG_SAVEAS,L"\u0630\u062e\u06cc\u0631\u0647 \u0628\u0647 \u0639\u0646\u0648\u0627\u0646 \u062c\u062f\u06cc\u062f",ICO_SAVE,BS_OUTLINE,0,0,10,10);
+    HWND bDownload=createFlatButton(h,IDC_DSG_DOWNLOAD,L"\u062f\u0627\u0646\u0644\u0648\u062f \u062f\u06cc\u0632\u0627\u06cc\u0646",ICO_SAVE,BS_OUTLINE,0,0,10,10);
+    HWND bExit=createFlatButton(h,IDC_DSG_EXIT,L"\u062e\u0631\u0648\u062c",ICO_X,BS_DANGER,0,0,10,10);
+    HWND topBtns[]={bSave,bSaveAs,bDownload,bExit};
+    for(HWND b:topBtns) setFlatButtonBg(b,g_theme.bg);
+    st->hPaperCombo=createThemedCombo(h,IDC_DSG_PAPER);
     SendMessageW(st->hPaperCombo,WM_SETFONT,(WPARAM)g_fUI,TRUE);
     const wchar_t* papers[]={L"A3",L"A4",L"A5",L"A6",L"B5",L"Letter",L"R80",L"R58",
                              L"L90",L"L100",L"L102",L"L130"};
     for(auto p:papers) SendMessageW(st->hPaperCombo,CB_ADDSTRING,0,(LPARAM)p);
     SendMessageW(st->hPaperCombo,CB_SELECTSTRING,(WPARAM)-1,(LPARAM)st->design.paper.c_str());
-    st->hOrientCombo=CreateWindowExW(0,L"COMBOBOX",L"",
-        WS_CHILD|WS_VISIBLE|CBS_DROPDOWNLIST,0,0,10,200,h,
-        (HMENU)IDC_DSG_ORIENT,g_hInst,NULL);
+    st->hOrientCombo=createThemedCombo(h,IDC_DSG_ORIENT);
     SendMessageW(st->hOrientCombo,WM_SETFONT,(WPARAM)g_fUI,TRUE);
     SendMessageW(st->hOrientCombo,CB_ADDSTRING,0,(LPARAM)L"\u0639\u0645\u0648\u062f\u06cc");
     SendMessageW(st->hOrientCombo,CB_ADDSTRING,0,(LPARAM)L"\u0627\u0641\u0642\u06cc");
@@ -1401,19 +1597,10 @@ static void PrintDesigner_OpenCore(HWND hMain){
             return;
         }
     }
-    Breadcrumb(L"print designer: open editor");
-    // §1.19.0: PREFER the HTML/CSS/JS designer hosted in an app-owned WebBrowser
-    // window (lightweight, modern, synced with C++ over the loopback /api
-    // bridge). If the host or control cannot be created (very old/locked-down
-    // box), fall back to the proven native GDI editor so the feature NEVER
-    // breaks on weak hardware or odd Windows builds.
-    bool webOk=false;
-    if(getSetting(L"designer_engine",L"web")!=L"native"){
-        Breadcrumb(L"print designer: try web host");
-        webOk = WebDesigner_Open(hMain, launch.sectionIds);
-        if(!webOk) Breadcrumb(L"print designer: web host unavailable, native fallback");
-    }
-    if(!webOk) OpenDesignerWindow(hMain,launch,nullptr);
+    Breadcrumb(L"print designer: open native editor");
+    // The print designer is entirely in-process: no loopback server, browser,
+    // or optional runtime is needed. Keep one deterministic native path.
+    OpenDesignerWindow(hMain,launch,nullptr);
     Breadcrumb(L"print designer: closed");
 }
 
@@ -1596,17 +1783,20 @@ void RestoreDesign_Open(HWND hMain){
     uikit::AzDropZone_Create(h,IDC_RST_DROP,
         L"\u0641\u0627\u06cc\u0644 .aztpl \u0631\u0627 \u0627\u06cc\u0646\u062c\u0627 \u0631\u0647\u0627 \u06a9\u0646\u06cc\u062f \u06cc\u0627 \u06a9\u0644\u06cc\u06a9 \u06a9\u0646\u06cc\u062f",
         L"DarmanPlus Template\0*.aztpl;*.json\0",mgn,mgn,W-2*mgn,S(120));
-    createFlatButton(h,IDC_RST_PICK,L"\u0627\u0646\u062a\u062e\u0627\u0628 \u0641\u0627\u06cc\u0644",ICO_SAVE,BS_OUTLINE,
+    HWND bPick=createFlatButton(h,IDC_RST_PICK,L"\u0627\u0646\u062a\u062e\u0627\u0628 \u0641\u0627\u06cc\u0644",ICO_SAVE,BS_OUTLINE,
         mgn,mgn+S(130),S(140),S(30));
+    setFlatButtonBg(bPick,g_theme.surface);
     st.hStatus=CreateWindowExW(0,L"STATIC",
         L"\u0641\u0627\u06cc\u0644\u06cc \u0628\u0627\u0631\u06af\u0630\u0627\u0631\u06cc \u0646\u0634\u062f\u0647",
         WS_CHILD|WS_VISIBLE|SS_RIGHT,mgn,mgn+S(170),W-2*mgn,S(24),h,NULL,g_hInst,NULL);
     SendMessageW(st.hStatus,WM_SETFONT,(WPARAM)g_fUI,TRUE);
-    createFlatButton(h,IDC_RST_APPLY,
+    HWND bApply=createFlatButton(h,IDC_RST_APPLY,
         L"\u0630\u062e\u06cc\u0631\u0647 \u0628\u0647 \u0639\u0646\u0648\u0627\u0646 \u062f\u06cc\u0632\u0627\u06cc\u0646 \u062c\u062f\u06cc\u062f \u0648 \u0627\u0639\u0645\u0627\u0644",
         ICO_CHECK,BS_PRIMARY,W-mgn-S(280),H-S(54),S(280),S(34));
-    createFlatButton(h,IDC_RST_CANCEL,L"\u0627\u0646\u0635\u0631\u0627\u0641",ICO_X,BS_OUTLINE,
+    HWND bCancel=createFlatButton(h,IDC_RST_CANCEL,L"\u0627\u0646\u0635\u0631\u0627\u0641",ICO_X,BS_OUTLINE,
         mgn,H-S(54),S(110),S(34));
+    setFlatButtonBg(bApply,g_theme.surface);
+    setFlatButtonBg(bCancel,g_theme.surface);
     ShowWindow(h,SW_SHOW);
     EnableWindow(hMain,FALSE);
     // §F fix: self-contained modal pump (see RunSectionPicker note).

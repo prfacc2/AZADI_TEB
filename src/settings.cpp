@@ -316,9 +316,8 @@ static void buildBgCache(HWND h, HDC ref){
     RECT card=cardRect(h);
     // shadow + opaque card
     gpShadow(dc,card,S(20),S(22),80);
-    { HBRUSH pb=CreateSolidBrush(g_theme.surface);
-      FillRect(dc,&card,pb); DeleteObject(pb); }
-    gpGradRoundRect(dc,card,S(20),g_theme.surfaceTop,g_theme.surface,g_theme.border);
+    gpGradRoundRectBg(dc,card,S(20),g_theme.surfaceTop,g_theme.surface,
+                      g_theme.border,g_dark?RGB(6,9,14):RGB(28,36,48));
 
     SetBkMode(dc,TRANSPARENT);
 
@@ -427,24 +426,26 @@ static void paintRows(HWND h, HDC dc){
                     blendColor(g_theme.border,g_theme.bg,40),255);
             } else if(hov){
                 gpShadowColor(dc,r,S(12),S(7),86,rowAcc);
-                gpGradRoundRect(dc,r,S(12),
+                gpGradRoundRectBg(dc,r,S(12),
                     blendColor(g_theme.surfaceTop,g_theme.hover,45),
-                    g_theme.hover, blendColor(g_theme.border,rowAcc,60));
+                    g_theme.hover, blendColor(g_theme.border,rowAcc,60),g_theme.surface);
                 RECT li={r.right-S(5),r.top+S(8),r.right-S(2),r.bottom-S(8)};
                 if(li.bottom>li.top) gpRoundRect(dc,li,S(2),rowAcc,CLR_INVALID);
             } else {
-                gpGradRoundRect(dc,r,S(12),
+                gpGradRoundRectBg(dc,r,S(12),
                     blendColor(g_theme.surfaceTop,g_theme.surface,55),
-                    g_theme.surface, g_theme.border);
+                    g_theme.surface, g_theme.border,g_theme.surface);
             }
             COLORREF ic= dis ? g_theme.textDim : (danger?g_theme.danger:g_theme.accent);
             RECT ir={r.right-S(40),r.top+S(10),r.right-S(16),r.top+S(34)};
             { RECT md=ir; InflateRect(&md,S(6),S(6));
               int mr2=(md.bottom-md.top)/2;
-              gpFillAlpha(dc,md,mr2,blendColor(ic,g_theme.surface,dis?68:50),
-                          dis?(g_dark?46:30):(hov?(g_dark?100:66):(g_dark?76:44)));
-              gpRoundRect(dc,md,mr2,CLR_INVALID,
-                          blendColor(g_theme.border,ic,dis?18:(hov?58:38))); }
+              // Opaque pre-blended fill: alpha medallions could composite as
+              // white on older GDI+, especially over dark cached surfaces.
+              int tint=dis?12:(hov?28:20);
+              COLORREF medFill=blendColor(g_theme.surface,ic,tint);
+              gpRoundRectBg(dc,md,mr2,medFill,
+                  blendColor(g_theme.border,ic,dis?18:(hov?58:38)),g_theme.surface); }
             drawIcon(dc,rd.icon,ir,ic,S(2));
             SelectObject(dc,g_fUIB);
             SetTextColor(dc, dis ? g_theme.textDim : (danger?g_theme.danger:g_theme.text));

@@ -65,6 +65,8 @@ static LRESULT CALLBACK loginProc(HWND h, UINT m, WPARAM w, LPARAM l){
         SendMessageW(d->ePass,WM_SETFONT,(WPARAM)g_fUI,TRUE);
         d->bOk     = createFlatButton(h,ID_LG_OK,L"ورود",ICO_CHECK,BS_PRIMARY,0,0,10,10);
         d->bCancel = createFlatButton(h,ID_LG_CANCEL,L"انصراف",0,BS_OUTLINE,0,0,10,10);
+        setFlatButtonBg(d->bOk,g_theme.surface);
+        setFlatButtonBg(d->bCancel,g_theme.surface);
         loginLayout(h,d);
         return 0; }
     case WM_SIZE: if(d) loginLayout(h,d); return 0;
@@ -134,8 +136,9 @@ static LRESULT CALLBACK loginProc(HWND h, UINT m, WPARAM w, LPARAM l){
         // ------------------------------------------------------------------
         COLORREF roleCol = (d&&d->role==2)?g_theme.danger:g_theme.accent;
         gpShadow(dc,c,S(18),S(22),120);
-        gpGradRoundRect(dc,c,S(18),g_theme.surfaceTop,g_theme.surface,
-            blendColor(g_theme.border,roleCol,22));
+        gpGradRoundRectBg(dc,c,S(18),g_theme.surfaceTop,g_theme.surface,
+            blendColor(g_theme.border,roleCol,22),
+            g_dark?RGB(6,8,12):RGB(126,138,158));
 
         SetBkMode(dc,TRANSPARENT);
         // role badge — v1.64.0 (درمان پلاس): the circular brand logo now fills
@@ -314,11 +317,10 @@ static void shiftRefresh(ShiftData* d){
         // out-of-hours shift by mistake. In auto mode all are disabled (locked).
         bool enabled = d->autoMode ? false : (i==as);
         EnableWindow(bs[i], enabled);
-        // highlight the current shift with the success colour; selected (but not
-        // current) gets the accent; others stay default.
-        if(i==as)            setFlatButtonBg(bs[i], g_theme.success);
-        else if(i==d->sel)   setFlatButtonBg(bs[i], g_theme.accent);
-        else                 setFlatButtonBg(bs[i], CLR_INVALID);
+        // These controls all sit on the card. Selection is already conveyed by
+        // the bullet/text and enabled state; keep the rounded corner host tied
+        // to the live card surface instead of storing a body colour as a host.
+        setFlatButtonBg(bs[i],g_theme.surface);
     }
     // keep the manual selection aligned with the only valid shift
     if(!d->autoMode) d->sel = as;
@@ -350,6 +352,8 @@ static LRESULT CALLBACK shiftProc(HWND h, UINT m, WPARAM w, LPARAM l){
         d->b2     = createFlatButton(h,ID_SH_S2,L"",0,BS_OUTLINE,0,0,10,10);
         d->bOk    = createFlatButton(h,ID_SH_OK,L"تأیید و ورود",ICO_CHECK,BS_PRIMARY,0,0,10,10);
         d->bCancel= createFlatButton(h,ID_SH_CANCEL,L"انصراف",0,BS_OUTLINE,0,0,10,10);
+        HWND buttons[]={d->bAuto,d->b0,d->b1,d->b2,d->bOk,d->bCancel};
+        for(HWND b:buttons) setFlatButtonBg(b,g_theme.surface);
         shiftRefresh(d);
         shiftLayout(h,d);
         SetTimer(h, 9, 30000, NULL);
@@ -403,8 +407,8 @@ static LRESULT CALLBACK shiftProc(HWND h, UINT m, WPARAM w, LPARAM l){
         // drew a solid grey duplicate of the card offset by 6 px, which looked
         // like a rendering artefact rather than elevation).
         gpShadow(dc,c,S(18),S(22),120);
-        gpGradRoundRect(dc,c,S(18),g_theme.surfaceTop,g_theme.surface,
-            g_theme.border);
+        gpGradRoundRectBg(dc,c,S(18),g_theme.surfaceTop,g_theme.surface,
+            g_theme.border,g_dark?RGB(6,8,12):RGB(126,138,158));
         SetBkMode(dc,TRANSPARENT);
         SetTextColor(dc,g_theme.text);
         SelectObject(dc,g_fTitle);
@@ -496,6 +500,9 @@ static LRESULT CALLBACK profProc(HWND h, UINT m, WPARAM w, LPARAM l){
         d->bPick   = createFlatButton(h,ID_PF_PICK,L"انتخاب عکس پروفایل…",ICO_USER,BS_OUTLINE,0,0,10,10);
         d->bOk     = createFlatButton(h,ID_PF_OK,L"تأیید",ICO_CHECK,BS_PRIMARY,0,0,10,10);
         d->bCancel = createFlatButton(h,ID_PF_CANCEL,L"انصراف",0,BS_OUTLINE,0,0,10,10);
+        setFlatButtonBg(d->bPick,g_theme.surface);
+        setFlatButtonBg(d->bOk,g_theme.surface);
+        setFlatButtonBg(d->bCancel,g_theme.surface);
         profLayout(h,d);
         return 0; }
     case WM_SIZE: if(d) profLayout(h,d); return 0;
@@ -575,8 +582,8 @@ static LRESULT CALLBACK profProc(HWND h, UINT m, WPARAM w, LPARAM l){
         // drew a solid grey duplicate of the card offset by 6 px, which looked
         // like a rendering artefact rather than elevation).
         gpShadow(dc,c,S(18),S(22),120);
-        gpGradRoundRect(dc,c,S(18),g_theme.surfaceTop,g_theme.surface,
-            g_theme.border);
+        gpGradRoundRectBg(dc,c,S(18),g_theme.surfaceTop,g_theme.surface,
+            g_theme.border,g_dark?RGB(6,8,12):RGB(126,138,158));
         SetBkMode(dc,TRANSPARENT);
         SetTextColor(dc,g_theme.text);
         SelectObject(dc,g_fTitle);

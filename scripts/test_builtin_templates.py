@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Structural regression checks for the 30 builtin print designs (v1.62.0).
+"""Structural regression checks for the 30 builtin print designs (v1.67.0).
 
 Validates BOTH sides of the ready-made-template contract:
 
@@ -7,10 +7,10 @@ Validates BOTH sides of the ready-made-template contract:
   2. assets/designer/templates.js      — the ES5 mirror the web gallery shows
 
 The single invariant that matters for the bug this architecture was written to
-kill («خدمات چاپ نمی‌شود»): every one of the 30 designs must own exactly ONE
-dynamic PIT_SERVICES table, its column captions must all be classifiable by
-printer.cpp::pdSvcColOf(), and the table must be tall enough to print a real
-bill (>= 12 rows on A4) without ever overlapping the footer band.
+kill («خدمات چاپ نمی‌شود»): every one of the 30 designs owns exactly ONE live
+services table and ONE barcode; all presets include authoritative name,
+description, quantity, and line-amount columns; runtime rows stay compact,
+wrap prose, and never pad the page with fake/example services.
 """
 from pathlib import Path
 import json
@@ -23,6 +23,10 @@ ROOT = Path(__file__).resolve().parents[1]
 INC = ROOT / "src" / "print_designer_templates.inc"
 JS = ROOT / "assets" / "designer" / "templates.js"
 PRINTER = ROOT / "src" / "printer.cpp"
+PAGINATION = ROOT / "src" / "print_services_pagination.h"
+SERVICE_IDENTITY = ROOT / "src" / "service_identity.h"
+PAGINATION_POLICY = ROOT / "src" / "print_services_policy.h"
+SERVICE_CANONICALIZATION = ROOT / "src" / "service_canonicalization.h"
 
 failures = []
 notes = []
@@ -165,7 +169,7 @@ def audit_preset(where, key, model):
     widths = model.get("widths") or []
     labels = model.get("labels") or []
     check(model.get("header") is True, f"{where} preset {key} has no header row")
-    check(cols in (3, 4, 5, 6, 7), f"{where} preset {key} declares an odd column count {cols}")
+    check(cols in (4, 5, 6, 7), f"{where} preset {key} declares an odd column count {cols}")
     check(len(widths) == cols, f"{where} preset {key}: {len(widths)} widths for {cols} cols")
     check(len(labels) == cols, f"{where} preset {key}: {len(labels)} labels for {cols} cols")
     total = sum(widths)
@@ -183,10 +187,11 @@ def audit_preset(where, key, model):
         f"{where} preset {key} has a caption printer.cpp cannot classify: "
         + ", ".join("%s->%s" % (l, k) for l, k in zip(labels, kinds)),
     )
-    check(
-        "NAME" in kinds,
-        f"{where} preset {key} has no service-name column — the receipt would be anonymous",
-    )
+    for mandatory in ("NAME", "DESC", "QTY", "LINE"):
+        check(
+            mandatory in kinds,
+            f"{where} preset {key} lacks mandatory {mandatory}: {kinds}",
+        )
     check(
         len(set(kinds)) == len(kinds),
         f"{where} preset {key} repeats a column kind: {kinds}",
@@ -206,10 +211,10 @@ for fn in ("servicesBlock", "servicesBlockAt"):
         body = block.group(0)
         check(
             "footY - reserve - y" in body,
-            f"{fn}() no longer COMPUTES its height from the free page space",
+            f"{fn}() no longer derives the safe runtime frame from page space",
         )
-        check("if(h < 40) h = 40;" in body, f"{fn}() can collapse below 40 mm")
-        check("if(h > 120) h = 120;" in body, f"{fn}() can overflow past 120 mm (v1.66.0 compact)")
+        check("if(h < 18) h = 18;" in body, f"{fn}() lacks the compact empty-row floor")
+        check("if(h > 120)" not in body, f"{fn}() still hard-caps the service frame at 120 mm")
         check("mkServices(" in body, f"{fn}() does not emit the services table")
 
 # --- the 30 specs ---------------------------------------------------------
@@ -316,14 +321,14 @@ check('d.paper=L"A4"' in inc.replace(" ", "").replace('d.paper=L"A4"', 'd.paper=
       "designs are no longer authored against A4")
 
 # --- migration guard ---------------------------------------------------
-check('getSetting(L"tpl_migration_1_65"' in inc, "the v1.65 migration guard is missing")
+check('getSetting(L"tpl_migration_1_67"' in inc, "the v1.67 migration guard is missing")
 init_fn = re.search(r"void Designs_Init\(\)\{(.*?)\n\}", inc, re.S)
 check(init_fn is not None, "Designs_Init() was not found")
 if init_fn:
     init_body = init_fn.group(1)
     check(
-        init_body.count("stamp();") == 3,
-        "the migration must be stamped for fresh installs and all upgrades "
+        init_body.count("stamp();") == 2,
+        "the migration must be stamped for fresh installs and the v1.67 upgrade "
         f"(found {init_body.count('stamp();')} stamp() calls)",
     )
     check(
@@ -334,7 +339,7 @@ if init_fn:
         "Designs_Delete(existing[i].id)" in init_body,
         "Designs_Init() no longer removes surplus builtins beyond the 30",
     )
-for old in ("1_52", "1_53", "1_58", "1_59", "1_60", "1_61", "1_62"):
+for old in ("1_52", "1_53", "1_58", "1_59", "1_60", "1_61", "1_62", "1_65", "1_66"):
     check(
         'setSetting(L"tpl_migration_%s", L"1")' % old in inc,
         f"upgrade path no longer retires the tpl_migration_{old} guard",
@@ -356,8 +361,11 @@ new Function(fs.readFileSync(process.argv[2], 'utf8')).call(global);
 var all = global.window.AZ_TEMPLATES;
 var out = [];
 for (var i = 0; i < all.length; i++) {
-  var t = all[i], svc = [], k;
-  for (k = 0; k < t.items.length; k++) if (t.items[k].type === 'services') svc.push(t.items[k]);
+  var t = all[i], svc = [], barcode = [], k;
+  for (k = 0; k < t.items.length; k++) {
+    if (t.items[k].type === 'services') svc.push(t.items[k]);
+    if (t.items[k].type === 'barcode' || t.items[k].type === 'qr') barcode.push(t.items[k]);
+  }
   var minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
   for (k = 0; k < t.items.length; k++) {
     var it = t.items[k];
@@ -374,7 +382,7 @@ for (var i = 0; i < all.length; i++) {
   if (s && s.rowH > 0) rows = Math.floor((s.h - (s.headerH || s.rowH)) / s.rowH);
   out.push({
     name: t.name, paper: t.paper, orientation: t.orientation,
-    items: t.items.length, svcCount: svc.length,
+    items: t.items.length, svcCount: svc.length, barcodeCount: barcode.length,
     model: model, h: s ? s.h : 0, y: s ? s.y : 0, rowH: s ? s.rowH : 0,
     headerH: s ? s.headerH : 0, rows: rows,
     minX: minX, minY: minY, maxX: maxX, maxY: maxY
@@ -414,6 +422,10 @@ if js_designs:
             d["svcCount"] == 1,
             f"{tag} must own exactly one dynamic services table; got {d['svcCount']}",
         )
+        check(
+            d["barcodeCount"] == 1,
+            f"{tag} must own exactly one barcode/code carrier; got {d['barcodeCount']}",
+        )
         if d["svcCount"] != 1:
             continue
         check(d["model"] is not None, f"{tag} has an unparsable services model")
@@ -432,10 +444,6 @@ if js_designs:
                     )
         check(d["rowH"] > 0 and d["headerH"] > 0, f"{tag} has no pinned row/header pitch")
         check(
-            d["rows"] >= 12,
-            f"{tag} only fits {d['rows']} service rows — a real bill would not fit",
-        )
-        check(
             d["y"] + d["h"] <= 263.0 + 0.01,
             f"{tag} services table (y={d['y']:.1f} h={d['h']:.1f}) runs into the footer band",
         )
@@ -451,12 +459,262 @@ if js_designs:
             f"{tag} bleeds off the printable height ({d['minY']:.1f}..{d['maxY']:.1f})",
         )
         check(d["items"] >= 18, f"{tag} looks under-designed ({d['items']} items)")
-    rowcounts = [d["rows"] for d in js_designs if d["svcCount"] == 1]
-    if rowcounts:
-        notes.append(
-            "  printable service rows per design: min=%d max=%d avg=%.1f"
-            % (min(rowcounts), max(rowcounts), sum(rowcounts) / float(len(rowcounts)))
+
+# ===========================================================================
+# 3. Runtime renderer and admission canonicalization guards
+# ===========================================================================
+printer = PRINTER.read_text(encoding="utf-8")
+manage = (ROOT / "src" / "manage.inc").read_text(encoding="utf-8")
+api = (ROOT / "src" / "web_admission_api.inc").read_text(encoding="utf-8")
+admission_js = (ROOT / "assets" / "admission" / "admission.js").read_text(encoding="utf-8")
+identity_header = SERVICE_IDENTITY.read_text(encoding="utf-8")
+policy_header = PAGINATION_POLICY.read_text(encoding="utf-8")
+canonical_header = SERVICE_CANONICALIZATION.read_text(encoding="utf-8")
+check("#include <string>" in identity_header and "#include <cstring>" not in identity_header,
+      "service_identity.h must include <string> directly, not <cstring>")
+check("#include <string>" in policy_header and "#include <cstring>" not in policy_header,
+      "print_services_policy.h must include <string> directly, not <cstring>")
+check("if(dst.discount>cap) dst.discount=cap;" in canonical_header and
+      "if(dst.discount<cap) dst.discount=cap;" not in canonical_header,
+      "merged service discounts do not clamp down to line gross")
+check("minRows" not in printer, "printer still pads live services to frame capacity")
+check("pdSvcCellSample" not in printer, "printer still fabricates sample service text")
+check("نمونهٔ خدمت" not in manage, "native ready-template preview still shows a fake service")
+check("ry.reserve(totalRows+1)" in printer, "renderer no longer allocates totalRows+1 boundaries")
+check("DT_WORDBREAK" in printer and "pdBuildServicesLayout" in printer,
+      "service prose is not measured/wrapped into growing rows")
+check("-2" not in printer[printer.find("static void pdDrawServices"):printer.find("REAL 1-D BARCODE ENGINE")],
+      "service renderer still replaces overflow services with a continuation marker row")
+check("pdPlanServicePages" in printer and "for(size_t pageNo=0;pageNo<servicePages.size();++pageNo)" in printer,
+      "modern print-design path does not paginate measured service rows")
+check("pdDrawServiceRowFragment" in printer and "f.offset" in printer and
+      "layout.textLineH" in printer,
+      "oversized wrapped rows are not split into complete line-aligned fragments")
+check("pdPrintableDataHeight" in printer and "pdEnsureServicesFrame" in printer,
+      "header-consuming/zero-height service geometry can still drop all data rows")
+check("pdContinuationRepeatAllowed(repeatKind,normalizedField)" in printer and
+      "if(multiPage && serviceItem && pit!=serviceItem && !finalPage)" in printer and
+      "if(it.type==PIT_FRAME) repeatKind=PDCI_FRAME;" in printer and
+      "||it.is_frame" not in printer[printer.find("PdContinuationItemKind repeatKind"):printer.find("if(!pdContinuationRepeatAllowed", printer.find("PdContinuationItemKind repeatKind"))],
+      "continuation-page repetition is not governed by an explicit type-safe whitelist")
+check("if(StartPage(dc)<=0)" in printer and "EndPage(dc)" in printer,
+      "modern print-design pagination no longer emits physical pages safely")
+check("adCanonicalServices" in api and "r.services.swap(canonicalServices)" in api,
+      "server does not print the same canonical merged services it billed")
+check("serviceCanonicalAdd(lines,identityCodes,identityFreeRates,ln" in api and
+      "serviceVariantMatches(incomingCodeKey,nameKey,freeRate,incoming.price" in canonical_header and
+      "identityCodes.push_back(incomingCodeKey);" in canonical_header and
+      "identityFreeRates.push_back(freeRate);" in canonical_header,
+      "server duplicate matching no longer preserves submitted code/rate variants")
+check("serviceIdentityKey(u82w(codeU))" in api and "serviceIdentityKey(s.code)==want" in api,
+      "server catalogue lookup and canonicalization do not share one identity normalization contract")
+check("serviceCanonicalSort(lines,identityCodes,identityFreeRates);" in api and
+      "serviceVariantCompare(" in canonical_header and "normal→free and free→normal" in api,
+      "server canonical row ordering is not explicitly submission-order independent")
+check("if(want.empty()&&!wantName.empty())" in api,
+      "authoritative catalogue lookup still rebinds an unmatched coded service by display name")
+check("jsonGetNumber(obj,\"price\",n)" not in api[api.find("static bool adCatalogPrice"):api.find("// ---- resolve the operator")],
+      "unknown normal-rate rows still trust a browser-submitted amount")
+check("sameServiceIdentity(code, name, rowCode" in admission_js and "row.qty = Math.min(999" in admission_js,
+      "admission UI duplicate matching drifted from the code-first server behavior")
+
+# Compile and execute the pure behavior helpers. These cases cover empty, one,
+# many and long-description-height pagination, plus the coded-name collision
+# that triggered the integrated review. No printer driver is required.
+behavior_cpp = r'''
+#include <cassert>
+#include <string>
+#include <vector>
+#include "print_services_pagination.h"
+#include "print_services_policy.h"
+#include "service_identity.h"
+#include "service_canonicalization.h"
+
+struct CanonLine {
+    std::wstring code,name,category,desc;
+    long long price=0,discount=0;
+    int qty=1;
+};
+static CanonLine line(const wchar_t* code,const wchar_t* name,long long price,
+                      int qty=1,long long discount=0,const wchar_t* desc=L""){
+    CanonLine v; v.code=code; v.name=name; v.price=price; v.qty=qty;
+    v.discount=discount; v.desc=desc; return v;
+}
+static void add(std::vector<CanonLine>& rows,std::vector<std::wstring>& codes,
+                std::vector<bool>& freeRates,const CanonLine& v,bool freeRate){
+    serviceCanonicalAdd(rows,codes,freeRates,v,serviceIdentityKey(v.code),freeRate);
+}
+static int emitted(const std::vector<PdServicesPageSlice>& pages,int row){
+    int total=0;
+    for(size_t p=0;p<pages.size();++p)
+        for(size_t i=0;i<pages[p].rows.size();++i)
+            if(pages[p].rows[i].row==row) total+=pages[p].rows[i].height;
+    return total;
+}
+static long long authoritativeCharge(const std::vector<CanonLine>& rows){
+    long long total=0;
+    for(size_t i=0;i<rows.size();++i)
+        total+=rows[i].price*(long long)rows[i].qty-rows[i].discount;
+    return total;
+}
+static long long toggledBackCharge(bool formerFreeFirst){
+    std::vector<CanonLine> rows;
+    std::vector<std::wstring> codes;
+    std::vector<bool> freeRates;
+    CanonLine normal=line(L"A۱۲٣",L"shared",100,1,10,L"normal");
+    // This row used to be manual/free. After the operator turns that toggle off,
+    // its stale freePrice is irrelevant: the effective normal price is 100 and
+    // it must merge with the catalogue row without becoming fully discounted.
+    CanonLine formerFree=line(L"a١٢۳",L"shared",100,1,20,L"former free");
+    if(formerFreeFirst){
+        add(rows,codes,freeRates,formerFree,false);
+        add(rows,codes,freeRates,normal,false);
+    } else {
+        add(rows,codes,freeRates,normal,false);
+        add(rows,codes,freeRates,formerFree,false);
+    }
+    serviceCanonicalSort(rows,codes,freeRates);
+    assert(rows.size()==1 && rows[0].qty==2 && rows[0].discount==30);
+    return authoritativeCharge(rows);
+}
+int main(){
+    { std::vector<int> h; auto p=pdSliceServiceRows(h,100);
+      assert(p.size()==1 && p[0].rows.empty()); }
+    { std::vector<int> h(1,20); auto p=pdSliceServiceRows(h,100);
+      assert(p.size()==1 && p[0].rows.size()==1);
+      assert(p[0].rows[0].row==0 && p[0].rows[0].offset==0 && p[0].rows[0].height==20); }
+    { std::vector<int> h={20,20,20,20,20}; auto p=pdSliceServiceRows(h,45);
+      assert(p.size()==3);
+      for(int row=0;row<5;++row) assert(emitted(p,row)==20); }
+    { std::vector<int> h={230}; auto p=pdSliceServiceRows(h,100,10,2);
+      assert(p.size()==3 && emitted(p,0)==230);
+      assert(p[0].rows[0].offset==0 && p[0].rows[0].height==92);
+      assert(p[1].rows[0].offset==92 && p[1].rows[0].height==100);
+      assert(p[2].rows[0].offset==192 && p[2].rows[0].height==38); }
+    { int head=-1; int data=pdPrintableDataHeight(10,100,12,&head);
+      assert(data==10 && head==0);
+      std::vector<int> h={3}; auto p=pdSliceServiceRows(h,data);
+      assert(p.size()==1 && emitted(p,0)==3); }
+    { int head=-1; int data=pdPrintableDataHeight(1,100,12,&head);
+      assert(data==1 && head==0);
+      std::vector<int> h={3}; auto p=pdSliceServiceRows(h,data);
+      assert(p.size()==3 && emitted(p,0)==3); }
+    { PdServicesFrame f=pdEnsureServicesFrame(295,295,0,300,12);
+      assert(f.top==288 && f.bottom==300); }
+
+    assert(serviceIdentityKey(L"  A۱۲٣‏ ")==L"a123");
+    assert(serviceIdentityKey(L"‌نام‌‏  خدمت‎")==L"نام خدمت");
+    assert(serviceIdentityKey(L"كد ١٢۳")==serviceIdentityKey(L"کد 123"));
+    assert(serviceIdentityMatches(L"a123",L"shared",L"a123",L"shared"));
+    assert(!serviceIdentityMatches(L"a123",L"shared",L"b123",L"shared"));
+    assert(serviceIdentityMatches(L"",L"shared",L"b123",L"shared"));
+    assert(!serviceVariantMatches(L"a",L"shared",false,100,L"a",L"shared",true,100));
+    assert(!serviceVariantMatches(L"a",L"shared",false,100,L"a",L"shared",false,200));
+    assert(serviceVariantMatches(L"a",L"shared",false,100,L"a",L"shared",false,100));
+    assert(serviceVariantCompare(L"a",L"shared",false,100,L"",L"a",L"shared",true,250,L"")<0);
+    assert(serviceVariantCompare(L"a",L"shared",true,250,L"",L"a",L"shared",false,100,L"")>0);
+    long long normalThenFormerFree=toggledBackCharge(false);
+    long long formerFreeThenNormal=toggledBackCharge(true);
+    assert(normalThenFormerFree==170);
+    assert(formerFreeThenNormal==170);
+    assert(normalThenFormerFree==formerFreeThenNormal && normalThenFormerFree>0);
+    { std::vector<CanonLine> rows; std::vector<std::wstring> codes;
+      std::vector<bool> freeRates;
+      add(rows,codes,freeRates,line(L"A۱۲٣",L"shared",100),false);
+      add(rows,codes,freeRates,line(L"a١٢۳",L"shared",250),true);
+      serviceCanonicalSort(rows,codes,freeRates);
+      assert(rows.size()==2 && rows[0].price==100 && rows[1].price==250);
+      assert(!freeRates[0] && freeRates[1]); }
+    { std::vector<CanonLine> rows; std::vector<std::wstring> codes;
+      std::vector<bool> freeRates;
+      add(rows,codes,freeRates,line(L"a١٢۳",L"shared",250),true);
+      add(rows,codes,freeRates,line(L"A۱۲٣",L"shared",100),false);
+      serviceCanonicalSort(rows,codes,freeRates);
+      assert(rows.size()==2 && rows[0].price==100 && rows[1].price==250);
+      assert(!freeRates[0] && freeRates[1]); }
+    { std::vector<CanonLine> rows; std::vector<std::wstring> codes;
+      std::vector<bool> freeRates;
+      add(rows,codes,freeRates,line(L"A",L"shared",100),false);
+      add(rows,codes,freeRates,line(L"B",L"shared",100),false);
+      assert(rows.size()==2); }
+    { std::vector<CanonLine> rows; std::vector<std::wstring> codes;
+      std::vector<bool> freeRates;
+      add(rows,codes,freeRates,line(L"",L"shared",100,2,10,L"z"),false);
+      add(rows,codes,freeRates,line(L"A",L"shared",100,3,20,L"a"),false);
+      assert(rows.size()==1 && rows[0].code==L"A" && rows[0].qty==5 &&
+             rows[0].discount==30 && codes[0]==L"a"); }
+
+    assert(pdContinuationRepeatAllowed(PDCI_FRAME,L""));
+    assert(pdContinuationRepeatAllowed(PDCI_FIELD,L"{full}"));
+    assert(pdContinuationRepeatAllowed(PDCI_FIELD,L"{nid}"));
+    assert(!pdContinuationRepeatAllowed(PDCI_OTHER,L"{receiptbarcode}"));
+    assert(!pdContinuationRepeatAllowed(PDCI_OTHER,L"{receiptcode}"));
+    assert(!pdContinuationRepeatAllowed(PDCI_FIELD,L"{total}"));
+    assert(!pdContinuationRepeatAllowed(PDCI_FIELD,L"{paid}"));
+    assert(!pdContinuationRepeatAllowed(PDCI_FIELD,L"{patientshare}"));
+    assert(!pdContinuationRepeatAllowed(PDCI_OTHER,L""));
+    return 0;
+}
+'''
+try:
+    with tempfile.TemporaryDirectory() as td:
+        src = Path(td) / "behavior.cpp"
+        exe = Path(td) / "behavior"
+        src.write_text(behavior_cpp, encoding="utf-8")
+        build = subprocess.run(
+            ["g++", "-std=c++17", "-Wall", "-Wextra", "-Werror", "-I", str(ROOT / "src"),
+             str(src), "-o", str(exe)], capture_output=True, text=True, timeout=60
         )
+        check(build.returncode == 0, "service pagination behavior harness failed to compile: " + build.stderr[:400])
+        if build.returncode == 0:
+            run = subprocess.run([str(exe)], capture_output=True, text=True, timeout=60)
+            check(run.returncode == 0, "service pagination/identity behavior harness failed")
+except FileNotFoundError:
+    failures.append("g++ is required for service pagination behavior coverage")
+
+# Execute the actual ES5 identity helpers extracted from admission.js, rather
+# than merely checking for their names. This keeps browser/server duplicate
+# behavior locked to the same coded-name collision and missing-code fallback.
+helper_src = []
+for helper_name in ("trimStr", "serviceKey", "sameServiceIdentity",
+                    "serviceEffectiveUnit", "sameServiceVariant",
+                    "compareServiceVariants"):
+    helper = re.search(r"  function %s\([^\n]*\) \{.*?\n  \}" % helper_name,
+                       admission_js, re.S)
+    check(helper is not None, f"admission.js helper {helper_name}() was not found")
+    if helper:
+        helper_src.append(helper.group(0))
+if len(helper_src) == 6:
+    browser_identity_js = "\n".join(helper_src) + r'''
+function ok(v) { if (!v) process.exit(2); }
+ok(serviceKey('  A۱۲٣\u200f ') === 'a123');
+ok(serviceKey('\u200cنام\u200c\u200f  خدمت\u200e') === 'نام خدمت');
+ok(serviceKey('كد ١٢۳') === serviceKey('کد 123'));
+ok(sameServiceIdentity(serviceKey('A'), serviceKey('shared'),
+                       serviceKey('A'), serviceKey('shared')));
+ok(!sameServiceIdentity(serviceKey('A'), serviceKey('shared'),
+                        serviceKey('B'), serviceKey('shared')));
+ok(sameServiceIdentity(serviceKey(''), serviceKey('shared'),
+                       serviceKey('B'), serviceKey('shared')));
+var normal = { code: 'A۱۲٣', name: 'shared', price: 100, freeRate: false, desc: '' };
+var free = { code: 'a١٢۳', name: 'shared', price: 100, freeRate: true, freePrice: 250, desc: '' };
+ok(!sameServiceVariant(serviceKey(normal.code), serviceKey(normal.name), normal,
+                       serviceKey(free.code), serviceKey(free.name), free));
+var nf = [normal, free].sort(compareServiceVariants);
+var fn = [free, normal].sort(compareServiceVariants);
+ok(!nf[0].freeRate && nf[1].freeRate);
+ok(!fn[0].freeRate && fn[1].freeRate);
+ok(serviceEffectiveUnit(nf[0]) + serviceEffectiveUnit(nf[1]) ===
+   serviceEffectiveUnit(fn[0]) + serviceEffectiveUnit(fn[1]));
+'''
+    try:
+        browser_run = subprocess.run(
+            ["node", "-e", browser_identity_js], capture_output=True, text=True, timeout=60
+        )
+        check(browser_run.returncode == 0,
+              "admission.js code-first duplicate identity behavior failed")
+    except FileNotFoundError:
+        failures.append("node is required for browser duplicate-identity coverage")
 
 # ===========================================================================
 if failures:
@@ -464,12 +722,13 @@ if failures:
         print(f"FAIL: {failure}")
     sys.exit(1)
 
-print("PASS: 8 services column presets, every caption classifiable by pdSvcColOf")
+print("PASS: 8 presets all include name + description + quantity + line amount")
 for note in notes:
     print(note)
 print("PASS: 30 specs = 10 distinct layout families x 3 variants, legible pitch/borders")
 print("PASS: all 30 designs carry their Persian name (no more blank gallery cards)")
 print("PASS: every family emits exactly one live PIT_SERVICES table + a footer band")
-print("PASS: services height is computed from free page space (>=12 rows, no footer overlap)")
+print("PASS: runtime service rows are compact, wrapped, bounded, and never sample-padded")
 print("PASS: assets/designer/templates.js mirrors the C++ seeder exactly")
-print("PASS: tpl_migration_1_65 guard stamped for fresh installs and upgrades")
+print("PASS: tpl_migration_1_67 guard stamped for fresh installs and upgrades")
+print("PASS: toggled-back normal rows charge 170 in both orders through production canonicalization")

@@ -11,6 +11,9 @@
 #ifdef AZ_DEBUG_BUILD
 #include <winsock2.h>   // headless admission_probe self-connect (debug only)
 #include <ws2tcpip.h>
+long WebAdmission_DebugInitHits();
+std::string WebAdmission_DebugInlinePage(bool withFontFace);
+std::string WebAdmission_DebugLastFilledNid();
 #endif
 
 HINSTANCE g_hInst = NULL;
@@ -1290,8 +1293,6 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
             // bridge, so a non-zero init-hit count proves the ES5 JS parsed and
             // executed under the real engine. Writes AZ_ADMISSION_PROBE=OK/FAIL.
             else if(!wcscmp(dbg,L"admission_probe")){
-                long WebAdmission_DebugInitHits();
-                std::string WebAdmission_DebugInlinePage(bool);
                 WebAdmission_Prepare();
                 auto pageOk=[&](const std::string& pg, bool wantFont)->bool{
                     if(pg.empty()) return false;
@@ -1363,8 +1364,6 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
             // fired + auto-fill flow reached the store). Driven by
             // `--smoke-admission-keys` (AZ_DEBUG_SCREEN=admission_keys).
             else if(!wcscmp(dbg,L"admission_keys")){
-                long WebAdmission_DebugInitHits();
-                std::string WebAdmission_DebugLastFilledNid();
                 // small local UTF-8 <-> wide helpers (web_admission's are static)
                 auto w2u8_dbg=[](const std::wstring& w)->std::string{
                     if(w.empty()) return "";
@@ -1380,11 +1379,23 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
                 };
                 // Seed a known patient so the lookup has something to find.
                 std::wstring knownNid=L"1234567890";
+                bool seededPatient=false;
                 {
-                    // Pull the first existing patient's nid if the store is
-                    // non-empty; otherwise fall back to the seeded constant.
+                    // Pull the first existing patient's nid. On a clean smoke
+                    // data root create one temporary row, then remove it below.
                     auto pats=loadAllPatients();
                     if(!pats.empty() && !pats[0].nid.empty()) knownNid=pats[0].nid;
+                    // The JS normalizes Persian/Arabic digits before lookup, so
+                    // compare against the same ASCII form in the smoke oracle.
+                    for(wchar_t& c:knownNid){
+                        if(c>=L'۰' && c<=L'۹') c=(wchar_t)(L'0'+(c-L'۰'));
+                        else if(c>=L'٠' && c<=L'٩') c=(wchar_t)(L'0'+(c-L'٠'));
+                    }
+                    if(pats.empty()){
+                        rememberPatient(knownNid,L"Smoke",L"Admission",L"",L"",L"",L"",L"",L"",
+                                        std::vector<int>(),-1);
+                        seededPatient=true;
+                    }
                 }
                 logLine(L"SMOKE admission_keys: using nid=" + knownNid);
                 bool viewOk=false, jsOk=false, keyOk=false;
@@ -1433,6 +1444,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
                     }
                 }
                 bool ok = viewOk && jsOk && keyOk;
+                if(seededPatient) deletePatient(knownNid);
                 logLine(ok?L"AZ_ADMISSION_KEYS=OK":L"AZ_ADMISSION_KEYS=FAIL");
                 {
                     std::wstring marker;

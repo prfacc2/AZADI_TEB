@@ -2,12 +2,12 @@
 
 این سند «نقشه ذهنی» کامل برنامه است. **قبل از هر تغییری این فایل را کامل بخوانید.**
 
-> **نسخهٔ فعلی: ۱.۵۹.۰** — رابط لایه‌ای، محاسبات مالی سخت‌گیرانه و چاپ پویا:
-> - **پذیرش سه‌ناحیه‌ای** با ستون‌های مستقل راست/وسط/چپ، برجسته‌سازی ناحیهٔ فعال، پروفایل و عملیات در راست و صورتحساب/پرداخت در چپ (`assets/admission/*`).
-> - **تنظیمات سبک پیام‌رسان** با sheet مرکزی، ریل‌های خاکستری-آبی، border و shadow حرفه‌ای و مسیرهای مجزای مهمان/پذیرش/مدیر (`user_settings.cpp`).
-> - **چهار ظاهر هماهنگ**: سفید پزشکی، تیره حرفه‌ای، آرام فیروزه‌ای و گرم صدفی؛ پالت روشن هرگز روی تم تیره اعمال نمی‌شود (`theme.cpp` و `admission.js`).
-> - **محاسبات authoritative**: index و درصد بیمه محدود به بازه معتبر، تخفیف محدود به مبلغ خدمت و سهم بیمه/مکمل/بیمار غیرمنفی و کران‌دار (`web_admission_api.inc`).
-> - **۳۰ قالب builtin چاپ** با جدول خدمات واقعی «نام خدمت/تعداد/شرح خدمت»؛ متن نمونه فقط در preview طراحیگر و نه چاپ واقعی (`print_designer_templates.inc` و `printer.cpp`).
+> **نسخهٔ فعلی: ۱.۶۷.۰** — اجرای مستقل، رابط حرفه‌ای و چاپ خدمات پویا:
+> - **پذیرش سه‌ناحیه‌ای تعبیه‌شده** با پروفایل/عملیات در راست، فرم و خدمات در مرکز، صورتحساب/پرداخت در چپ؛ HTML/CSS/JS مستقیم از RCDATA بارگذاری می‌شود و به localhost وابسته نیست (`assets/admission/*`, `web_admission*`).
+> - **چهار ظاهر هماهنگ**: سفید پزشکی، تیره حرفه‌ای، آرام فیروزه‌ای و گرم صدفی؛ رنگ متن، آیکون‌ها و سطوح گرد در هر تم کنتراست قطعی دارند (`theme.cpp`, `gdiplus.cpp`, `admission.js`).
+> - **محاسبات authoritative**: درصدها و تخفیف‌ها کران‌دارند و خدمات تکراری پیش از صورتحساب/چاپ بر اساس کد یا نام ادغام می‌شوند (`web_admission_api.inc`).
+> - **۳۰ قالب builtin چاپ** با جدول واقعی «نام خدمت/شرح/تعداد/مبلغ»؛ ارتفاع بر اساس ردیف‌های واقعی رشد می‌کند، متن بلند wrap می‌شود و هیچ دادهٔ نمونه‌ای روی قبض چاپ نمی‌شود (`print_designer_templates.inc`, `printer.cpp`).
+> - **طراح چاپ نیتیو و مستقل**: ذخیره، import/export، جدول خدمات و اتصال طرح به بخش داخل خود EXE انجام می‌شود و مرورگر یا سرور loopback اجرا نمی‌شود (`print_designer_ui.inc`, `web_designer.cpp`).
 > - **ایمنی داده و سازگاری رو‌به‌جلو (§H)**: `setSetting` کامنت/کلیدهای ناشناخته را حفظ می‌کند؛ `User`/`EmpProfile`/`DeptCat` ستون‌ها/کلیدهای ناشناختهٔ نسخه‌های آینده را round-trip می‌کنند و هرگز حذف نمی‌کنند.
 
 ## 1. معماری کلی
@@ -94,106 +94,65 @@ RTL به‌صورت **دستی** پیاده شده و **`WS_EX_LAYOUTRTL` است
 - WinINet از قبل لینک شده (`update.cpp` نمونه GET دارد).
 - ساختار `ReceptionRecord` معادل یک ردیف جدول پذیرش سرور طراحی شده.
 
-## 6. پوستهٔ چندصفحه‌ایِ وبِ تعبیه‌شده (Multi-page embedded-web shell — v1.40.0)
+## 6. پوستهٔ وب تعبیه‌شدهٔ بدون سرور (Serverless embedded-web shell — v1.67.0)
 
-از نسخهٔ ۱.۴۰.۰، صفحهٔ پذیرش دیگر تنها «صفحهٔ HTML/JSِ تعبیه‌شده» نیست؛ یک
-**زیرساختِ چندصفحه‌ای** اضافه شده تا صفحاتِ بعدی هم از همان میزبانِ لوپ‌بک، با
-دارایی‌ها و پلِ ارتباطیِ مشترک، سرو شوند. این بخش، معماری و نقاطِ توسعه را شرح می‌دهد.
+از نسخهٔ ۱.۶۶.۰، میزبان HTTP لوپ‌بک پذیرش حذف شده است. در نسخهٔ ۱.۶۷.۰ این مسیر سخت‌سازی شد: دارایی‌های پذیرش و پوسته از RCDATA خوانده، در یک سند کامل inline می‌شوند و مستقیم به WebView2 (`NavigateToString`) یا MSHTML (`about:blank` + `IHTMLDocument2::write`) تحویل داده می‌شوند. هیچ `socket`، پورت تصادفی یا URL محلی در جریان پذیرش وجود ندارد.
 
 ### معماری کلی
 ```
-┌────────────── نخِ رابط (UI thread / g_hFrame) ──────────────┐
-│  frameProc  ──►  WM_APP_UI_TASK  ──►  WebUiTask_Run(fn)       │
-└──────────────────────────▲──────────────────────────────────┘
-                           │ RunOnUiThread(fn)  (PostMessage)
-┌──────────────────────────┴──────────────────────────────────┐
-│  استخرِ نخِ کارگر (web_thread_pool):                          │
-│    accept()  ──►  WebPool_Submit(socket)  ──►  workerN        │
-│                                              │ adServeConn    │
-│                                              ▼                │
-│  دیسپچِ HTTP (web_admission_http.inc):                        │
-│    /…            → 1) سوییچِ پذیرش 400..405                    │
-│                    2) WebPages_ResolveAsset (500.. / 600..)   │
-│    /api/<verb>   → 1) WebPages_DispatchVerb                    │
-│                    2) admissionApi (پشتیبانِ عقب‌رو)           │
-└──────────────────────────────────────────────────────────────┘
-                           ▲ XHR /api  یا  WebView2 postMessage
-┌──────────────────────────┴──────────────────────────────────┐
-│  رانتایمِ مشترک (assets/shell/common.js):                     │
-│    AzBoot · AzBridge · AzUi · AzNav · AzPerf                  │
-└──────────────────────────────────────────────────────────────┘
+┌──────────── نخ رابط / قاب اصلی ─────────────┐
+│ WebAdmission_CreateView                     │
+│   ├─ WebView2: NavigateToString              │
+│   ├─ MSHTML: document.write                  │
+│   └─ شکست هر دو موتور: فرم نیتیو پذیرش      │
+└───────────────────┬──────────────────────────┘
+                    │ IPC درون‌پردازه‌ای JSON
+┌───────────────────▼──────────────────────────┐
+│ WebView2: chrome.webview.postMessage         │
+│ MSHTML: window.external.azCall               │
+│ C++: WebAdmission_Dispatch / admissionApi    │
+└───────────────────┬──────────────────────────┘
+                    │
+┌───────────────────▼──────────────────────────┐
+│ assets/shell/common.js + assets/admission/*  │
+│ AzBoot · AzBridge · AzUi · AzNav · AzPerf    │
+└──────────────────────────────────────────────┘
 ```
 
-### قواعدِ شمارهٔ منابع (RCDATA) — تغییر ندهید
+### قواعد شمارهٔ منابع (RCDATA) — تغییر ندهید
 | بازه | مالک |
 |---|---|
 | 400..405 | صفحهٔ **پذیرش** (index/css/bridge/js/vazir/contextmenu) — **بازشماری نشود** |
 | 500/501/502 | **پوستهٔ مشترک**: `common.css` / `common.js` / `vazir.ttf` |
 | 600/601/602 | صفحهٔ نمونهٔ **ping**: `index.html` / `ping.css` / `ping.js` |
 
-### افزودنِ یک صفحهٔ جدید (نسخهٔ کوتاه)
-۱. سه دارایی بسازید: `assets/pages/<name>/index.html`, `<name>.css`, `<name>.js`.
-   در `<head>` حتماً `<meta name="az-page" content="<name>">` و ترتیبِ
-   `common.css` → `<name>.css` و `common.js` → `<name>.js` را رعایت کنید.
-۲. در `src/app.rc` سه RCDATA با شناسه‌های آزادِ بعدی (مثلاً 610/611/612) اضافه کنید.
-۳. در `WebPages_RegisterBuiltins()` (فایل `src/web_pages.cpp`) مسیرها را ثبت کنید:
-   `WebPages_RegisterAsset("<name>", "/<name>.css", 611, nullptr);` …
-۴. اگر صفحه API می‌خواهد، یک فایلِ `src/web_<name>_api.cpp` با یک تابعِ
-   `std::string Handle(body,page)` بنویسید، آن را در `web_pages.h` اعلام و در
-   `WebPages_RegisterBuiltins()` با `WebPages_RegisterVerb("<verb>", &Handle)` ثبت کنید،
-   و منبع را به `build.sh` بیفزایید.
-۵. از داخلِ هندلرها، هر کاری که به HWND/GDI/WebView2 دست می‌زند را **حتماً** با
-   `RunOnUiThread([...]{ … })` به نخِ رابط ببرید.
+### افزودن یک صفحه یا فعل مشترک
+۱. دارایی‌ها را با شناسهٔ RCDATA آزاد ثبت کنید.
+۲. asset/verb را در `WebPages_RegisterBuiltins()` ثبت کنید؛ رجیستری دیگر به معنای HTTP نیست و توسط دیسپچر IPC تعبیه‌شده استفاده می‌شود.
+۳. اگر صفحه باید در محصول نمایش داده شود، inliner اختصاصی آن باید همهٔ assetها را الزاماً جایگزین کند و در صورت asset ناقص fail-closed باشد.
+۴. فعل‌های C++ باید JSON دریافت/برگردانند. هر کار وابسته به HWND/GDI/WebView2 باید روی نخ رابط اجرا شود.
+۵. fallback HTTP در `common.js` و `bridge.js` فقط با `window.__AZADI_DEV_ALLOW_HTTP__ = true` برای harness توسعه مجاز است؛ محصول هرگز آن را فعال نمی‌کند.
 
-### رانتایمِ مشترکِ سمتِ JS (ES5-only)
-- **`AzBoot`** — `page()` (از `<meta az-page>`)، `ready(cb)` (پس از برپا شدنِ پل)،
-  `applyTheme(dark)`.
-- **`AzBridge`** — تنها لایهٔ IPC. `call(verb,payload)` یک thenable با **حذفِ
-  تکرارِ درخواستِ همزمان** برمی‌گرداند؛ هر درخواستِ HTTP سرآیندِ `X-Az-Page` دارد؛
-  `on(event,cb)` برای رویدادهای C++→JS؛ `log(level,msg,extra)` و
-  `metrics(name,value,extra)` به `logs\client.log` و `logs\client.metrics` می‌روند.
-- **`AzUi`** — `toast(text,kind)` با kindهای `ok`/`err`/`warn`/`info`؛ `$`, `esc`.
-- **`AzNav`** — `bind(NAV_ORDER, {onEnter})`: ناوبریِ Enter/Tabِ صریح، **بدونِ
-  wrap-around**، مدیریتِ MSHTML-امنِ `<select>`، Ctrl+A انتخابِ همهٔ متنِ INPUT.
-- **`AzPerf`** — `since()`, `mark(name,ms)` (به `client.metrics`).
-- سازگاریِ عقب‌رو: اگر `Bridge` از قبل تعریف نشده باشد، `AzBridge` روی
-  `window.Bridge` هم منتشر می‌شود؛ صفحهٔ پذیرش هنوز از `bridge.js`ِ اختصاصیِ خود
-  به‌عنوانِ `Bridge` استفاده می‌کند.
+### رانتایم مشترک سمت JS (ES5-only)
+- **`AzBoot`** — تشخیص صفحه، ready شدن پس از اتصال پل و اعمال تم.
+- **`AzBridge`** — IPC واحد، حذف درخواست همزمان تکراری، eventهای C++→JS و log/metrics.
+- **`AzUi`** — toast و helperهای ایمن DOM.
+- **`AzNav`** — ناوبری صریح Enter/Tab، پشتیبانی select در MSHTML و Ctrl+A.
+- **`AzPerf`** — اندازه‌گیری و ارسال metric از طریق همان پل درون‌پردازه‌ای.
 
-### مدیریتِ کیبورد در سطوحِ وبِ تعبیه‌شده (Keyboard handling in embedded surfaces — v1.41.0)
-> **هشدار به توسعه‌دهندگانِ آینده — این را دوباره خراب نکنید.**
+### مدیریت کیبورد در سطوح وب تعبیه‌شده
+> کنترل‌های MSHTML/WebView2 درون یک HWND خارجی، acceleratorها را خودکار دریافت نمی‌کنند. سه مسیر زیر باید باقی بمانند:
 >
-> کنترل‌هایِ مرورگرِ امبد (MSHTML/WebBrowser و WebView2) وقتی داخلِ یک HWNDِ بیگانه
-> میزبانی می‌شوند، **کلیدهایِ شتاب‌دهنده (Tab / Enter / Ctrl+A / کلیدهایِ جهت / F-keys)
-> را به‌صورتِ خودکار دریافت نمی‌کنند**. اگر این کلیدها مسیریابی نشوند، رویدادِ
-> `keydown` در سندِ HTML **اصلاً شلیک نمی‌شود** و ناوبریِ فیلدها می‌شکند. هیچ مقدار
-> جاوااسکریپت این را حل نمی‌کند، چون پیامِ Win32 هرگز به کنترل تحویل نشده است.
->
-> سه قطعهٔ الزامی (هر سه باید باقی بمانند):
-> 1. **حلقهٔ پیام** (`src/main.cpp`): پیش از `TranslateMessage`/`DispatchMessage`
->    باید `WebAdmission_TranslateAccel(&msg)` صدا زده شود؛ اگر `true` برگرداند، پیام
->    مصرف شده و باید `continue` شود.
-> 2. **MSHTML** (`src/web_admission_mshtml.inc`): سایتِ میزبان باید
->    `IDocHostUIHandler` را پیاده کند و `TranslateAccelerator` مقدارِ **`S_FALSE`**
->    برگرداند (یعنی «کانتینر مصرف نکرد، خودت داخلِ سند توزیع کن»). این handler با
->    `ICustomDoc::SetUIHandler` ثبت می‌شود، و `IOleInPlaceActiveObject` گرفته و
->    ذخیره می‌شود تا حلقهٔ پیام `ipao->TranslateAccelerator(msg)` را صدا بزند
->    (تنها برایِ نمایی که HWNDِ میزبانش جدِ `msg->hwnd` است).
-> 3. **WebView2** (`src/web_admission_webview2.inc` + `web_admission_host.inc`): با
->    `add_AcceleratorKeyPressed` مشترک شوید و برایِ Tab/Enter/جهت/Home/End/Esc/Ctrl+A
->    مقدارِ `put_Handled(FALSE)` بگذارید تا WebView خودش پردازش کند. (WebView2 نیازی
->    به `TranslateAccelerator` در حلقهٔ پیام ندارد؛ `WV2_TranslateAccel` همیشه `false`.)
->
-> مرجع مایکروسافت: `IOleInPlaceActiveObject::TranslateAccelerator` و
-> `IDocHostUIHandler::TranslateAccelerator`.
+> 1. حلقهٔ پیام `src/main.cpp` پیش از `TranslateMessage`، تابع `WebAdmission_TranslateAccel(&msg)` را صدا می‌زند.
+> 2. میزبان MSHTML، `IDocHostUIHandler` و `IOleInPlaceActiveObject::TranslateAccelerator` را به سند واقعی متصل می‌کند.
+> 3. میزبان WebView2 رویداد `AcceleratorKeyPressed` را ثبت می‌کند و Tab/Enter/جهت/Home/End/Esc/Ctrl+A را به WebView می‌سپارد.
 
-### سخت‌سازیِ شبکه (میزبانِ لوپ‌بک)
-- **فقط لوپ‌بک**: علاوه‌بر `bind` به `INADDR_LOOPBACK`، هر همتای غیرِ `127.0.0.0/8`
-  در `accept` رد می‌شود.
-- **`SO_REUSEADDR`** روی سوکتِ گوش‌دهنده (اتصالِ سریعِ دوباره پس از کرش).
-- **timeoutها**: `SO_RCVTIMEO`/`SO_SNDTIMEO` = ۸ ثانیه روی هر اتصال، تا همتای کند
-  هرگز یک کارگر را برای همیشه اشغال نکند.
+### قرارداد آماده‌شدن و fallback
+- میزبان تا موفقیت navigation/write، probe پل و رسیدن همان view به `init` مخفی می‌ماند.
+- callbackهای async WebView2 state اشتراکی heap-owned دارند؛ timeout هرگز pointer روی stack باقی نمی‌گذارد.
+- شکست یا timeout موتور، host نیمه‌کاره را نابود می‌کند و مسیر MSHTML یا فرم نیتیو را امتحان می‌کند.
+- نبود WebView2Loader یا موتور HTML یک حالت پشتیبانی‌شده است؛ برنامه نباید صفحهٔ سفید یا «Can't reach this page» نشان دهد.
 
-### ثوابت (constants)
-- `WM_APP_UI_TASK = WM_APP+15` (app.h) — پیامِ مارشالِ نخِ رابط.
-- تعدادِ کارگر: `g_lowSpec ? 2 : 4`، سقفِ ۸ (`web_thread_pool.cpp:chooseWorkerCount`).
+### ثوابت
+- `WM_APP_UI_TASK = WM_APP+15` — مارشال کارهای نیازمند نخ رابط.
+- منابع پذیرش 400..405 و پوسته 500..502 باید همیشه با `src/app.rc` و اعتبارسنجی inliner هماهنگ بمانند.

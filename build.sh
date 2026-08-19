@@ -21,8 +21,8 @@ echo "[2/3] Compiling C++..."
 # v1.17.0: the HTML/CSS/JS (MSHTML) presentation host has been RETIRED. The
 # reception / appointment UI is now rendered 100% in native C++ (Win32/GDI), so
 # src/webhost.cpp (and its webhost_*.inc includes + embedded HTML/CSS/JS in
-# webhost_assets.inc) are no longer compiled. This removes the IE/Trident
-# dependency, shrinks the EXE, and makes the UI single-engine + crash-safe.
+# webhost_assets.inc) are no longer compiled. The print designer also uses its
+# native GDI editor; src/web_designer.cpp now provides JSON compatibility only.
 SRCS="src/main.cpp src/util.cpp src/handlers.cpp src/theme.cpp src/users.cpp \
       src/billing.cpp src/calculator.cpp src/dialogs.cpp src/update.cpp \
       src/admin.cpp src/reception.cpp src/gdiplus.cpp src/settings.cpp \
@@ -62,12 +62,10 @@ ls -lh build/DarmanPlus.exe
 echo "Build OK -> build/DarmanPlus.exe"
 
 # ----------------------------------------------------------------------------
-# §D.5: OPTIONAL headless print-designer smoke test. Gated behind AZ_SMOKE so
-# production builds skip it entirely. Builds a SEPARATE debug binary with the
-# AZ_DEBUG_BUILD hook, runs it under Wine with AZ_DEBUG_SCREEN=print_designer
-# (which seeds the section/design stores and exits 0 if the open path is
-# healthy), and fails the build on a non-zero exit code. The production
-# build/DarmanPlus.exe above is NOT affected by this debug binary.
+# Optional bounded debug smokes. AZ_SMOKE=1 builds a separate AZ_DEBUG_BUILD
+# binary, then exercises the print-designer path plus admission inline/view/JS
+# readiness and admission keyboard routing under Wine. Production output above
+# is unchanged; every run is timeout-bounded so CI cannot hang on a bad host.
 # ----------------------------------------------------------------------------
 if [ -n "$AZ_SMOKE" ]; then
     echo "[smoke] Building debug binary for print_designer smoke test..."
@@ -75,7 +73,7 @@ if [ -n "$AZ_SMOKE" ]; then
     $CXX -std=c++17 -O2 -municode -mwindows \
         -DUNICODE -D_UNICODE -D_WIN32_IE=0x0700 -DAZ_DEBUG_BUILD \
         -static -static-libgcc -static-libstdc++ \
-        -Wall -Wextra \
+        -Wall -Wextra -Werror \
         -Wno-unused-variable -Wno-unused-parameter \
         -Wno-misleading-indentation -Wno-unused-function \
         -Wno-missing-field-initializers \
@@ -85,17 +83,27 @@ if [ -n "$AZ_SMOKE" ]; then
         -luser32 -lshlwapi -lwininet -ladvapi32 -lshell32 -lwinspool \
         -lole32 -loleaut32 -luuid -lversion -lwinmm -ldbghelp \
         -lwinhttp -lurlmon -lcrypt32 -lwintrust -lwtsapi32 -lpsapi -lws2_32
-    if command -v wine >/dev/null 2>&1; then
-        echo "[smoke] Running print_designer open/close path under Wine..."
-        AZ_DEBUG_SCREEN=print_designer wine build/DarmanPlus_smoke.exe
-        rc=$?
-        if [ "$rc" -ne 0 ]; then
-            echo "[smoke] FAILED: print_designer smoke exited $rc" >&2
-            exit "$rc"
-        fi
-        echo "[smoke] print_designer smoke PASSED"
+    if command -v wine >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1; then
+        WINE_RUN=(wine)
+        if command -v xvfb-run >/dev/null 2>&1; then WINE_RUN=(xvfb-run -a wine); fi
+        run_smoke() {
+            local screen="$1" label="$2"
+            echo "[smoke] Running $label under Wine..."
+            set +e
+            AZ_DEBUG_SCREEN="$screen" timeout --signal=KILL 30s "${WINE_RUN[@]}" build/DarmanPlus_smoke.exe
+            local rc=$?
+            set -e
+            if [ "$rc" -ne 0 ]; then
+                echo "[smoke] FAILED: $label exited $rc" >&2
+                exit "$rc"
+            fi
+            echo "[smoke] $label PASSED"
+        }
+        run_smoke print_designer "print_designer open/close path"
+        run_smoke admission_probe "admission inline/view/bridge probe"
+        run_smoke admission_keys "admission keyboard routing"
     else
-        echo "[smoke] Wine not available — debug binary built but not executed."
+        echo "[smoke] Wine/timeout not available — debug binary built but not executed."
     fi
     rm -f build/DarmanPlus_smoke.exe
 fi

@@ -2,6 +2,7 @@
 //  theme.cpp — light/dark themes, owner-drawn flat buttons, vector icons
 // ============================================================================
 #include "app.h"
+#include <uxtheme.h>
 
 Theme   g_theme;
 bool    g_dark = false;
@@ -143,13 +144,16 @@ void broadcastThemeChange(){
 
 // =================================================================== draw ==
 void fillRoundRect(HDC dc, RECT rc, int rad, COLORREF fill, COLORREF border){
-    HBRUSH br = CreateSolidBrush(fill);
+    // CLR_INVALID means outline-only. Treating it as a COLORREF produces white
+    // (0x00FFFFFF), which used to overwrite button bodies and dark medallions.
+    HBRUSH br = (fill==CLR_INVALID) ? (HBRUSH)GetStockObject(NULL_BRUSH)
+                                    : CreateSolidBrush(fill);
     HPEN   pn = (border==CLR_INVALID) ? (HPEN)GetStockObject(NULL_PEN)
                                       : CreatePen(PS_SOLID, 1, border);
     HGDIOBJ ob = SelectObject(dc, br), op = SelectObject(dc, pn);
     RoundRect(dc, rc.left, rc.top, rc.right, rc.bottom, rad, rad);
     SelectObject(dc, ob); SelectObject(dc, op);
-    DeleteObject(br);
+    if(fill!=CLR_INVALID) DeleteObject(br);
     if(border!=CLR_INVALID) DeleteObject(pn);
 }
 
@@ -485,10 +489,24 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
     case WM_PAINT: {
         PAINTSTRUCT ps; HDC dc0 = BeginPaint(h,&ps);
         RECT rc; GetClientRect(h,&rc);
-        // double buffer
-        HDC dc = CreateCompatibleDC(dc0);
-        HBITMAP bmp = CreateCompatibleBitmap(dc0, rc.right, rc.bottom);
-        HGDIOBJ obm = SelectObject(dc, bmp);
+        if(rc.right<=0 || rc.bottom<=0){ EndPaint(h,&ps); return 0; }
+        // Double-buffer when GDI can allocate the backing objects. On old or
+        // resource-constrained systems allocation may fail; painting directly
+        // to the window DC still produces a complete, opaque, legible button.
+        HDC mem = CreateCompatibleDC(dc0);
+        HBITMAP bmp = mem ? CreateCompatibleBitmap(dc0, rc.right, rc.bottom) : NULL;
+        HGDIOBJ obm = NULL;
+        HDC dc = dc0;
+        bool buffered = false;
+        if(mem && bmp){
+            obm = SelectObject(mem, bmp);
+            if(obm && obm!=HGDI_ERROR){ dc=mem; buffered=true; }
+        }
+        if(!buffered){
+            if(bmp) DeleteObject(bmp);
+            if(mem) DeleteDC(mem);
+            bmp=NULL; mem=NULL; obm=NULL;
+        }
 
         // Background behind the rounded corners. v1.4.0: when the host told us
         // the exact colour it sits on (header gradient, surface2 bar, card,…)
@@ -669,9 +687,9 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
         }
 
         SetBkMode(dc, TRANSPARENT);
-        // §C: disabled controls render dim + low-contrast text so the state is
-        //     unmistakable (and they ignore hover/active above).
-        if(!enabled) txt = g_theme.textDim;
+        // §C: disabled controls use a body-relative ink. A fixed dim token can
+        // disappear on solid success/accent overrides in old themes.
+        if(!enabled) txt = readable(fill, blendColor(txt, fill, 45));
         SetTextColor(dc, txt);
         if(st==BS_CARD){
             // v1.62.0 CARD REDESIGN. The old card pinned its badge/title/sub to
@@ -770,15 +788,17 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
                     DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
             }
         }
-        // §C: disabled veil — a translucent wash of the page colour over the
-        //     whole control so disabled buttons are visually muted but still
-        //     legible. Applied last, over both fill and content.
+        // Keep disabled buttons opaque and legible. An alpha veil applied after
+        // text could turn both body and ink white on failing/older GDI+ paths.
         if(!enabled){
-            gpRoundRectBg(dc, rr, rad,
-                blendColor(g_theme.bg, g_theme.surface2, 40), CLR_INVALID, g_theme.surface, 150);
+            RECT fr=rr; InflateRect(&fr,-S(1),-S(1));
+            gpRoundRect(dc,fr,rad>S(2)?rad-S(1):rad,CLR_INVALID,
+                        blendColor(fill,g_theme.border,55));
         }
-        BitBlt(dc0,0,0,rc.right,rc.bottom,dc,0,0,SRCCOPY);
-        SelectObject(dc,obm); DeleteObject(bmp); DeleteDC(dc);
+        if(buffered){
+            BitBlt(dc0,0,0,rc.right,rc.bottom,dc,0,0,SRCCOPY);
+            SelectObject(mem,obm); DeleteObject(bmp); DeleteDC(mem);
+        }
         EndPaint(h,&ps);
         return 0; }
     }
@@ -843,29 +863,57 @@ void setFlatButtonImage(HWND btn, int resId){
 //  with CBS_OWNERDRAWFIXED|CBS_HASSTRINGS and forwarding WM_DRAWITEM here paints
 //  every row with the theme palette and RTL-aligns Persian text.
 // ============================================================================
-// v1.8.0: combo boxes must have NO visible border (redesign brief). We subclass
-// the combo and, after the default non-client paint, overpaint the entire
-// non-client FRAME with the theme input-well colour so the system's chunky 3-D
-// edge / white box disappears completely and the control reads as a clean,
-// borderless, integrated input that matches the wells around it.
-static WNDPROC s_comboOldProc = NULL;
+// v1.8.0: combo boxes must have NO visible system edge. Subclass each combo
+// and paint its closed face after the default pass; this also hides Wine's
+// fixed white dropdown-button rectangle while preserving normal combo behavior.
+static const wchar_t* const THEMED_COMBO_OLDPROC_PROP=L"AzThemedComboOldProc";
+static bool comboHasPersian(const wchar_t* s);
 static LRESULT CALLBACK themedComboProc(HWND h, UINT m, WPARAM w, LPARAM l){
-    LRESULT r = CallWindowProcW(s_comboOldProc, h, m, w, l);
+    WNDPROC old=(WNDPROC)GetPropW(h,THEMED_COMBO_OLDPROC_PROP);
+    if(!old) return DefWindowProcW(h,m,w,l);
+    if(m==WM_NCDESTROY){
+        RemovePropW(h,THEMED_COMBO_OLDPROC_PROP);
+        return CallWindowProcW(old,h,m,w,l);
+    }
+    if(m==WM_APP_THEME){
+        InvalidateRect(h,NULL,TRUE);
+        return 0;
+    }
+    LRESULT r=CallWindowProcW(old,h,m,w,l);
     if(m==WM_PAINT || m==WM_NCPAINT){
         HDC dc=GetWindowDC(h);
         if(dc){
             RECT wr; GetWindowRect(h,&wr);
-            RECT br={0,0,wr.right-wr.left,wr.bottom-wr.top};
-            // paint ONLY the 2-px frame ring with the input colour (no border):
-            // top, bottom, left, right strips — the interior is owner-drawn.
-            HBRUSH eb=CreateSolidBrush(g_theme.inputBg);
-            RECT t={br.left,br.top,br.right,br.top+2};
-            RECT b={br.left,br.bottom-2,br.right,br.bottom};
-            RECT lft={br.left,br.top,br.left+2,br.bottom};
-            RECT rt={br.right-2,br.top,br.right,br.bottom};
-            FillRect(dc,&t,eb); FillRect(dc,&b,eb);
-            FillRect(dc,&lft,eb); FillRect(dc,&rt,eb);
-            DeleteObject(eb);
+            RECT rc={0,0,wr.right-wr.left,wr.bottom-wr.top};
+            HBRUSH bg=CreateSolidBrush(g_theme.inputBg);
+            FillRect(dc,&rc,bg);
+            DeleteObject(bg);
+
+            wchar_t text[256]={0};
+            int sel=(int)SendMessageW(h,CB_GETCURSEL,0,0);
+            if(sel>=0) SendMessageW(h,CB_GETLBTEXT,sel,(LPARAM)text);
+            SetBkMode(dc,TRANSPARENT);
+            SetTextColor(dc,g_theme.inputText);
+            HGDIOBJ oldFont=SelectObject(dc,g_fUI);
+            RECT tr=rc; tr.left+=S(28); tr.right-=S(8);
+            UINT flags=DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX;
+            if(comboHasPersian(text)) flags|=DT_RIGHT|DT_RTLREADING;
+            else flags|=DT_LEFT;
+            DrawTextW(dc,text,-1,&tr,flags);
+            SelectObject(dc,oldFont);
+
+            int cx=rc.left+S(14), cy=(rc.top+rc.bottom)/2;
+            POINT tri[3]={{cx-S(4),cy-S(2)},{cx+S(4),cy-S(2)},{cx,cy+S(3)}};
+            HBRUSH ab=CreateSolidBrush(g_theme.textDim);
+            HPEN ap=CreatePen(PS_SOLID,1,g_theme.textDim);
+            HGDIOBJ ob=SelectObject(dc,ab), op=SelectObject(dc,ap);
+            Polygon(dc,tri,3);
+            SelectObject(dc,ob); SelectObject(dc,op);
+            DeleteObject(ab); DeleteObject(ap);
+
+            HBRUSH border=CreateSolidBrush(g_theme.border);
+            FrameRect(dc,&rc,border);
+            DeleteObject(border);
             ReleaseDC(h,dc);
         }
     }
@@ -878,7 +926,7 @@ HWND createThemedCombo(HWND parent, int id){
         0,0,10,10, parent,(HMENU)(UINT_PTR)id, g_hInst,0);
     SendMessageW(c,WM_SETFONT,(WPARAM)g_fUI,TRUE);
     WNDPROC old=(WNDPROC)SetWindowLongPtrW(c,GWLP_WNDPROC,(LONG_PTR)themedComboProc);
-    if(!s_comboOldProc) s_comboOldProc=old;
+    SetPropW(c,THEMED_COMBO_OLDPROC_PROP,(HANDLE)old);
     return c;
 }
 static bool comboHasPersian(const wchar_t* s){
@@ -933,5 +981,297 @@ bool drawThemedComboItem(LPDRAWITEMSTRUCT dis){
         DeleteObject(ab); DeleteObject(ap);
     }
     if((dis->itemState & ODS_FOCUS) && (int)dis->itemID>=0) DrawFocusRect(dc,&rc);
+    return true;
+}
+
+// ============================================================================
+//  Themed report ListView + header
+//  The body colors cover both populated rows and the empty client area. Native
+//  header visual styles are disabled only for headers opted in here, allowing
+//  the parent to provide deterministic dark/light custom drawing on Win7/Wine.
+// ============================================================================
+static const wchar_t* const THEMED_LIST_HEADER_PROP=L"AzThemedListHeader";
+static const wchar_t* const THEMED_HEADER_OLDPROC_PROP=L"AzThemedHeaderOldProc";
+static const wchar_t* const THEMED_LIST_OLDPROC_PROP=L"AzThemedListOldProc";
+static const wchar_t* const THEMED_LIST_OVERLAY_PROP=L"AzThemedHeaderOverlay";
+static const wchar_t* const THEMED_HEADER_OVERLAY_CLASS=L"AzThemedHeaderOverlay";
+
+static void paintThemedListHeader(HWND header, HDC dc){
+    RECT client; GetClientRect(header,&client);
+    HBRUSH bg=CreateSolidBrush(g_theme.surface2);
+    FillRect(dc,&client,bg);
+    DeleteObject(bg);
+
+    int count=Header_GetItemCount(header);
+    for(int i=0;i<count;i++){
+        RECT rc={0};
+        if(!Header_GetItemRect(header,i,&rc)) continue;
+        wchar_t text[256]={0};
+        HDITEMW item={0};
+        item.mask=HDI_TEXT|HDI_FORMAT;
+        item.pszText=text;
+        item.cchTextMax=(int)(sizeof(text)/sizeof(text[0]));
+        Header_GetItem(header,i,&item);
+
+        HPEN pen=CreatePen(PS_SOLID,1,g_theme.border);
+        HGDIOBJ oldPen=SelectObject(dc,pen);
+        MoveToEx(dc,rc.left,rc.bottom-1,NULL); LineTo(dc,rc.right,rc.bottom-1);
+        MoveToEx(dc,rc.right-1,rc.top,NULL); LineTo(dc,rc.right-1,rc.bottom);
+        SelectObject(dc,oldPen);
+        DeleteObject(pen);
+
+        RECT tr=rc; tr.left+=S(8); tr.right-=S(8);
+        UINT flags=DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX|DT_END_ELLIPSIS;
+        if((item.fmt&HDF_RTLREADING) || comboHasPersian(text))
+            flags|=DT_RIGHT|DT_RTLREADING;
+        else if((item.fmt&HDF_JUSTIFYMASK)==HDF_CENTER)
+            flags|=DT_CENTER;
+        else if((item.fmt&HDF_JUSTIFYMASK)==HDF_RIGHT)
+            flags|=DT_RIGHT;
+        else
+            flags|=DT_LEFT;
+        SetBkMode(dc,TRANSPARENT);
+        SetTextColor(dc,g_theme.text);
+        HGDIOBJ oldFont=SelectObject(dc,g_fUIB ? g_fUIB : g_fUI);
+        DrawTextW(dc,text,-1,&tr,flags);
+        SelectObject(dc,oldFont);
+    }
+}
+
+static LRESULT CALLBACK themedListHeaderProc(HWND h, UINT m, WPARAM w, LPARAM l){
+    WNDPROC old=(WNDPROC)GetPropW(h,THEMED_HEADER_OLDPROC_PROP);
+    if(!old) return DefWindowProcW(h,m,w,l);
+    if(m==WM_NCDESTROY){
+        RemovePropW(h,THEMED_LIST_HEADER_PROP);
+        RemovePropW(h,THEMED_HEADER_OLDPROC_PROP);
+        return CallWindowProcW(old,h,m,w,l);
+    }
+    if(m==WM_ERASEBKGND) return 1;
+    if(m==WM_APP_THEME){ InvalidateRect(h,NULL,TRUE); return 0; }
+    if(m==WM_PAINT){
+        PAINTSTRUCT ps; HDC dc=BeginPaint(h,&ps);
+        paintThemedListHeader(h,dc);
+        EndPaint(h,&ps);
+        return 0;
+    }
+    if(m==WM_PRINTCLIENT){ paintThemedListHeader(h,(HDC)w); return 0; }
+    return CallWindowProcW(old,h,m,w,l);
+}
+
+// Wine can repaint a native header with system colors after NM_CUSTOMDRAW and
+// even after a header subclass handles WM_PAINT. A transparent hit-test overlay
+// keeps the native header fully interactive underneath while making the final
+// pixels deterministic. It is a child of the ListView and follows its header.
+static LRESULT CALLBACK themedHeaderOverlayProc(HWND h, UINT m, WPARAM w, LPARAM l){
+    HWND header=(HWND)GetWindowLongPtrW(h,GWLP_USERDATA);
+    switch(m){
+    case WM_NCHITTEST: return HTTRANSPARENT;
+    case WM_ERASEBKGND: return 1;
+    case WM_APP_THEME: InvalidateRect(h,NULL,TRUE); return 0;
+    case WM_PAINT:{
+        PAINTSTRUCT ps; HDC dc=BeginPaint(h,&ps);
+        if(header && IsWindow(header)) paintThemedListHeader(header,dc);
+        EndPaint(h,&ps);
+        return 0; }
+    case WM_PRINTCLIENT:
+        if(header && IsWindow(header)) paintThemedListHeader(header,(HDC)w);
+        return 0;
+    }
+    return DefWindowProcW(h,m,w,l);
+}
+
+static void updateThemedHeaderOverlay(HWND list){
+    if(!list || !IsWindow(list)) return;
+    HWND header=ListView_GetHeader(list);
+    HWND overlay=(HWND)GetPropW(list,THEMED_LIST_OVERLAY_PROP);
+    HWND host=GetParent(list);
+    if(!host || !header || !IsWindow(header) || !overlay || !IsWindow(overlay)) return;
+    if(!IsWindowVisible(list)){
+        ShowWindow(overlay,SW_HIDE);
+        return;
+    }
+    RECT hr; GetWindowRect(header,&hr);
+    POINT tl={hr.left,hr.top}, br={hr.right,hr.bottom};
+    ScreenToClient(host,&tl); ScreenToClient(host,&br);
+    SetWindowPos(overlay,HWND_TOP,tl.x,tl.y,br.x-tl.x,br.y-tl.y,
+                 SWP_NOACTIVATE|SWP_SHOWWINDOW);
+    InvalidateRect(overlay,NULL,TRUE);
+}
+
+static bool drawThemedHeaderOwnerItem(HWND list, LPDRAWITEMSTRUCT dis){
+    if(!dis || dis->CtlType!=ODT_HEADER) return false;
+    HWND header=ListView_GetHeader(list);
+    if(!header || !IsWindow(header) || dis->hwndItem!=header) return false;
+
+    RECT rc=dis->rcItem;
+    HBRUSH bg=CreateSolidBrush(g_theme.surface2);
+    FillRect(dis->hDC,&rc,bg);
+    DeleteObject(bg);
+
+    HPEN pen=CreatePen(PS_SOLID,1,g_theme.border);
+    HGDIOBJ oldPen=SelectObject(dis->hDC,pen);
+    MoveToEx(dis->hDC,rc.left,rc.bottom-1,NULL);
+    LineTo(dis->hDC,rc.right,rc.bottom-1);
+    MoveToEx(dis->hDC,rc.right-1,rc.top,NULL);
+    LineTo(dis->hDC,rc.right-1,rc.bottom);
+    SelectObject(dis->hDC,oldPen);
+    DeleteObject(pen);
+
+    wchar_t text[256]={0};
+    HDITEMW item={0};
+    item.mask=HDI_TEXT|HDI_FORMAT;
+    item.pszText=text;
+    item.cchTextMax=(int)(sizeof(text)/sizeof(text[0]));
+    Header_GetItem(header,(int)dis->itemID,&item);
+
+    RECT tr=rc; tr.left+=S(8); tr.right-=S(8);
+    UINT flags=DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX|DT_END_ELLIPSIS;
+    if((item.fmt&HDF_RTLREADING) || comboHasPersian(text))
+        flags|=DT_RIGHT|DT_RTLREADING;
+    else if((item.fmt&HDF_JUSTIFYMASK)==HDF_CENTER)
+        flags|=DT_CENTER;
+    else if((item.fmt&HDF_JUSTIFYMASK)==HDF_RIGHT)
+        flags|=DT_RIGHT;
+    else
+        flags|=DT_LEFT;
+    SetBkMode(dis->hDC,TRANSPARENT);
+    SetTextColor(dis->hDC,g_theme.text);
+    HGDIOBJ oldFont=SelectObject(dis->hDC,g_fUIB ? g_fUIB : g_fUI);
+    DrawTextW(dis->hDC,text,-1,&tr,flags);
+    SelectObject(dis->hDC,oldFont);
+    return true;
+}
+
+static LRESULT CALLBACK themedListViewProc(HWND h, UINT m, WPARAM w, LPARAM l){
+    WNDPROC old=(WNDPROC)GetPropW(h,THEMED_LIST_OLDPROC_PROP);
+    if(!old) return DefWindowProcW(h,m,w,l);
+    if(m==WM_DRAWITEM && drawThemedHeaderOwnerItem(h,(LPDRAWITEMSTRUCT)l))
+        return TRUE;
+    if(m==WM_NCDESTROY){
+        HWND overlay=(HWND)GetPropW(h,THEMED_LIST_OVERLAY_PROP);
+        if(overlay && IsWindow(overlay)) DestroyWindow(overlay);
+        RemovePropW(h,THEMED_LIST_OVERLAY_PROP);
+        RemovePropW(h,THEMED_LIST_OLDPROC_PROP);
+        return CallWindowProcW(old,h,m,w,l);
+    }
+    LRESULT r=CallWindowProcW(old,h,m,w,l);
+    if(m==WM_SIZE || m==WM_WINDOWPOSCHANGED || m==WM_SHOWWINDOW)
+        updateThemedHeaderOverlay(h);
+    else if(m==WM_APP_THEME){
+        HWND overlay=(HWND)GetPropW(h,THEMED_LIST_OVERLAY_PROP);
+        if(overlay && IsWindow(overlay)) InvalidateRect(overlay,NULL,TRUE);
+    }
+    return r;
+}
+
+static void ensureThemedHeaderOverlay(HWND list, HWND header){
+    static bool registered=false;
+    if(!registered){
+        WNDCLASSW wc={0};
+        wc.lpfnWndProc=themedHeaderOverlayProc;
+        wc.hInstance=g_hInst;
+        wc.hCursor=LoadCursor(NULL,IDC_ARROW);
+        wc.lpszClassName=THEMED_HEADER_OVERLAY_CLASS;
+        RegisterClassW(&wc);
+        registered=true;
+    }
+    if(!GetPropW(list,THEMED_LIST_OLDPROC_PROP)){
+        WNDPROC old=(WNDPROC)SetWindowLongPtrW(list,GWLP_WNDPROC,
+                                              (LONG_PTR)themedListViewProc);
+        SetPropW(list,THEMED_LIST_OLDPROC_PROP,(HANDLE)old);
+    }
+    HWND overlay=(HWND)GetPropW(list,THEMED_LIST_OVERLAY_PROP);
+    if(!overlay || !IsWindow(overlay)){
+        overlay=CreateWindowExW(WS_EX_NOACTIVATE,
+            THEMED_HEADER_OVERLAY_CLASS,L"",WS_CHILD|WS_VISIBLE,
+            0,0,1,1,GetParent(list),NULL,g_hInst,NULL);
+        SetWindowLongPtrW(overlay,GWLP_USERDATA,(LONG_PTR)header);
+        SetPropW(list,THEMED_LIST_OVERLAY_PROP,(HANDLE)overlay);
+    }
+    updateThemedHeaderOverlay(list);
+}
+
+void applyThemedListView(HWND list){
+    if(!list || !IsWindow(list)) return;
+    ListView_SetBkColor(list,g_theme.surface);
+    ListView_SetTextBkColor(list,g_theme.surface);
+    ListView_SetTextColor(list,g_theme.text);
+
+    HWND header=ListView_GetHeader(list);
+    if(header && IsWindow(header)){
+        SetPropW(header,THEMED_LIST_HEADER_PROP,(HANDLE)1);
+        SetWindowTheme(header,L"",L"");
+        // Wine can ignore NM_CUSTOMDRAW for an empty report header. Opt every
+        // column into the native owner-draw contract; WM_DRAWITEM is delivered
+        // to the ListView and handled by themedListViewProc without changing
+        // sorting, sizing, ordering, or hit testing.
+        int count=Header_GetItemCount(header);
+        for(int i=0;i<count;i++){
+            HDITEMW item={0}; item.mask=HDI_FORMAT;
+            if(Header_GetItem(header,i,&item) && !(item.fmt&HDF_OWNERDRAW)){
+                item.fmt|=HDF_OWNERDRAW;
+                Header_SetItem(header,i,&item);
+            }
+        }
+        if(!GetPropW(header,THEMED_HEADER_OLDPROC_PROP)){
+            WNDPROC old=(WNDPROC)SetWindowLongPtrW(header,GWLP_WNDPROC,
+                                                  (LONG_PTR)themedListHeaderProc);
+            SetPropW(header,THEMED_HEADER_OLDPROC_PROP,(HANDLE)old);
+        }
+        ensureThemedHeaderOverlay(list,header);
+        InvalidateRect(header,NULL,TRUE);
+    }
+    InvalidateRect(list,NULL,TRUE);
+}
+
+bool drawThemedListViewHeader(LPNMCUSTOMDRAW cd, LRESULT* result){
+    if(!cd || !result || cd->hdr.code!=NM_CUSTOMDRAW ||
+       !cd->hdr.hwndFrom || !GetPropW(cd->hdr.hwndFrom,THEMED_LIST_HEADER_PROP))
+        return false;
+
+    if(cd->dwDrawStage==CDDS_PREPAINT){
+        *result=CDRF_NOTIFYITEMDRAW;
+        return true;
+    }
+    if(cd->dwDrawStage!=CDDS_ITEMPREPAINT) return false;
+
+    HDC dc=cd->hdc;
+    RECT rc=cd->rc;
+    HBRUSH bg=CreateSolidBrush(g_theme.surface2);
+    FillRect(dc,&rc,bg);
+    DeleteObject(bg);
+
+    HPEN pen=CreatePen(PS_SOLID,1,g_theme.border);
+    HGDIOBJ oldPen=SelectObject(dc,pen);
+    MoveToEx(dc,rc.left,rc.bottom-1,NULL); LineTo(dc,rc.right,rc.bottom-1);
+    MoveToEx(dc,rc.right-1,rc.top,NULL); LineTo(dc,rc.right-1,rc.bottom);
+    SelectObject(dc,oldPen);
+    DeleteObject(pen);
+
+    wchar_t text[256]={0};
+    HDITEMW item={0};
+    item.mask=HDI_TEXT|HDI_FORMAT;
+    item.pszText=text;
+    item.cchTextMax=(int)(sizeof(text)/sizeof(text[0]));
+    SendMessageW(cd->hdr.hwndFrom,HDM_GETITEMW,(WPARAM)cd->dwItemSpec,(LPARAM)&item);
+
+    RECT tr=rc;
+    tr.left+=S(8); tr.right-=S(8);
+    UINT flags=DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX|DT_END_ELLIPSIS;
+    if((item.fmt&HDF_RTLREADING) || comboHasPersian(text))
+        flags|=DT_RIGHT|DT_RTLREADING;
+    else if((item.fmt&HDF_JUSTIFYMASK)==HDF_CENTER)
+        flags|=DT_CENTER;
+    else if((item.fmt&HDF_JUSTIFYMASK)==HDF_RIGHT)
+        flags|=DT_RIGHT;
+    else
+        flags|=DT_LEFT;
+    SetBkMode(dc,TRANSPARENT);
+    SetTextColor(dc,g_theme.text);
+    HGDIOBJ oldFont=SelectObject(dc,g_fUIB ? g_fUIB : g_fUI);
+    DrawTextW(dc,text,-1,&tr,flags);
+    SelectObject(dc,oldFont);
+
+    *result=CDRF_SKIPDEFAULT;
     return true;
 }
