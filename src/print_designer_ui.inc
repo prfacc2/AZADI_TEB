@@ -1597,10 +1597,20 @@ static void PrintDesigner_OpenCore(HWND hMain){
             return;
         }
     }
-    Breadcrumb(L"print designer: open native editor");
-    // The print designer is entirely in-process: no loopback server, browser,
-    // or optional runtime is needed. Keep one deterministic native path.
-    OpenDesignerWindow(hMain,launch,nullptr);
+    // §1.19.0 (restored v1.68.0): PREFER the HTML/CSS/JS designer opened in the
+    // operator's DEFAULT BROWSER (loopback host + ShellExecute). The real design
+    // editor runs in the browser process — crash-proof, universal (every Windows
+    // has a default browser, no WebView2 runtime needed) and the requested UX
+    // («دیزاین چاپ توی وب باز بشه، پنل C++ باز نشه»). A small native session
+    // tracker stays on screen to reflect save state and end the session. Only if
+    // the browser host genuinely cannot start do we fall back to the in-process
+    // native GDI editor so the feature is never lost.
+    Breadcrumb(L"print designer: try browser designer");
+    bool webOk = WebDesigner_Open(hMain, launch.sectionIds);
+    if(!webOk){
+        Breadcrumb(L"print designer: browser unavailable — native fallback");
+        OpenDesignerWindow(hMain,launch,nullptr);
+    }
     Breadcrumb(L"print designer: closed");
 }
 

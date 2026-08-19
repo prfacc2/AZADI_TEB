@@ -66,6 +66,14 @@
 601 RCDATA "../assets/pages/ping/ping.css"
 602 RCDATA "../assets/pages/ping/ping.js"
 
+// v1.68.0: the redistributable WebView2 loader (x86). Extracted to a per-user
+// writable folder at first use so the embedded Patient-Admission surface can
+// light up the modern Chromium engine on any machine that has the Evergreen
+// runtime (Win10/11 with Edge), without shipping a loose DLL next to the EXE.
+// On machines WITHOUT the runtime the loader's version probe simply fails and
+// the universal MSHTML fallback is used — so this is strictly additive.
+700 RCDATA "../assets/runtime/WebView2Loader.dll"
+
 1 24 "app.manifest"
 
 VS_VERSION_INFO VERSIONINFO

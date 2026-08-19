@@ -38,6 +38,43 @@ static PFN_CreateWebView2Env         pCreateEnv=nullptr;
 static PFN_GetAvailableBrowserVersion pGetVer=nullptr;
 static bool adLoaderTried=false;
 
+// Extract the embedded WebView2Loader.dll (RCDATA 700) to a per-user writable
+// folder and return its full path. The EXE folder is often read-only (Program
+// Files), so we use %LOCALAPPDATA%\DarmanPlus\runtime. Idempotent: a file that
+// already matches the embedded size is reused (no per-launch rewrite churn).
+static std::wstring adExtractLoaderPath(){
+    wchar_t base[MAX_PATH]={0};
+    if(FAILED(SHGetFolderPathW(NULL,CSIDL_LOCAL_APPDATA,NULL,0,base))) return L"";
+    std::wstring dir=base; dir+=L"\\DarmanPlus\\runtime";
+    CreateDirectoryW(dir.c_str(),NULL);   // ok if it already exists
+    std::wstring path=dir+L"\\WebView2Loader.dll";
+
+    // Load the embedded blob so we can (re)write it when missing or truncated.
+    HRSRC hr=FindResourceW(g_hInst,MAKEINTRESOURCEW(700),RT_RCDATA);
+    if(!hr) return L"";
+    DWORD need=SizeofResource(g_hInst,hr);
+    HGLOBAL hg=LoadResource(g_hInst,hr); if(!hg) return L"";
+    void* dat=LockResource(hg); if(!dat||!need) return L"";
+
+    bool write=true;
+    HANDLE ex=CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ,NULL,
+                          OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);
+    if(ex!=INVALID_HANDLE_VALUE){
+        DWORD sz=GetFileSize(ex,NULL);
+        CloseHandle(ex);
+        if(sz==need) write=false;     // unchanged build → reuse the cached copy
+    }
+    if(write){
+        HANDLE hf=CreateFileW(path.c_str(),GENERIC_WRITE,0,NULL,
+                              CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
+        if(hf!=INVALID_HANDLE_VALUE){
+            DWORD wr=0; WriteFile(hf,dat,need,&wr,NULL); CloseHandle(hf);
+            if(wr!=need) return L"";  // partial write → refuse to load it
+        } else return L"";
+    }
+    return path;
+}
+
 static void adLoadLoader(){
     if(adLoaderTried) return; adLoaderTried=true;
     HMODULE m=LoadLibraryW(L"WebView2Loader.dll");
@@ -47,6 +84,15 @@ static void adLoadLoader(){
         std::wstring p=path; size_t s=p.find_last_of(L"\\/"); if(s!=std::wstring::npos) p=p.substr(0,s+1);
         p+=L"WebView2Loader.dll";
         m=LoadLibraryW(p.c_str());
+    }
+    if(!m){
+        // v1.68.0: last resort — the redistributable loader extracted from the
+        // embedded RCDATA blob to a per-user folder. This lights up the modern
+        // Chromium engine on machines that have the Evergreen runtime but no
+        // loose loader DLL beside the EXE (the common case for a single-file
+        // build). A failure here just leaves pCreateEnv NULL → MSHTML fallback.
+        std::wstring extracted=adExtractLoaderPath();
+        if(!extracted.empty()) m=LoadLibraryW(extracted.c_str());
     }
     if(m){
         pCreateEnv=reinterpret_cast<PFN_CreateWebView2Env>(

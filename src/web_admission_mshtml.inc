@@ -334,15 +334,27 @@ static HWND MshtmlAdmission_CreateView(HWND parent){
             g_mshtmlViews.erase(host);
             registered=false;
         }
-        if(v->ipao){ v->ipao->Release(); v->ipao=nullptr; }
-        if(v->wb){ v->wb->Stop(); v->wb->Release(); v->wb=nullptr; }
+        // v1.68.0 CRASH FIX — correct OLE teardown order. Close() must run
+        // BEFORE any interface ref is dropped or the host window is destroyed:
+        // it synchronously deactivates in-place and stops the control, calling
+        // back into the (still-alive) site. Releasing ipao/wb first, or tearing
+        // down the window while Trident still holds queued callbacks, lets a
+        // late callback dispatch into a half-destroyed MshtmlHost vtable → a
+        // call through a wild/freed pointer (the reported 0xC0000005 with
+        // EIP=0xFFxxxxxx, "Fault: <unknown>"). Order: Stop → Close → disconnect
+        // site → release interfaces → release object → destroy window →
+        // release site → delete view.
+        if(v->wb) v->wb->Stop();
         if(v->oleObj){
             v->oleObj->Close(OLECLOSE_NOSAVE);
             v->oleObj->SetClientSite(NULL);
-            v->oleObj->Release(); v->oleObj=nullptr;
         }
+        if(v->ipao){ v->ipao->Release(); v->ipao=nullptr; }
+        if(v->wb){ v->wb->Release(); v->wb=nullptr; }
+        if(v->oleObj){ v->oleObj->Release(); v->oleObj=nullptr; }
         if(IsWindow(host)) DestroyWindow(host);
         site->Release(); delete v;
+        Breadcrumb(L"admission mshtml: create failed → native fallback");
         return nullptr;
     };
 
@@ -494,9 +506,17 @@ static void MshtmlAdmission_Destroy(HWND host){
     { std::lock_guard<std::mutex> lk(g_mshtmlMx);
       auto it=g_mshtmlViews.find(host); if(it!=g_mshtmlViews.end()){ v=it->second; g_mshtmlViews.erase(it); } }
     if(!v) return;
+    // v1.68.0: same correct teardown order as the create-time fail() path —
+    // Close+disconnect first (site alive for deactivation callbacks), then
+    // release interfaces/object, then destroy the window, then release site.
+    if(v->wb) v->wb->Stop();
+    if(v->oleObj){
+        v->oleObj->Close(OLECLOSE_NOSAVE);
+        v->oleObj->SetClientSite(NULL);
+    }
     if(v->ipao){ v->ipao->Release(); v->ipao=nullptr; }
-    if(v->wb){ v->wb->Stop(); v->wb->Release(); v->wb=nullptr; }
-    if(v->oleObj){ v->oleObj->Close(OLECLOSE_NOSAVE); v->oleObj->SetClientSite(NULL); v->oleObj->Release(); v->oleObj=nullptr; }
+    if(v->wb){ v->wb->Release(); v->wb=nullptr; }
+    if(v->oleObj){ v->oleObj->Release(); v->oleObj=nullptr; }
     if(v->site) v->site->Release();
     if(IsWindow(host)) DestroyWindow(host);
     delete v;
