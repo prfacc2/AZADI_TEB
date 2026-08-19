@@ -5,6 +5,27 @@
 
 ---
 
+## 1.68.0 — 2026-08-19 — رفع کرش پذیرش + اتصال طراح چاپ به مرورگر + ردیف‌های فشرده + رفع افت FPS
+
+### Fixed — رفع کرش پذیرش بیمار (0xC0000005 ACCESS_VIOLATION)
+- `src/web_admission_mshtml.inc`: ترتیب تخریب کنترل OLE/MSHTML اصلاح شد. نسخهٔ ۱.۶۷ ابتدا pointerهای ipao/wb را آزاد و پنجره را نابود می‌کرد و سپس `OleClose` را صدا می‌زد؛ یک callback دیررسِ Trident (deactivate/GetExternal) داخل یک MshtmlHost نیمه‌تخریب‌شده دیسپچ می‌شد و از طریق یک vtable آزادشده فراخوانی می‌کرد (همین خطای EIP=0xFFxxxxxx). ترتیب درست اعمال شد: Stop → Close → SetClientSite(NULL) → آزادسازی interfaceها → DestroyWindow → release site. در هر دو مسیر create-time fail() و MshtmlAdmission_Destroy.
+- `src/app.rc` + `src/web_admission_host.inc`: `WebView2Loader.dll` (x86) به‌عنوان RCDATA 700 داخل EXE جاسازی و در اولین استفاده به `%LOCALAPPDATA%\DarmanPlus\runtime` استخراج می‌شود؛ ماشین‌های ویندوز ۱۰/۱۱ با رانتایم Evergreen (Edge) موتور Chromium پایدار را فعال می‌کنند و از مسیر MSHTML عبور می‌کنند. روی سیستم‌های بدون رانتایم، fallback MSHTML اصلاح‌شده باقی می‌ماند.
+
+### Fixed — اتصال طراح چاپ به مرورگر (reconnect)
+- `src/web_designer.h` / `web_designer.cpp`: v1.67 مسیر طراح وب را قطع کرده و فقط پنل نیتیو را باز می‌کرد. نسخهٔ ۱.۶۶ (میزبان loopback + ShellExecute در مرورگر پیش‌فرض) بازیابی شد و `PrintDesigner_OpenCore` (print_designer_ui.inc) دوباره ابتدا طراح مرورگر را ترجیح می‌دهد و فقط در صورت شکست به پنل نیتیو برمی‌گردد.
+
+### Changed — ردیف‌های فشردهٔ Excel-مانند در طراح چاپ
+- `src/print_designer_templates.inc` + `assets/designer/templates.js`: ارتفاع ردیف قالب‌ها از 5.0–6.2mm به 4.0–4.6mm کاهش یافت (به اندازهٔ یک خط 8.5pt + padding کم). موتور چاپ همچنان ردیف را فقط در صورت نیاز (متن چندخطی) بزرگ می‌کند تا فضا از همان اول اشغال نشود. تست floor به 3.8mm به‌روز شد.
+
+### Fixed — رفع افت FPS پنل تنظیمات
+- `src/user_settings.cpp`: سایهٔ sheet مرکزی (gpShadow spread 10 ≈ ۱۰ path fill) در هر WM_PAINT بازرسمی می‌شد و با repaint ناشی از hover ردیف‌ها باعث افت فریم می‌شد. frame ایستا (rails + shadow + sheet) در یک backing DC کش و per-paint blit می‌شود؛ فقط محتوای پویا redraw می‌شود. کش در WM_SIZE/WM_APP_THEME بی‌اعتبار و در destroy آزاد می‌گردد.
+
+### Changed — بازطراحی پذیرش بیمار + پنل مدیریت/CRM
+- `assets/admission/*`: تم سفید با تنوع رنگی حرفه‌ای (هر بخش رنگ متمایز)، صورتحساب و مبلغ نهایی برجسته و خوانا، انیمیشن‌های نوین، حفظ قرارداد پل C++ و محاسبات.
+- پنل مدیریت/CRM: حرفه‌ای‌تر، بدون تداخل ظاهری، انیمیشن/افکت نوین مطابق زبان طراحی ۱.۶۳.۰.
+
+---
+
 ## 1.67.0 — 2026-08-18 — پذیرش مستقل و حرفه‌ای + چاپ پویای خدمات + رفع کامل تداخل‌های ظاهری
 
 ### Fixed — اجرای پذیرش بدون localhost و fallback قطعی

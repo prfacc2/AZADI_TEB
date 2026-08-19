@@ -408,6 +408,55 @@ static void mgLoadEmps(){
     // empSort==2 → created order (oldest first) = natural load order, no change
 }
 // ====================== employee details modal ==============================
+// v1.68.0 PERF — cached card drop-shadow for modal popups.
+// The seven management dialogs each draw gpShadow(spread 22) → 11 GDI+ path
+// fills per WM_PAINT; mgdProc/mrProc repaint on WM_MOUSEMOVE hover, so those
+// 11 fills ran per mouse-move → FPS drop. The shadow depends only on
+// (window size, card rect, dark, rad, spread, alpha) — all static between
+// paints unless the theme/size changes — so it is rendered once into a
+// transparent backing DC and blitted on subsequent paints. Only one modal is
+// open at a time, so a single shared cache suffices.
+static HDC        s_mgShDC  = NULL;
+static HBITMAP    s_mgShBmp = NULL, s_mgShOld = NULL;
+static int        s_mgShW=0, s_mgShH=0, s_mgShDark=-1, s_mgShRad=0, s_mgShSp=0, s_mgShA=0;
+static RECT       s_mgShCard{};
+
+static void mgFreeShadowCache(){
+    if(s_mgShDC && s_mgShOld) SelectObject(s_mgShDC,s_mgShOld);
+    if(s_mgShBmp){ DeleteObject(s_mgShBmp); s_mgShBmp=NULL; }
+    if(s_mgShDC){ DeleteDC(s_mgShDC); s_mgShDC=NULL; }
+    s_mgShW=s_mgShH=0; s_mgShDark=-1;
+}
+// Render the card shadow into a cache (transparent background) once, then blit
+// it onto the paint DC on every subsequent paint. Falls back to a direct
+// gpShadow if allocation fails (low-resource hosts).
+static void gpShadowCached(HDC ref, HDC dc, int W, int H, const RECT& card,
+                           int rad, int spread, int alpha){
+    bool same = s_mgShDC && s_mgShW==W && s_mgShH==H && s_mgShDark==(g_dark?1:0)
+                && s_mgShRad==rad && s_mgShSp==spread && s_mgShA==alpha
+                && memcmp(&s_mgShCard,&card,sizeof(RECT))==0;
+    if(!same){
+        mgFreeShadowCache();
+        s_mgShDC=CreateCompatibleDC(ref);
+        s_mgShBmp=CreateCompatibleBitmap(ref,W,H);
+        if(!s_mgShDC||!s_mgShBmp){ mgFreeShadowCache();
+            gpShadow(dc,card,rad,spread,alpha); return; }
+        s_mgShOld=(HBITMAP)SelectObject(s_mgShDC,s_mgShBmp);
+        // Clear the cache to the page scrim colour + scrim wash, then render
+        // the card shadow once. Subsequent paints just blit this surface (the
+        // 11 GDI+ path fills run once, not per hover repaint). The blit covers
+        // the same scrim pixels the dialog already painted, so it is seamless.
+        RECT all={0,0,W,H};
+        { HBRUSH sb=CreateSolidBrush(g_dark?RGB(6,9,14):RGB(28,36,48));
+          FillRect(s_mgShDC,&all,sb); DeleteObject(sb); }
+        gpFillAlpha(s_mgShDC,all,0,g_dark?RGB(0,0,0):RGB(20,28,40),120);
+        gpShadow(s_mgShDC,card,rad,spread,alpha);
+        s_mgShW=W; s_mgShH=H; s_mgShDark=g_dark?1:0; s_mgShRad=rad;
+        s_mgShSp=spread; s_mgShA=alpha; s_mgShCard=card;
+    }
+    BitBlt(dc,0,0,W,H,s_mgShDC,0,0,SRCCOPY);
+}
+
 #define MGD_CLASS L"AzEmpDetail"
 struct DetailState { EmpRow row; int hot; int paper; };
 static HWND s_mgd=NULL; static DetailState* s_dt=NULL;
@@ -522,7 +571,8 @@ static LRESULT CALLBACK mgdProc(HWND h, UINT m, WPARAM w, LPARAM l){
           FillRect(dc,&rc,sb); DeleteObject(sb); }
         gpFillAlpha(dc,rc,0,g_dark?RGB(0,0,0):RGB(20,28,40),120);
         RECT c=mgdCard(h);
-        gpShadow(dc,c,S(20),S(22),80);
+        // v1.68.0: cached card shadow (11 GDI+ path fills) instead of per-paint.
+        gpShadowCached(dc0,dc,rc.right,rc.bottom,c,S(20),S(22),80);
         gpGradRoundRectBg(dc,c,S(18),g_theme.surfaceTop,g_theme.surface,g_theme.border,
             g_dark?RGB(6,9,14):RGB(28,36,48));
         SetBkMode(dc,TRANSPARENT);
@@ -702,7 +752,7 @@ static LRESULT CALLBACK mrProc(HWND h, UINT m, WPARAM w, LPARAM l){
           FillRect(dc,&rc,sb); DeleteObject(sb); }
         gpFillAlpha(dc,rc,0,g_dark?RGB(0,0,0):RGB(20,28,40),120);
         RECT c=mrCard(h);
-        gpShadow(dc,c,S(20),S(22),80);
+        gpShadowCached(dc0,dc,rc.right,rc.bottom,c,S(20),S(22),80);
         gpGradRoundRectBg(dc,c,S(18),g_theme.surfaceTop,g_theme.surface,g_theme.border,
             g_dark?RGB(6,9,14):RGB(28,36,48));
         SetBkMode(dc,TRANSPARENT);
@@ -936,7 +986,7 @@ static LRESULT CALLBACK prProc(HWND h, UINT m, WPARAM w, LPARAM l){
           FillRect(dc,&rc,sb); DeleteObject(sb); }
         gpFillAlpha(dc,rc,0,g_dark?RGB(0,0,0):RGB(20,28,40),120);
         RECT c=prCard(h);
-        gpShadow(dc,c,S(20),S(22),80);
+        gpShadowCached(dc0,dc,rc.right,rc.bottom,c,S(20),S(22),80);
         gpGradRoundRectBg(dc,c,S(18),g_theme.surfaceTop,g_theme.surface,g_theme.border,
             g_dark?RGB(6,9,14):RGB(28,36,48));
         SetBkMode(dc,TRANSPARENT);
@@ -1452,7 +1502,7 @@ static LRESULT CALLBACK mmProc(HWND h, UINT m, WPARAM w, LPARAM l){
           FillRect(dc,&rc,sb); DeleteObject(sb); }
         gpFillAlpha(dc,rc,0,g_dark?RGB(0,0,0):RGB(20,28,40),120);
         RECT c=mmCard(h);
-        gpShadow(dc,c,S(20),S(22),80);
+        gpShadowCached(dc0,dc,rc.right,rc.bottom,c,S(20),S(22),80);
         gpGradRoundRectBg(dc,c,S(18),g_theme.surfaceTop,g_theme.surface,g_theme.border,
             g_dark?RGB(6,9,14):RGB(28,36,48));
         SetBkMode(dc,TRANSPARENT);
@@ -1811,7 +1861,7 @@ static LRESULT CALLBACK neProc(HWND h, UINT m, WPARAM w, LPARAM l){
           FillRect(dc,&rc,sb); DeleteObject(sb); }
         gpFillAlpha(dc,rc,0,g_dark?RGB(0,0,0):RGB(20,28,40),120);
         RECT c=neCard(h);
-        gpShadow(dc,c,S(20),S(22),80);
+        gpShadowCached(dc0,dc,rc.right,rc.bottom,c,S(20),S(22),80);
         gpGradRoundRectBg(dc,c,S(18),g_theme.surfaceTop,g_theme.surface,g_theme.border,
             g_dark?RGB(6,9,14):RGB(28,36,48));
         SetBkMode(dc,TRANSPARENT);
@@ -2018,7 +2068,7 @@ static LRESULT CALLBACK npProc(HWND h, UINT m, WPARAM w, LPARAM l){
           FillRect(dc,&rc,sb); DeleteObject(sb); }
         gpFillAlpha(dc,rc,0,g_dark?RGB(0,0,0):RGB(20,28,40),120);
         RECT c=npCard(h);
-        gpShadow(dc,c,S(20),S(22),80);
+        gpShadowCached(dc0,dc,rc.right,rc.bottom,c,S(20),S(22),80);
         gpGradRoundRectBg(dc,c,S(18),g_theme.surfaceTop,g_theme.surface,g_theme.border,
             g_dark?RGB(6,9,14):RGB(28,36,48));
         SetBkMode(dc,TRANSPARENT);
@@ -2584,7 +2634,7 @@ static LRESULT CALLBACK pcProc(HWND h, UINT m, WPARAM w, LPARAM l){
           FillRect(dc,&rc,sb); DeleteObject(sb); }
         gpFillAlpha(dc,rc,0,g_dark?RGB(0,0,0):RGB(20,28,40),120);
         RECT c=pcCard(h);
-        gpShadow(dc,c,S(20),S(22),80);
+        gpShadowCached(dc0,dc,rc.right,rc.bottom,c,S(20),S(22),80);
         gpGradRoundRectBg(dc,c,S(18),g_theme.surfaceTop,g_theme.surface,g_theme.border,
             g_dark?RGB(6,9,14):RGB(28,36,48));
         SetBkMode(dc,TRANSPARENT);
@@ -3766,6 +3816,7 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
 #endif
         return 0; }
     case WM_NCDESTROY: if(g_hManage==h) g_hManage=NULL;
+        mgFreeShadowCache();   // v1.68.0: release cached modal shadow DC
         if(s_mg){ delete s_mg->ptAll; s_mg->ptAll=nullptr;
                   delete s_mg; s_mg=NULL; } break;
     case WM_SIZE: if(s_mg) mgLayout(h); return 0;
@@ -3779,6 +3830,7 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             applyThemedListView(s_mg->ptList);
             applyThemedListView(s_mg->svList);
         }
+        mgFreeShadowCache();   // v1.68.0: shadow cache is theme-coloured
         InvalidateRect(h,NULL,TRUE); return 0;
     case WM_CTLCOLOREDIT:{ HDC dc=(HDC)w; SetTextColor(dc,g_theme.inputText);
         SetBkColor(dc,g_theme.inputBg); return (LRESULT)g_brInput; }
