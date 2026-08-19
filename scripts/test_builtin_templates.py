@@ -8,7 +8,9 @@ Validates BOTH sides of the ready-made-template contract:
 
 The single invariant that matters for the bug this architecture was written to
 kill («خدمات چاپ نمی‌شود»): every one of the 30 designs owns exactly ONE live
-services table and ONE barcode; all presets include authoritative name,
+services table and AT MOST ONE barcode/code carrier (v1.69.0: some designs now
+carry no code at all, so the carrier count is 0 or 1, never 2); all presets
+include authoritative name,
 description, quantity, and line-amount columns; runtime rows stay compact,
 wrap prose, and never pad the page with fake/example services.
 """
@@ -308,10 +310,10 @@ for pos, match in enumerate(cases):
     arm = build[match.end() : end]
     n = len(re.findall(r"\bservicesBlock(?:At)?\s*\(", arm))
     check(n == 1, f"family {fam} must call servicesBlock*() exactly once; got {n}")
-    # A family either calls one of the four shared footer builders, or (family 3,
-    # the sidebar layout) paints its own barcode band inside the sidebar column.
+    # A family either calls one of the shared footer builders (incl. the v1.69.0
+    # no-code footClean), or (family 3 / family 8) paints its own barcode band.
     check(
-        re.search(r"\bfoot(?:Barcode|Centered|Dual|Minimal)\s*\(", arm) is not None
+        re.search(r"\bfoot(?:Barcode|Centered|Dual|Minimal|Clean)\s*\(", arm) is not None
         or "mkBarcode(" in arm,
         f"family {fam} reserves no footer / barcode band",
     )
@@ -423,8 +425,8 @@ if js_designs:
             f"{tag} must own exactly one dynamic services table; got {d['svcCount']}",
         )
         check(
-            d["barcodeCount"] == 1,
-            f"{tag} must own exactly one barcode/code carrier; got {d['barcodeCount']}",
+            d["barcodeCount"] <= 1,
+            f"{tag} must own at most one barcode/code carrier; got {d['barcodeCount']}",
         )
         if d["svcCount"] != 1:
             continue
@@ -459,6 +461,20 @@ if js_designs:
             f"{tag} bleeds off the printable height ({d['minY']:.1f}..{d['maxY']:.1f})",
         )
         check(d["items"] >= 18, f"{tag} looks under-designed ({d['items']} items)")
+
+    # v1.69.0 — the 30 designs must be VISUALLY DISTINCT, not mere colour swaps.
+    # Each family's three variants get a different services-table height (a direct
+    # consequence of differing meta/patient/totals/footer blocks), and the code
+    # carrier is mixed: some barcoded, some deliberately code-less.
+    no_code = sum(1 for d in js_designs if d["barcodeCount"] == 0)
+    with_code = sum(1 for d in js_designs if d["barcodeCount"] == 1)
+    check(no_code >= 5 and with_code >= 10,
+          f"code-carrier variety lost: {no_code} code-less, {with_code} barcoded")
+    for fam in range(10):
+        hs = sorted(round(d["h"], 1) for i, d in enumerate(js_designs)
+                    if len(specs) == 30 and specs[i]["family"] == fam)
+        check(len(set(hs)) == 3,
+              f"family {fam} variants are not layout-distinct (services heights {hs})")
 
 # ===========================================================================
 # 3. Runtime renderer and admission canonicalization guards
@@ -726,6 +742,7 @@ print("PASS: 8 presets all include name + description + quantity + line amount")
 for note in notes:
     print(note)
 print("PASS: 30 specs = 10 distinct layout families x 3 variants, legible pitch/borders")
+print("PASS: all 30 designs are layout-distinct (per-family variant heights differ) + mixed code carrier")
 print("PASS: all 30 designs carry their Persian name (no more blank gallery cards)")
 print("PASS: every family emits exactly one live PIT_SERVICES table + a footer band")
 print("PASS: runtime service rows are compact, wrapped, bounded, and never sample-padded")

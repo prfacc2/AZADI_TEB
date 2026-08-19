@@ -157,6 +157,13 @@ struct TabPage {
     // ---- v1.25.0: bottom tab area ----
     HWND bAddUnpaid, bAddQueue, chkNoPay;
     int  bottomTab;                   // 0 = صندوق نرفته‌ها, 1 = صف پذیرش
+    //  v1.69.0: interactive row state for the redesigned cash-desk / queue panel.
+    //  upHotIdx  — s_upRows index under the cursor (-1 none) for row hover.
+    //  upSelRaw  — raw line of the SELECTED row (empty = none). Stored as the
+    //  raw line (not an index) so the selection survives a cache reload / tab
+    //  data change without ever pointing at the wrong patient.
+    int  upHotIdx;
+    std::wstring upSelRaw;
     // ---- v1.26.0: unpaid-box panel toolbar controls ----
     HWND eUpDate;    HWND cUpHours;   HWND bUpRefresh;
     HWND chkIns;             // «دارای بیمه» — کنار کد ملی، پیش‌فرض تیک‌خورده
@@ -207,7 +214,7 @@ struct TabPage {
     std::wstring lastMsg; COLORREF msgCol;
     TabPage():page(0),kind(TK_RECEPTION),svcPanelOpen(false),
         svcCollapsed(true),upCollapsed(true),
-        svcHotRow(-1),svcHotBtn(0),bottomTab(0),web(0),
+        svcHotRow(-1),svcHotBtn(0),bottomTab(0),upHotIdx(-1),web(0),
         total(0),mainShare(0),patientShare(0),
         baseDiff(0),orgShare(0),paid(0),detached(false),autoPrice(false),
         idChecked(false),idVerified(false),
@@ -265,7 +272,26 @@ static void drawCollapseCaret(HDC dc, RECT r, bool collapsed, COLORREF col){
     SelectObject(dc,op); DeleteObject(pn);
     SelectObject(dc,ob); DeleteObject(br);
 }
-struct UpHit { RECT del; int idx; };                  // idx into the loaded rows
+// v1.69.0: small filled triangle ▲/▼ for the queue move-up / move-down row
+// actions. Font arrows are unreliable in Vazirmatn (render as blank tofu), so
+// a polygon is used — same approach as drawCollapseCaret. up=true → ▲.
+static void drawArrowBtn(HDC dc, RECT r, bool up, COLORREF col){
+    int cx=(r.left+r.right)/2, cy=(r.top+r.bottom)/2;
+    int s=(r.right-r.left)/3; if(s<3) s=3;
+    HBRUSH br=CreateSolidBrush(col); HGDIOBJ ob=SelectObject(dc,br);
+    HPEN   pn=CreatePen(PS_SOLID,1,col); HGDIOBJ op=SelectObject(dc,pn);
+    POINT pts[3];
+    if(up){   pts[0]={cx-s,cy+s}; pts[1]={cx+s,cy+s}; pts[2]={cx,cy-s}; }
+    else  {   pts[0]={cx-s,cy-s}; pts[1]={cx+s,cy-s}; pts[2]={cx,cy+s}; }
+    Polygon(dc,pts,3);
+    SelectObject(dc,op); DeleteObject(pn);
+    SelectObject(dc,ob); DeleteObject(br);
+}
+// v1.69.0: per-row hit map for the redesigned cash-desk / queue table. `row` is
+// the whole row body (click = select). edit/up/down/del are the operation icons;
+// up/down are only populated for the SELECTED row (progressive disclosure), so
+// for other rows they stay zeroed and PtInRect() returns false. idx → s_upRows.
+struct UpHit { RECT row, edit, up, down, del; int idx; };
 static std::vector<UpHit> s_upHits;
 // one parsed line of unpaid_box.dat / recept_queue.dat
 struct UpRow {
@@ -278,7 +304,8 @@ struct UpRow {
 };
 static std::vector<UpRow> s_upRows;      // rows of the ACTIVE bottom tab
 static int  s_upLoadedTab = -1;          // which tab s_upRows holds (-1 = dirty)
-static void upMarkDirty(){ s_upLoadedTab = -1; }
+static int  s_upCount[2]={-1,-1};        // v1.69: cached item count per tab (-1 dirty)
+static void upMarkDirty(){ s_upLoadedTab = -1; s_upCount[0]=s_upCount[1]=-1; }
 static std::wstring upFileFor(int tab){
     return dataDir() + (tab==0 ? L"\\unpaid_box.dat" : L"\\recept_queue.dat");
 }
@@ -312,7 +339,25 @@ static void upLoad(int tab){
         while(!ln.empty() && (ln.back()==L'\r'||ln.back()==L'\n')) ln.pop_back();
         UpRow r; if(upParse(ln,r)) s_upRows.push_back(r);
     }
+    s_upCount[tab]=(int)s_upRows.size();
     s_upLoadedTab=tab;
+}
+// v1.69.0: cached item count for EITHER bottom tab (drives the tab count badges).
+// Read from disk only when the cache is dirty — never on every WM_PAINT. When the
+// requested tab is already the live-loaded one, the count is free (s_upRows.size).
+static int upCount(int tab){
+    if(tab<0||tab>1) return 0;
+    if(s_upCount[tab]>=0) return s_upCount[tab];
+    if(s_upLoadedTab==tab){ s_upCount[tab]=(int)s_upRows.size(); return s_upCount[tab]; }
+    std::wstring txt=readFileUtf8(upFileFor(tab));
+    int n=0; size_t p=0;
+    while(p<txt.size()){
+        size_t e=txt.find(L'\n',p); if(e==std::wstring::npos) e=txt.size();
+        std::wstring ln=txt.substr(p,e-p); p=e+1;
+        while(!ln.empty() && (ln.back()==L'\r'||ln.back()==L'\n')) ln.pop_back();
+        UpRow r; if(upParse(ln,r)) n++;
+    }
+    s_upCount[tab]=n; return n;
 }
 // remove one raw line from the tab's data file, then mark the cache dirty.
 static void upDeleteRaw(int tab, const std::wstring& raw){
@@ -334,6 +379,156 @@ static std::wstring upNowHHMM(){
     SYSTEMTIME st; GetLocalTime(&st);
     wchar_t b[8]; swprintf(b,8,L"%02d:%02d",st.wHour,st.wMinute);
     return toFaDigits(b);
+}
+
+// v1.69.0: swap two raw lines in the tab's data file — the queue "move up / move
+// down" action. Each raw line is unique (it carries an epoch), so we swap the
+// first occurrence of each; the file format is otherwise untouched.
+static void upSwapRaw(int tab, const std::wstring& a, const std::wstring& b){
+    if(a.empty()||b.empty()||a==b) return;
+    std::wstring txt=readFileUtf8(upFileFor(tab)), out;
+    bool didA=false, didB=false; size_t p=0;
+    while(p<txt.size()){
+        size_t e=txt.find(L'\n',p); if(e==std::wstring::npos) e=txt.size();
+        std::wstring ln=txt.substr(p,e-p); p=e+1;
+        std::wstring cl=ln;
+        while(!cl.empty() && (cl.back()==L'\r'||cl.back()==L'\n')) cl.pop_back();
+        if(!didA && cl==a){ out+=b+L"\n"; didA=true; continue; }
+        if(!didB && cl==b){ out+=a+L"\n"; didB=true; continue; }
+        if(!cl.empty()) out+=cl+L"\n";
+    }
+    writeFileUtf8(upFileFor(tab), out, false);
+    upMarkDirty();
+}
+// v1.69.0: replace one raw line with a rebuilt line — used by «ویرایش» to change
+// the patient name while preserving every other field (q / tag / paid / date …).
+static void upReplaceLine(int tab, const std::wstring& oldRaw, const std::wstring& newRaw){
+    if(oldRaw.empty()||oldRaw==newRaw) return;
+    std::wstring txt=readFileUtf8(upFileFor(tab)), out;
+    bool done=false; size_t p=0;
+    while(p<txt.size()){
+        size_t e=txt.find(L'\n',p); if(e==std::wstring::npos) e=txt.size();
+        std::wstring ln=txt.substr(p,e-p); p=e+1;
+        std::wstring cl=ln;
+        while(!cl.empty() && (cl.back()==L'\r'||cl.back()==L'\n')) cl.pop_back();
+        if(!done && cl==oldRaw){ out+=newRaw+L"\n"; done=true; continue; }
+        if(!cl.empty()) out+=cl+L"\n";
+    }
+    writeFileUtf8(upFileFor(tab), out, false);
+    upMarkDirty();
+}
+// rebuild a raw line with a new patient name (pipe-field index 2), keeping the
+// rest of the line byte-for-byte. Falls back to the original if there are too
+// few fields to rebuild safely.
+static std::wstring upRebuildLine(const UpRow& r, const std::wstring& newName){
+    std::vector<std::wstring> f; size_t p=0;
+    while(p<=r.raw.size()){
+        size_t e=r.raw.find(L'|',p); if(e==std::wstring::npos) e=r.raw.size();
+        f.push_back(r.raw.substr(p,e-p)); p=e+1;
+        if(e==r.raw.size()) break;
+    }
+    if(f.size()<4) return r.raw;
+    f[2]=newName;
+    std::wstring out; for(size_t i=0;i<f.size();i++){ if(i) out+=L'|'; out+=f[i]; }
+    return out;
+}
+
+// v1.69.0: a tiny self-contained MODAL popup to edit one text field (the patient
+// name on a cash-desk / queue row). The app uses NO Win32 dialog templates, so
+// this builds a themed popup window with a real EDIT child + flat OK/Cancel
+// buttons and runs a nested message loop — exactly what MessageBoxW does. The
+// owner is disabled for the duration so the edit is truly modal.
+struct UpEditState { std::wstring val; bool ok; bool done;
+                     HWND edit, bOk, bCancel; };
+static LRESULT CALLBACK upEditProc(HWND h, UINT m, WPARAM w, LPARAM l){
+    UpEditState* s=(UpEditState*)GetWindowLongPtrW(h,GWLP_USERDATA);
+    switch(m){
+    case WM_ERASEBKGND: return 1;
+    case WM_CTLCOLOREDIT:
+    case WM_CTLCOLORLISTBOX:
+        SetTextColor((HDC)w,g_theme.inputText); SetBkColor((HDC)w,g_theme.inputBg);
+        return (LRESULT)g_brInput;
+    case WM_PAINT: {
+        PAINTSTRUCT ps; HDC dc0=BeginPaint(h,&ps);
+        RECT rc; GetClientRect(h,&rc);
+        HDC dc=CreateCompatibleDC(dc0);
+        HBITMAP bmp=CreateCompatibleBitmap(dc0,rc.right,rc.bottom);
+        HGDIOBJ obm=SelectObject(dc,bmp);
+        { HBRUSH bb=CreateSolidBrush(g_theme.bg); FillRect(dc,&rc,bb); DeleteObject(bb); }
+        SetBkMode(dc,TRANSPARENT);
+        SelectObject(dc,g_fLabel); SetTextColor(dc,g_theme.labelInk);
+        RECT lr={S(16),S(14),rc.right-S(16),S(14)+S(22)};
+        DrawTextW(dc,L"نام بیمار:",-1,&lr,
+            DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+        // recessed well behind the EDIT (same language as the reception form)
+        if(s && s->edit){
+            RECT er; GetWindowRect(s->edit,&er);
+            POINT a={er.left,er.top}, b={er.right,er.bottom};
+            ScreenToClient(h,&a); ScreenToClient(h,&b);
+            RECT well={a.x,a.y,b.x,b.y}; InflateRect(&well,S(6),S(5));
+            gpGradRoundRectBg(dc,well,S(8),
+                blendColor(g_theme.inputBg,g_theme.border,g_dark?26:34),
+                g_theme.inputBg,g_theme.border,g_theme.bg);
+        }
+        BitBlt(dc0,0,0,rc.right,rc.bottom,dc,0,0,SRCCOPY);
+        SelectObject(dc,obm); DeleteObject(bmp); DeleteDC(dc);
+        EndPaint(h,&ps); return 0; }
+    case WM_COMMAND:
+        if(s){
+            if(LOWORD(w)==IDOK){            // تأیید
+                int len=GetWindowTextLengthW(s->edit);
+                std::wstring v;
+                if(len>0){ v.resize((size_t)len+1);
+                    int got=GetWindowTextW(s->edit,&v[0],len+1);
+                    v.resize(got>0?(size_t)got:0); }
+                s->val=v; s->ok=true; s->done=true; DestroyWindow(h);
+            } else if(LOWORD(w)==IDCANCEL){  // انصراف
+                s->done=true; DestroyWindow(h);
+            }
+        }
+        return 0;
+    case WM_CLOSE:
+        if(s) s->done=true;
+        DestroyWindow(h); return 0;
+    }
+    return DefWindowProcW(h,m,w,l);
+}
+static bool upEditName(HWND owner, const wchar_t* title, std::wstring& val){
+    static bool reg=false;
+    if(!reg){ WNDCLASSW wc={0}; wc.lpfnWndProc=upEditProc; wc.hInstance=g_hInst;
+        wc.hCursor=LoadCursor(NULL,IDC_ARROW); wc.lpszClassName=L"AzUpEdit";
+        RegisterClassW(&wc); reg=true; }
+    UpEditState st{}; st.val=val;
+    int w=S(400), hgt=S(180);
+    RECT or_; GetWindowRect(owner,&or_);
+    int x=or_.left+((or_.right-or_.left)-w)/2;
+    int y=or_.top+((or_.bottom-or_.top)-hgt)/2;
+    HWND pw=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW, L"AzUpEdit", title,
+        WS_POPUP|WS_CAPTION|WS_SYSMENU, x,y,w,hgt, owner,NULL,g_hInst,NULL);
+    SetWindowLongPtrW(pw,GWLP_USERDATA,(LONG_PTR)&st);
+    DWORD es=WS_CHILD|WS_VISIBLE|WS_TABSTOP|ES_AUTOHSCROLL|ES_RIGHT;
+    st.edit=CreateWindowExW(0,L"EDIT",val.c_str(),es,
+        S(16),S(44),w-S(32),S(36), pw,(HMENU)10, g_hInst,NULL);
+    SendMessageW(st.edit,WM_SETFONT,(WPARAM)g_fUI,TRUE);
+    enableAutoDir(st.edit);
+    int bw=S(96), bh=S(38), gap=S(12);
+    st.bOk    = createFlatButton(pw,IDOK,   L"تأیید",   ICO_CHECK,BS_PRIMARY,
+        w-S(16)-bw,           S(100), bw, bh);
+    st.bCancel= createFlatButton(pw,IDCANCEL,L"انصراف",ICO_X,     BS_OUTLINE,
+        w-S(16)-2*bw-gap,     S(100), bw, bh);
+    setFlatButtonBg(st.bOk,     g_theme.bg);
+    setFlatButtonBg(st.bCancel, g_theme.bg);
+    ShowWindow(pw,SW_SHOW); UpdateWindow(pw);
+    SetFocus(st.edit); SendMessageW(st.edit,EM_SETSEL,0,-1);
+    EnableWindow(owner,FALSE);
+    MSG msg;
+    while(!st.done && GetMessageW(&msg,NULL,0,0)>0){
+        if(!IsDialogMessageW(pw,&msg)){ TranslateMessage(&msg); DispatchMessageW(&msg); }
+    }
+    EnableWindow(owner,TRUE);
+    SetActiveWindow(owner);
+    if(st.ok) val=st.val;
+    return st.ok;
 }
 
 // metrics
@@ -996,7 +1191,9 @@ static void tabPageLayout(HWND h, TabPage* t){
         int upL=bp.upL+in, upR=bp.upR-in;
         int refW=S(30), hrsW=S(52), dtW=S(88);
         // RTL order: [search………] [تاریخ تا] [ساعت▼] [⟳]  — search fills the rest
-        int x2=upL;
+        int upW=upR-upL;
+        int fchip=(upW>S(360))?S(48):0;     // painted «فیلتر» chip (see WM_PAINT)
+        int x2=upL+(fchip?fchip+S(8):0);
         MoveWindow(t->bUpRefresh, x2, Y(v.upToolY), refW, rh, TRUE); x2+=refW+S(6);
         MoveWindow(t->cUpHours,   x2, Y(v.upToolY), hrsW, S(200), TRUE); x2+=hrsW+S(6);
         MoveWindow(t->eUpDate,    x2, Y(v.upToolY), dtW, rh, TRUE); x2+=dtW+S(6);
@@ -3037,11 +3234,22 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             int hb=cartBtnHit(pt);
             if(hb!=t->cartHotBtn){ t->cartHotBtn=hb; InvalidateRect(h,NULL,FALSE); }
             TRACKMOUSEEVENT te={sizeof(te),TME_LEAVE,h,0}; TrackMouseEvent(&te);
+        } else if(t && t->kind==TK_RECEPTION){
+            // v1.69.0: hover the cash-desk / queue rows for a highlight wash.
+            POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};
+            int hit=-1;
+            for(int i=0;i<(int)s_upHits.size();i++)
+                if(PtInRect(&s_upHits[i].row,pt)){ hit=s_upHits[i].idx; break; }
+            if(hit!=t->upHotIdx){ t->upHotIdx=hit; InvalidateRect(h,NULL,FALSE); }
+            TRACKMOUSEEVENT te={sizeof(te),TME_LEAVE,h,0}; TrackMouseEvent(&te);
         }
         break; }
     case WM_MOUSELEAVE:
         if(t && t->kind==TK_PORTAL && t->cartHotBtn){
             t->cartHotBtn=0; InvalidateRect(h,NULL,FALSE);
+        }
+        if(t && t->kind==TK_RECEPTION && t->upHotIdx!=-1){
+            t->upHotIdx=-1; InvalidateRect(h,NULL,FALSE);
         }
         break;
     case WM_RBUTTONDOWN: {
@@ -3121,6 +3329,7 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 if(PtInRect(&s_upTabR[k],pt)){
                     if(t->bottomTab!=k){
                         t->bottomTab=k; upMarkDirty();
+                        t->upSelRaw.clear(); t->upHotIdx=-1;
                         InvalidateRect(h,NULL,FALSE);
                     }
                     return 0;
@@ -3133,21 +3342,57 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
                                BN_CLICKED),0);
                 return 0;
             }
-            // 5) trash icon on an unpaid/queue row → confirm + delete the line
+            // 5) v1.69.0 — row operations on the cash-desk / queue table. The hit
+            //    map carries per-row rects: up/down (selected row only), edit, del,
+            //    and the row body (click = select). Each acts on the row it sits on.
             for(int i=0;i<(int)s_upHits.size();i++){
-                if(PtInRect(&s_upHits[i].del,pt)){
-                    int idx=s_upHits[i].idx;
-                    if(idx>=0 && idx<(int)s_upRows.size()){
-                        std::wstring nm=s_upRows[idx].name;
-                        std::wstring q2=L"«"+nm+L"» از فهرست حذف شود؟";
-                        if(MessageBoxW(h,q2.c_str(),
-                            t->bottomTab==0?L"حذف از صندوق نرفته‌ها":L"حذف از صف پذیرش",
-                            MB_YESNO|MB_ICONQUESTION)==IDYES){
-                            upDeleteRaw(t->bottomTab,s_upRows[idx].raw);
-                            t->lastMsg=L"ردیف حذف شد."; t->msgCol=g_theme.textDim;
-                            InvalidateRect(h,NULL,FALSE);
-                        }
+                int idx=s_upHits[i].idx;
+                if(idx<0 || idx>=(int)s_upRows.size()) continue;
+                const UpRow& rrow=s_upRows[idx];
+                // move up / down (queue reorder) — swap raw lines; selection follows
+                if(PtInRect(&s_upHits[i].up,pt) || PtInRect(&s_upHits[i].down,pt)){
+                    bool mvUp=PtInRect(&s_upHits[i].up,pt);
+                    int tgt=i+(mvUp?-1:1);          // s_upHits is in display order
+                    if(tgt>=0 && tgt<(int)s_upHits.size()){
+                        upSwapRaw(t->bottomTab,rrow.raw,
+                                  s_upRows[s_upHits[tgt].idx].raw);
+                        t->lastMsg= mvUp?L"نوبت به بالا منتقل شد."
+                                        :L"نوبت به پایین منتقل شد.";
+                        t->msgCol=g_theme.textDim;
                     }
+                    InvalidateRect(h,NULL,FALSE);
+                    return 0;
+                }
+                // edit patient name (modal popup) -> rebuild + replace the line
+                if(PtInRect(&s_upHits[i].edit,pt)){
+                    std::wstring nm=rrow.name;
+                    if(upEditName(h,L"ویرایش نام بیمار",nm) && !trim(nm).empty()){
+                        upReplaceLine(t->bottomTab,rrow.raw,upRebuildLine(rrow,trim(nm)));
+                        t->upSelRaw.clear();
+                        t->lastMsg=L"نام بیمار ویرایش شد."; t->msgCol=g_theme.textDim;
+                        InvalidateRect(h,NULL,FALSE);
+                    }
+                    return 0;
+                }
+                // delete (confirm) -> remove the line
+                if(PtInRect(&s_upHits[i].del,pt)){
+                    std::wstring q2=L"«"+rrow.name+L"» از فهرست حذف شود؟";
+                    if(MessageBoxW(h,q2.c_str(),
+                        t->bottomTab==0?L"حذف از صندوق نرفته‌ها":L"حذف از صف پذیرش",
+                        MB_YESNO|MB_ICONQUESTION)==IDYES){
+                        upDeleteRaw(t->bottomTab,rrow.raw);
+                        t->upSelRaw.clear();
+                        t->lastMsg=L"ردیف حذف شد."; t->msgCol=g_theme.textDim;
+                        InvalidateRect(h,NULL,FALSE);
+                    }
+                    return 0;
+                }
+            }
+            // 6) click on a row body (not an icon) -> select that row
+            for(int i=0;i<(int)s_upHits.size();i++){
+                if(PtInRect(&s_upHits[i].row,pt)){
+                    t->upSelRaw=s_upRows[s_upHits[i].idx].raw;
+                    InvalidateRect(h,NULL,FALSE);
                     return 0;
                 }
             }
@@ -3569,47 +3814,105 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             int upL=bp.upL+in, upR=bp.upR-in, upW=upR-upL;
             RECT ur={bp.upL,Y(v.bTop),bp.upR,Y(v.bBot)};
             cardShell(ur);
-            // ---- flat desktop tabs: صندوق نرفته ها | صف پذیرش (RTL order) ----
-            { int tw=S(120), th=S(26);
-              RECT t0={upR-tw,Y(v.upTabY),upR,Y(v.upTabY)+th};              // صندوق نرفته‌ها
-              RECT t1={upR-2*tw-S(4),Y(v.upTabY),upR-tw-S(4),Y(v.upTabY)+th}; // صف پذیرش
+            // ---- v1.69.0 PANEL HEADER: segmented tabs (right) + RED close (left)
+            //      on a faint header band. The two tabs are clearly divided pills
+            //      (icon + label + count badge); the red x collapses the panel and
+            //      becomes an expand chevron when collapsed. Manual RTL layout. ----
+            { int bandH=S(34);
+              int bandT=Y(v.upTabY)-S(2), bandB=bandT+bandH;
+              RECT hbar={upL,bandT,upR,bandB};
+              gpFillAlpha(dc,hbar,S(10),g_theme.surface2,g_dark?58:40);
+              gpLine(dc,upL+S(6),bandB-S(1),upR-S(6),bandB-S(1),
+                     g_theme.border,1.0f,120);
+              // -- red close / expand toggle (far LEFT = visual end) --
+              int clsS=S(30), clsY=bandT+(bandH-clsS)/2;
+              RECT cls={upL+S(2),clsY,upL+S(2)+clsS,clsY+clsS};
+              s_upToggleR=cls;                 // toggles upCollapsed (hit-tested)
+              if(!t->upCollapsed){
+                  // expanded -> RED close pill (the close button is RED)
+                  gpShadowColor(dc,cls,S(8),S(5),82,g_theme.danger);
+                  gpGradRoundRectBg(dc,cls,S(8),
+                      blendColor(g_theme.danger,g_theme.accentText,16),
+                      g_theme.danger,CLR_INVALID,g_theme.bg);
+                  RECT cli=cls; InflateRect(&cli,-S(7),-S(7));
+                  drawIcon(dc,ICO_X,cli,g_theme.accentText,S(2));
+              } else {
+                  // collapsed -> accent expand chevron
+                  gpGradRoundRectBg(dc,cls,S(8),
+                      blendColor(g_theme.surfaceTop,g_theme.surface2,45),
+                      g_theme.surface2,blendColor(g_theme.border,g_theme.accent,30),
+                      g_theme.bg);
+                  drawCollapseCaret(dc,cls,true,g_theme.accent);
+              }
+              // -- segmented tab pills (far RIGHT = visual start); RTL: tab 0 rightmost
+              int tabGap=S(6), tabH=S(30), tabW=S(140);
+              int need=2*tabW+tabGap;
+              int maxTabs=upW-clsS-S(10)-S(8);
+              if(need>maxTabs){ tabW=(maxTabs-tabGap)/2; if(tabW<S(84)) tabW=S(84); }
+              int contT=bandT+(bandH-tabH)/2, contB=contT+tabH;
+              RECT t0={upR-S(4)-tabW,contT,upR-S(4),contB};                 // tab 0
+              RECT t1={upR-S(4)-2*tabW-tabGap,contT,upR-S(4)-tabW-tabGap,contB}; // tab 1
               s_upTabR[0]=t0; s_upTabR[1]=t1;
               for(int k=0;k<2;k++){
                   RECT tr=k==0?t0:t1;
                   bool act=(t->bottomTab==k);
-                  // v1.63.0: the active sub-tab is a glowing accent pill; the
-                  // inactive one is a soft raised chip (was two flat rects that
-                  // differed only in colour).
+                  int icoS=S(16), cyT=(tr.top+tr.bottom)/2;
                   if(act){
                       gpShadowColor(dc,tr,S(8),S(6),88,g_theme.accent);
-                      gpGradRoundRect(dc,tr,S(8),g_theme.accentHover,
-                                      g_theme.accent,CLR_INVALID);
+                      gpGradRoundRectBg(dc,tr,S(8),g_theme.accentHover,
+                                        g_theme.accent,CLR_INVALID,g_theme.bg);
                   } else {
-                      gpGradRoundRect(dc,tr,S(8),
+                      gpGradRoundRectBg(dc,tr,S(8),
                           blendColor(g_theme.surfaceTop,g_theme.surface2,45),
                           g_theme.surface2,
-                          blendColor(g_theme.border,g_theme.accent,22));
+                          blendColor(g_theme.border,g_theme.accent,22),g_theme.bg);
                   }
-                  SelectObject(dc,act?g_fUIB:g_fSmall);
-                  SetTextColor(dc,act?RGB(255,255,255):g_theme.textDim);
-                  DrawTextW(dc,k==0?L"صندوق نرفته ها":L"صف پذیرش",-1,&tr,
+                  // icon (right side of the segment, RTL start)
+                  RECT ico={tr.right-icoS-S(8),cyT-icoS/2,tr.right-S(8),cyT+icoS/2};
+                  drawIcon(dc,k==0?ICO_RECEIPT:ICO_PEOPLE,ico,
+                      act?g_theme.accentText:g_theme.accent,S(2));
+                  // count badge (left side of the segment)
+                  int bgS=S(18);
+                  RECT bdg={tr.left+S(6),cyT-bgS/2,tr.left+S(6)+bgS,cyT+bgS/2};
+                  int cnt=upCount(k);
+                  if(act){
+                      gpFillAlpha(dc,bdg,S(9),g_theme.accentText,g_dark?215:238);
+                      SetTextColor(dc,g_theme.accent);
+                  } else {
+                      gpFillAlpha(dc,bdg,S(9),g_theme.surface,g_dark?205:255);
+                      SetTextColor(dc,g_theme.textDim);
+                  }
+                  SelectObject(dc,g_fSmall);
+                  wchar_t cb[8]; swprintf(cb,8,L"%d",cnt);
+                  DrawTextW(dc,toFaDigits(cb).c_str(),-1,&bdg,
+                      DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX);
+                  // label between badge and icon
+                  SetTextColor(dc,act?g_theme.accentText:g_theme.text);
+                  SelectObject(dc,act?g_fUIB:g_fUI);
+                  RECT lr2={bdg.right+S(6),tr.top,ico.left-S(6),tr.bottom};
+                  DrawTextW(dc,k==0?L"صندوق نرفته ها":L"صف پذیرش",-1,&lr2,
+                      DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
+              }
+            }
+            // ---- v1.69.0 FILTER BAR: a labelled chip (wide screens only) grouping
+            //      the real toolbar controls (search / date / hours / refresh). The
+            //      controls are positioned by tabPageLayout with the same fchip
+            //      offset, so the chip and the controls never drift apart. ----
+            { int fchip=(upW>S(360))?S(48):0;
+              if(fchip){
+                  RECT fc={upL,Y(v.upToolY)-S(2),upL+fchip,Y(v.upToolY)+v.rh+S(2)};
+                  gpGradRoundRectBg(dc,fc,S(8),
+                      blendColor(g_theme.surfaceTop,g_theme.surface2,40),
+                      g_theme.surface2,blendColor(g_theme.border,g_theme.accent,25),
+                      g_theme.bg);
+                  SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.accent);
+                  RECT ftr={fc.left+S(4),fc.top,fc.right-S(4),fc.bottom};
+                  DrawTextW(dc,L"فیلتر",-1,&ftr,
                       DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
               }
-              //  v1.31.0 collapse toggle for the queue/unpaid list (far LEFT of
-              //  the tab row). ▾ expanded / ▸ collapsed.
-              int tsz=S(22), ty=Y(v.upTabY)+(th-tsz)/2;
-              RECT tgl={upL,ty,upL+tsz,ty+tsz};
-              s_upToggleR=tgl;
-              gpGradRoundRect(dc,tgl,S(7),
-                  blendColor(g_theme.surfaceTop,g_theme.surface2,45),
-                  g_theme.surface2,blendColor(g_theme.border,g_theme.accent,30));
-              drawCollapseCaret(dc,tgl,t->upCollapsed,g_theme.accent);
             }
-            // ---- toolbar captions (controls themselves are real windows) ----
-            // ---- table header: بارکد/کد پرونده | نام بیمار | تاریخ | زمان |
-            //      دقیقه پیش | عملیات ----
-            // v1.63.0: same accent-tinted table head as the services table, so
-            // both bottom panels read as one designed system.
+            // ---- v1.69.0 TABLE HEAD: نوبت | نام بیمار | تاریخ و ساعت | وضعیت |
+            //      عملیات — accent-tinted band (matches the خدمات table). ----
             RECT uhead={upL,Y(v.upHeadY),upR,Y(v.upHeadY)+S(28)};
             gpGradRoundRect(dc,uhead,S(7),
                 blendColor(g_theme.accent,g_theme.surface,g_dark?76:84),
@@ -3618,12 +3921,12 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             gpLine(dc,upL+S(2),uhead.bottom-1,upR-S(2),uhead.bottom-1,
                 blendColor(g_theme.accent,g_theme.surface,35),1.0f,190);
             SelectObject(dc,g_fLabel); SetTextColor(dc,g_theme.text);
-            const wchar_t* ucols[6]={L"بارکد/کد پرونده",L"نام بیمار",L"تاریخ",
-                L"زمان",L"دقیقه پیش",L"عملیات"};
-            int uwt[6]={20,26,16,12,12,14};
-            int uws=0; for(int i=0;i<6;i++) uws+=uwt[i];
-            int ucR[6], ucW[6]; { int x=upR; for(int i=0;i<6;i++){ ucW[i]=(upW*uwt[i])/uws; ucR[i]=x; x-=ucW[i]; } }
-            for(int i=0;i<6;i++){
+            const wchar_t* ucols[5]={L"نوبت",L"نام بیمار",L"تاریخ و ساعت",
+                L"وضعیت",L"عملیات"};
+            int uwt[5]={10,28,20,16,26};
+            int uws=0; for(int i=0;i<5;i++) uws+=uwt[i];
+            int ucR[5], ucW[5]; { int x=upR; for(int i=0;i<5;i++){ ucW[i]=(upW*uwt[i])/uws; ucR[i]=x; x-=ucW[i]; } }
+            for(int i=0;i<5;i++){
                 RECT hr={ucR[i]-ucW[i]+S(2),uhead.top,ucR[i]-S(2),uhead.bottom};
                 DrawTextW(dc,ucols[i],-1,&hr,DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
             }
@@ -3686,58 +3989,122 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 for(int k=0;k<(int)shown.size() && k<umax;k++){
                     const UpRow& rrow=s_upRows[shown[k]];
                     int ry=Y(v.upBodyY)+k*urowH;
-                    if(k%2==1){ RECT zr={upL,ry,upR,ry+urowH};
-                        // v1.63.0: whisper-light zebra + hairline separators and
-                        // column dividers (same language as the services table).
-                        gpFillAlpha(dc,zr,S(4),g_theme.surface2,g_dark?110:150); }
+                    bool sel=!t->upSelRaw.empty() && rrow.raw==t->upSelRaw;
+                    bool hot=(t->upHotIdx==shown[k]);
+                    RECT rowR={upL,ry,upR,ry+urowH};
+                    // zebra (skipped for highlighted rows — the wash reads cleaner)
+                    if(!sel && !hot && k%2==1)
+                        gpFillAlpha(dc,rowR,S(4),g_theme.surface2,g_dark?110:150);
+                    // hover / selection wash
+                    if(sel){
+                        gpFillAlpha(dc,rowR,0,
+                            blendColor(g_theme.accent,g_theme.surface,g_dark?58:70),
+                            g_dark?74:52);
+                        RECT bar={upR-S(3),ry+S(2),upR,ry+urowH-S(2)};
+                        gpFillAlpha(dc,bar,S(2),g_theme.accent,225);
+                    } else if(hot){
+                        gpFillAlpha(dc,rowR,0,
+                            blendColor(g_theme.accent,g_theme.surface,g_dark?80:88),
+                            g_dark?40:28);
+                    }
+                    // row separator + column dividers
                     gpLine(dc,upL+S(2),ry+urowH,upR-S(2),ry+urowH,g_theme.border,1.0f,70);
-                    for(int c=1;c<6;c++)
+                    for(int c=1;c<5;c++)
                         gpLine(dc,ucR[c],ry+S(3),ucR[c],ry+urowH-S(3),
                                g_theme.border,1.0f,55);
-                    // minutes ago (only when the epoch is known)
-                    std::wstring ago=L"—";
-                    if(rrow.epoch>0){
-                        long long mins=((long long)time(NULL)-rrow.epoch)/60;
-                        if(mins<0)mins=0;
-                        wchar_t mb2[16]; swprintf(mb2,16,L"%lld",mins);
-                        ago=toFaDigits(mb2);
-                    }
+                    // ---- queue-number badge (col 0) ----
                     wchar_t qb[16]; swprintf(qb,16,L"%d",rrow.q);
-                    std::wstring cells[5]={
-                        toFaDigits(qb), rrow.name,
-                        rrow.date.empty()?today:rrow.date,
-                        rrow.time.empty()?L"—":rrow.time,
-                        ago };
-                    SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.text);
-                    for(int c=0;c<5;c++){
-                        RECT cellr={ucR[c]-ucW[c]+S(3),ry,ucR[c]-S(3),ry+urowH};
-                        UINT fl=(c==1)?(DT_RIGHT|DT_RTLREADING):DT_CENTER;
-                        DrawTextW(dc,cells[c].c_str(),-1,&cellr,
-                            fl|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX|DT_END_ELLIPSIS);
+                    { int bgS=S(22), cyT=ry+urowH/2;
+                      RECT cell0={ucR[0]-ucW[0]+S(6),ry,ucR[0]-S(6),ry+urowH};
+                      int bx=(cell0.left+cell0.right)/2-bgS/2;
+                      RECT bdg={bx,cyT-bgS/2,bx+bgS,cyT+bgS/2};
+                      gpFillAlpha(dc,bdg,S(7),
+                          sel?g_theme.accent:blendColor(g_theme.accent,g_theme.surface,72),
+                          sel?(g_dark?230:255):(g_dark?70:46));
+                      SelectObject(dc,g_fUIB);
+                      SetTextColor(dc,sel?g_theme.accentText:g_theme.accent);
+                      DrawTextW(dc,toFaDigits(qb).c_str(),-1,&bdg,
+                          DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX);
                     }
-                    // operations column: refresh / receipt / edit / delete icons
-                    { RECT opr={ucR[5]-ucW[5],ry,ucR[5],ry+urowH};
-                      int bs=S(14), gap2=S(4);
-                      int totW=4*bs+3*gap2;
+                    // ---- patient name (col 1) — prominent, RTL right-aligned ----
+                    { RECT cellr={ucR[1]-ucW[1]+S(8),ry,ucR[1]-S(8),ry+urowH};
+                      SelectObject(dc,g_fUI); SetTextColor(dc,g_theme.text);
+                      DrawTextW(dc,rrow.name.c_str(),-1,&cellr,
+                          DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
+                    }
+                    // ---- date & time (col 2) ----
+                    { std::wstring dt=rrow.date.empty()?today:rrow.date;
+                      if(!rrow.time.empty()) dt+=L"  "+rrow.time;
+                      RECT cellr={ucR[2]-ucW[2]+S(4),ry,ucR[2]-S(4),ry+urowH};
+                      SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
+                      DrawTextW(dc,toFaDigits(dt).c_str(),-1,&cellr,
+                          DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
+                    }
+                    // ---- payment-status chip (col 3) ----
+                    { bool paid=rrow.paid>0;
+                      COLORREF sc=paid?g_theme.success:g_theme.warn;
+                      int chH=S(22), cyT=ry+urowH/2;
+                      RECT cellr={ucR[3]-ucW[3]+S(6),ry,ucR[3]-S(6),ry+urowH};
+                      const wchar_t* sl=paid?L"پرداخت شده":L"پرداخت نشده";
+                      SelectObject(dc,g_fSmall);
+                      SIZE sz; GetTextExtentPoint32W(dc,sl,(int)wcslen(sl),&sz);
+                      int chW=sz.cx+S(18); if(chW>cellr.right-cellr.left) chW=cellr.right-cellr.left;
+                      int chx=(cellr.left+cellr.right)/2-chW/2;
+                      RECT ch={chx,cyT-chH/2,chx+chW,cyT+chH/2};
+                      gpFillAlpha(dc,ch,S(11),blendColor(sc,g_theme.surface,72),
+                          g_dark?150:200);
+                      SetTextColor(dc,sc);
+                      DrawTextW(dc,sl,-1,&ch,
+                          DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
+                    }
+                    // ---- operations (col 4): edit + delete always; up/down arrows
+                    //      on the selected row (progressive disclosure of reorder) ----
+                    { UpHit uh{};
+                      uh.row=rowR; uh.idx=shown[k];
+                      RECT opr={ucR[4]-ucW[4]+S(2),ry,ucR[4]-S(2),ry+urowH};
+                      int avail=opr.right-opr.left, gap2=S(3);
+                      int n=sel?4:2;
+                      int bs=(avail-(n-1)*gap2)/n;
+                      if(bs>S(15)) bs=S(15);
+                      if(bs<S(9)){ n=2; bs=(avail-gap2)/2; if(bs>S(15))bs=S(15); if(bs<S(9))bs=S(9); }
+                      int totW=n*bs+(n-1)*gap2;
                       int x0=(opr.left+opr.right)/2-totW/2;
-                      RECT i1={x0,ry+(urowH-bs)/2,x0+bs,ry+(urowH-bs)/2+bs};
-                      RECT i2=i1; OffsetRect(&i2,bs+gap2,0);
-                      RECT i3=i2; OffsetRect(&i3,bs+gap2,0);
-                      RECT i4=i3; OffsetRect(&i4,bs+gap2,0);
-                      drawIcon(dc,ICO_REFRESH,i1,g_theme.accent,S(2));
-                      drawIcon(dc,ICO_RECEIPT,i2,g_theme.textDim,S(2));
-                      drawIcon(dc,ICO_GEAR,   i3,g_theme.textDim,S(2));
-                      drawIcon(dc,ICO_TRASH,  i4,g_theme.danger,S(2));
-                      UpHit uh; uh.del=i4; uh.idx=shown[k]; s_upHits.push_back(uh);
+                      int iy=ry+(urowH-bs)/2, xx=x0;
+                      if(sel && n==4){
+                          RECT rU ={xx,iy,xx+bs,iy+bs}; xx+=bs+gap2;
+                          RECT rDn={xx,iy,xx+bs,iy+bs}; xx+=bs+gap2;
+                          drawArrowBtn(dc,rU,true, g_theme.accent);
+                          drawArrowBtn(dc,rDn,false,g_theme.accent);
+                          uh.up=rU; uh.down=rDn;
+                      }
+                      RECT rE={xx,iy,xx+bs,iy+bs}; xx+=bs+gap2;
+                      RECT rD={xx,iy,xx+bs,iy+bs};
+                      drawIcon(dc,ICO_GEAR, rE, sel?g_theme.accent:g_theme.textDim,S(2));
+                      drawIcon(dc,ICO_TRASH,rD, g_theme.danger,S(2));
+                      uh.edit=rE; uh.del=rD;
+                      s_upHits.push_back(uh);
                     }
                 }
             }
-            // ---- footer: تعداد کل + blue «+ افزودن به …» link ----
+            // ---- footer: تعداد کل + selected hint + blue «+ افزودن به …» link ----
             { RECT fr={upL,Y(v.upFootY),upR,Y(v.upFootY)+S(22)};
               SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
               wchar_t cb2[64]; swprintf(cb2,64,L"تعداد کل: %d",(int)shown.size());
               DrawTextW(dc,toFaDigits(cb2).c_str(),-1,&fr,
                   DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+              // selected-patient hint in the centre (only when a row is selected)
+              if(!t->upSelRaw.empty()){
+                  const wchar_t* nm=L"";
+                  for(int idx=0;idx<(int)s_upRows.size();idx++)
+                      if(s_upRows[idx].raw==t->upSelRaw){ nm=s_upRows[idx].name.c_str(); break; }
+                  if(nm[0]){
+                      std::wstring hl=std::wstring(L"انتخاب: ")+nm;
+                      SelectObject(dc,g_fUIB); SetTextColor(dc,g_theme.accent);
+                      RECT hr={upL+S(200),fr.top,upR-S(120),fr.bottom};
+                      DrawTextW(dc,hl.c_str(),-1,&hr,
+                          DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
+                  }
+              }
               // blue add-link at the LEFT of the footer (reference image)
               std::wstring lk = t->bottomTab==0
                   ? L"+ افزودن به صندوق نرفته ها" : L"+ افزودن به صف پذیرش";

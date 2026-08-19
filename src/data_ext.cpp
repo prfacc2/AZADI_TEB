@@ -440,7 +440,9 @@ CitizenInfo lookupCitizen(const std::wstring& nationalId){
 //  DOCTORS
 // ============================================================================
 static std::wstring docsPath(){ return dataDir()+L"\\doctors.dat"; }
-//  file format per line: name|specialty|service1;service2;service3
+//  v1.69.0: expanded doctor record. New format is multi-line key=value per
+//  doctor (like EmpProfile), separated by a blank line. Old 3-field pipe
+//  format (name|specialty|svc1;svc2) is still parsed for backward compat.
 static void seedDoctors(){
     struct D{ const wchar_t* n; const wchar_t* sp; const wchar_t* sv; };
     static const D defs[] = {
@@ -454,26 +456,124 @@ static void seedDoctors(){
         { L"دکتر لیلا نوری",      L"چشم‌پزشکی",    L"معاینه بینایی;اپتومتری;لیزیک" },
     };
     std::wstring out;
-    for(auto&d:defs)
-        out += std::wstring(d.n)+L"|"+d.sp+L"|"+d.sv+L"\r\n";
+    for(auto&d:defs){
+        out += L"name="+std::wstring(d.n)+L"\r\n";
+        out += L"specialty="+std::wstring(d.sp)+L"\r\n";
+        out += L"services="+std::wstring(d.sv)+L"\r\n";
+        out += L"active=1\r\n";
+        out += L"printOnReceipt=1\r\n";
+        out += L"\r\n";
+    }
     writeFileUtf8(docsPath(),out,false);
+}
+static DoctorDef parseOldDoctor(const std::wstring& line){
+    DoctorDef d;
+    auto f=dx_split(line,L'|');
+    if(f.size()>=1) d.name=f[0];
+    if(f.size()>=2) d.specialty=f[1];
+    if(f.size()>=3) for(auto&s:dx_split(f[2],L';')) if(!trim(s).empty()) d.services.push_back(trim(s));
+    d.active=true; d.printOnReceipt=true;
+    return d;
+}
+static DoctorDef parseKvDoctor(const std::wstring& block){
+    DoctorDef d; d.active=true; d.printOnReceipt=true;
+    std::wstring name,sp,sv;
+    size_t pos=0;
+    while(pos<block.size()){
+        size_t e=block.find(L'\n',pos); if(e==std::wstring::npos) e=block.size();
+        std::wstring line=trim(block.substr(pos,e-pos)); pos=e+1;
+        if(line.empty()) continue;
+        size_t eq=line.find(L'=');
+        if(eq==std::wstring::npos) continue;
+        std::wstring k=trim(line.substr(0,eq));
+        std::wstring v=trim(line.substr(eq+1));
+        if(k==L"name")          name=v;
+        else if(k==L"specialty") sp=v;
+        else if(k==L"services")  sv=v;
+        else if(k==L"deptId")    d.deptId=v;
+        else if(k==L"docType")   d.docType=_wtoi(v.c_str());
+        else if(k==L"docCode")   d.docCode=v;
+        else if(k==L"active")    d.active=(v!=L"0");
+        else if(k==L"medicalId") d.medicalId=v;
+        else if(k==L"namePrefix")d.namePrefix=v;
+        else if(k==L"firstName") d.firstName=v;
+        else if(k==L"lastName")  d.lastName=v;
+        else if(k==L"nationalId")d.nationalId=v;
+        else if(k==L"mobile")    d.mobile=v;
+        else if(k==L"email")     d.email=v;
+        else if(k==L"address")   d.address=v;
+        else if(k==L"franchise") d.franchise=v;
+        else if(k==L"printOnReceipt") d.printOnReceipt=(v!=L"0");
+        else if(k==L"insSpecialty") d.insSpecialty=v;
+        else if(k==L"degree")    d.degree=v;
+        else if(k==L"contractType") d.contractType=_wtoi(v.c_str());
+        else if(k==L"emergencyContract") d.emergencyContract=v;
+        else if(k==L"accounting") d.accounting=v;
+    }
+    d.name=name; d.specialty=sp;
+    if(!sv.empty()) for(auto&s:dx_split(sv,L';')) if(!trim(s).empty()) d.services.push_back(trim(s));
+    if(d.name.empty() && (!d.firstName.empty()||!d.lastName.empty()))
+        d.name=(d.namePrefix.empty()?L"":d.namePrefix+L" ")+d.firstName+L" "+d.lastName;
+    return d;
 }
 std::vector<DoctorDef> loadDoctors(){
     std::wstring all=readFileUtf8(docsPath());
     if(trim(all).empty()){ seedDoctors(); all=readFileUtf8(docsPath()); }
     std::vector<DoctorDef> out;
-    size_t pos=0;
-    while(pos<all.size()){
-        size_t e=all.find(L'\n',pos); if(e==std::wstring::npos) e=all.size();
-        std::wstring line=trim(all.substr(pos,e-pos)); pos=e+1;
-        if(line.empty()) continue;
-        auto f=dx_split(line,L'|');
-        if(f.size()<3) continue;
-        DoctorDef d; d.name=f[0]; d.specialty=f[1];
-        for(auto&s:dx_split(f[2],L';')) if(!trim(s).empty()) d.services.push_back(trim(s));
-        out.push_back(d);
+    bool isNewFormat = all.find(L"name=")!=std::wstring::npos || all.find(L"specialty=")!=std::wstring::npos;
+    if(isNewFormat){
+        size_t pos=0;
+        while(pos<all.size()){
+            size_t next=all.find(L"\r\n\r\n",pos);
+            if(next==std::wstring::npos) next=all.find(L"\n\n",pos);
+            if(next==std::wstring::npos) next=all.size();
+            std::wstring block=all.substr(pos,next-pos);
+            pos=next+2; if(pos<all.size() && (all[pos]==L'\n'||all[pos]==L'\r')) pos++;
+            if(trim(block).empty()) continue;
+            DoctorDef d=parseKvDoctor(block);
+            if(!d.name.empty()) out.push_back(d);
+        }
+    } else {
+        size_t pos=0;
+        while(pos<all.size()){
+            size_t e=all.find(L'\n',pos); if(e==std::wstring::npos) e=all.size();
+            std::wstring line=trim(all.substr(pos,e-pos)); pos=e+1;
+            if(line.empty()) continue;
+            if(line.find(L'|')!=std::wstring::npos) out.push_back(parseOldDoctor(line));
+        }
     }
     return out;
+}
+bool saveDoctors(const std::vector<DoctorDef>& doctors){
+    std::wstring out;
+    for(const auto& d:doctors){
+        out += L"name="+d.name+L"\r\n";
+        out += L"specialty="+d.specialty+L"\r\n";
+        std::wstring sv;
+        for(size_t i=0;i<d.services.size();++i){ if(i) sv+=L";"; sv+=d.services[i]; }
+        out += L"services="+sv+L"\r\n";
+        out += L"deptId="+d.deptId+L"\r\n";
+        out += L"docType="+std::to_wstring(d.docType)+L"\r\n";
+        out += L"docCode="+d.docCode+L"\r\n";
+        out += L"active="+std::wstring(d.active?L"1":L"0")+L"\r\n";
+        out += L"medicalId="+d.medicalId+L"\r\n";
+        out += L"namePrefix="+d.namePrefix+L"\r\n";
+        out += L"firstName="+d.firstName+L"\r\n";
+        out += L"lastName="+d.lastName+L"\r\n";
+        out += L"nationalId="+d.nationalId+L"\r\n";
+        out += L"mobile="+d.mobile+L"\r\n";
+        out += L"email="+d.email+L"\r\n";
+        out += L"address="+d.address+L"\r\n";
+        out += L"franchise="+d.franchise+L"\r\n";
+        out += L"printOnReceipt="+std::wstring(d.printOnReceipt?L"1":L"0")+L"\r\n";
+        out += L"insSpecialty="+d.insSpecialty+L"\r\n";
+        out += L"degree="+d.degree+L"\r\n";
+        out += L"contractType="+std::to_wstring(d.contractType)+L"\r\n";
+        out += L"emergencyContract="+d.emergencyContract+L"\r\n";
+        out += L"accounting="+d.accounting+L"\r\n";
+        out += L"\r\n";
+    }
+    return writeFileUtf8(docsPath(),out,false);
 }
 std::vector<DoctorDef> todaysDoctors(){
     // deterministic subset "on shift today" based on the Jalali day number so

@@ -384,7 +384,7 @@ static HWND WV2_CreateView(HWND parent){
     while(!InterlockedCompareExchange(&state->done,0,0) &&
           !(InterlockedCompareExchange(&state->navReady,0,0) &&
             InterlockedCompareExchange(&v->bridgeReady,0,0))){
-        if(GetTickCount()-start>6000) break;
+        if(GetTickCount()-start>8000) break;  // v1.69.0: was 6000 — WebView2 env creation can take 2-4s on first launch
         if(PeekMessageW(&msg,NULL,0,0,PM_REMOVE)){
             TranslateMessage(&msg); DispatchMessageW(&msg);
         } else Sleep(5);

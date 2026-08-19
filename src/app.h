@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.68.0"
+#define APP_VERSION_W   L"1.69.0"
 
 // ----------------------------------------------------------- logging policy -
 //  RELEASE 1.2.0 (Section A): all general user-behavior logging is gated behind
@@ -814,9 +814,41 @@ ImportResult importPatientsFromFile(const std::wstring& path);
 // ----------------------------------------------------------- doctors --------
 //  Doctors & their services for the appointment screen (file-backed, seeded
 //  with realistic Iranian specialties so the workflow is usable out-of-box).
-struct DoctorDef { std::wstring name, specialty; std::vector<std::wstring> services; };
+//  v1.69.0: expanded doctor record with full clinical/contract/accounting
+//  fields for the new «پزشکان» management page. Backward-compatible: the old
+//  3-field pipe format (name|specialty|services) is still parsed; missing
+//  fields default to empty. New saves use the multi-line key=value format.
+struct DoctorDef {
+    // identity
+    std::wstring name, specialty;
+    std::vector<std::wstring> services;
+    // v1.69.0 extended fields
+    std::wstring deptId;        // بخش (links to a section/department)
+    int  docType;               // 0=پزشک, 1=پرستار
+    std::wstring docCode;       // کد پزشک
+    bool active;                // فعال / غیرفعال
+    // personal info
+    std::wstring medicalId;     // کد نظام پزشکی
+    std::wstring namePrefix;    // پیشوند نام (دکتر/پزشک/...)
+    std::wstring firstName;     // نام
+    std::wstring lastName;      // نام خانوادگی
+    std::wstring nationalId;    // کد ملی
+    std::wstring mobile;        // تلفن همراه
+    std::wstring email;         // ایمیل
+    std::wstring address;       // آدرس
+    // contract / accounting
+    std::wstring franchise;     // فرانشیز
+    bool printOnReceipt;        // چاپ در قبض
+    std::wstring insSpecialty;  // تخصص بیمه
+    std::wstring degree;        // مدرک
+    int  contractType;          // نوع قرار داد (0=... custom text below)
+    std::wstring emergencyContract; // قرار پزشک اورژانس
+    std::wstring accounting;    // حسابداری (free text)
+    DoctorDef():docType(0),active(true),printOnReceipt(true),contractType(0){}
+};
 std::vector<DoctorDef> loadDoctors();          // seeds defaults if empty
 std::vector<DoctorDef> todaysDoctors();        // doctors on shift today
+bool saveDoctors(const std::vector<DoctorDef>& doctors); // v1.69.0
 
 // ----------------------------------------------------- profile-change reqs --
 //  v1.6.0: a full profile-change request workflow (reception → management).

@@ -241,7 +241,7 @@
     setText($('invSuppTotal'), money(afterBase));
     setText($('invSuppShare'), money(b.supp));
     setText($('invSuppPat'), money(b.pat));
-    setText($('invFinTotal'), money(b.gross));
+    setText($('invFinTotal'), money(b.pat));  // v1.69.0: final = patient share after insurance, NOT gross
     setText($('invFinDisc'), money(b.disc));
     setText($('invFinPaid'), money(b.paid));
     setText($('invRemain'), money((Number(b.pat) || 0) - (Number(b.paid) || 0)));
@@ -281,20 +281,15 @@
     setText($('invSuppShare'), money(sumSupp));
     setText($('invSuppPat'), money(sumPat));
     /* invoice — مبلغ نهایی */
-    setText($('invFinTotal'), money(sumGross));
+    setText($('invFinTotal'), money(sumPat));  // v1.69.0: final = patient share after insurance, NOT gross
     setText($('invFinDisc'), money(sumDisc));
     var paid = $('noPay') && $('noPay').checked ? 0 : sumPat;
     setText($('invFinPaid'), money(paid));
     setText($('invRemain'), money(sumPat - paid));
 
-    /* total card + compact payment state */
+    /* total card — v1.69.0: payment status card removed, replaced with
+       queue/unpaid action buttons in HTML. No paymentState element anymore. */
     setText($('tcVal'), money(sumPat));
-    if ($('paymentState')) {
-      $('paymentState').className = state.services.length ? 'payment-state' : 'payment-state pending';
-      setText($('paymentStateText'), state.services.length ?
-        'مانده قبض آماده دریافت است' :
-        'پس از افزودن خدمت، وضعیت پرداخت نمایش داده می‌شود');
-    }
     scheduleBillSync();
     return { gross: sumGross, disc: sumDisc, org: sumOrg, supp: sumSupp, pat: sumPat, paid: paid };
   }
@@ -660,7 +655,7 @@
     return out;
   }
   function refreshQueue() {
-    Bridge.call('queue.list', { kind: state.queueKind }).then(function (r) { renderQueue(r.rows || []); });
+    Bridge.call('queue.list', { kind: state.queueKind }).then(function (r) { renderQueue(r.rows || []); updateTurnPreview(); });
   }
 
   /* ==========================================================================
@@ -1207,14 +1202,22 @@
     on($('qSearch'), 'input', function () { renderQueue(state.queue); });
     on($('qSearch'), 'keyup', function () { renderQueue(state.queue); });
     on($('qMinutes'), 'change', function () { renderQueue(state.queue); });
+    /* v1.69.0: overlay foot addToQueue still adds to the currently selected tab */
     on($('addToQueue'), 'click', addCurrentToQueue);
     on($('tabQueue'), 'click', function () {
-      state.queueKind = 'unpaid'; setActiveTab('tabQueue');
-      setText($('addToQueue'), 'افزودن به صندوق نرفته‌ها'); refreshQueue();
+      state.queueKind = 'unpaid'; setActiveTab('tabQueue'); refreshQueue();
     });
     on($('tabAdmQ'), 'click', function () {
-      state.queueKind = 'admission'; setActiveTab('tabAdmQ');
-      setText($('addToQueue'), 'افزودن به صف پذیرش'); refreshQueue();
+      state.queueKind = 'admission'; setActiveTab('tabAdmQ'); refreshQueue();
+    });
+
+    /* v1.69.0: two distinct queue/unpaid action buttons (replacing the old
+       single context-dependent addToQueue + payment status card). */
+    on($('addToQueueBtn'), 'click', function () {
+      state.queueKind = 'unpaid'; addCurrentToQueue();
+    });
+    on($('addToAdmQBtn'), 'click', function () {
+      state.queueKind = 'admission'; addCurrentToQueue();
     });
 
     /* save / clear / new — v1.64.0: «پذیرش جدید» and «انصراف» were removed;
@@ -1258,10 +1261,8 @@
     if (!p) return;
     if (tab === 'admission') {
       state.queueKind = 'admission'; setActiveTab('tabAdmQ');
-      setText($('addToQueue'), 'افزودن به صف پذیرش');
     } else if (tab === 'unpaid') {
       state.queueKind = 'unpaid'; setActiveTab('tabQueue');
-      setText($('addToQueue'), 'افزودن به صندوق نرفته‌ها');
     }
     if (b) b.className = 'queue-backdrop open';
     p.className = (p.className || '').replace(/\s*open/g, '') + ' open';
@@ -1353,6 +1354,15 @@
   /* --- save admission + print per Management design --- */
   function saveAdmission() {
     var rec = collectRecord();
+    /* v1.69.0: SMART SUBMIT — if the patient fields are empty (no national ID
+       AND no name), the operator is re-printing the PREVIOUS receipt (F8
+       equivalent). If fields are filled, this is a NEW admission. */
+    var hasPatient = rec.patient.nid || (rec.patient.first && rec.patient.last);
+    if (!hasPatient) {
+      /* empty form → print the last receipt instead of erroring */
+      Bridge.call('print.last', {});
+      return;
+    }
     if (!rec.patient.nid) { toast('کد ملی بیمار الزامی است', 'err'); if ($('nid')) $('nid').focus(); return; }
     if (!rec.patient.first || !rec.patient.last) { toast('نام و نام خانوادگی الزامی است', 'err'); return; }
     if (!state.services.length) { toast('حداقل یک خدمت باید افزوده شود', 'err'); return; }
@@ -1437,6 +1447,18 @@
     if (ps.S != null) { state.ps.S = ps.S; setText($('psSVal'), toFa(ps.S)); }
   }
 
+  /* v1.69.0: پیش‌نمایش نوبت — ثبت‌شده (صندوق نرفته‌ها) و در انتظار (صف پذیرش).
+     Counts come from the existing queue.list IPC (one call per kind); the
+     bridge contract is unchanged. setText no-ops if the elements are absent. */
+  function updateTurnPreview() {
+    Bridge.call('queue.list', { kind: 'unpaid' }).then(function (r) {
+      setText($('tpReg'), toFa((r && r.rows) ? r.rows.length : 0));
+    });
+    Bridge.call('queue.list', { kind: 'admission' }).then(function (r) {
+      setText($('tpWait'), toFa((r && r.rows) ? r.rows.length : 0));
+    });
+  }
+
   /* ==========================================================================
      C++ → JS events
      ========================================================================== */
@@ -1449,18 +1471,18 @@
         renderServices(); recompute();
       }
     });
-    Bridge.on('queue.update', function (d) { renderQueue(d.rows || []); });
+    Bridge.on('queue.update', function (d) { renderQueue(d.rows || []); updateTurnPreview(); });
     Bridge.on('ps.update', function (d) { updatePS(d); });
     Bridge.on('reception.settings', function (d) {
       var root = document.documentElement;
       var mode = d && d.mode === 'full' ? 'full' : 'simple';
       var zoom = Number(d && d.zoom) || 100;
       if (zoom < 80 || zoom > 130) zoom = 100;
-      state.mode = mode; state.zoom = zoom;
+      state.mode = mode; state.zoom = 100;  // v1.69.0: always 100%, no zoom
       if (root) root.className = root.className.replace(/\bmode-(simple|full)\b/g, '') + ' mode-' + mode;
       if (document.body) {
         document.body.className = document.body.className.replace(/\bmode-(simple|full)\b/g, '') + ' mode-' + mode;
-        document.body.style.zoom = zoom + '%';
+        document.body.style.zoom = '';  // v1.69.0: force 100%, never scale
       }
       toast('تنظیمات نمایش پذیرش اعمال شد', 'ok');
     });
