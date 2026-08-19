@@ -620,11 +620,16 @@ static std::string admissionApi(const std::string& verb, const std::string& body
             std::wstring dcode=cb;
             bool hit;
             if(!code.empty()) hit = (dcode==code) || (normDigits(q).empty()?false:false);
-            else hit = q.empty() || wcontains(d.name,q) || wcontains(d.specialty,q);
+            else hit = q.empty() || wcontains(d.name,q) || wcontains(d.specialty,q)
+                       // v1.69.0: also search by medical council ID (کد نظام پزشکی)
+                       || wcontains(d.medicalId,q) || wcontains(d.medicalId,normDigits(q))
+                       || wcontains(d.docCode,q) || wcontains(d.docCode,normDigits(q));
             if(!hit) continue;
             if(n++) o+=",";
             o+="{\"name\":"+jstr(d.name)+",\"specialty\":"+jstr(d.specialty)+
-               ",\"code\":"+jstr(dcode)+"}";
+               ",\"code\":"+jstr(dcode)+
+               // v1.69.0: return medicalId so the JS can display it
+               ",\"medicalId\":"+jstr(d.medicalId)+"}";
             if(n>=50) break;
         }
         o+="]}"; return o;
