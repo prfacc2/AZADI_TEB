@@ -241,7 +241,7 @@
     setText($('invSuppTotal'), money(afterBase));
     setText($('invSuppShare'), money(b.supp));
     setText($('invSuppPat'), money(b.pat));
-    setText($('invFinTotal'), money(b.gross));
+    setText($('invFinTotal'), money(b.pat));  // v1.69.0: final = patient share after insurance, NOT gross
     setText($('invFinDisc'), money(b.disc));
     setText($('invFinPaid'), money(b.paid));
     setText($('invRemain'), money((Number(b.pat) || 0) - (Number(b.paid) || 0)));
@@ -281,7 +281,7 @@
     setText($('invSuppShare'), money(sumSupp));
     setText($('invSuppPat'), money(sumPat));
     /* invoice — مبلغ نهایی */
-    setText($('invFinTotal'), money(sumGross));
+    setText($('invFinTotal'), money(sumPat));  // v1.69.0: final = patient share after insurance, NOT gross
     setText($('invFinDisc'), money(sumDisc));
     var paid = $('noPay') && $('noPay').checked ? 0 : sumPat;
     setText($('invFinPaid'), money(paid));
@@ -1456,11 +1456,11 @@
       var mode = d && d.mode === 'full' ? 'full' : 'simple';
       var zoom = Number(d && d.zoom) || 100;
       if (zoom < 80 || zoom > 130) zoom = 100;
-      state.mode = mode; state.zoom = zoom;
+      state.mode = mode; state.zoom = 100;  // v1.69.0: always 100%, no zoom
       if (root) root.className = root.className.replace(/\bmode-(simple|full)\b/g, '') + ' mode-' + mode;
       if (document.body) {
         document.body.className = document.body.className.replace(/\bmode-(simple|full)\b/g, '') + ' mode-' + mode;
-        document.body.style.zoom = zoom + '%';
+        document.body.style.zoom = '';  // v1.69.0: force 100%, never scale
       }
       toast('تنظیمات نمایش پذیرش اعمال شد', 'ok');
     });

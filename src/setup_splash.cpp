@@ -63,14 +63,8 @@ static bool ssFirstRunForBuild(){
     return done != std::wstring(APP_VERSION_W);
 }
 
-// ----------------------------------------------------------------------------
-//  Worker: performs the actual preparation, updating progress as it goes.
-//  Deliberately paced (short sleeps) so the bar is *seen* — the operations
-//  themselves are near-instant, but a flash-and-vanish window confuses users
-//  who reported "nothing happens / it didn't apply".
-// ----------------------------------------------------------------------------
-// §1.18.1: detect weak hardware (≤2GB RAM or ≤2 logical CPUs) so the splash can
-// pace itself shorter and the app can later trim animations. Cheap, no polling.
+// §1.18.1: detect weak hardware (≤2GB RAM or ≤2 logical CPUs) so the app can
+// trim animations on weak systems. Cheap, no polling.
 static bool ssDetectLowSpec(){
     MEMORYSTATUSEX ms; ms.dwLength=sizeof(ms);
     unsigned long long ramMB = 0;
@@ -114,74 +108,49 @@ static bool ssConfigureBrowserFeatures(){
     return ok;
 }
 
+// v1.69.0: the preparation work is now done SILENTLY and INSTANTLY — no splash
+// window, no progress bar, no artificial sleeps. The user explicitly requested
+// removing the loader animation ("انیمیشن loader رو حذف کن، برای وارد شدن
+// نیازی به انیمیشن نیست"). All operations below are near-instant (<50ms total).
 static DWORD WINAPI ssWorker(LPVOID p){
     SetupState* s = (SetupState*)p;
-    // weak machines: shave the deliberate pacing so the bar isn't slow on the
-    // very hardware that needs to get to work fastest.
-    const int slow = s->lowSpec ? 90 : 220;
 
-    ssSet(s, 6,  L"بررسی پوشه‌های برنامه…");
     // ensure data/ and logs/ exist & are writable (root cause of save errors)
     dataDir();   // auto-creates <exe>\data (or override)
     logsDir();   // auto-creates <exe>\logs
-    Sleep(slow);
 
-    ssSet(s, 24, L"شناسایی سخت‌افزار سیستم…");
+    // detect hardware profile
     {
-        wchar_t cap[160];
         MEMORYSTATUSEX ms; ms.dwLength=sizeof(ms);
         unsigned long long ramMB=0;
         if(GlobalMemoryStatusEx(&ms)) ramMB=(unsigned long long)(ms.ullTotalPhys/(1024*1024));
         SYSTEM_INFO si; GetSystemInfo(&si);
-        swprintf(cap,160,L"setup: cpu=%lu cores, ram=%llu MB, lowSpec=%d",
-                 (unsigned long)si.dwNumberOfProcessors, ramMB, s->lowSpec?1:0);
-        logLine(cap);
-        // persist the detected profile so other modules can read it without
-        // re-probing; also acts as the "configured for this system" flag.
+        // persist the detected profile
         setSetting(L"sys_low_spec", s->lowSpec?L"1":L"0");
+        (void)ramMB; (void)si;
     }
-    Sleep(s->lowSpec?60:160);
 
     // Always add the embedded face to this process. installVazirFont checks
     // whether a persistent per-user copy already exists, so repeat launches do
     // the cheap AddFontMemResourceEx step without reinstalling any files/keys.
-    ssSet(s, 46, s->firstRun ? L"نصب فونت فارسی (Vazirmatn)…"
-                             : L"بارگذاری فونت فارسی…");
     installVazirFont();
-    Sleep(s->firstRun ? slow : (s->lowSpec?40:120));
 
-    ssSet(s, 66, L"آماده‌سازی موتور گرافیکی (GDI+)…");
-    // GDI+ is started in WinMain right after the splash; here we only confirm the
-    // library is resolvable so a broken GDI+ is reported deterministically rather
-    // than crashing later. No token kept — WinMain owns the real startup.
+    // GDI+ probe — confirm the library is resolvable so a broken GDI+ is
+    // reported deterministically rather than crashing later.
     {
         ULONG_PTR tok=0; Gdiplus::GdiplusStartupInput in;
         Gdiplus::Status gs=Gdiplus::GdiplusStartup(&tok,&in,NULL);
-        if(gs==Gdiplus::Ok && tok){ Gdiplus::GdiplusShutdown(tok); logLine(L"setup: GDI+ OK"); }
+        if(gs==Gdiplus::Ok && tok){ Gdiplus::GdiplusShutdown(tok); }
         else logLine(L"setup: GDI+ probe failed (will fall back to plain GDI)");
     }
-    Sleep(s->lowSpec?60:160);
 
-    ssSet(s, 82, L"ثبت اجزای رابط و موتور نمایش…");
-    // §1.18.1: register ALL custom control window classes (spinner / color /
-    // switch / dropdown) up-front. This guarantees every screen — including the
-    // print designer opened from Management — can create its controls, and is
-    // the belt-and-braces companion to the in-flow registration that fixed the
-    // print-designer ACCESS_VIOLATION. Idempotent (internal done-guard).
+    // Register ALL custom control window classes up-front.
     uikit::Az_RegisterControls();
     s->webOk = ssConfigureBrowserFeatures();
     setSetting(L"sys_mshtml_configured",s->webOk?L"1":L"0");
-    logLine(s->webOk ? L"setup: MSHTML IE11 standards + GPU features configured"
-                     : L"setup: warning: MSHTML feature registry configuration failed");
-    Sleep(s->lowSpec?50:200);
 
-    ssSet(s, 94, L"تکمیل پیکربندی برای این سیستم…");
     if(s->firstRun) setSetting(L"setup_done_version", APP_VERSION_W);
-    logLine(L"setup: prerequisites prepared & system configured (native C++ UI)");
-    Sleep(s->lowSpec?80:200);
 
-    ssSet(s, 100, L"آماده است");
-    Sleep(s->lowSpec?120:260);
     InterlockedExchange(&s->done, 1);
     return 0;
 }
@@ -309,50 +278,19 @@ static LRESULT CALLBACK ssProc(HWND h, UINT m, WPARAM w, LPARAM l){
 // ----------------------------------------------------------------------------
 //  Public entry.
 // ----------------------------------------------------------------------------
+// v1.69.0: SILENT instant boot — no splash window, no progress bar, no message
+// pump. All preparation runs synchronously (<50ms) and the app starts instantly.
+// The user explicitly requested: "انیمیشن loader رو حذف کن، برای وارد شدن
+// نیازی به انیمیشن نیست".
 bool RunSetupSplash(HINSTANCE hInst){
-    // §1.18.1: the loading/preparation splash now runs on EVERY launch so the
-    // app is always (re)configured for the user's current system — folders,
-    // hardware profile, GDI+ probe and UI-control registration. Heavy one-time
-    // work (font install) is still gated to the first launch of a given build.
     SetupState st; g_ss=&st;
     st.firstRun = ssFirstRunForBuild();
     st.lowSpec  = ssDetectLowSpec();
 
-    WNDCLASSW wc={0};
-    wc.lpfnWndProc   = ssProc;
-    wc.hInstance     = hInst;
-    wc.hCursor       = LoadCursorW(NULL, IDC_ARROW);
-    wc.lpszClassName = SS_CLASS;
-    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW+1);
-    RegisterClassW(&wc);
+    // Run all preparation work synchronously — no window, no thread, no delays.
+    ssWorker(&st);
 
-    int sw=GetSystemMetrics(SM_CXSCREEN), sh=GetSystemMetrics(SM_CYSCREEN);
-    int W=420, H=260;
-    int x=(sw-W)/2, y=(sh-H)/2;
-
-    HWND h=CreateWindowExW(WS_EX_TOPMOST|WS_EX_DLGMODALFRAME,
-        SS_CLASS, APP_NAME_W, WS_POPUP|WS_BORDER,
-        x,y,W,H, NULL,NULL,hInst,NULL);
-    if(!h){
-        // could not show UI — still do the work silently.
-        ssWorker(&st);
-        g_ss=nullptr;
-        return st.webOk;
-    }
-
-    ShowWindow(h, SW_SHOW);
-    UpdateWindow(h);
-    SetTimer(h, 1, 33, NULL);   // ~30fps repaint
-
-    HANDLE th=CreateThread(NULL,0,ssWorker,&st,0,NULL);
-
-    MSG msg;
-    while(GetMessageW(&msg,NULL,0,0)){
-        TranslateMessage(&msg);
-        DispatchMessageW(&msg);
-    }
-    if(th){ WaitForSingleObject(th, 2000); CloseHandle(th); }
-    UnregisterClassW(SS_CLASS, hInst);
     g_ss=nullptr;
+    (void)hInst;
     return st.webOk;
 }

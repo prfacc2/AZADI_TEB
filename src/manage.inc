@@ -3065,10 +3065,12 @@ static COLORREF mgFade(COLORREF c, float f){
     return blendColor(c, g_theme.surface, pct);
 }
 static void mgDashAnimStart(HWND h){
+    // v1.69.0: entrance animation REMOVED per user request ("برای وارد شدن
+    // نیازی به انیمیشن نیست"). Jump straight to the final state — no timer,
+    // no fade, no count-up. The dashboard paints instantly.
     if(!s_mg) return;
-    if(g_lowSpec){ s_mg->dashAnim=1.0f; s_mg->dashAnimOn=false; return; }
-    s_mg->dashAnim=0.0f; s_mg->dashAnimOn=true;
-    SetTimer(h,MG_DASH_ANIM_TIMER,16,NULL);
+    s_mg->dashAnim=1.0f; s_mg->dashAnimOn=false;
+    (void)h;
 }
 static void mgDashAnimStop(HWND h){
     if(!s_mg) return;

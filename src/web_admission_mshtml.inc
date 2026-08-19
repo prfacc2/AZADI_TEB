@@ -389,9 +389,15 @@ static HWND MshtmlAdmission_CreateView(HWND parent){
     SysFreeString(burl);
     if(FAILED(hr)) return fail();
 
+    // v1.69.0: show the host immediately so the user sees the page loading
+    // instead of a black box during navigation. Reduced the about:blank wait
+    // from 6s to 2s (it completes almost instantly) to cut the black-screen
+    // delay the user reported.
+    ShowWindow(host,SW_SHOW);
+
     bool docReady=false;
     DWORD t0=GetTickCount(); MSG pm;
-    while(GetTickCount()-t0<=6000){
+    while(GetTickCount()-t0<=2000){   // v1.69.0: was 6000
         READYSTATE rs=READYSTATE_UNINITIALIZED;
         if(SUCCEEDED(wb->get_ReadyState(&rs)) && rs==READYSTATE_COMPLETE){
             docReady=true; break;
@@ -450,7 +456,7 @@ static HWND MshtmlAdmission_CreateView(HWND parent){
     // native form instead of leaving a blank or permanently loading host.
     bool bridgeReady=false;
     t0=GetTickCount();
-    while(GetTickCount()-t0<=6000){
+    while(GetTickCount()-t0<=3000){   // v1.69.0: was 6000
         if(InterlockedCompareExchange(&site->external->initHits,0,0)>0){
             bridgeReady=true; break;
         }
@@ -464,7 +470,6 @@ static HWND MshtmlAdmission_CreateView(HWND parent){
         std::lock_guard<std::mutex> lk(g_mshtmlMx);
         g_mshtmlViews[host]=v; registered=true;
     }
-    ShowWindow(host,SW_SHOW);
     SetFocus(host);
     return host;
 }
