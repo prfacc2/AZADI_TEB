@@ -655,7 +655,7 @@
     return out;
   }
   function refreshQueue() {
-    Bridge.call('queue.list', { kind: state.queueKind }).then(function (r) { renderQueue(r.rows || []); });
+    Bridge.call('queue.list', { kind: state.queueKind }).then(function (r) { renderQueue(r.rows || []); updateTurnPreview(); });
   }
 
   /* ==========================================================================
@@ -1447,6 +1447,18 @@
     if (ps.S != null) { state.ps.S = ps.S; setText($('psSVal'), toFa(ps.S)); }
   }
 
+  /* v1.69.0: پیش‌نمایش نوبت — ثبت‌شده (صندوق نرفته‌ها) و در انتظار (صف پذیرش).
+     Counts come from the existing queue.list IPC (one call per kind); the
+     bridge contract is unchanged. setText no-ops if the elements are absent. */
+  function updateTurnPreview() {
+    Bridge.call('queue.list', { kind: 'unpaid' }).then(function (r) {
+      setText($('tpReg'), toFa((r && r.rows) ? r.rows.length : 0));
+    });
+    Bridge.call('queue.list', { kind: 'admission' }).then(function (r) {
+      setText($('tpWait'), toFa((r && r.rows) ? r.rows.length : 0));
+    });
+  }
+
   /* ==========================================================================
      C++ → JS events
      ========================================================================== */
@@ -1459,7 +1471,7 @@
         renderServices(); recompute();
       }
     });
-    Bridge.on('queue.update', function (d) { renderQueue(d.rows || []); });
+    Bridge.on('queue.update', function (d) { renderQueue(d.rows || []); updateTurnPreview(); });
     Bridge.on('ps.update', function (d) { updatePS(d); });
     Bridge.on('reception.settings', function (d) {
       var root = document.documentElement;

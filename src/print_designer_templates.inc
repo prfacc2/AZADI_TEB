@@ -25,6 +25,23 @@
 //    تعداد / مبلغ واحد / تخفیف / سهم بیمه / سهم بیمار / مبلغ کل), so a clinic
 //    can pick the level of detail it wants and still get real data in it.
 //
+//  WHAT CHANGED IN v1.69.0 (per-variant visual distinctness)
+//  --------------------------------------------------------
+//  * The three variants inside each family used to share ONE cookie-cutter
+//    meta + patient + totals + footer (only header / colour / column-preset
+//    differed), so the gallery read as ten triplets of near-identical pages.
+//    Now every variant also gets its OWN meta strip, patient block, totals
+//    treatment and footer — so all 30 are fundamentally different in layout,
+//    table framing and appearance, not colour swaps. Each family keeps its
+//    signature (band / sidebar / card / photo / tear-off / dual-block …).
+//  * Code-carrier variety: 21 designs carry one deterministic Code128
+//    barcode (in four footer styles: right / centred / tinted-dual / mini),
+//    9 carry NO code at all (the new footClean). One code per page remains
+//    the rule (0 or 1, never 2 — the «بارکد دوبار» bug stays dead).
+//  * Responsive: designs stay compact (modest fonts, 4.0–4.6 mm rows, all
+//    items inside the A4 printable area) so the engine's proportional pscale
+//    shrinks them gracefully onto A5/A6/receipt paper without clipping.
+//
 //  If the operator switches the paper size (A5/A6/receipt) the print engine
 //  auto-scales the whole design proportionally (pscale), so nothing is
 //  clipped. Seeded on first run; existing installs are migrated once.
@@ -535,6 +552,21 @@ static void footMinimal(PrintDesign& d,double footY){
     d.items.push_back(mkBarcode(bcX,y,bcW,13));
     d.items.push_back(mkLabel(PG_M,y+3,PG_CW*0.60,5.5,FA_KEEP,8.5,false,0));
 }
+// v1.69.0 — NO code carrier. A clean professional footer: hairline + clinic
+// contact on the left + keep-note / signature on the right. Used by the
+// variants that deliberately carry NO barcode, so the 30 designs differ in
+// their code-carrier treatment (some barcoded, some not) rather than all
+// sharing one. One deterministic code per page is still the rule — here it is
+// simply zero, never two.
+static void footClean(PrintDesign& d,double footY,unsigned accent){
+    double y=footY;
+    d.items.push_back(mkHLine(PG_M,y-3,PG_CW,0.3));
+    d.items.push_back(mkField(PG_M,y+1,PG_CW*0.55,6,L"clinicphone",FA_PHONE,8.5,0));
+    d.items.push_back(mkField(PG_M,y+7.5,PG_CW*0.55,6,L"clinicaddr",L"نشانی: ",8.5,0));
+    d.items.push_back(mkLabelC(PG_M+PG_CW*0.58,y+1,PG_CW*0.42,6,FA_KEEP,8.5,false,2,accent));
+    d.items.push_back(mkHLine(PG_M+PG_CW*0.58,y+9,PG_CW*0.42,0.3));
+    d.items.push_back(mkLabel(PG_M+PG_CW*0.58,y+9.5,PG_CW*0.42,5,FA_SIGN,8.5,false,1));
+}
 
 // ===========================================================================
 //  buildTemplate — 30 designs across TEN layout families.
@@ -649,38 +681,62 @@ static PrintDesign buildTemplate(int idx){
     switch(sp.family){
 
     // ================= 0 — کلاسیک ==========================================
+    // v1.69.0 — each variant now gets a different meta strip, patient block,
+    // totals treatment AND footer, so the three classic receipts look
+    // fundamentally unlike each other (not just a colour swap).
     case 0: {
         if(sp.variant==0)      y=hdrPlain(d,FA_CLINIC,18,true,0.7);
         else if(sp.variant==1) y=hdrLogoRight(d,FA_CLINIC,17,true,0.7);
         else                   y=hdrCenterLogo(d,FA_CLINIC,18,false,0.5);
-        y=metaStrip4(d,y,pt-0.5);
-        y=patient2x3(d,y,pt);
+        if(sp.variant==0)      y=metaStrip4(d,y,pt-0.5);
+        else if(sp.variant==1) y=metaStripBoxed(d,y,pt-0.5,sp.tint,sp.accent);
+        else                   y=metaGrid6(d,y,pt-1,sp.accent);
+        if(sp.variant==0)      y=patient2x3(d,y,pt);
+        else if(sp.variant==1) y=patient3x3(d,y,pt);
+        else                   y=patientCard(d,y,pt-0.5,sp.tint,sp.accent,sp.accent);
         d.items.push_back(mkHLine(PG_M,y-1,PG_CW,0.25));
-        y=servicesBlock(d,y+1.5,pt,sp.svc,sp.headFill,sp.bw,sp.rowH,15,true,footY);
-        totalsRow(d,footY-13,pt);
-        footBarcode(d,footY+2);
+        double reserve0=(sp.variant==2)?32:15;
+        y=servicesBlock(d,y+1.5,pt,sp.svc,sp.headFill,sp.bw,sp.rowH,reserve0,true,footY);
+        if(sp.variant==2) totalsBox(d,footY-31,pt,sp.tint,sp.accent,sp.accent);
+        else              totalsRow(d,footY-13,pt);     // v0/v1 keep the row amount
+        if(sp.variant==0)      footBarcode(d,footY+2);
+        else if(sp.variant==1) footCentered(d,footY+3);
+        else                   footClean(d,footY+2,sp.accent);
     } break;
 
     // ================= 1 — باند رنگی =======================================
+    // v1.69.0 — the band header + tinted patient card stay (family signature),
+    // but the meta strip, totals block and footer now differ per variant.
     case 1: {
         const wchar_t* doc = (sp.variant==0) ? L"قبض پذیرش و صورت‌حساب خدمات"
                             :(sp.variant==1) ? L"صورت‌حساب خدمات درمانی"
                                              : L"رسید پذیرش بیمار";
         y=hdrBand(d,FA_CLINIC,sp.accent,sp.variant!=2,doc);
-        y=metaStripBoxed(d,y,pt-0.5,sp.tint,sp.accent);
+        if(sp.variant==0)      y=metaStripBoxed(d,y,pt-0.5,sp.tint,sp.accent);
+        else if(sp.variant==1) y=metaStrip4(d,y,pt-0.5);
+        else                   y=metaGrid6(d,y,pt-1,sp.accent);
         y=patientCard(d,y,pt-0.5,sp.tint,sp.accent,sp.accent);
-        y=servicesBlock(d,y,pt,sp.svc,sp.headFill,sp.bw,sp.rowH,24,true,footY);
-        totalsBar(d,footY-22,pt,sp.accent);
-        footCentered(d,footY+3);
+        double reserve1=(sp.variant==1)?36:(sp.variant==2)?32:24;
+        y=servicesBlock(d,y,pt,sp.svc,sp.headFill,sp.bw,sp.rowH,reserve1,true,footY);
+        if(sp.variant==0)      totalsBar(d,footY-22,pt,sp.accent);
+        else if(sp.variant==1) totalsLadder(d,footY-34,pt,sp.accent);
+        else                   totalsBox(d,footY-31,pt,sp.tint,sp.accent,sp.accent);
+        if(sp.variant==0)      footCentered(d,footY+3);
+        else if(sp.variant==1) footBarcode(d,footY+2);
+        else                   footClean(d,footY+2,sp.accent);
     } break;
 
     // ================= 2 — فاکتور ==========================================
+    // v1.69.0 — split masthead + compact patient strip stay; meta/totals/footer
+    // now differ per variant so the three invoices are visually distinct.
     case 2: {
         const wchar_t* doc = (sp.variant==0) ? L"فاکتور خدمات درمانی"
                             :(sp.variant==1) ? L"فاکتور رسمی خدمات"
                                              : L"صورت‌حساب تفصیلی خدمات";
         y=hdrSplit(d,FA_CLINIC,sp.accent,doc);
-        y=metaGrid6(d,y,pt-1,sp.accent);
+        if(sp.variant==0)      y=metaGrid6(d,y,pt-1,sp.accent);
+        else if(sp.variant==1) y=metaStripBoxed(d,y,pt-0.5,sp.tint,sp.accent);
+        else                   y=metaStrip4(d,y,pt-0.5);
         // one-line patient strip: the invoice family gives the table the most room
         {
             double c=PG_CW/3;
@@ -691,12 +747,20 @@ static PrintDesign buildTemplate(int idx){
             d.items.push_back(mkField (PG_M+  c,y,c-2,7,L"performer",FA_PERF,pt,0));
             d.items.push_back(mkField (PG_M    ,y,c-2,7,L"patientType",FA_PTYPE,pt,0)); y+=10;
         }
-        y=servicesBlock(d,y,pt,sp.svc,sp.headFill,sp.bw,sp.rowH,36,true,footY);
-        totalsLadder(d,footY-34,pt,sp.accent);
-        footMinimal(d,footY+2);
+        double reserve2=(sp.variant==0)?36:(sp.variant==1)?24:32;
+        y=servicesBlock(d,y,pt,sp.svc,sp.headFill,sp.bw,sp.rowH,reserve2,true,footY);
+        if(sp.variant==0)      totalsLadder(d,footY-34,pt,sp.accent);
+        else if(sp.variant==1) totalsBar(d,footY-22,pt,sp.accent);
+        else                   totalsBox(d,footY-31,pt,sp.tint,sp.accent,sp.accent);
+        if(sp.variant==0)      footMinimal(d,footY+2);
+        else if(sp.variant==1) footBarcode(d,footY+2);
+        else                   footClean(d,footY+2,sp.accent);
     } break;
 
     // ================= 3 — ستون کناری =====================================
+    // v1.69.0 — the sidebar (logo/identity/barcode) + inline totals ladder stay;
+    // the MAIN-column patient block now takes a different layout per variant
+    // (plain 2-col / 3-col / boxed card) so the three sidebar receipts differ.
     case 3: {
         double sbW=44, sbX=PG_M, mainX=PG_M+sbW+5, mainW=PG_CW-sbW-5;
         // sidebar panel spans header → footer
@@ -729,7 +793,7 @@ static PrintDesign buildTemplate(int idx){
         d.items.push_back(mkLabelC(mainX,my,mainW,9,doc,15,true,0,sp.accent));
         my+=11;
         d.items.push_back(mkHLineC(mainX,my,mainW,0.7,sp.accent)); my+=3.5;
-        {
+        if(sp.variant==0){                  // plain two-column identity grid
             double c=mainW/2;
             d.items.push_back(mkFieldB(mainX+c,my,c-2,7,L"fullName",FA_FULL,pt,0));
             d.items.push_back(mkField (mainX  ,my,c-2,7,L"nationalCode",FA_NID,pt,0)); my+=7.8;
@@ -739,6 +803,32 @@ static PrintDesign buildTemplate(int idx){
             d.items.push_back(mkField (mainX  ,my,c-2,7,L"suppInsurance",FA_SUPP,pt,0)); my+=7.8;
             d.items.push_back(mkField (mainX+c,my,c-2,7,L"doctor",FA_DOCTOR,pt,0));
             d.items.push_back(mkField (mainX  ,my,c-2,7,L"mobile",FA_PHONE,pt,0)); my+=10;
+        } else if(sp.variant==1){           // three-column identity grid
+            double c=mainW/3;
+            d.items.push_back(mkFieldB(mainX+2*c,my,c-2,7,L"fullName",FA_FULL,pt,0));
+            d.items.push_back(mkField (mainX+  c,my,c-2,7,L"nationalCode",FA_NID,pt,0));
+            d.items.push_back(mkField (mainX    ,my,c-2,7,L"fatherName",FA_FATHER,pt,0)); my+=7.8;
+            d.items.push_back(mkField (mainX+2*c,my,c-2,7,L"birthDate",FA_BIRTH,pt,0));
+            d.items.push_back(mkField (mainX+  c,my,c-2,7,L"insurance",FA_INS,pt,0));
+            d.items.push_back(mkField (mainX    ,my,c-2,7,L"suppInsurance",FA_SUPP,pt,0)); my+=7.8;
+            d.items.push_back(mkField (mainX+2*c,my,c-2,7,L"doctor",FA_DOCTOR,pt,0));
+            d.items.push_back(mkField (mainX+  c,my,c-2,7,L"mobile",FA_PHONE,pt,0));
+            d.items.push_back(mkField (mainX    ,my,c-2,7,L"dept",FA_DEPT,pt,0)); my+=10;
+        } else {                            // boxed tinted identity card
+            double c=mainW/2, bh3=34;
+            d.items.push_back(mkTint(mainX,my,mainW,bh3,sp.tint,sp.accent,0.3,1.5));
+            d.items.push_back(mkBand(mainX,my,mainW,6.5,sp.accent,0));
+            d.items.push_back(mkLabelC(mainX+2,my+0.6,mainW-4,5,L"مشخصات بیمار",9,true,0,0xFFFFFF));
+            double py=my+8;
+            d.items.push_back(mkFieldB(mainX+c,py,c-2,6.5,L"fullName",FA_FULL,pt,0));
+            d.items.push_back(mkField (mainX  ,py,c-2,6.5,L"nationalCode",FA_NID,pt,0)); py+=7;
+            d.items.push_back(mkField (mainX+c,py,c-2,6.5,L"fatherName",FA_FATHER,pt,0));
+            d.items.push_back(mkField (mainX  ,py,c-2,6.5,L"birthDate",FA_BIRTH,pt,0)); py+=7;
+            d.items.push_back(mkField (mainX+c,py,c-2,6.5,L"insurance",FA_INS,pt,0));
+            d.items.push_back(mkField (mainX  ,py,c-2,6.5,L"mobile",FA_PHONE,pt,0)); py+=7;
+            d.items.push_back(mkField (mainX+c,py,c-2,6.5,L"doctor",FA_DOCTOR,pt,0));
+            d.items.push_back(mkField (mainX  ,py,c-2,6.5,L"dept",FA_DEPT,pt,0));
+            my+=bh3+4;
         }
         my=servicesBlockAt(d,mainX,mainW,my,pt,sp.svc,sp.headFill,sp.bw,sp.rowH,
                            30,true,footY-2);
@@ -758,11 +848,14 @@ static PrintDesign buildTemplate(int idx){
     } break;
 
     // ================= 4 — خط‌کشی (mono line-art) =========================
+    // v1.69.0 — still 100% monochrome (black borders / white fills only, line-art
+    // table header), but each variant now uses a different meta + patient + totals
+    // + footer so the three line-art receipts are not near-identical.
     case 4: {
         if(sp.variant==0)      y=hdrPlain(d,FA_CLINIC,17,false,0.9);
         else if(sp.variant==1) y=hdrPlain(d,FA_CLINIC,19,true,1.2);
         else                   y=hdrLogoRight(d,FA_CLINIC,16,false,0.9);
-        {   // ruled meta line
+        if(sp.variant==0){   // ruled meta line (pure line-art)
             double c=PG_CW/4;
             d.items.push_back(mkFieldB(PG_M+3*c,y,c,6.5,L"receiptNo",FA_RECEIPT,pt-0.5,0));
             d.items.push_back(mkField (PG_M+2*c,y,c,6.5,L"date",FA_DATE,pt-0.5,1));
@@ -770,15 +863,28 @@ static PrintDesign buildTemplate(int idx){
             d.items.push_back(mkField (PG_M    ,y,c,6.5,L"shift",FA_SHIFT,pt-0.5,2));
             y+=7.5;
             d.items.push_back(mkHLine(PG_M,y,PG_CW,0.25)); y+=3;
+        } else if(sp.variant==1){
+            y=metaStripBoxed(d,y,pt-0.5,sp.tint,sp.accent);
+        } else {
+            y=metaGrid6(d,y,pt-1,sp.accent);
         }
-        y=patient3x3(d,y,pt);
+        if(sp.variant==0)      y=patient3x3(d,y,pt);
+        else if(sp.variant==1) y=patient2x3(d,y,pt);
+        else                   y=patientCard(d,y,pt-0.5,sp.tint,sp.accent,sp.accent);
         d.items.push_back(mkHLine(PG_M,y-1,PG_CW,0.25)); y+=2;
-        y=servicesBlock(d,y,pt,sp.svc,0,sp.bw,sp.rowH,16,true,footY);
-        totalsRow(d,footY-14,pt);
-        footMinimal(d,footY+1);
+        double reserve4=(sp.variant==0)?16:(sp.variant==1)?24:32;
+        y=servicesBlock(d,y,pt,sp.svc,0,sp.bw,sp.rowH,reserve4,true,footY);
+        if(sp.variant==0)      totalsRow(d,footY-14,pt);
+        else if(sp.variant==1) totalsBar(d,footY-22,pt,sp.accent);
+        else                   totalsBox(d,footY-31,pt,sp.tint,sp.accent,sp.accent);
+        if(sp.variant==0)      footMinimal(d,footY+1);
+        else if(sp.variant==1) footClean(d,footY+2,sp.accent);
+        else                   footBarcode(d,footY+2);
     } break;
 
     // ================= 5 — کارتی ==========================================
+    // v1.69.0 — rounded card shell + tinted patient card stay; meta/totals/footer
+    // differ per variant so the three card designs look unlike each other.
     case 5: {
         // rounded card shell around the whole page content
         d.items.push_back(mkRectC(PG_M-2,PG_M-2,PG_CW+4,PG_H-2*PG_M+4,0.5,4.0,sp.accent));
@@ -797,33 +903,52 @@ static PrintDesign buildTemplate(int idx){
             d.items.push_back(mkLabelC(PG_M+3,y+3.2,PG_CW-6,8,FA_CLINIC,15,true,0,0xFFFFFF));
             y+=18;
         }
-        y=metaStripBoxed(d,y,pt-0.5,sp.tint,sp.accent);
+        if(sp.variant==0)      y=metaStripBoxed(d,y,pt-0.5,sp.tint,sp.accent);
+        else if(sp.variant==1) y=metaStrip4(d,y,pt-0.5);
+        else                   y=metaGrid6(d,y,pt-1,sp.accent);
         y=patientCard(d,y,pt-0.5,sp.tint,sp.accent,sp.accent);
-        y=servicesBlock(d,y,pt,sp.svc,sp.headFill,sp.bw,sp.rowH,32,true,footY);
-        totalsBox(d,footY-31,pt,sp.tint,sp.accent,sp.accent);
-        footDual(d,footY+1,sp.tint,sp.accent);
+        double reserve5=(sp.variant==0)?32:(sp.variant==1)?24:36;
+        y=servicesBlock(d,y,pt,sp.svc,sp.headFill,sp.bw,sp.rowH,reserve5,true,footY);
+        if(sp.variant==0)      totalsBox(d,footY-31,pt,sp.tint,sp.accent,sp.accent);
+        else if(sp.variant==1) totalsBar(d,footY-22,pt,sp.accent);
+        else                   totalsLadder(d,footY-34,pt,sp.accent);
+        if(sp.variant==0)      footDual(d,footY+1,sp.tint,sp.accent);
+        else if(sp.variant==1) footBarcode(d,footY+2);
+        else                   footClean(d,footY+2,sp.accent);
     } break;
 
     // ================= 6 — عکس و هویت =====================================
+    // v1.69.0 — patient photo stays; meta/totals/footer differ per variant.
     case 6: {
         if(sp.variant==0)      y=hdrLogoRight(d,FA_CLINIC,17,true,0.7);
         else if(sp.variant==1) y=hdrBand(d,FA_CLINIC,sp.accent,true,L"پروندهٔ پذیرش بیمار");
         else                   y=hdrCenterLogo(d,FA_CLINIC,17,true,0.5);
-        y=metaStrip4(d,y,pt-0.5);
+        if(sp.variant==0)      y=metaStrip4(d,y,pt-0.5);
+        else if(sp.variant==1) y=metaStripBoxed(d,y,pt-0.5,sp.tint,sp.accent);
+        else                   y=metaGrid6(d,y,pt-1,sp.accent);
         y=patientPhoto(d,y,pt-0.5);
         d.items.push_back(mkHLineC(PG_M,y-1,PG_CW,0.4,sp.accent)); y+=2;
-        y=servicesBlock(d,y,pt,sp.svc,sp.headFill,sp.bw,sp.rowH,32,true,footY);
-        totalsBox(d,footY-31,pt,sp.tint,sp.accent,sp.accent);
-        footBarcode(d,footY+2);
+        double reserve6=(sp.variant==0)?32:(sp.variant==1)?36:24;
+        y=servicesBlock(d,y,pt,sp.svc,sp.headFill,sp.bw,sp.rowH,reserve6,true,footY);
+        if(sp.variant==0)      totalsBox(d,footY-31,pt,sp.tint,sp.accent,sp.accent);
+        else if(sp.variant==1) totalsLadder(d,footY-34,pt,sp.accent);
+        else                   totalsBar(d,footY-22,pt,sp.accent);
+        if(sp.variant==0)      footBarcode(d,footY+2);
+        else if(sp.variant==1) footCentered(d,footY+3);
+        else                   footClean(d,footY+2,sp.accent);
     } break;
 
     // ================= 7 — مالی ===========================================
+    // v1.69.0 — split masthead + insurance patient grid stay; meta/totals/footer
+    // differ per variant so the three financial sheets are visually distinct.
     case 7: {
         const wchar_t* doc = (sp.variant==0) ? L"صورت‌حساب مالی خدمات"
                             :(sp.variant==1) ? L"ریز صورت‌حساب و سهم بیمه"
                                              : L"صورت‌حساب تفصیلی مالی";
         y=hdrSplit(d,FA_CLINIC,sp.accent,doc);
-        y=metaStripBoxed(d,y,pt-0.5,sp.tint,sp.accent);
+        if(sp.variant==0)      y=metaStripBoxed(d,y,pt-0.5,sp.tint,sp.accent);
+        else if(sp.variant==1) y=metaStrip4(d,y,pt-0.5);
+        else                   y=metaGrid6(d,y,pt-1,sp.accent);
         {
             double c=PG_CW/3;
             d.items.push_back(mkFieldB(PG_M+2*c,y,c-2,7,L"fullName",FA_FULL,pt,0));
@@ -836,12 +961,20 @@ static PrintDesign buildTemplate(int idx){
             d.items.push_back(mkField (PG_M+  c,y,c-2,7,L"supp_percent",L"درصد مکمل: ",pt,0));
             d.items.push_back(mkField (PG_M    ,y,c-2,7,L"doctor",FA_DOCTOR,pt,0)); y+=10;
         }
-        y=servicesBlock(d,y,pt,sp.svc,sp.headFill,sp.bw,sp.rowH,36,true,footY);
-        totalsLadder(d,footY-34,pt,sp.accent);
-        footBarcode(d,footY+2);
+        double reserve7=(sp.variant==0)?36:(sp.variant==1)?24:32;
+        y=servicesBlock(d,y,pt,sp.svc,sp.headFill,sp.bw,sp.rowH,reserve7,true,footY);
+        if(sp.variant==0)      totalsLadder(d,footY-34,pt,sp.accent);
+        else if(sp.variant==1) totalsBar(d,footY-22,pt,sp.accent);
+        else                   totalsBox(d,footY-31,pt,sp.tint,sp.accent,sp.accent);
+        if(sp.variant==0)      footBarcode(d,footY+2);
+        else if(sp.variant==1) footCentered(d,footY+3);
+        else                   footClean(d,footY+2,sp.accent);
     } break;
 
     // ================= 8 — فشرده + ته‌برگ =================================
+    // v1.69.0 — the tear-off + patient-copy stub stays; the meta strip, patient
+    // block, main-receipt totals and the stub's code carrier now differ per
+    // variant (v1 carries NO barcode — a clean stub).
     case 8: {
         // Main receipt occupies the top ~62% of the page; a dotted tear line and
         // a short «نسخهٔ بیمار» stub follow, so one A4 sheet gives two copies.
@@ -849,10 +982,17 @@ static PrintDesign buildTemplate(int idx){
         if(sp.variant==0)      y=hdrPlain(d,FA_CLINIC,16.5,false,0.6);
         else if(sp.variant==1) y=hdrLogoRight(d,FA_CLINIC,16,false,0.6);
         else                   y=hdrBand(d,FA_CLINIC,sp.accent,true,L"");
-        y=metaStrip4(d,y,pt-1);
-        y=patient2x3(d,y,pt-0.5);
-        y=servicesBlock(d,y,pt-0.5,sp.svc,sp.headFill,sp.bw,sp.rowH,15,true,tear-4);
-        totalsRow(d,tear-17,pt-0.5);
+        if(sp.variant==0)      y=metaStrip4(d,y,pt-1);
+        else if(sp.variant==1) y=metaStripBoxed(d,y,pt-1,sp.tint,sp.accent);
+        else                   y=metaGrid6(d,y,pt-1,sp.accent);
+        if(sp.variant==0)      y=patient2x3(d,y,pt-0.5);
+        else if(sp.variant==1) y=patient3x3(d,y,pt-0.5);
+        else                   y=patientCard(d,y,pt-0.5,sp.tint,sp.accent,sp.accent);
+        double reserve8=(sp.variant==0)?15:(sp.variant==1)?24:32;
+        y=servicesBlock(d,y,pt-0.5,sp.svc,sp.headFill,sp.bw,sp.rowH,reserve8,true,tear-4);
+        if(sp.variant==0)      totalsRow(d,tear-17,pt-0.5);
+        else if(sp.variant==1) totalsBar(d,tear-24,pt-0.5,sp.accent);
+        else                   totalsBox(d,tear-33,pt-0.5,sp.tint,sp.accent,sp.accent);
         // tear-off rule
         d.items.push_back(mkHLine(PG_M,tear,PG_CW,0.3));
         d.items.push_back(mkLabel(PG_M,tear+0.8,PG_CW,5,L"— — — محل جدا کردن — — —",8,false,1));
@@ -875,17 +1015,25 @@ static PrintDesign buildTemplate(int idx){
         // v1.65.0: the barcode is now PART of the patient stub (it used to
         // float alone at the very bottom, detached from both copies). One
         // deterministic barcode + the clinic contact line, directly under
-        // the tinted stub card.
-        {
+        // the tinted stub card. v1.69.0: variant 1 carries NO code — a clean
+        // contact + keep-note line instead.
+        if(sp.variant!=1){
             double by=footY-20, bcW=PG_CW*0.40, bcX=PG_M+PG_CW-bcW;
             d.items.push_back(mkBarcode(bcX,by,bcW,14));
             d.items.push_back(mkLabel(bcX,by+14.5,bcW,4,FA_BARCODE_CAP,8,false,1));
             d.items.push_back(mkField(PG_M,by+1,PG_CW*0.52,6,L"clinicphone",FA_PHONE,8.5,0));
             d.items.push_back(mkField(PG_M,by+8,PG_CW*0.52,6,L"clinicaddr",L"نشانی: ",8.5,0));
+        } else {
+            double by=footY-20;
+            d.items.push_back(mkField(PG_M,by+1,PG_CW*0.60,6,L"clinicphone",FA_PHONE,8.5,0));
+            d.items.push_back(mkField(PG_M,by+8,PG_CW*0.60,6,L"clinicaddr",L"نشانی: ",8.5,0));
+            d.items.push_back(mkLabelC(PG_M+PG_CW*0.62,by+1,PG_CW*0.38,6,FA_KEEP,8.5,false,2,sp.accent));
         }
     } break;
 
     // ================= 9 — دو بلوکی =======================================
+    // v1.69.0 — the two side-by-side blocks stay; totals + footer differ per
+    // variant so the three dual-block receipts are visually distinct.
     default: {
         if(sp.variant==0)      y=hdrBand(d,FA_CLINIC,sp.accent,true,L"");
         else if(sp.variant==1) y=hdrPlain(d,FA_CLINIC,18,true,0.8);
@@ -920,9 +1068,14 @@ static PrintDesign buildTemplate(int idx){
             d.items.push_back(mkField(PG_M    ,y,c-2,7,L"patientType",FA_PTYPE,pt,0));
             y+=9;
         }
-        y=servicesBlock(d,y,pt,sp.svc,sp.headFill,sp.bw,sp.rowH,24,true,footY);
-        totalsBar(d,footY-22,pt,sp.accent);
-        footBarcode(d,footY+3);
+        double reserve9=(sp.variant==0)?24:(sp.variant==1)?36:32;
+        y=servicesBlock(d,y,pt,sp.svc,sp.headFill,sp.bw,sp.rowH,reserve9,true,footY);
+        if(sp.variant==0)      totalsBar(d,footY-22,pt,sp.accent);
+        else if(sp.variant==1) totalsLadder(d,footY-34,pt,sp.accent);
+        else                   totalsBox(d,footY-31,pt,sp.tint,sp.accent,sp.accent);
+        if(sp.variant==0)      footBarcode(d,footY+3);
+        else if(sp.variant==1) footCentered(d,footY+3);
+        else                   footClean(d,footY+2,sp.accent);
     } break;
     }
     return d;

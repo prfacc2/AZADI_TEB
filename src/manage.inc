@@ -8,6 +8,9 @@
 //    PG_DASH   داشبورد           — summary cards (sections / employees / online
 //                                  / pending requests) + quick actions
 //    PG_SECTS  بخش‌ها             — existing sections grid + «ایجاد بخش» page
+//    PG_DOCS   پزشکان             — doctor/nurse registry: searchable table +
+//                                  full add/edit form (identity, contact, contract,
+//                                  accounting) with delete (v1.69.0)
 //    PG_EMPS   کارمندان           — employee list with combinable filters +
 //                                  «افزودن کارمند» (full new-employee form)
 //    PG_MSG    پیام به کارمندان   — compose with live search, dept filters,
@@ -27,8 +30,8 @@
 // panel — index 1, right after the dashboard (RTL: visually first after it).
 // It was previously only reachable from the hidden-admin panel, which was the
 // wrong surface. The hidden-admin patients tab is removed (see admin.cpp).
-enum { PG_DASH=0, PG_PATIENTS=1, PG_SECTS=2, PG_SERVICES=3, PG_EMPS=4, PG_MSG=5,
-       PG_REQS=6, PG_SAVED=7, PG_BACKUP=8, PG_PRINTCFG=9, PG_COUNT=10 };
+enum { PG_DASH=0, PG_PATIENTS=1, PG_SECTS=2, PG_SERVICES=3, PG_DOCS=4, PG_EMPS=5,
+       PG_MSG=6, PG_REQS=7, PG_SAVED=8, PG_BACKUP=9, PG_PRINTCFG=10, PG_COUNT=11 };
 
 // control ids
 enum {
@@ -61,6 +64,33 @@ enum {
     MG_SV_CLEAR,           // فرم جدید (پاک کردن)
     MG_SV_SEARCH,          // جستجو
     MG_SV_LIST,            // جدول خدمات (ListView)
+    // ---- v1.69.0: مدیریت پزشکان (Doctors Management) page ----
+    MG_DC_DEPT=2800,       // بخش (combo, from loadDepts())
+    MG_DC_TYPE,            // نوع (combo: پزشک/پرستار)
+    MG_DC_CODE,            // کد پزشک
+    MG_DC_ACTIVE,          // فعال/غیرفعال (toggle button)
+    MG_DC_MEDID,           // کد نظام پزشکی
+    MG_DC_PREFIX,          // پیشوند نام
+    MG_DC_FIRST,           // نام
+    MG_DC_LAST,            // نام خانوادگی
+    MG_DC_NID,             // کد ملی
+    MG_DC_MOBILE,          // تلفن همراه
+    MG_DC_EMAIL,           // ایمیل
+    MG_DC_ADDRESS,         // آدرس
+    MG_DC_FRANCHISE,       // فرانشیز
+    MG_DC_PRINT,           // چاپ در قبض (toggle button)
+    MG_DC_SPEC,            // تخصص
+    MG_DC_INSSPEC,         // تخصص بیمه
+    MG_DC_DEGREE,          // مدرک
+    MG_DC_CONTRACT,        // نوع قرار داد (combo)
+    MG_DC_EMERG,           // قرار پزشک اورژانس
+    MG_DC_ACCT,            // حسابداری
+    MG_DC_SAVE,            // ذخیره / افزودن
+    MG_DC_EDIT,            // ویرایش
+    MG_DC_DELETE,          // حذف
+    MG_DC_CLEAR,           // فرم جدید (پاک کردن)
+    MG_DC_SEARCH,          // جستجو
+    MG_DC_LIST,            // جدول پزشکان (ListView)
 };
 
 struct EmpRow {
@@ -111,6 +141,23 @@ struct ManageState {
     std::wstring            svQuery;    // last search text
     std::wstring            svEditCode; // code currently loaded in the form ("" = new)
     bool                    svLoaded=false;
+    // ---- doctors page (v1.69.0) ----
+    //  In-memory model + form <-> record helpers, mirroring the services page.
+    //  Doctor data is loaded ONCE on page entry (mgDocsReload) and cached here so
+    //  WM_PAINT never touches the doctors.dat file.
+    HWND dcDept=nullptr, dcType=nullptr, dcCode=nullptr, dcActiveChk=nullptr,
+         dcMedId=nullptr, dcPrefix=nullptr, dcFirst=nullptr, dcLast=nullptr,
+         dcNid=nullptr, dcMobile=nullptr, dcEmail=nullptr, dcAddress=nullptr,
+         dcFranchise=nullptr, dcPrintChk=nullptr, dcSpec=nullptr, dcInsSpec=nullptr,
+         dcDegree=nullptr, dcContract=nullptr, dcEmerg=nullptr, dcAcct=nullptr,
+         dcSave=nullptr, dcEdit=nullptr, dcDelete=nullptr, dcClear=nullptr,
+         dcSearch=nullptr, dcList=nullptr;
+    std::vector<DoctorDef>  dcAll;      // all doctors (loaded + cached)
+    std::vector<int>        dcView;     // filtered indices into dcAll
+    std::wstring            dcQuery;    // last search text
+    int                     dcEditIdx=-1; // index into dcAll loaded in form (-1 = new)
+    bool                    dcActiveVal=true, dcPrintVal=true; // toggle-button state
+    bool                    dcLoaded=false;
     // v1.66.0: dashboard summary cache — the dash calls loadAllPatients(),
     // loadUsers(), loadDepts(), countTodayReceptions(), unseen*Count() on
     // every WM_PAINT (several times per frame with GDI+), and every call
@@ -373,6 +420,220 @@ static void mgServicesEditSelected(HWND h){
     mgServicesLoadForm(s_mg->svAll[s_mg->svView[sel]]);
     InvalidateRect(h,NULL,TRUE);
     SetFocus(s_mg->svName);
+}
+
+// ================================================= DOCTORS PAGE (v1.69.0) ====
+//  In-memory model, filter and form <-> record helpers for «مدیریت پزشکان».
+//  Mirrors the services page: doctors are loaded once into s_mg->dcAll (cached,
+//  no per-WM_PAINT file reads), filtered into dcView, and rendered by an
+//  LVS_OWNERDATA ListView. The form composes the display `name` from prefix +
+//  first + last on save (the data layer keeps the parts too).
+//  NOTE on deptId: reception only consumes a doctor's name/specialty, and a
+//  DeptCat.id may be empty (auto ids), so the form stores the SECTION NAME in
+//  deptId (human-readable, round-trips safely) — same convention the services
+//  page uses for its department field.
+static void mgDocsRefreshChecks(){
+    if(!s_mg) return;
+    SetWindowTextW(s_mg->dcActiveChk, s_mg->dcActiveVal?L"\u2611 فعال":L"\u2610 غیرفعال");
+    SetWindowTextW(s_mg->dcPrintChk,  s_mg->dcPrintVal ?L"\u2611 بله":L"\u2610 خیر");
+}
+static void mgDocsFilter(){
+    if(!s_mg) return;
+    std::wstring q=uikit::NormalizeFa(trim(s_mg->dcQuery));
+    s_mg->dcView.clear();
+    s_mg->dcView.reserve(s_mg->dcAll.size());
+    for(int i=0;i<(int)s_mg->dcAll.size();++i){
+        const DoctorDef& d=s_mg->dcAll[i];
+        if(q.empty()){ s_mg->dcView.push_back(i); continue; }
+        std::wstring name=uikit::NormalizeFa(d.name);
+        std::wstring spec =uikit::NormalizeFa(d.specialty);
+        std::wstring code=uikit::NormalizeFa(d.docCode);
+        if(name.find(q)!=std::wstring::npos ||
+           spec.find(q)!=std::wstring::npos  ||
+           code.find(q)!=std::wstring::npos)
+            s_mg->dcView.push_back(i);
+    }
+    if(s_mg->dcList){
+        ListView_SetItemCountEx(s_mg->dcList,(int)s_mg->dcView.size(),
+            LVSICF_NOINVALIDATEALL|LVSICF_NOSCROLL);
+        InvalidateRect(s_mg->dcList,NULL,FALSE);
+    }
+}
+//  (Re)load doctors + repopulate the department combo from the live section
+//  list, then re-apply the filter and refresh the table.
+static void mgDocsReload(){
+    if(!s_mg) return;
+    s_mg->dcAll=loadDoctors();
+    s_mg->dcLoaded=true;
+    if(s_mg->dcDept){
+        std::wstring cur; { wchar_t b[128]={0}; GetWindowTextW(s_mg->dcDept,b,128); cur=b; }
+        SendMessageW(s_mg->dcDept,CB_RESETCONTENT,0,0);
+        SendMessageW(s_mg->dcDept,CB_ADDSTRING,0,(LPARAM)L"—");
+        auto cats=loadDepts();
+        for(auto&c:cats) SendMessageW(s_mg->dcDept,CB_ADDSTRING,0,(LPARAM)c.name.c_str());
+        int idx=0;
+        if(!cur.empty()){
+            for(int i=0;i<(int)cats.size();++i) if(cats[i].name==cur){ idx=i+1; break; }
+        }
+        SendMessageW(s_mg->dcDept,CB_SETCURSEL,idx,0);
+    }
+    mgDocsFilter();
+}
+//  Clear the form for a NEW doctor (checkboxes reset to their defaults).
+static void mgDocsClearForm(){
+    if(!s_mg) return;
+    SetWindowTextW(s_mg->dcCode,L"");
+    SetWindowTextW(s_mg->dcMedId,L"");
+    SetWindowTextW(s_mg->dcPrefix,L"");
+    SetWindowTextW(s_mg->dcFirst,L"");
+    SetWindowTextW(s_mg->dcLast,L"");
+    SetWindowTextW(s_mg->dcNid,L"");
+    SetWindowTextW(s_mg->dcMobile,L"");
+    SetWindowTextW(s_mg->dcEmail,L"");
+    SetWindowTextW(s_mg->dcAddress,L"");
+    SetWindowTextW(s_mg->dcFranchise,L"");
+    SetWindowTextW(s_mg->dcSpec,L"");
+    SetWindowTextW(s_mg->dcInsSpec,L"");
+    SetWindowTextW(s_mg->dcDegree,L"");
+    SetWindowTextW(s_mg->dcEmerg,L"");
+    SetWindowTextW(s_mg->dcAcct,L"");
+    if(s_mg->dcDept)     SendMessageW(s_mg->dcDept,CB_SETCURSEL,0,0);
+    if(s_mg->dcType)     SendMessageW(s_mg->dcType,CB_SETCURSEL,0,0);
+    if(s_mg->dcContract) SendMessageW(s_mg->dcContract,CB_SETCURSEL,0,0);
+    s_mg->dcActiveVal=true; s_mg->dcPrintVal=true;
+    s_mg->dcEditIdx=-1;
+    mgDocsRefreshChecks();
+}
+//  Load a record into the form (for editing).
+static void mgDocsLoadForm(const DoctorDef& d){
+    if(!s_mg) return;
+    SetWindowTextW(s_mg->dcCode,d.docCode.c_str());
+    SetWindowTextW(s_mg->dcMedId,d.medicalId.c_str());
+    SetWindowTextW(s_mg->dcPrefix,d.namePrefix.c_str());
+    SetWindowTextW(s_mg->dcFirst,d.firstName.c_str());
+    SetWindowTextW(s_mg->dcLast,d.lastName.c_str());
+    SetWindowTextW(s_mg->dcNid,d.nationalId.c_str());
+    SetWindowTextW(s_mg->dcMobile,d.mobile.c_str());
+    SetWindowTextW(s_mg->dcEmail,d.email.c_str());
+    SetWindowTextW(s_mg->dcAddress,d.address.c_str());
+    SetWindowTextW(s_mg->dcFranchise,d.franchise.c_str());
+    SetWindowTextW(s_mg->dcSpec,d.specialty.c_str());
+    SetWindowTextW(s_mg->dcInsSpec,d.insSpecialty.c_str());
+    SetWindowTextW(s_mg->dcDegree,d.degree.c_str());
+    SetWindowTextW(s_mg->dcEmerg,d.emergencyContract.c_str());
+    SetWindowTextW(s_mg->dcAcct,d.accounting.c_str());
+    if(s_mg->dcDept){                       // dept combo by stored section name
+        int n=(int)SendMessageW(s_mg->dcDept,CB_GETCOUNT,0,0), sel=0;
+        for(int i=0;i<n;i++){ wchar_t b[128]={0};
+            SendMessageW(s_mg->dcDept,CB_GETLBTEXT,i,(LPARAM)b);
+            if(d.deptId==b){ sel=i; break; } }
+        SendMessageW(s_mg->dcDept,CB_SETCURSEL,sel,0);
+    }
+    if(s_mg->dcType) SendMessageW(s_mg->dcType,CB_SETCURSEL,d.docType==0?0:1,0);
+    if(s_mg->dcContract){
+        int n=(int)SendMessageW(s_mg->dcContract,CB_GETCOUNT,0,0);
+        int ct=d.contractType; if(ct<0)ct=0; if(n>0&&ct>=n)ct=0;
+        SendMessageW(s_mg->dcContract,CB_SETCURSEL,ct,0);
+    }
+    s_mg->dcActiveVal=d.active; s_mg->dcPrintVal=d.printOnReceipt;
+    mgDocsRefreshChecks();
+}
+//  Read the form into a DoctorDef. The display `name` is composed from the
+//  prefix / first / last parts; `services` is left empty (preserved on edit).
+static DoctorDef mgDocsReadForm(){
+    DoctorDef d;
+    if(!s_mg) return d;
+    wchar_t b[512]={0};
+    GetWindowTextW(s_mg->dcCode,b,512);      d.docCode=trim(b);
+    GetWindowTextW(s_mg->dcMedId,b,512);     d.medicalId=trim(b);
+    GetWindowTextW(s_mg->dcPrefix,b,512);    d.namePrefix=trim(b);
+    GetWindowTextW(s_mg->dcFirst,b,512);     d.firstName=trim(b);
+    GetWindowTextW(s_mg->dcLast,b,512);      d.lastName=trim(b);
+    GetWindowTextW(s_mg->dcNid,b,512);       d.nationalId=trim(b);
+    GetWindowTextW(s_mg->dcMobile,b,512);    d.mobile=trim(b);
+    GetWindowTextW(s_mg->dcEmail,b,512);     d.email=trim(b);
+    GetWindowTextW(s_mg->dcAddress,b,512);   d.address=trim(b);
+    GetWindowTextW(s_mg->dcFranchise,b,512); d.franchise=trim(b);
+    GetWindowTextW(s_mg->dcSpec,b,512);      d.specialty=trim(b);
+    GetWindowTextW(s_mg->dcInsSpec,b,512);   d.insSpecialty=trim(b);
+    GetWindowTextW(s_mg->dcDegree,b,512);    d.degree=trim(b);
+    GetWindowTextW(s_mg->dcEmerg,b,512);     d.emergencyContract=trim(b);
+    GetWindowTextW(s_mg->dcAcct,b,512);      d.accounting=trim(b);
+    if(s_mg->dcDept){                        // deptId stores the section NAME
+        int sel=(int)SendMessageW(s_mg->dcDept,CB_GETCURSEL,0,0);
+        if(sel>0){ wchar_t nb[128]={0};
+            SendMessageW(s_mg->dcDept,CB_GETLBTEXT,sel,(LPARAM)nb); d.deptId=nb; }
+        else d.deptId.clear();
+    }
+    if(s_mg->dcType) d.docType = (SendMessageW(s_mg->dcType,CB_GETCURSEL,0,0)==1)?1:0;
+    if(s_mg->dcContract){
+        int sel=(int)SendMessageW(s_mg->dcContract,CB_GETCURSEL,0,0);
+        d.contractType = sel<0?0:sel;
+    }
+    d.active=s_mg->dcActiveVal; d.printOnReceipt=s_mg->dcPrintVal;
+    std::wstring nm;
+    if(!d.namePrefix.empty()) nm += d.namePrefix + L" ";
+    if(!d.firstName.empty())  nm += d.firstName  + L" ";
+    if(!d.lastName.empty())   nm += d.lastName;
+    d.name=trim(nm);
+    return d;
+}
+//  «ذخیره» — insert a new doctor or update the one loaded in the form. Only the
+//  composed name is required (so a doctor is always identifiable); every other
+//  field is optional. On edit the existing `services` list is preserved.
+static void mgDocsSave(HWND h){
+    if(!s_mg) return;
+    DoctorDef d=mgDocsReadForm();
+    if(d.name.empty()){
+        s_mg->msg=L"حداقل نام پزشک را وارد کنید."; s_mg->msgCol=g_theme.danger;
+        InvalidateRect(h,NULL,TRUE); return;
+    }
+    bool ok;
+    if(s_mg->dcEditIdx>=0 && s_mg->dcEditIdx<(int)s_mg->dcAll.size()){
+        d.services=s_mg->dcAll[s_mg->dcEditIdx].services;   // keep services list
+        s_mg->dcAll[s_mg->dcEditIdx]=d;
+        ok=saveDoctors(s_mg->dcAll);
+        if(ok){ s_mg->msg=L"پزشک «"+d.name+L"» ویرایش شد."; s_mg->msgCol=g_theme.success; }
+    } else {
+        s_mg->dcAll.push_back(d);
+        ok=saveDoctors(s_mg->dcAll);
+        if(ok){ s_mg->msg=L"پزشک «"+d.name+L"» اضافه شد."; s_mg->msgCol=g_theme.success; }
+    }
+    if(!ok){ s_mg->msg=L"ذخیرهٔ پزشک ناموفق بود."; s_mg->msgCol=g_theme.danger; }
+    else mgDocsClearForm();
+    mgDocsReload();
+    InvalidateRect(h,NULL,TRUE);
+}
+//  «حذف» — delete the selected row (with confirm).
+static void mgDocsDelete(HWND h){
+    if(!s_mg || !s_mg->dcList) return;
+    int sel=ListView_GetNextItem(s_mg->dcList,-1,LVNI_SELECTED);
+    if(sel<0 || sel>=(int)s_mg->dcView.size()){
+        s_mg->msg=L"ابتدا یک پزشک را از جدول انتخاب کنید."; s_mg->msgCol=g_theme.danger;
+        InvalidateRect(h,NULL,TRUE); return;
+    }
+    const DoctorDef& d=s_mg->dcAll[s_mg->dcView[sel]];
+    std::wstring q=L"حذف پزشک «"+d.name+L"»؟";
+    if(MessageBoxW(h,q.c_str(),L"تأیید حذف",MB_YESNO|MB_ICONWARNING)!=IDYES) return;
+    s_mg->dcAll.erase(s_mg->dcAll.begin()+s_mg->dcView[sel]);
+    saveDoctors(s_mg->dcAll);
+    s_mg->msg=L"پزشک حذف شد."; s_mg->msgCol=g_theme.success;
+    mgDocsClearForm();
+    mgDocsReload();
+    InvalidateRect(h,NULL,TRUE);
+}
+//  «ویرایش» / double-click — load the selected row into the form.
+static void mgDocsEditSelected(HWND h){
+    if(!s_mg || !s_mg->dcList) return;
+    int sel=ListView_GetNextItem(s_mg->dcList,-1,LVNI_SELECTED);
+    if(sel<0 || sel>=(int)s_mg->dcView.size()){
+        s_mg->msg=L"ابتدا یک پزشک را از جدول انتخاب کنید."; s_mg->msgCol=g_theme.danger;
+        InvalidateRect(h,NULL,TRUE); return;
+    }
+    s_mg->dcEditIdx=s_mg->dcView[sel];
+    mgDocsLoadForm(s_mg->dcAll[s_mg->dcEditIdx]);
+    InvalidateRect(h,NULL,TRUE);
+    SetFocus(s_mg->dcFirst);
 }
 
 // ---- data refresh ----------------------------------------------------------
@@ -2705,13 +2966,13 @@ static void openPrintCfg(HWND owner){
 static int  mgNavW(){ return S(220); }     // sidebar width
 static int  mgHeadH(){ return S(64); }      // content header height
 static const wchar_t* MG_NAV_LABELS[PG_COUNT] = {
-    L"داشبورد", L"بیماران", L"بخش‌ها", L"مدیریت خدمات", L"کارمندان",
+    L"داشبورد", L"بیماران", L"بخش‌ها", L"مدیریت خدمات", L"پزشکان", L"کارمندان",
     L"پیام به کارمندان", L"درخواست‌ها", L"پیام‌های ذخیره‌شده",
     L"پشتیبان‌گیری", L"تنظیمات چاپ"
 };
 static int MG_NAV_ICONS[PG_COUNT] = {
-    ICO_TAB, ICO_ID, ICO_SHIELD, ICO_PLUS, ICO_USER, ICO_BELL, ICO_GEAR,
-    ICO_SAVE, ICO_REFRESH, ICO_GEAR
+    ICO_TAB, ICO_ID, ICO_SHIELD, ICO_PLUS, ICO_CROSS_MED, ICO_USER, ICO_BELL,
+    ICO_GEAR, ICO_SAVE, ICO_REFRESH, ICO_GEAR
 };
 //  content area to the LEFT of the RTL nav rail (rail is on the RIGHT)
 static RECT mgContentRect(HWND h){
@@ -2845,7 +3106,13 @@ static void mgLayout(HWND h){
         s_mg->ptSearch,s_mg->ptList,s_mg->ptAdd,
         s_mg->svCode,s_mg->svName,s_mg->svCat,s_mg->svDept,s_mg->svPrice,
         s_mg->svIns,s_mg->svStatus,s_mg->svDesc,s_mg->svSave,s_mg->svEdit,
-        s_mg->svDelete,s_mg->svClear,s_mg->svSearch,s_mg->svList};
+        s_mg->svDelete,s_mg->svClear,s_mg->svSearch,s_mg->svList,
+        s_mg->dcDept,s_mg->dcType,s_mg->dcCode,s_mg->dcActiveChk,s_mg->dcMedId,
+        s_mg->dcPrefix,s_mg->dcFirst,s_mg->dcLast,s_mg->dcNid,s_mg->dcMobile,
+        s_mg->dcEmail,s_mg->dcAddress,s_mg->dcFranchise,s_mg->dcPrintChk,
+        s_mg->dcSpec,s_mg->dcInsSpec,s_mg->dcDegree,s_mg->dcContract,s_mg->dcEmerg,
+        s_mg->dcAcct,s_mg->dcSave,s_mg->dcEdit,s_mg->dcDelete,s_mg->dcClear,
+        s_mg->dcSearch,s_mg->dcList};
     for(HWND w:all) if(w) ShowWindow(w,SW_HIDE);
 
     if(s_mg->page==PG_PATIENTS){
@@ -2962,6 +3229,63 @@ static void mgLayout(HWND h){
             s_mg->svSave,s_mg->svEdit,s_mg->svDelete,s_mg->svClear,
             s_mg->svSearch,s_mg->svList};
         for(HWND w:show) if(w) ShowWindow(w,SW_SHOW);
+    } else if(s_mg->page==PG_DOCS){
+        // ---- doctor-management form (top) + doctors table (fills rest) ----
+        //  A 4-column × 5-row field grid inside one card, then the action
+        //  buttons, then a search box + the LVS_OWNERDATA table below.
+        int lh=S(20), fgap=S(14);
+        int formL=a.left+S(12), formR=rEdge, formW=formR-formL;
+        const int cols=4;
+        int cgap=S(12);
+        int colW=(formW-(cols-1)*cgap)/cols;
+        auto cx=[&](int c){ return formR-(c+1)*colW-c*cgap; };  // RTL col left
+        auto cy=[&](int row){ return top+S(28)+lh+row*(lh+fh+fgap); };
+        int comboH=S(200);               // tall so the dropdown shows several rows
+        // Row 0: نوع | بخش | کد پزشک | کد نظام پزشکی
+        MoveWindow(s_mg->dcType,     cx(0), cy(0), colW, comboH, TRUE);
+        MoveWindow(s_mg->dcDept,     cx(1), cy(0), colW, comboH, TRUE);
+        MoveWindow(s_mg->dcCode,     cx(2), cy(0), colW, fh, TRUE);
+        MoveWindow(s_mg->dcMedId,    cx(3), cy(0), colW, fh, TRUE);
+        // Row 1: پیشوند نام | نام | نام خانوادگی | کد ملی
+        MoveWindow(s_mg->dcPrefix,   cx(0), cy(1), colW, fh, TRUE);
+        MoveWindow(s_mg->dcFirst,    cx(1), cy(1), colW, fh, TRUE);
+        MoveWindow(s_mg->dcLast,     cx(2), cy(1), colW, fh, TRUE);
+        MoveWindow(s_mg->dcNid,      cx(3), cy(1), colW, fh, TRUE);
+        // Row 2: تلفن همراه | ایمیل | فرانشیز | تخصص
+        MoveWindow(s_mg->dcMobile,   cx(0), cy(2), colW, fh, TRUE);
+        MoveWindow(s_mg->dcEmail,    cx(1), cy(2), colW, fh, TRUE);
+        MoveWindow(s_mg->dcFranchise,cx(2), cy(2), colW, fh, TRUE);
+        MoveWindow(s_mg->dcSpec,     cx(3), cy(2), colW, fh, TRUE);
+        // Row 3: تخصص بیمه | مدرک | نوع قرار داد | قرار پزشک اورژانس
+        MoveWindow(s_mg->dcInsSpec,  cx(0), cy(3), colW, fh, TRUE);
+        MoveWindow(s_mg->dcDegree,   cx(1), cy(3), colW, fh, TRUE);
+        MoveWindow(s_mg->dcContract, cx(2), cy(3), colW, comboH, TRUE);
+        MoveWindow(s_mg->dcEmerg,    cx(3), cy(3), colW, fh, TRUE);
+        // Row 4: فعال | چاپ در قبض | آدرس | حسابداری
+        MoveWindow(s_mg->dcActiveChk,cx(0), cy(4), colW, fh, TRUE);
+        MoveWindow(s_mg->dcPrintChk, cx(1), cy(4), colW, fh, TRUE);
+        MoveWindow(s_mg->dcAddress,  cx(2), cy(4), colW, fh, TRUE);
+        MoveWindow(s_mg->dcAcct,     cx(3), cy(4), colW, fh, TRUE);
+        // action buttons row (right→left): ذخیره | ویرایش | حذف | فرم جدید
+        int by=cy(4)+fh+S(6);
+        int bw=S(120), bgap=S(10), bx=formR;
+        MoveWindow(s_mg->dcSave,   bx-bw, by, bw, S(40), TRUE); bx-=bw+bgap;
+        MoveWindow(s_mg->dcEdit,   bx-bw, by, bw, S(40), TRUE); bx-=bw+bgap;
+        MoveWindow(s_mg->dcDelete, bx-bw, by, bw, S(40), TRUE); bx-=bw+bgap;
+        MoveWindow(s_mg->dcClear,  bx-bw, by, bw, S(40), TRUE);
+        int cardBot=by+S(40)+S(10);
+        // search box (left) + table below the form card
+        int srchTop=cardBot+S(8), srchH=fh, srchW=S(320);
+        MoveWindow(s_mg->dcSearch, formL, srchTop, srchW, srchH, TRUE);
+        int ly=srchTop+srchH+S(10);
+        MoveWindow(s_mg->dcList, formL, ly, formW, a.bottom-ly-S(8), TRUE);
+        HWND show[]={s_mg->dcType,s_mg->dcDept,s_mg->dcCode,s_mg->dcMedId,
+            s_mg->dcPrefix,s_mg->dcFirst,s_mg->dcLast,s_mg->dcNid,s_mg->dcMobile,
+            s_mg->dcEmail,s_mg->dcFranchise,s_mg->dcSpec,s_mg->dcInsSpec,
+            s_mg->dcDegree,s_mg->dcContract,s_mg->dcEmerg,s_mg->dcActiveChk,
+            s_mg->dcPrintChk,s_mg->dcAddress,s_mg->dcAcct,s_mg->dcSave,
+            s_mg->dcEdit,s_mg->dcDelete,s_mg->dcClear,s_mg->dcSearch,s_mg->dcList};
+        for(HWND w:show) if(w) ShowWindow(w,SW_SHOW);
     }
 }
 
@@ -2998,6 +3322,7 @@ static const wchar_t* mgCardTitle(int page){
         case PG_PATIENTS: return L"مدیریت بیماران";
         case PG_SECTS: return L"مدیریت بخش‌ها";
         case PG_SERVICES: return L"مدیریت خدمات";
+        case PG_DOCS:  return L"مدیریت پزشکان";
         case PG_EMPS:  return L"فهرست کارمندان";
         case PG_MSG:   return L"پیام به کارمندان";
         case PG_REQS:  return L"درخواست‌های تغییر";
@@ -3623,6 +3948,79 @@ static void mgPaintServices(HDC dc, HWND h){
     }
 }
 
+// ---- «مدیریت پزشکان» page body ---------------------------------------------
+//  Paints the form-card chrome only: a soft shadow + surface-gradient card
+//  with an accent icon medallion and a fading rule under the title (the design
+//  language's height-shadow / surface-gradient / icon-modal / fade-separator
+//  elements), then the 4×5 grid of field labels, and a status / empty hint in
+//  the search row. The doctor TABLE itself is the LVS_OWNERDATA child (dcList),
+//  themed by applyThemedListView; it paints its own rows. Geometry mirrors the
+//  mgLayout PG_DOCS branch exactly so labels line up with their controls.
+static void mgPaintDocs(HDC dc, HWND h){
+    if(!s_mg) return;
+    RECT a=mgContentRect(h);
+    int rEdge=a.right-S(12), fh=S(34);
+    int top=a.top+mgHeadH()+S(12);
+    int lh=S(20), fgap=S(14);
+    int formL=a.left+S(12), formR=rEdge, formW=formR-formL;
+    const int cols=4;
+    int cgap=S(12);
+    int colW=(formW-(cols-1)*cgap)/cols;
+    auto cx=[&](int c){ return formR-(c+1)*colW-c*cgap; };
+    auto cy=[&](int row){ return top+S(28)+lh+row*(lh+fh+fgap); };
+    int by=cy(4)+fh+S(6);
+    int cardBot=by+S(40)+S(10);
+    // ---- form card: soft shadow + surface gradient ----
+    RECT card={formL-S(4),top-S(2),formR+S(4),cardBot};
+    gpShadow(dc,card,S(12),S(7),g_dark?58:40);
+    gpGradRoundRectBg(dc,card,S(12),g_theme.surfaceTop,g_theme.surface,
+                      g_theme.border,g_theme.bg);
+    // card title with a small accent medallion on the RTL (right) edge
+    int ttop=top+S(2), th=S(24), med=S(22), mcy=ttop+th/2;
+    RECT mdr={formR-med-S(4),mcy-med/2,formR-S(4),mcy+med/2};
+    gpRoundRectBg(dc,mdr,med/2,blendColor(g_theme.surface,g_infoAccent,g_dark?22:16),
+                  blendColor(g_theme.border,g_infoAccent,46),g_theme.surface);
+    { RECT ir={mdr.left+S(5),mdr.top+S(5),mdr.right-S(5),mdr.bottom-S(5)};
+      drawIcon(dc,ICO_CROSS_MED,ir,blendColor(g_infoAccent,g_theme.text,12),S(2)); }
+    SelectObject(dc,g_fSection); SetTextColor(dc,g_theme.sectionInk);
+    { RECT tr={formL+S(10),ttop,mdr.left-S(10),ttop+th};
+      DrawTextW(dc,L"مشخصات پزشک",-1,&tr,
+        DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX); }
+    // fade separator under the title (strong on the RTL/right side)
+    { int sy=ttop+th, x0=formL+S(10), x1=formR-S(10), span=x1-x0;
+      if(span>0){ int seg=S(6); if(seg<2)seg=2;
+        for(int x=x0;x<x1;x+=seg){ int xe=x+seg; if(xe>x1)xe=x1;
+            int al=150-(140*(x1-x))/span; if(al<8)al=8; if(al>255)al=255;
+            gpLine(dc,x,sy,xe,sy,blendColor(g_theme.border,g_infoAccent,32),1.0f,al); } } }
+    // field labels (4 columns × 5 rows, RTL)
+    auto lbl=[&](int x,int ly,int w,const wchar_t* txt){
+        SelectObject(dc,g_fLabel); SetTextColor(dc,g_theme.labelInk);
+        RECT lr={x,ly,x+w,ly+S(16)};
+        DrawTextW(dc,txt,-1,&lr,DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+    };
+    struct Lb{int r,c; const wchar_t* t;};
+    const Lb lbs[]={
+        {0,0,L"نوع"},{0,1,L"بخش"},{0,2,L"کد پزشک"},{0,3,L"کد نظام پزشکی"},
+        {1,0,L"پیشوند نام"},{1,1,L"نام"},{1,2,L"نام خانوادگی"},{1,3,L"کد ملی"},
+        {2,0,L"تلفن همراه"},{2,1,L"ایمیل"},{2,2,L"فرانشیز"},{2,3,L"تخصص"},
+        {3,0,L"تخصص بیمه"},{3,3,L"قرار پزشک اورژانس"},{3,2,L"نوع قرار داد"},{3,1,L"مدرک"},
+        {4,0,L"وضعیت فعالیت"},{4,1,L"چاپ در قبض"},{4,2,L"آدرس"},{4,3,L"حسابداری"}};
+    for(const Lb& lb:lbs) lbl(cx(lb.c),cy(lb.r)-lh,colW,lb.t);
+    // ---- search row: box (left, child) + status / empty hint (right) ----
+    int srchTop=cardBot+S(8), srchH=fh, srchW=S(320);
+    if(!s_mg->msg.empty()){
+        SelectObject(dc,g_fSmall); SetTextColor(dc,s_mg->msgCol);
+        RECT mr={formL+srchW+S(14),srchTop,formR,srchTop+srchH};
+        DrawTextW(dc,s_mg->msg.c_str(),-1,&mr,
+            DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+    } else if(s_mg->dcView.empty()){
+        SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
+        RECT er={formL+srchW+S(14),srchTop,formR,srchTop+srchH};
+        DrawTextW(dc, s_mg->dcAll.empty()?L"هنوز پزشکی ثبت نشده است":L"موردی یافت نشد",
+            -1,&er,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+    }
+}
+
 // ---- the dashboard shell: nav rail (right) + content card (left) -----------
 static void mgPaintShell(HDC dc, HWND h){
     RECT rc; GetClientRect(h,&rc);
@@ -3719,6 +4117,7 @@ static void mgPaintShell(HDC dc, HWND h){
             case PG_PATIENTS: mgPaintPatients(dc,h); break;
             case PG_SECTS: mgPaintSects(dc,h); break;
             case PG_SERVICES: mgPaintServices(dc,h); break;
+            case PG_DOCS:  mgPaintDocs(dc,h);  break;
             case PG_EMPS:  mgPaintEmps(dc,h);  break;
             case PG_MSG:   mgPaintMsg(dc,h);   break;
             case PG_REQS:  mgPaintReqs(dc,h);  break;
@@ -3786,6 +4185,7 @@ static void mgGoPage(HWND h, int page){
     else if(page==PG_MSG){ mgLoadEmps(); }   // v1.22.0: show employee list
     else if(page==PG_PATIENTS){ mgPatientsLoadAsync(h); }
     else if(page==PG_SERVICES){ mgServicesClearForm(); mgServicesReload(); }
+    else if(page==PG_DOCS){ mgDocsClearForm(); mgDocsReload(); }
     // v1.69.0: replay the subtle dashboard entrance each time the dash is shown;
     // stop it (and the timer) whenever we navigate away.
     if(page==PG_DASH) mgDashAnimStart(h); else mgDashAnimStop(h);
@@ -3799,6 +4199,72 @@ static void mgRefreshSortBtns(){
     SetWindowTextW(s_mg->bAbc,     s_mg->empSort==0?L"● الفبایی":L"الفبایی");
     SetWindowTextW(s_mg->bNew,     s_mg->empSort==1?L"● جدیدترین":L"جدیدترین");
     SetWindowTextW(s_mg->bCreated, s_mg->empSort==2?L"● زمان ساخت":L"زمان ساخت");
+}
+
+// ----------------------------------------------------------------------------
+//  v1.69.0 DOCTORS PAGE — create all child controls once (kept hidden until
+//  the page is shown by mgLayout). Mirrors the services control block but is
+//  isolated in its own function so WM_CREATE stays readable.
+// ----------------------------------------------------------------------------
+static void mgBuildDocsPage(HWND h){
+    if(!s_mg) return;
+    DWORD es=WS_CHILD|WS_TABSTOP|ES_AUTOHSCROLL;
+    s_mg->dcType    =createThemedCombo(h,MG_DC_TYPE);
+    s_mg->dcDept    =createThemedCombo(h,MG_DC_DEPT);
+    s_mg->dcCode    =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)MG_DC_CODE,g_hInst,0);
+    s_mg->dcMedId   =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)MG_DC_MEDID,g_hInst,0);
+    s_mg->dcPrefix  =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)MG_DC_PREFIX,g_hInst,0);
+    s_mg->dcFirst   =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)MG_DC_FIRST,g_hInst,0);
+    s_mg->dcLast    =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)MG_DC_LAST,g_hInst,0);
+    s_mg->dcNid     =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)MG_DC_NID,g_hInst,0);
+    s_mg->dcMobile  =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)MG_DC_MOBILE,g_hInst,0);
+    s_mg->dcEmail   =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)MG_DC_EMAIL,g_hInst,0);
+    s_mg->dcFranchise=CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)MG_DC_FRANCHISE,g_hInst,0);
+    s_mg->dcSpec    =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)MG_DC_SPEC,g_hInst,0);
+    s_mg->dcInsSpec =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)MG_DC_INSSPEC,g_hInst,0);
+    s_mg->dcDegree  =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)MG_DC_DEGREE,g_hInst,0);
+    s_mg->dcContract=createThemedCombo(h,MG_DC_CONTRACT);
+    s_mg->dcEmerg   =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)MG_DC_EMERG,g_hInst,0);
+    s_mg->dcAddress =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)MG_DC_ADDRESS,g_hInst,0);
+    s_mg->dcAcct    =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)MG_DC_ACCT,g_hInst,0);
+    s_mg->dcActiveChk=createFlatButton(h,MG_DC_ACTIVE,L"\u2611 فعال",0,BS_OUTLINE,0,0,10,10);
+    s_mg->dcPrintChk =createFlatButton(h,MG_DC_PRINT, L"\u2611 بله",0,BS_OUTLINE,0,0,10,10);
+    s_mg->dcSave   =createFlatButton(h,MG_DC_SAVE,  L"ذخیره",  ICO_SAVE,  BS_PRIMARY,0,0,10,10);
+    s_mg->dcEdit   =createFlatButton(h,MG_DC_EDIT,  L"ویرایش", ICO_GEAR,  BS_OUTLINE,0,0,10,10);
+    s_mg->dcDelete =createFlatButton(h,MG_DC_DELETE,L"حذف",    ICO_TRASH, BS_DANGER, 0,0,10,10);
+    s_mg->dcClear  =createFlatButton(h,MG_DC_CLEAR, L"فرم جدید",ICO_PLUS, BS_OUTLINE,0,0,10,10);
+    s_mg->dcSearch =CreateWindowExW(0,L"EDIT",L"",
+        WS_CHILD|WS_TABSTOP|ES_AUTOHSCROLL,0,0,10,10,h,(HMENU)MG_DC_SEARCH,g_hInst,0);
+    s_mg->dcList   =CreateWindowExW(0,WC_LISTVIEWW,L"",
+        WS_CHILD|WS_TABSTOP|LVS_OWNERDATA|LVS_REPORT|LVS_SHOWSELALWAYS|LVS_SINGLESEL,
+        0,0,10,10,h,(HMENU)MG_DC_LIST,g_hInst,0);
+    ListView_SetExtendedListViewStyle(s_mg->dcList,
+        LVS_EX_FULLROWSELECT|LVS_EX_DOUBLEBUFFER);
+    SendMessageW(s_mg->dcList,WM_SETFONT,(WPARAM)g_fUI,TRUE);
+    {   // RTL columns (rightmost first): # | نام | تخصص | نوع | وضعیت
+        struct { const wchar_t* t; int w; } dcols[]={
+            {L"#",S(44)},{L"نام",S(230)},{L"تخصص",S(170)},{L"نوع",S(90)},{L"وضعیت",S(90)} };
+        LVCOLUMNW lc={0}; lc.mask=LVCF_TEXT|LVCF_WIDTH|LVCF_FMT; lc.fmt=LVCFMT_RIGHT;
+        for(int i=0;i<5;i++){ lc.pszText=(LPWSTR)dcols[i].t; lc.cx=dcols[i].w;
+            ListView_InsertColumn(s_mg->dcList,i,&lc); }
+    }
+    applyThemedListView(s_mg->dcList);
+    SendMessageW(s_mg->dcSearch,WM_SETFONT,(WPARAM)g_fUI,TRUE);
+    // type combo: پزشک / پرستار
+    SendMessageW(s_mg->dcType,CB_ADDSTRING,0,(LPARAM)L"پزشک");
+    SendMessageW(s_mg->dcType,CB_ADDSTRING,0,(LPARAM)L"پرستار");
+    SendMessageW(s_mg->dcType,CB_SETCURSEL,0,0);
+    // contract-type combo
+    { const wchar_t* ct[]={L"حقوقی",L"پورسانتی",L"قراردادی",L"ساعتی"};
+      for(int i=0;i<4;i++) SendMessageW(s_mg->dcContract,CB_ADDSTRING,0,(LPARAM)ct[i]);
+      SendMessageW(s_mg->dcContract,CB_SETCURSEL,0,0); }
+    // fonts + Enter-key navigation on the edit fields
+    HWND eds[]={s_mg->dcCode,s_mg->dcMedId,s_mg->dcPrefix,s_mg->dcFirst,s_mg->dcLast,
+        s_mg->dcNid,s_mg->dcMobile,s_mg->dcEmail,s_mg->dcFranchise,s_mg->dcSpec,
+        s_mg->dcInsSpec,s_mg->dcDegree,s_mg->dcEmerg,s_mg->dcAddress,s_mg->dcAcct};
+    for(HWND e:eds){ SendMessageW(e,WM_SETFONT,(WPARAM)g_fUI,TRUE); enableEnterNavigation(e); }
+    HWND cmb[]={s_mg->dcType,s_mg->dcDept,s_mg->dcContract};
+    for(HWND c:cmb) SendMessageW(c,WM_SETFONT,(WPARAM)g_fUI,TRUE);
 }
 
 // ============================================================================
@@ -3874,10 +4340,14 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         s_mg->svEdit  =createFlatButton(h,MG_SV_EDIT,  L"ویرایش", ICO_GEAR, BS_OUTLINE,0,0,10,10);
         s_mg->svDelete=createFlatButton(h,MG_SV_DELETE,L"حذف",    ICO_TRASH,BS_DANGER, 0,0,10,10);
         s_mg->svClear =createFlatButton(h,MG_SV_CLEAR, L"فرم جدید",ICO_PLUS, BS_OUTLINE,0,0,10,10);
+        // ---- doctors page controls (v1.69.0) ----
+        mgBuildDocsPage(h);
         HWND pageBtns[]={s_mg->bAdd,s_mg->bAutoId,s_mg->bSecNew,s_mg->bSecBack,
             s_mg->bAbc,s_mg->bNew,s_mg->bCreated,s_mg->bAddEmp,s_mg->bMsg,
             s_mg->bReqs,s_mg->bProfReqs,s_mg->bNoteAttach,s_mg->bNoteSend,
-            s_mg->ptAdd,s_mg->svSave,s_mg->svEdit,s_mg->svDelete,s_mg->svClear};
+            s_mg->ptAdd,s_mg->svSave,s_mg->svEdit,s_mg->svDelete,s_mg->svClear,
+            s_mg->dcSave,s_mg->dcEdit,s_mg->dcDelete,s_mg->dcClear,
+            s_mg->dcActiveChk,s_mg->dcPrintChk};
         for(HWND b:pageBtns) setFlatButtonBg(b,g_theme.surface);
         s_mg->svSearch=CreateWindowExW(0,L"EDIT",L"",
             WS_CHILD|WS_TABSTOP|ES_AUTOHSCROLL,0,0,10,10,h,(HMENU)MG_SV_SEARCH,g_hInst,0);
@@ -3930,6 +4400,7 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 else if(!wcscmp(dbgp,L"emps"))   pg=PG_EMPS;
                 else if(!wcscmp(dbgp,L"sects"))  pg=PG_SECTS;
                 else if(!wcscmp(dbgp,L"services")) pg=PG_SERVICES;
+                else if(!wcscmp(dbgp,L"docs"))    pg=PG_DOCS;
                 if(pg>=0){ mgGoPage(h,pg); InvalidateRect(h,NULL,TRUE); }
             }
         }
@@ -3946,10 +4417,13 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             HWND pageBtns[]={s_mg->bAdd,s_mg->bAutoId,s_mg->bSecNew,s_mg->bSecBack,
                 s_mg->bAbc,s_mg->bNew,s_mg->bCreated,s_mg->bAddEmp,s_mg->bMsg,
                 s_mg->bReqs,s_mg->bProfReqs,s_mg->bNoteAttach,s_mg->bNoteSend,
-                s_mg->ptAdd,s_mg->svSave,s_mg->svEdit,s_mg->svDelete,s_mg->svClear};
+                s_mg->ptAdd,s_mg->svSave,s_mg->svEdit,s_mg->svDelete,s_mg->svClear,
+                s_mg->dcSave,s_mg->dcEdit,s_mg->dcDelete,s_mg->dcClear,
+                s_mg->dcActiveChk,s_mg->dcPrintChk};
             for(HWND b:pageBtns) setFlatButtonBg(b,g_theme.surface);
             applyThemedListView(s_mg->ptList);
             applyThemedListView(s_mg->svList);
+            applyThemedListView(s_mg->dcList);
         }
         mgFreeShadowCache();   // v1.68.0: shadow cache is theme-coloured
         InvalidateRect(h,NULL,TRUE); return 0;
@@ -4038,6 +4512,28 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             }
             if(nh->code==NM_DBLCLK){ mgServicesEditSelected(h); return 0; }
         }
+        // ---- doctors table (v1.69.0) ----
+        if(nh && nh->hwndFrom==s_mg->dcList){
+            if(nh->code==LVN_GETDISPINFOW){
+                NMLVDISPINFOW* di=(NMLVDISPINFOW*)l;
+                int vi=di->item.iItem;
+                if(vi>=0 && vi<(int)s_mg->dcView.size() && (di->item.mask & LVIF_TEXT)){
+                    const DoctorDef& d=s_mg->dcAll[s_mg->dcView[vi]];
+                    static wchar_t cell[256];
+                    switch(di->item.iSubItem){
+                        case 0: wcsncpy(cell,toFaDigits(std::to_wstring(vi+1)).c_str(),255); break;
+                        case 1: wcsncpy(cell,d.name.c_str(),255); break;
+                        case 2: wcsncpy(cell,d.specialty.c_str(),255); break;
+                        case 3: wcsncpy(cell,d.docType==1?L"پرستار":L"پزشک",255); break;
+                        case 4: wcsncpy(cell,d.active?L"فعال":L"غیرفعال",255); break;
+                        default: cell[0]=0; break;
+                    }
+                    cell[255]=0; di->item.pszText=cell;
+                }
+                return 0;
+            }
+            if(nh->code==NM_DBLCLK){ mgDocsEditSelected(h); return 0; }
+        }
         break; }
     case WM_COMMAND:{
         if(!s_mg) return 0;
@@ -4055,12 +4551,27 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             mgServicesFormatPriceLive();
             return 0;
         }
+        if(id==MG_DC_SEARCH && HIWORD(w)==EN_CHANGE){
+            wchar_t b[256]={0}; GetWindowTextW(s_mg->dcSearch,b,256);
+            s_mg->dcQuery=b; mgDocsFilter();
+            return 0;
+        }
         switch(id){
             case MG_SV_SAVE:   mgServicesSave(h); return 0;
             case MG_SV_EDIT:   mgServicesEditSelected(h); return 0;
             case MG_SV_DELETE: mgServicesDelete(h); return 0;
             case MG_SV_CLEAR:  mgServicesClearForm(); s_mg->msg.clear();
                                InvalidateRect(h,NULL,TRUE); return 0;
+            // ---- doctors page (v1.69.0) ----
+            case MG_DC_SAVE:   mgDocsSave(h); return 0;
+            case MG_DC_EDIT:   mgDocsEditSelected(h); return 0;
+            case MG_DC_DELETE: mgDocsDelete(h); return 0;
+            case MG_DC_CLEAR:  mgDocsClearForm(); s_mg->msg.clear();
+                               InvalidateRect(h,NULL,TRUE); return 0;
+            case MG_DC_ACTIVE: s_mg->dcActiveVal=!s_mg->dcActiveVal;
+                               mgDocsRefreshChecks(); InvalidateRect(h,NULL,FALSE); return 0;
+            case MG_DC_PRINT:  s_mg->dcPrintVal=!s_mg->dcPrintVal;
+                               mgDocsRefreshChecks(); InvalidateRect(h,NULL,FALSE); return 0;
         }
         if(id==MG_CB_DEPT && HIWORD(w)==CBN_SELCHANGE){
             int sel=(int)SendMessageW(s_mg->cDept,CB_GETCURSEL,0,0);

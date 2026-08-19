@@ -2250,3 +2250,240 @@ body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payable-value b{
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payable-value span{
   padding-bottom:5px;color:#bbf7d0;font-size:11px;font-weight:800;
 }
+
+/* ============================================================================
+   v1.69.0 — ADMISSION REDESIGN: compact 100%-zoom fit · pastel profile ·
+   frosted-glass right rail · relocated date/shift · legible invoice · tinted
+   services list · P/S counters moved to the left rail + turn preview on right.
+   ----------------------------------------------------------------------------
+   User request, translated:
+     · Make everything smaller and fit at 100% zoom — all items visible by
+       default on every display, responsive, no overlap.
+     · RIGHT rail: profile card → soft PASTEL surface (not solid blue);
+       «عملیات پذیرش» and «چاپ اسناد» → frosted GLASS panels.
+     · «تاریخ پذیرش و شیفت» moved from CENTER to RIGHT, between operations and
+       printing, very small.
+     · «مشخصات بیمار» header with a sub-separator + subtle colour variety.
+     · «صورت حساب» fonts slightly more prominent/legible.
+     · Services list no longer stark white → soft tinted surface.
+     · LEFT rail now carries the P (پرداختی) / S (صندوق) 24-hour counters (the
+       web equivalent of the native ID_F_APPT_P / ID_F_APPT_S); a «پیش‌نمایش
+       نوبت» (registered / waiting) preview sits on the right.
+   Trident-safe: literal colours, no custom properties / grid / gap / logical
+   props; every modern flex prop carries its -ms- pair. backdrop-filter is a
+   progressive enhancement only — Chromium renders the frost; Trident/IE11
+   ignore it and fall back to the translucent surface below (still frosted).
+   The accent overrides are guarded with chained :not() so calm/warm/dark keep
+   their own palettes (and are excluded from the structural test assertions).
+   ============================================================================ */
+
+/* ----------------------------------------------------- 0. COMPACT BASELINE ---
+   Lighter paddings/margins and slightly shorter controls so the whole surface
+   fits one screen at 100% zoom without scrolling or overlap. Sizes only — the
+   layout-critical flex/order/anchor declarations above are deliberately left
+   untouched. */
+body{font-weight:600;}
+.card{margin-bottom:8px;border-radius:10px;}
+.card-head{padding:8px 12px;}
+.card-title{font-size:12.5px;}
+.card-body{padding:10px;}
+.inp{height:34px;font-size:13px;}
+.btn{height:32px;font-size:12.5px;}
+.btn-sm{height:30px;font-size:12px;}
+.btn-icon{height:30px;width:30px;}
+.col-action{-ms-flex:0 0 250px;flex:0 0 250px;width:250px;}
+.col-left{-ms-flex:0 0 244px;flex:0 0 244px;width:244px;}
+/* shorter table rows so the services list shows many rows without scrolling */
+.tbl thead th{height:30px;padding:6px 6px;font-size:11px;}
+.tbl tbody td{height:30px;padding:5px;font-size:11.5px;}
+
+/* --------------------------------------------- 1. RIGHT RAIL: PROFILE (pastel) ---
+   The identity card drops its solid coloured surface for a soft pastel mint so
+   it reads as a calm clinical card instead of a heavy blue block. All child
+   text flips to dark tones for legibility on the light surface. */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card{
+  color:#0f4f47;border:1px solid #c4e3dc;
+  background:#eef7f4;
+  background:-webkit-linear-gradient(top,#f3faf8 0%,#e6f2ee 100%);
+  background:linear-gradient(180deg,#f3faf8 0%,#e6f2ee 100%);
+  -webkit-box-shadow:0 4px 14px rgba(13,148,136,.12);box-shadow:0 4px 14px rgba(13,148,136,.12);
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .profile-top{padding:11px 12px 8px;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .avatar{
+  width:44px;height:44px;border:3px solid #cfe9e2;background:#ffffff;color:#0d9488;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-kicker{color:#0d9488;font-size:10px;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .pf-name{color:#0f3b37;font-size:14px;font-weight:900;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .pf-file,
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .pf-file b{color:#5b7a74;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .profile-state{
+  margin:0 11px 9px;padding:6px 9px;border:1px solid #c9e6df;border-radius:9px;
+  background:#e3f2ee;color:#15554c;font-size:11px;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .profile-state .dot{background:#10b981;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .btn-erx{
+  height:32px;margin:0 11px 8px;border-color:#bfe3da;background:#dbf0ea;color:#0f6b60;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .btn-erx:hover{background:#cde9e1;border-color:#0d9488;color:#0c534c;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .rx-row{padding:0 11px 9px;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .rx-box{
+  padding:6px 6px;border:1px solid #cde7e0;border-radius:8px;background:#e6f3ef;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .rx-lbl{color:#0d9488;font-size:10px;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .rx-val{color:#0f3b37;font-size:15px;}
+
+/* turn preview (پیش‌نمایش نوبت) — two compact pastel pills inside the profile
+   card: ثبت‌شده (registered) and در انتظار (waiting), default ۰. */
+.tp-row{
+  display:-ms-flexbox;display:flex;
+  padding:0 11px 11px;
+}
+.tp-box{
+  -ms-flex:1 1 0;flex:1 1 0;
+  border:1px solid #c9e6df;border-radius:9px;background:#e6f3ef;
+  padding:6px 4px;text-align:center;
+  display:-ms-flexbox;display:flex;
+  -ms-flex-direction:column;flex-direction:column;
+  -ms-flex-pack:center;justify-content:center;
+  -ms-flex-align:center;align-items:center;
+}
+.tp-box + .tp-box{margin-right:8px;}
+.tp-lbl{display:block;font-size:10px;color:#0d9488;font-weight:700;margin-bottom:2px;}
+.tp-val{display:block;font-weight:900;font-size:17px;color:#0f3b37;line-height:1.1;}
+
+/* ------------------------------------------- 2. RIGHT RAIL: GLASS panels (شیشه) ---
+   «عملیات پذیرش» and «چاپ اسناد» become frosted glass: a translucent surface
+   plus a backdrop blur (Chromium). Trident/IE11 ignore backdrop-filter and keep
+   the translucent tint, which still reads as a frosted panel. */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .action-card,
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .print-card{
+  background:rgba(255,255,255,.55);
+  border:1px solid rgba(184,206,235,.60);
+  -webkit-backdrop-filter:blur(9px);backdrop-filter:blur(9px);
+  -webkit-box-shadow:0 6px 20px rgba(31,95,214,.10);box-shadow:0 6px 20px rgba(31,95,214,.10);
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .action-card .action-kicker{color:#1c3f86;border-color:#d8e6f6;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .print-card .card-head{
+  background:transparent;border-bottom-color:#d6e4f3;-webkit-box-shadow:none;box-shadow:none;
+}
+
+/* ----------------------------------- 3. RIGHT RAIL: date/shift (relocated, tiny) ---
+   The datetime card now lives in the narrow right rail; its two halves stack
+   (each forced to 100% → flex-wrap puts them on separate rows) and every part
+   shrinks so the pair fits the slim gap between operations and printing. The
+   base .datetime-card / .dt-half rules (with their -ms-flex sizing + wrap) are
+   kept intact for the regression guard; these are additive, higher-specificity
+   overrides scoped to the action rail. */
+.col-action .datetime-card{
+  margin-bottom:8px;padding:8px 10px;border-color:#cbdbea;
+  background:#ffffff;background:-webkit-linear-gradient(top,#ffffff 0%,#f2f7fd 100%);
+  background:linear-gradient(180deg,#ffffff 0%,#f2f7fd 100%);
+}
+.col-action .datetime-card .dt-half{-ms-flex:1 1 100%;flex:1 1 100%;min-width:0;}
+.col-action .datetime-card .dt-half + .dt-half{margin-right:0;margin-top:7px;}
+.col-action .datetime-card .dt-ico{width:26px;height:26px;margin-left:7px;border-radius:8px;background:#e7f2fe;color:#176fcf;}
+.col-action .datetime-card .dt-fld > span{margin-bottom:2px;font-size:10px;color:#3d5573;font-weight:800;}
+.col-action .datetime-card .inp{height:28px;font-size:11px;border-color:#c5d6e8;background:#f5f9fd;color:#123d70;}
+
+/* ------------------------------- 4. CENTER: patient details sub-separator + variety ---
+   A refined violet header (clinical-intake accent) with a secondary hairline,
+   plus one faint sub-separator that divides the identity group from the contact
+   group. width:100% forces a flex-wrap line break inside grid-4 (IE-safe). */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .card-head{border-bottom:1px solid #e6def7;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .card-title{color:#5b21b6;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .ct-ico{color:#7c3aed;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .fld > span{color:#4c3a6b;}
+.pt-sep{
+  width:100%;height:0;margin:4px 0;
+  border:0;border-top:1px solid #e2e8f0;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .pt-sep{border-top-color:#ece3f7;}
+
+/* ----------------------------------------------- 5. CENTER: services list tint ---
+   No longer stark white: a soft blue-tinted surface with slightly more visible
+   zebra rows so the list reads as its own calm region. */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card .tbl-wrap,
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card .tbl-wrap.expanded,
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card .tbl-wrap.collapsed{
+  background:#f4f8fd;border-color:#c4d5e8;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card .tbl tbody tr:nth-child(even){background:#e9f1fb;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card .tbl tbody tr:hover{background:#dfeaff;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card .tbl thead th{background:#dbe7f6;color:#123f70;}
+
+/* ------------------------------------------ 6. LEFT: invoice fonts more legible ---
+   Slightly larger, heavier invoice figures and group titles so the breakdown
+   reads clearly without enlarging the rest of the page. The amber palette is
+   preserved; only size/weight/contrast move up. */
+.invoice-body{padding:9px 12px 10px;}
+.inv-gtitle{font-size:12px;font-weight:800;}
+.inv-line{font-size:12.5px;min-height:24px;}
+.inv-line span{font-weight:700;}
+.inv-line b{font-size:13.5px;font-weight:800;}
+.inv-remain span{font-size:12.5px;}
+.inv-remain b{font-size:14px;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inv-line span{color:#7a5a2c;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inv-line b{color:#2f2008;}
+
+/* --------------------------------------- 7. LEFT: P/S 24-hour counters (relocated) ---
+   The P (پرداختی) / S (صندوق) counters moved here from the profile card; they
+   reuse the existing psPVal / psSVal element IDs (the web equivalent of the
+   native ID_F_APPT_P / ID_F_APPT_S controls), default ۰, driven by ps.update. */
+.ps-card{padding:0;overflow:hidden;}
+.ps-rail{
+  display:-ms-flexbox;display:flex;
+  -ms-flex-direction:row;flex-direction:row;
+  padding:10px;margin:0;
+}
+.col-left .ps-line{
+  -ms-flex:1 1 0;flex:1 1 0;
+  border:1px solid #c9d8e8;border-radius:9px;background:#f3f7fc;
+  padding:8px 6px;text-align:center;
+  display:-ms-flexbox;display:flex;
+  -ms-flex-direction:column;flex-direction:column;
+  -ms-flex-pack:center;justify-content:center;
+  -ms-flex-align:center;align-items:center;
+}
+.col-left .ps-line + .ps-line{margin-right:9px;margin-top:0;}
+.col-left .ps-key{
+  width:24px;height:24px;border-radius:7px;font-size:12px;margin:0 0 3px;
+  display:-ms-inline-flexbox;display:inline-flex;
+  -ms-flex-align:center;align-items:center;-ms-flex-pack:center;justify-content:center;
+}
+.col-left .ps-cap{font-size:11px;color:#33465f;font-weight:700;margin-bottom:1px;}
+.col-left .ps-val{font-size:18px;color:#0d2144;font-weight:900;margin:0;line-height:1.1;}
+.col-left .ps-unit{font-size:10px;color:#6a7c92;font-weight:600;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .ps-card{border-color:#c9d8e8;}
+
+/* --------------------------- 8. compact rail buttons + smaller payable hero total --- */
+.action-card{padding:10px;}
+.action-card .btn-submit.btn-block{height:42px;font-size:13.5px;margin-bottom:7px;border-radius:10px;}
+.action-card .btn-danger.btn-block{height:34px;font-size:12.5px;}
+.queue-nav-row{margin-top:7px;}
+.queue-nav-row .btn-nav{height:32px;padding:0 6px;font-size:11px;}
+.print-grid .btn-print{height:34px;font-size:11px;}
+.print-grid .btn-print-primary{height:38px;font-size:12px;margin-bottom:7px;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payable-card{padding:12px 13px;}
+.payable-value b{font-size:24px;line-height:1.2;}
+.payable-value span{font-size:11px;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payable-value b{font-size:24px;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payable-value span{font-size:11px;}
+.queue-hub-btn{height:40px;font-size:11.5px;}
+
+/* ------------------------------------------- 9. DARK-THEME parity for new surfaces --- */
+.theme-dark .tp-box{background:rgba(20,40,64,.55);border-color:#34516d;}
+.theme-dark .tp-lbl{color:#7fb0f5;}
+.theme-dark .tp-val{color:#eaf3ff;}
+.theme-dark .action-card,
+.theme-dark .print-card{
+  background:rgba(25,43,64,.62);border:1px solid #34516d;
+  -webkit-backdrop-filter:blur(9px);backdrop-filter:blur(9px);
+}
+.theme-dark .print-card .card-head{background:transparent;border-bottom-color:#34516d;-webkit-box-shadow:none;box-shadow:none;}
+.theme-dark .ps-card{border-color:#35516d;}
+.theme-dark .col-left .ps-line{background:#172a3f;border-color:#35516d;}
+.theme-dark .col-left .ps-cap{color:#b8cce1;}
+.theme-dark .col-left .ps-val{color:#ecf6ff;}
+.theme-dark .col-left .ps-unit{color:#9fb7cf;}
+.theme-dark .col-left .ps-key-p{background:#16a34a;}
+.theme-dark .col-left .ps-key-s{background:#f0a800;}

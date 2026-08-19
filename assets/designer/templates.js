@@ -14,6 +14,14 @@
      • قاب امن جدول از فضای آزاد صفحه محاسبه می‌شود؛ موتور چاپ فقط سطرهای
        واقعی را می‌کشد و فضای استفاده‌نشدهٔ صفحه را خالی می‌گذارد
      • هشت پیش‌تنظیم ستونی (۴ تا ۷ ستون) با عنوان‌های تأییدشده در pdSvcColOf
+
+   v1.69.0 (تمایز بصری هر ۳۰ طرح):
+     • هر گونه در هر خانواده حالا متا/بلاک بیمار/جمع‌بندی/پاورقی مخصوص خود
+       را دارد تا هر ۳۰ طرح اساسی متفاوت باشند، نه فقط تعویض رنگ.
+     • تنوع بارکد: ۲۱ طرح یک بارکد Code128 (چهار سبک پاورقی)، ۹ طرح بدون
+       کد (footClean). هر صفحه نهایتًا یک کد (۰ یا ۱، هرگز دو).
+     •compact و درون کادر A4 تا pscale موتور چاپ آن را روی A5/A6/رول کوچک
+       متناسب و بدون برش کوچک کند.
    =========================================================================== */
 (function () {
   "use strict";
@@ -444,6 +452,18 @@
     d.push(BARCODE(bcX, y, bcW, 13));
     d.push(L(PG_M, y + 3, PG_CW * 0.60, 5.5, FA_KEEP, 8.5, false, 0));
   }
+  /* v1.69.0 — NO code carrier. Clean professional footer: hairline + clinic
+     contact left + keep-note / signature right. One deterministic code per page
+     is still the rule — here it is simply zero, never two. */
+  function footClean(d, footY, accent) {
+    var y = footY;
+    d.push(HL(PG_M, y - 3, PG_CW, 0.3));
+    d.push(F(PG_M, y + 1, PG_CW * 0.55, 6, "clinicphone", FA_PHONE, 8.5, 0));
+    d.push(F(PG_M, y + 7.5, PG_CW * 0.55, 6, "clinicaddr", "نشانی: ", 8.5, 0));
+    d.push(LC(PG_M + PG_CW * 0.58, y + 1, PG_CW * 0.42, 6, FA_KEEP, 8.5, false, 2, accent));
+    d.push(HL(PG_M + PG_CW * 0.58, y + 9, PG_CW * 0.42, 0.3));
+    d.push(L(PG_M + PG_CW * 0.58, y + 9.5, PG_CW * 0.42, 5, FA_SIGN, 8.5, false, 1));
+  }
 
   /* ============================================ 30 designs / 10 families == */
   /* family, variant, svc preset, accent, tint, headFill(0=line-art), bw, rowH, frame */
@@ -527,12 +547,20 @@
       if (sp.v === 0)      y = hdrPlain(d, FA_CLINIC, 18, true, 0.7);
       else if (sp.v === 1) y = hdrLogoRight(d, FA_CLINIC, 17, true, 0.7);
       else                 y = hdrCenterLogo(d, FA_CLINIC, 18, false, 0.5);
-      y = metaStrip4(d, y, pt - 0.5);
-      y = patient2x3(d, y, pt);
+      if (sp.v === 0)      y = metaStrip4(d, y, pt - 0.5);
+      else if (sp.v === 1) y = metaStripBoxed(d, y, pt - 0.5, sp.t, sp.a);
+      else                 y = metaGrid6(d, y, pt - 1, sp.a);
+      if (sp.v === 0)      y = patient2x3(d, y, pt);
+      else if (sp.v === 1) y = patient3x3(d, y, pt);
+      else                 y = patientCard(d, y, pt - 0.5, sp.t, sp.a, sp.a);
       d.push(HL(PG_M, y - 1, PG_CW, 0.25));
-      y = servicesBlock(d, y + 1.5, pt, sp.s, sp.hf, sp.bw, sp.rh, 15, true, footY);
-      totalsRow(d, footY - 13, pt);
-      footBarcode(d, footY + 2);
+      var reserve0 = (sp.v === 2) ? 32 : 15;
+      y = servicesBlock(d, y + 1.5, pt, sp.s, sp.hf, sp.bw, sp.rh, reserve0, true, footY);
+      if (sp.v === 2) totalsBox(d, footY - 31, pt, sp.t, sp.a, sp.a);
+      else            totalsRow(d, footY - 13, pt);
+      if (sp.v === 0)      footBarcode(d, footY + 2);
+      else if (sp.v === 1) footCentered(d, footY + 3);
+      else                 footClean(d, footY + 2, sp.a);
       break;
 
     /* ---------------- 1 — باند رنگی ------------------------------------- */
@@ -541,11 +569,18 @@
           : (sp.v === 1) ? "صورت‌حساب خدمات درمانی"
                          : "رسید پذیرش بیمار";
       y = hdrBand(d, FA_CLINIC, sp.a, sp.v !== 2, doc);
-      y = metaStripBoxed(d, y, pt - 0.5, sp.t, sp.a);
+      if (sp.v === 0)      y = metaStripBoxed(d, y, pt - 0.5, sp.t, sp.a);
+      else if (sp.v === 1) y = metaStrip4(d, y, pt - 0.5);
+      else                 y = metaGrid6(d, y, pt - 1, sp.a);
       y = patientCard(d, y, pt - 0.5, sp.t, sp.a, sp.a);
-      y = servicesBlock(d, y, pt, sp.s, sp.hf, sp.bw, sp.rh, 24, true, footY);
-      totalsBar(d, footY - 22, pt, sp.a);
-      footCentered(d, footY + 3);
+      var reserve1 = (sp.v === 1) ? 36 : (sp.v === 2) ? 32 : 24;
+      y = servicesBlock(d, y, pt, sp.s, sp.hf, sp.bw, sp.rh, reserve1, true, footY);
+      if (sp.v === 0)      totalsBar(d, footY - 22, pt, sp.a);
+      else if (sp.v === 1) totalsLadder(d, footY - 34, pt, sp.a);
+      else                 totalsBox(d, footY - 31, pt, sp.t, sp.a, sp.a);
+      if (sp.v === 0)      footCentered(d, footY + 3);
+      else if (sp.v === 1) footBarcode(d, footY + 2);
+      else                 footClean(d, footY + 2, sp.a);
       break;
 
     /* ---------------- 2 — فاکتور --------------------------------------- */
@@ -554,7 +589,9 @@
           : (sp.v === 1) ? "فاکتور رسمی خدمات"
                          : "صورت‌حساب تفصیلی خدمات";
       y = hdrSplit(d, FA_CLINIC, sp.a, doc);
-      y = metaGrid6(d, y, pt - 1, sp.a);
+      if (sp.v === 0)      y = metaGrid6(d, y, pt - 1, sp.a);
+      else if (sp.v === 1) y = metaStripBoxed(d, y, pt - 0.5, sp.t, sp.a);
+      else                 y = metaStrip4(d, y, pt - 0.5);
       c = PG_CW / 3;
       d.push(FB(PG_M + 2 * c, y, c - 2, 7, "fullName", FA_FULL, pt, 0));
       d.push(F (PG_M +     c, y, c - 2, 7, "nationalCode", FA_NID, pt, 0));
@@ -562,9 +599,14 @@
       d.push(FB(PG_M + 2 * c, y, c - 2, 7, "doctor", FA_DOCTOR, pt, 0));
       d.push(F (PG_M +     c, y, c - 2, 7, "performer", FA_PERF, pt, 0));
       d.push(F (PG_M        , y, c - 2, 7, "patientType", FA_PTYPE, pt, 0)); y += 10;
-      y = servicesBlock(d, y, pt, sp.s, sp.hf, sp.bw, sp.rh, 36, true, footY);
-      totalsLadder(d, footY - 34, pt, sp.a);
-      footMinimal(d, footY + 2);
+      var reserve2 = (sp.v === 0) ? 36 : (sp.v === 1) ? 24 : 32;
+      y = servicesBlock(d, y, pt, sp.s, sp.hf, sp.bw, sp.rh, reserve2, true, footY);
+      if (sp.v === 0)      totalsLadder(d, footY - 34, pt, sp.a);
+      else if (sp.v === 1) totalsBar(d, footY - 22, pt, sp.a);
+      else                 totalsBox(d, footY - 31, pt, sp.t, sp.a, sp.a);
+      if (sp.v === 0)      footMinimal(d, footY + 2);
+      else if (sp.v === 1) footBarcode(d, footY + 2);
+      else                 footClean(d, footY + 2, sp.a);
       break;
 
     /* ---------------- 3 — ستون کناری ----------------------------------- */
@@ -595,15 +637,43 @@
                          : "فاکتور خدمات درمانی";
       d.push(LC(mainX, my, mainW, 9, doc, 15, true, 0, sp.a)); my += 11;
       d.push(HL(mainX, my, mainW, 0.7, sp.a)); my += 3.5;
-      c = mainW / 2;
-      d.push(FB(mainX + c, my, c - 2, 7, "fullName", FA_FULL, pt, 0));
-      d.push(F (mainX    , my, c - 2, 7, "nationalCode", FA_NID, pt, 0)); my += 7.8;
-      d.push(F (mainX + c, my, c - 2, 7, "fatherName", FA_FATHER, pt, 0));
-      d.push(F (mainX    , my, c - 2, 7, "birthDate", FA_BIRTH, pt, 0)); my += 7.8;
-      d.push(F (mainX + c, my, c - 2, 7, "insurance", FA_INS, pt, 0));
-      d.push(F (mainX    , my, c - 2, 7, "suppInsurance", FA_SUPP, pt, 0)); my += 7.8;
-      d.push(F (mainX + c, my, c - 2, 7, "doctor", FA_DOCTOR, pt, 0));
-      d.push(F (mainX    , my, c - 2, 7, "mobile", FA_PHONE, pt, 0)); my += 10;
+      if (sp.v === 0) {                 /* plain two-column identity grid */
+        c = mainW / 2;
+        d.push(FB(mainX + c, my, c - 2, 7, "fullName", FA_FULL, pt, 0));
+        d.push(F (mainX    , my, c - 2, 7, "nationalCode", FA_NID, pt, 0)); my += 7.8;
+        d.push(F (mainX + c, my, c - 2, 7, "fatherName", FA_FATHER, pt, 0));
+        d.push(F (mainX    , my, c - 2, 7, "birthDate", FA_BIRTH, pt, 0)); my += 7.8;
+        d.push(F (mainX + c, my, c - 2, 7, "insurance", FA_INS, pt, 0));
+        d.push(F (mainX    , my, c - 2, 7, "suppInsurance", FA_SUPP, pt, 0)); my += 7.8;
+        d.push(F (mainX + c, my, c - 2, 7, "doctor", FA_DOCTOR, pt, 0));
+        d.push(F (mainX    , my, c - 2, 7, "mobile", FA_PHONE, pt, 0)); my += 10;
+      } else if (sp.v === 1) {          /* three-column identity grid */
+        c = mainW / 3;
+        d.push(FB(mainX + 2 * c, my, c - 2, 7, "fullName", FA_FULL, pt, 0));
+        d.push(F (mainX +     c, my, c - 2, 7, "nationalCode", FA_NID, pt, 0));
+        d.push(F (mainX        , my, c - 2, 7, "fatherName", FA_FATHER, pt, 0)); my += 7.8;
+        d.push(F (mainX + 2 * c, my, c - 2, 7, "birthDate", FA_BIRTH, pt, 0));
+        d.push(F (mainX +     c, my, c - 2, 7, "insurance", FA_INS, pt, 0));
+        d.push(F (mainX        , my, c - 2, 7, "suppInsurance", FA_SUPP, pt, 0)); my += 7.8;
+        d.push(F (mainX + 2 * c, my, c - 2, 7, "doctor", FA_DOCTOR, pt, 0));
+        d.push(F (mainX +     c, my, c - 2, 7, "mobile", FA_PHONE, pt, 0));
+        d.push(F (mainX        , my, c - 2, 7, "dept", FA_DEPT, pt, 0)); my += 10;
+      } else {                          /* boxed tinted identity card */
+        c = mainW / 2; var bh3 = 34;
+        d.push(TINT(mainX, my, mainW, bh3, sp.t, sp.a, 0.3, 1.5));
+        d.push(BAND(mainX, my, mainW, 6.5, sp.a));
+        d.push(LC(mainX + 2, my + 0.6, mainW - 4, 5, "مشخصات بیمار", 9, true, 0, "#ffffff"));
+        var py = my + 8;
+        d.push(FB(mainX + c, py, c - 2, 6.5, "fullName", FA_FULL, pt, 0));
+        d.push(F (mainX    , py, c - 2, 6.5, "nationalCode", FA_NID, pt, 0)); py += 7;
+        d.push(F (mainX + c, py, c - 2, 6.5, "fatherName", FA_FATHER, pt, 0));
+        d.push(F (mainX    , py, c - 2, 6.5, "birthDate", FA_BIRTH, pt, 0)); py += 7;
+        d.push(F (mainX + c, py, c - 2, 6.5, "insurance", FA_INS, pt, 0));
+        d.push(F (mainX    , py, c - 2, 6.5, "mobile", FA_PHONE, pt, 0)); py += 7;
+        d.push(F (mainX + c, py, c - 2, 6.5, "doctor", FA_DOCTOR, pt, 0));
+        d.push(F (mainX    , py, c - 2, 6.5, "dept", FA_DEPT, pt, 0));
+        my += bh3 + 4;
+      }
       my = servicesBlockAt(d, mainX, mainW, my, pt, sp.s, sp.hf, sp.bw, sp.rh,
                            30, true, footY - 2);
       ly = footY - 30; lw = mainW * 0.60; lx = mainX + mainW - lw;
@@ -623,18 +693,31 @@
       if (sp.v === 0)      y = hdrPlain(d, FA_CLINIC, 17, false, 0.9);
       else if (sp.v === 1) y = hdrPlain(d, FA_CLINIC, 19, true, 1.2);
       else                 y = hdrLogoRight(d, FA_CLINIC, 16, false, 0.9);
-      c = PG_CW / 4;
-      d.push(FB(PG_M + 3 * c, y, c, 6.5, "receiptNo", FA_RECEIPT, pt - 0.5, 0));
-      d.push(F (PG_M + 2 * c, y, c, 6.5, "date", FA_DATE, pt - 0.5, 1));
-      d.push(F (PG_M +     c, y, c, 6.5, "time", FA_TIME, pt - 0.5, 1));
-      d.push(F (PG_M        , y, c, 6.5, "shift", FA_SHIFT, pt - 0.5, 2));
-      y += 7.5;
-      d.push(HL(PG_M, y, PG_CW, 0.25)); y += 3;
-      y = patient3x3(d, y, pt);
+      if (sp.v === 0) {                 /* ruled meta line (pure line-art) */
+        c = PG_CW / 4;
+        d.push(FB(PG_M + 3 * c, y, c, 6.5, "receiptNo", FA_RECEIPT, pt - 0.5, 0));
+        d.push(F (PG_M + 2 * c, y, c, 6.5, "date", FA_DATE, pt - 0.5, 1));
+        d.push(F (PG_M +     c, y, c, 6.5, "time", FA_TIME, pt - 0.5, 1));
+        d.push(F (PG_M        , y, c, 6.5, "shift", FA_SHIFT, pt - 0.5, 2));
+        y += 7.5;
+        d.push(HL(PG_M, y, PG_CW, 0.25)); y += 3;
+      } else if (sp.v === 1) {
+        y = metaStripBoxed(d, y, pt - 0.5, sp.t, sp.a);
+      } else {
+        y = metaGrid6(d, y, pt - 1, sp.a);
+      }
+      if (sp.v === 0)      y = patient3x3(d, y, pt);
+      else if (sp.v === 1) y = patient2x3(d, y, pt);
+      else                 y = patientCard(d, y, pt - 0.5, sp.t, sp.a, sp.a);
       d.push(HL(PG_M, y - 1, PG_CW, 0.25)); y += 2;
-      y = servicesBlock(d, y, pt, sp.s, 0, sp.bw, sp.rh, 16, true, footY);
-      totalsRow(d, footY - 14, pt);
-      footMinimal(d, footY + 1);
+      var reserve4 = (sp.v === 0) ? 16 : (sp.v === 1) ? 24 : 32;
+      y = servicesBlock(d, y, pt, sp.s, 0, sp.bw, sp.rh, reserve4, true, footY);
+      if (sp.v === 0)      totalsRow(d, footY - 14, pt);
+      else if (sp.v === 1) totalsBar(d, footY - 22, pt, sp.a);
+      else                 totalsBox(d, footY - 31, pt, sp.t, sp.a, sp.a);
+      if (sp.v === 0)      footMinimal(d, footY + 1);
+      else if (sp.v === 1) footClean(d, footY + 2, sp.a);
+      else                 footBarcode(d, footY + 2);
       break;
 
     /* ---------------- 5 — کارتی ---------------------------------------- */
@@ -655,11 +738,18 @@
         d.push(LC(PG_M + 3, y + 3.2, PG_CW - 6, 8, FA_CLINIC, 15, true, 0, "#ffffff"));
         y += 18;
       }
-      y = metaStripBoxed(d, y, pt - 0.5, sp.t, sp.a);
+      if (sp.v === 0)      y = metaStripBoxed(d, y, pt - 0.5, sp.t, sp.a);
+      else if (sp.v === 1) y = metaStrip4(d, y, pt - 0.5);
+      else                 y = metaGrid6(d, y, pt - 1, sp.a);
       y = patientCard(d, y, pt - 0.5, sp.t, sp.a, sp.a);
-      y = servicesBlock(d, y, pt, sp.s, sp.hf, sp.bw, sp.rh, 32, true, footY);
-      totalsBox(d, footY - 31, pt, sp.t, sp.a, sp.a);
-      footDual(d, footY + 1, sp.t, sp.a);
+      var reserve5 = (sp.v === 0) ? 32 : (sp.v === 1) ? 24 : 36;
+      y = servicesBlock(d, y, pt, sp.s, sp.hf, sp.bw, sp.rh, reserve5, true, footY);
+      if (sp.v === 0)      totalsBox(d, footY - 31, pt, sp.t, sp.a, sp.a);
+      else if (sp.v === 1) totalsBar(d, footY - 22, pt, sp.a);
+      else                 totalsLadder(d, footY - 34, pt, sp.a);
+      if (sp.v === 0)      footDual(d, footY + 1, sp.t, sp.a);
+      else if (sp.v === 1) footBarcode(d, footY + 2);
+      else                 footClean(d, footY + 2, sp.a);
       break;
 
     /* ---------------- 6 — عکس و هویت ----------------------------------- */
@@ -667,12 +757,19 @@
       if (sp.v === 0)      y = hdrLogoRight(d, FA_CLINIC, 17, true, 0.7);
       else if (sp.v === 1) y = hdrBand(d, FA_CLINIC, sp.a, true, "پروندهٔ پذیرش بیمار");
       else                 y = hdrCenterLogo(d, FA_CLINIC, 17, true, 0.5);
-      y = metaStrip4(d, y, pt - 0.5);
+      if (sp.v === 0)      y = metaStrip4(d, y, pt - 0.5);
+      else if (sp.v === 1) y = metaStripBoxed(d, y, pt - 0.5, sp.t, sp.a);
+      else                 y = metaGrid6(d, y, pt - 1, sp.a);
       y = patientPhoto(d, y, pt - 0.5);
       d.push(HL(PG_M, y - 1, PG_CW, 0.4, sp.a)); y += 2;
-      y = servicesBlock(d, y, pt, sp.s, sp.hf, sp.bw, sp.rh, 32, true, footY);
-      totalsBox(d, footY - 31, pt, sp.t, sp.a, sp.a);
-      footBarcode(d, footY + 2);
+      var reserve6 = (sp.v === 0) ? 32 : (sp.v === 1) ? 36 : 24;
+      y = servicesBlock(d, y, pt, sp.s, sp.hf, sp.bw, sp.rh, reserve6, true, footY);
+      if (sp.v === 0)      totalsBox(d, footY - 31, pt, sp.t, sp.a, sp.a);
+      else if (sp.v === 1) totalsLadder(d, footY - 34, pt, sp.a);
+      else                 totalsBar(d, footY - 22, pt, sp.a);
+      if (sp.v === 0)      footBarcode(d, footY + 2);
+      else if (sp.v === 1) footCentered(d, footY + 3);
+      else                 footClean(d, footY + 2, sp.a);
       break;
 
     /* ---------------- 7 — مالی ----------------------------------------- */
@@ -681,7 +778,9 @@
           : (sp.v === 1) ? "ریز صورت‌حساب و سهم بیمه"
                          : "صورت‌حساب تفصیلی مالی";
       y = hdrSplit(d, FA_CLINIC, sp.a, doc);
-      y = metaStripBoxed(d, y, pt - 0.5, sp.t, sp.a);
+      if (sp.v === 0)      y = metaStripBoxed(d, y, pt - 0.5, sp.t, sp.a);
+      else if (sp.v === 1) y = metaStrip4(d, y, pt - 0.5);
+      else                 y = metaGrid6(d, y, pt - 1, sp.a);
       c = PG_CW / 3;
       d.push(FB(PG_M + 2 * c, y, c - 2, 7, "fullName", FA_FULL, pt, 0));
       d.push(F (PG_M +     c, y, c - 2, 7, "nationalCode", FA_NID, pt, 0));
@@ -692,9 +791,14 @@
       d.push(F (PG_M + 2 * c, y, c - 2, 7, "suppInsurance", FA_SUPP, pt, 0));
       d.push(F (PG_M +     c, y, c - 2, 7, "supp_percent", "درصد مکمل: ", pt, 0));
       d.push(F (PG_M        , y, c - 2, 7, "doctor", FA_DOCTOR, pt, 0)); y += 10;
-      y = servicesBlock(d, y, pt, sp.s, sp.hf, sp.bw, sp.rh, 36, true, footY);
-      totalsLadder(d, footY - 34, pt, sp.a);
-      footBarcode(d, footY + 2);
+      var reserve7 = (sp.v === 0) ? 36 : (sp.v === 1) ? 24 : 32;
+      y = servicesBlock(d, y, pt, sp.s, sp.hf, sp.bw, sp.rh, reserve7, true, footY);
+      if (sp.v === 0)      totalsLadder(d, footY - 34, pt, sp.a);
+      else if (sp.v === 1) totalsBar(d, footY - 22, pt, sp.a);
+      else                 totalsBox(d, footY - 31, pt, sp.t, sp.a, sp.a);
+      if (sp.v === 0)      footBarcode(d, footY + 2);
+      else if (sp.v === 1) footCentered(d, footY + 3);
+      else                 footClean(d, footY + 2, sp.a);
       break;
 
     /* ---------------- 8 — فشرده + ته‌برگ ------------------------------- */
@@ -703,10 +807,17 @@
       if (sp.v === 0)      y = hdrPlain(d, FA_CLINIC, 16.5, false, 0.6);
       else if (sp.v === 1) y = hdrLogoRight(d, FA_CLINIC, 16, false, 0.6);
       else                 y = hdrBand(d, FA_CLINIC, sp.a, true, "");
-      y = metaStrip4(d, y, pt - 1);
-      y = patient2x3(d, y, pt - 0.5);
-      y = servicesBlock(d, y, pt - 0.5, sp.s, sp.hf, sp.bw, sp.rh, 15, true, tear - 4);
-      totalsRow(d, tear - 17, pt - 0.5);
+      if (sp.v === 0)      y = metaStrip4(d, y, pt - 1);
+      else if (sp.v === 1) y = metaStripBoxed(d, y, pt - 1, sp.t, sp.a);
+      else                 y = metaGrid6(d, y, pt - 1, sp.a);
+      if (sp.v === 0)      y = patient2x3(d, y, pt - 0.5);
+      else if (sp.v === 1) y = patient3x3(d, y, pt - 0.5);
+      else                 y = patientCard(d, y, pt - 0.5, sp.t, sp.a, sp.a);
+      var reserve8 = (sp.v === 0) ? 15 : (sp.v === 1) ? 24 : 32;
+      y = servicesBlock(d, y, pt - 0.5, sp.s, sp.hf, sp.bw, sp.rh, reserve8, true, tear - 4);
+      if (sp.v === 0)      totalsRow(d, tear - 17, pt - 0.5);
+      else if (sp.v === 1) totalsBar(d, tear - 24, pt - 0.5, sp.a);
+      else                 totalsBox(d, tear - 33, pt - 0.5, sp.t, sp.a, sp.a);
       d.push(HL(PG_M, tear, PG_CW, 0.3));
       d.push(L(PG_M, tear + 0.8, PG_CW, 5, "— — — محل جدا کردن — — —", 8, false, 1));
       sy = tear + 8;
@@ -723,12 +834,20 @@
       f = FB(PG_M + 1.5, sy + 17, PG_CW - 3, 7, "paid", FA_FINAL, pt + 1, 0);
       f.textColor = sp.a; d.push(f);
       /* v1.65.0: barcode is part of the patient stub now (used to float alone
-         at the very bottom, detached from both copies). */
-      ly = footY - 20; lw = PG_CW * 0.40; lx = PG_M + PG_CW - lw;
-      d.push(BARCODE(lx, ly, lw, 14));
-      d.push(L(lx, ly + 14.5, lw, 4, FA_BARCODE, 8, false, 1));
-      d.push(F(PG_M, ly + 1, PG_CW * 0.52, 6, "clinicphone", FA_PHONE, 8.5, 0));
-      d.push(F(PG_M, ly + 8, PG_CW * 0.52, 6, "clinicaddr", "نشانی: ", 8.5, 0));
+         at the very bottom, detached from both copies). v1.69.0: variant 1
+         carries NO code — a clean contact + keep-note line instead. */
+      ly = footY - 20;
+      if (sp.v !== 1) {
+        lw = PG_CW * 0.40; lx = PG_M + PG_CW - lw;
+        d.push(BARCODE(lx, ly, lw, 14));
+        d.push(L(lx, ly + 14.5, lw, 4, FA_BARCODE, 8, false, 1));
+        d.push(F(PG_M, ly + 1, PG_CW * 0.52, 6, "clinicphone", FA_PHONE, 8.5, 0));
+        d.push(F(PG_M, ly + 8, PG_CW * 0.52, 6, "clinicaddr", "نشانی: ", 8.5, 0));
+      } else {
+        d.push(F(PG_M, ly + 1, PG_CW * 0.60, 6, "clinicphone", FA_PHONE, 8.5, 0));
+        d.push(F(PG_M, ly + 8, PG_CW * 0.60, 6, "clinicaddr", "نشانی: ", 8.5, 0));
+        d.push(LC(PG_M + PG_CW * 0.62, ly + 1, PG_CW * 0.38, 6, FA_KEEP, 8.5, false, 2, sp.a));
+      }
       break;
 
     /* ---------------- 9 — دو بلوکی ------------------------------------- */
@@ -759,9 +878,14 @@
       d.push(F(PG_M +     c, y, c - 2, 7, "suppInsurance", FA_SUPP, pt, 0));
       d.push(F(PG_M        , y, c - 2, 7, "patientType", FA_PTYPE, pt, 0));
       y += 9;
-      y = servicesBlock(d, y, pt, sp.s, sp.hf, sp.bw, sp.rh, 24, true, footY);
-      totalsBar(d, footY - 22, pt, sp.a);
-      footBarcode(d, footY + 3);
+      var reserve9 = (sp.v === 0) ? 24 : (sp.v === 1) ? 36 : 32;
+      y = servicesBlock(d, y, pt, sp.s, sp.hf, sp.bw, sp.rh, reserve9, true, footY);
+      if (sp.v === 0)      totalsBar(d, footY - 22, pt, sp.a);
+      else if (sp.v === 1) totalsLadder(d, footY - 34, pt, sp.a);
+      else                 totalsBox(d, footY - 31, pt, sp.t, sp.a, sp.a);
+      if (sp.v === 0)      footBarcode(d, footY + 3);
+      else if (sp.v === 1) footCentered(d, footY + 3);
+      else                 footClean(d, footY + 2, sp.a);
       break;
     }
 
