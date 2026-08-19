@@ -287,14 +287,9 @@
     setText($('invFinPaid'), money(paid));
     setText($('invRemain'), money(sumPat - paid));
 
-    /* total card + compact payment state */
+    /* total card — v1.69.0: payment status card removed, replaced with
+       queue/unpaid action buttons in HTML. No paymentState element anymore. */
     setText($('tcVal'), money(sumPat));
-    if ($('paymentState')) {
-      $('paymentState').className = state.services.length ? 'payment-state' : 'payment-state pending';
-      setText($('paymentStateText'), state.services.length ?
-        'مانده قبض آماده دریافت است' :
-        'پس از افزودن خدمت، وضعیت پرداخت نمایش داده می‌شود');
-    }
     scheduleBillSync();
     return { gross: sumGross, disc: sumDisc, org: sumOrg, supp: sumSupp, pat: sumPat, paid: paid };
   }
@@ -1207,14 +1202,22 @@
     on($('qSearch'), 'input', function () { renderQueue(state.queue); });
     on($('qSearch'), 'keyup', function () { renderQueue(state.queue); });
     on($('qMinutes'), 'change', function () { renderQueue(state.queue); });
+    /* v1.69.0: overlay foot addToQueue still adds to the currently selected tab */
     on($('addToQueue'), 'click', addCurrentToQueue);
     on($('tabQueue'), 'click', function () {
-      state.queueKind = 'unpaid'; setActiveTab('tabQueue');
-      setText($('addToQueue'), 'افزودن به صندوق نرفته‌ها'); refreshQueue();
+      state.queueKind = 'unpaid'; setActiveTab('tabQueue'); refreshQueue();
     });
     on($('tabAdmQ'), 'click', function () {
-      state.queueKind = 'admission'; setActiveTab('tabAdmQ');
-      setText($('addToQueue'), 'افزودن به صف پذیرش'); refreshQueue();
+      state.queueKind = 'admission'; setActiveTab('tabAdmQ'); refreshQueue();
+    });
+
+    /* v1.69.0: two distinct queue/unpaid action buttons (replacing the old
+       single context-dependent addToQueue + payment status card). */
+    on($('addToQueueBtn'), 'click', function () {
+      state.queueKind = 'unpaid'; addCurrentToQueue();
+    });
+    on($('addToAdmQBtn'), 'click', function () {
+      state.queueKind = 'admission'; addCurrentToQueue();
     });
 
     /* save / clear / new — v1.64.0: «پذیرش جدید» and «انصراف» were removed;
@@ -1258,10 +1261,8 @@
     if (!p) return;
     if (tab === 'admission') {
       state.queueKind = 'admission'; setActiveTab('tabAdmQ');
-      setText($('addToQueue'), 'افزودن به صف پذیرش');
     } else if (tab === 'unpaid') {
       state.queueKind = 'unpaid'; setActiveTab('tabQueue');
-      setText($('addToQueue'), 'افزودن به صندوق نرفته‌ها');
     }
     if (b) b.className = 'queue-backdrop open';
     p.className = (p.className || '').replace(/\s*open/g, '') + ' open';
@@ -1353,6 +1354,15 @@
   /* --- save admission + print per Management design --- */
   function saveAdmission() {
     var rec = collectRecord();
+    /* v1.69.0: SMART SUBMIT — if the patient fields are empty (no national ID
+       AND no name), the operator is re-printing the PREVIOUS receipt (F8
+       equivalent). If fields are filled, this is a NEW admission. */
+    var hasPatient = rec.patient.nid || (rec.patient.first && rec.patient.last);
+    if (!hasPatient) {
+      /* empty form → print the last receipt instead of erroring */
+      Bridge.call('print.last', {});
+      return;
+    }
     if (!rec.patient.nid) { toast('کد ملی بیمار الزامی است', 'err'); if ($('nid')) $('nid').focus(); return; }
     if (!rec.patient.first || !rec.patient.last) { toast('نام و نام خانوادگی الزامی است', 'err'); return; }
     if (!state.services.length) { toast('حداقل یک خدمت باید افزوده شود', 'err'); return; }

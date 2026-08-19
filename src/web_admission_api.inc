@@ -95,7 +95,11 @@ static std::wstring adNowTime(){
 static std::string adDoctorStatsJson(const std::wstring& doctor){
     int total=countTodayDoctorReceptions(doctor,false);
     int paid=countTodayDoctorReceptions(doctor,true);
-    return "{\"P\":"+jnum(total)+",\"S\":"+jnum(paid)+"}";
+    int waiting=total-paid; if(waiting<0) waiting=0;
+    // v1.69.0: P=total admissions in 24h, S=cashiered (paid), plus turn stats:
+    // seen=doctor has processed (paid), waiting=still in queue for this doctor.
+    return "{\"P\":"+jnum(total)+",\"S\":"+jnum(paid)+
+           ",\"seen\":"+jnum(paid)+",\"waiting\":"+jnum(waiting)+"}";
 }
 static std::wstring adBlockRemaining(const BlacklistEntry& b){
     if(b.expiresEpochMin==0) return L"مسدودی دائم";

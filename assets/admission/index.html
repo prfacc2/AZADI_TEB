@@ -319,9 +319,16 @@
         <section class="card payment-card" id="paymentCard">
           <div class="card-head"><span class="card-title">
             <svg class="ct-ico" viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M3 5h18v14H3V5zm2 4h14V7H5v2zm0 3v5h14v-5H5z"/></svg>
-            وضعیت پرداخت</span></div>
+            عملیات پذیرش</span></div>
           <div class="card-body payment-body">
-            <div class="payment-state" id="paymentState"><span class="dot"></span><span id="paymentStateText">پس از افزودن خدمت، وضعیت پرداخت نمایش داده می‌شود</span></div>
+            <div class="queue-action-btns">
+              <button type="button" class="btn btn-queue-add" id="addToQueueBtn">
+                <span class="i"><svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M11 5v6H5v2h6v6h2v-6h6v-2h-6V5z"/></svg></span>
+                افزودن به صندوق نرفته‌ها</button>
+              <button type="button" class="btn btn-queue-add2" id="addToAdmQBtn">
+                <span class="i"><svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M11 5v6H5v2h6v6h2v-6h6v-2h-6V5z"/></svg></span>
+                افزودن به صف پذیرش</button>
+            </div>
             <div class="payment-shortcut">ثبت و صدور قبض: Ctrl + Enter</div>
           </div>
         </section>
