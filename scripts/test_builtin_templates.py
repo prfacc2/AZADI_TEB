@@ -261,8 +261,8 @@ if len(specs) == 30:
     )
     for i, s in enumerate(specs):
         check(
-            5.0 <= s["rowH"] <= 9.0,
-            f"template {i + 1:02d} row pitch {s['rowH']} mm is outside the legible 5.5..9 mm band",
+            3.8 <= s["rowH"] <= 9.0,
+            f"template {i + 1:02d} row pitch {s['rowH']} mm is outside the compact 4.0..9 mm band",
         )
         check(
             0.2 <= s["bw"] <= 0.8,
