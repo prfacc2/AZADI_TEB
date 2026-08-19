@@ -142,16 +142,13 @@ static DWORD WINAPI ssWorker(LPVOID p){
     }
     Sleep(s->lowSpec?60:160);
 
-    // Heavy, one-time-per-build work: install the Persian font. Skipped on
-    // subsequent launches of the same build so startup stays fast.
-    if(s->firstRun){
-        ssSet(s, 46, L"نصب فونت فارسی (Vazirmatn)…");
-        installVazirFont();
-        Sleep(slow);
-    } else {
-        ssSet(s, 46, L"بررسی فونت فارسی…");
-        Sleep(s->lowSpec?40:120);
-    }
+    // Always add the embedded face to this process. installVazirFont checks
+    // whether a persistent per-user copy already exists, so repeat launches do
+    // the cheap AddFontMemResourceEx step without reinstalling any files/keys.
+    ssSet(s, 46, s->firstRun ? L"نصب فونت فارسی (Vazirmatn)…"
+                             : L"بارگذاری فونت فارسی…");
+    installVazirFont();
+    Sleep(s->firstRun ? slow : (s->lowSpec?40:120));
 
     ssSet(s, 66, L"آماده‌سازی موتور گرافیکی (GDI+)…");
     // GDI+ is started in WinMain right after the splash; here we only confirm the

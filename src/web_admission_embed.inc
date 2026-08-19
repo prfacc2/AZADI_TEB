@@ -59,26 +59,30 @@ static std::string adB64(const std::string& in){
 // once the page no longer lives on the loopback host; a single data: URI face
 // is injected instead, with the process-wide AddFontMemResourceEx font as the
 // in-process MSHTML fallback).
-static void adStripFontFace(std::string& css){
+static bool adStripFontFace(std::string& css){
     size_t from=0;
     for(;;){
         size_t p=css.find("@font-face",from);
-        if(p==std::string::npos) return;
+        if(p==std::string::npos) return true;
         // only strip a real rule: "@font-face" + optional whitespace + "{"
         // (the string also appears inside header comments — leave those alone).
         size_t ob=p+10;
         while(ob<css.size() && (css[ob]==' '||css[ob]=='\t'||css[ob]=='\r'||css[ob]=='\n')) ob++;
         if(ob>=css.size() || css[ob]!='{'){ from=p+10; continue; }
-        size_t cb=css.find('}',ob); if(cb==std::string::npos) return;
+        size_t cb=css.find('}',ob); if(cb==std::string::npos) return false;
         css.erase(p,cb-p+1);
         from=p;
     }
 }
 
-static bool adReplaceOnce(std::string& hay, const std::string& needle,
-                          const std::string& rep){
+// Every source marker is part of the bundle contract. Requiring exactly one
+// occurrence prevents a renamed/missing asset (or an accidental duplicate)
+// from producing a page that still contains dead relative URLs.
+static bool adReplaceRequired(std::string& hay, const std::string& needle,
+                              const std::string& rep){
     size_t p=hay.find(needle);
-    if(p==std::string::npos) return false;
+    if(p==std::string::npos || hay.find(needle,p+needle.size())!=std::string::npos)
+        return false;
     hay.replace(p,needle.size(),rep);
     return true;
 }
@@ -100,34 +104,39 @@ static bool adReplaceOnce(std::string& hay, const std::string& needle,
 //      NO @font-face at all; plain font-family:'Vazirmatn' resolves to the
 //      process-installed font.
 static std::string AdmissionBuildInlinePage(bool withFontFace){
-    std::string html;
-    if(!adLoadRes(400,html)) return "";
-    std::string commonCss,admCss,commonJs,bridgeJs,ctxJs,admJs;
-    adLoadRes(500,commonCss); adLoadRes(401,admCss);
-    adLoadRes(501,commonJs);  adLoadRes(402,bridgeJs);
-    adLoadRes(405,ctxJs);     adLoadRes(403,admJs);
-    adStripFontFace(commonCss); adStripFontFace(admCss);
+    std::string html,commonCss,admCss,commonJs,bridgeJs,ctxJs,admJs;
+    if(!adLoadRes(400,html)      || html.empty()      ||
+       !adLoadRes(500,commonCss) || commonCss.empty() ||
+       !adLoadRes(401,admCss)    || admCss.empty()    ||
+       !adLoadRes(501,commonJs)  || commonJs.empty()  ||
+       !adLoadRes(402,bridgeJs)  || bridgeJs.empty()  ||
+       !adLoadRes(405,ctxJs)     || ctxJs.empty()     ||
+       !adLoadRes(403,admJs)     || admJs.empty())
+        return "";
+    if(!adStripFontFace(commonCss) || !adStripFontFace(admCss)) return "";
+
     std::string face;
     if(withFontFace){
         std::string font;
-        if(adLoadRes(404,font) && !font.empty()){
-            face="@font-face{font-family:'Vazirmatn';"
-                 "src:url(data:font/ttf;base64,"+adB64(font)+") format('truetype');"
-                 "font-weight:normal;font-style:normal;}\n";
-        }
+        if(!adLoadRes(404,font) || font.empty()) return "";
+        face="@font-face{font-family:'Vazirmatn';"
+             "src:url(data:font/ttf;base64,"+adB64(font)+") format('truetype');"
+             "font-weight:normal;font-style:normal;}\n";
     }
-    adReplaceOnce(html,"<link rel=\"stylesheet\" href=\"common.css\" />",
-                  "<style>\n"+face+commonCss+"\n</style>");
-    adReplaceOnce(html,"<link rel=\"stylesheet\" href=\"admission.css\" />",
-                  "<style>\n"+admCss+"\n</style>");
-    adReplaceOnce(html,"<script src=\"common.js\"></script>",
-                  "<script>\n"+commonJs+"\n</script>");
-    adReplaceOnce(html,"<script src=\"bridge.js\"></script>",
-                  "<script>\n"+bridgeJs+"\n</script>");
-    adReplaceOnce(html,"<script src=\"contextmenu.js\"></script>",
-                  "<script>\n"+ctxJs+"\n</script>");
-    adReplaceOnce(html,"<script src=\"admission.js\"></script>",
-                  "<script>\n"+admJs+"\n</script>");
+
+    if(!adReplaceRequired(html,"<link rel=\"stylesheet\" href=\"common.css\" />",
+                          "<style>\n"+face+commonCss+"\n</style>") ||
+       !adReplaceRequired(html,"<link rel=\"stylesheet\" href=\"admission.css\" />",
+                          "<style>\n"+admCss+"\n</style>") ||
+       !adReplaceRequired(html,"<script src=\"common.js\"></script>",
+                          "<script>\n"+commonJs+"\n</script>") ||
+       !adReplaceRequired(html,"<script src=\"bridge.js\"></script>",
+                          "<script>\n"+bridgeJs+"\n</script>") ||
+       !adReplaceRequired(html,"<script src=\"contextmenu.js\"></script>",
+                          "<script>\n"+ctxJs+"\n</script>") ||
+       !adReplaceRequired(html,"<script src=\"admission.js\"></script>",
+                          "<script>\n"+admJs+"\n</script>"))
+        return "";
     return html;
 }
 

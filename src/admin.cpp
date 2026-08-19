@@ -197,13 +197,12 @@ static LRESULT CALLBACK adminProc(HWND h, UINT m, WPARAM w, LPARAM l){
         d->eUser=CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)ID_AD_USER,g_hInst,0);
         d->ePass=CreateWindowExW(0,L"EDIT",L"",es|ES_PASSWORD,0,0,10,10,h,(HMENU)ID_AD_PASS,g_hInst,0);
         d->eDept=CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)ID_AD_DEPT,g_hInst,0);
-        d->cRole=CreateWindowExW(0,L"COMBOBOX",L"",
-            WS_CHILD|WS_VISIBLE|WS_TABSTOP|CBS_DROPDOWNLIST,
-            0,0,10,10,h,(HMENU)ID_AD_ROLE,g_hInst,0);
+        d->cRole=createThemedCombo(h,ID_AD_ROLE);
         SendMessageW(d->cRole,CB_ADDSTRING,0,(LPARAM)L"پذیرش");
         SendMessageW(d->cRole,CB_ADDSTRING,0,(LPARAM)L"مدیریت");
         SendMessageW(d->cRole,CB_SETCURSEL,0,0);
         d->bCreate=createFlatButton(h,ID_AD_CREATE,L"ساخت کاربر",ICO_PLUS,BS_PRIMARY,0,0,10,10);
+        setFlatButtonBg(d->bCreate,g_theme.surface);
         // user table (LAYOUTRTL only on the ListView itself is safe:
         // the control paints itself, no custom BitBlt involved)
         d->list=CreateWindowExW(WS_EX_LAYOUTRTL|WS_EX_RTLREADING,WC_LISTVIEWW,L"",
@@ -220,10 +219,9 @@ static LRESULT CALLBACK adminProc(HWND h, UINT m, WPARAM w, LPARAM l){
             ListView_InsertColumn(d->list,i,&c);
         }
         SendMessageW(d->list,WM_SETFONT,(WPARAM)g_fUI,TRUE);
-        ListView_SetBkColor(d->list,g_theme.surface);
-        ListView_SetTextBkColor(d->list,g_theme.surface);
-        ListView_SetTextColor(d->list,g_theme.text);
+        applyThemedListView(d->list);
         d->bDelete=createFlatButton(h,ID_AD_DELETE,L"حذف کاربر انتخابی",ICO_TRASH,BS_DANGER,0,0,10,10);
+        setFlatButtonBg(d->bDelete,g_theme.bg);
         HWND eds[4]={d->eFull,d->eUser,d->ePass,d->eDept};
         for(int i=0;i<4;i++){
             SendMessageW(eds[i],WM_SETFONT,(WPARAM)g_fUI,TRUE);
@@ -254,10 +252,9 @@ static LRESULT CALLBACK adminProc(HWND h, UINT m, WPARAM w, LPARAM l){
             }
         }
         SendMessageW(d->pList,WM_SETFONT,(WPARAM)g_fUI,TRUE);
-        ListView_SetBkColor(d->pList,g_theme.surface);
-        ListView_SetTextBkColor(d->pList,g_theme.surface);
-        ListView_SetTextColor(d->pList,g_theme.text);
+        applyThemedListView(d->pList);
         d->bPDel=createFlatButton(h,ID_AD_PDEL,L"حذف بیمار انتخابی",ICO_TRASH,BS_DANGER,0,0,10,10);
+        setFlatButtonBg(d->bPDel,g_theme.bg);
 
         adApplyTabVisibility(d);
         return 0; }
@@ -286,9 +283,15 @@ static LRESULT CALLBACK adminProc(HWND h, UINT m, WPARAM w, LPARAM l){
         }
         return 0;
 
+    case WM_DRAWITEM:
+        if(drawThemedComboItem((LPDRAWITEMSTRUCT)l)) return TRUE;
+        break;
     case WM_NOTIFY: {
         if(!d) break;
         LPNMHDR nh=(LPNMHDR)l;
+        LRESULT headerResult=0;
+        if(nh && drawThemedListViewHeader((LPNMCUSTOMDRAW)l,&headerResult))
+            return headerResult;
         if(nh->hwndFrom==d->pList){
             if(nh->code==LVN_GETDISPINFOW){
                 NMLVDISPINFOW* di=(NMLVDISPINFOW*)l;
@@ -315,15 +318,10 @@ static LRESULT CALLBACK adminProc(HWND h, UINT m, WPARAM w, LPARAM l){
             }
         }
         break; }
-    case WM_APP_THEME:        // v1.1.0: re-color ListView on theme switch
+    case WM_APP_THEME:        // re-color ListViews + headers in place
         if(d){
-            HWND lists[2]={d->list,d->pList};
-            for(HWND lv:lists){ if(!lv) continue;
-                ListView_SetBkColor(lv,g_theme.surface);
-                ListView_SetTextBkColor(lv,g_theme.surface);
-                ListView_SetTextColor(lv,g_theme.text);
-                InvalidateRect(lv,NULL,TRUE);
-            }
+            applyThemedListView(d->list);
+            applyThemedListView(d->pList);
         }
         return 0;
     case WM_CTLCOLOREDIT: {

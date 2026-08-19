@@ -118,9 +118,17 @@ struct ManageState {
     // across paints; invalidate only on page-switch back to dash.
     int  dashSec, dashEmp, dashOn, dashReq, dashPat, dashToday;
     bool dashValid;
+    // v1.69.0: subtle staggered fade-in + count-up entrance for the dashboard.
+    // Advances 0→1 over ~350 ms via a WM_TIMER; jumps to 1 instantly on weak
+    // hardware (g_lowSpec). At steady state (==1) every colour is drawn at full
+    // strength, so the entrance adds ZERO per-paint GDI+ cost once it settles.
+    float dashAnim;        // 0..1 entrance progress
+    bool  dashAnimOn;      // entrance timer running?
 };
 // background patient loader → UI thread marshal (no HWND access off-thread)
 #define WM_MG_PATIENTS_READY (WM_APP+74)
+// v1.69.0 dashboard entrance-animation timer id (kept clear of 0xB1 debounce).
+#define MG_DASH_ANIM_TIMER 0xD1
 static ManageState* s_mg=NULL;
 static HWND g_hManage=NULL;
 static void mgRefreshReqBadge();
@@ -408,6 +416,55 @@ static void mgLoadEmps(){
     // empSort==2 → created order (oldest first) = natural load order, no change
 }
 // ====================== employee details modal ==============================
+// v1.68.0 PERF — cached card drop-shadow for modal popups.
+// The seven management dialogs each draw gpShadow(spread 22) → 11 GDI+ path
+// fills per WM_PAINT; mgdProc/mrProc repaint on WM_MOUSEMOVE hover, so those
+// 11 fills ran per mouse-move → FPS drop. The shadow depends only on
+// (window size, card rect, dark, rad, spread, alpha) — all static between
+// paints unless the theme/size changes — so it is rendered once into a
+// transparent backing DC and blitted on subsequent paints. Only one modal is
+// open at a time, so a single shared cache suffices.
+static HDC        s_mgShDC  = NULL;
+static HBITMAP    s_mgShBmp = NULL, s_mgShOld = NULL;
+static int        s_mgShW=0, s_mgShH=0, s_mgShDark=-1, s_mgShRad=0, s_mgShSp=0, s_mgShA=0;
+static RECT       s_mgShCard{};
+
+static void mgFreeShadowCache(){
+    if(s_mgShDC && s_mgShOld) SelectObject(s_mgShDC,s_mgShOld);
+    if(s_mgShBmp){ DeleteObject(s_mgShBmp); s_mgShBmp=NULL; }
+    if(s_mgShDC){ DeleteDC(s_mgShDC); s_mgShDC=NULL; }
+    s_mgShW=s_mgShH=0; s_mgShDark=-1;
+}
+// Render the card shadow into a cache (transparent background) once, then blit
+// it onto the paint DC on every subsequent paint. Falls back to a direct
+// gpShadow if allocation fails (low-resource hosts).
+static void gpShadowCached(HDC ref, HDC dc, int W, int H, const RECT& card,
+                           int rad, int spread, int alpha){
+    bool same = s_mgShDC && s_mgShW==W && s_mgShH==H && s_mgShDark==(g_dark?1:0)
+                && s_mgShRad==rad && s_mgShSp==spread && s_mgShA==alpha
+                && memcmp(&s_mgShCard,&card,sizeof(RECT))==0;
+    if(!same){
+        mgFreeShadowCache();
+        s_mgShDC=CreateCompatibleDC(ref);
+        s_mgShBmp=CreateCompatibleBitmap(ref,W,H);
+        if(!s_mgShDC||!s_mgShBmp){ mgFreeShadowCache();
+            gpShadow(dc,card,rad,spread,alpha); return; }
+        s_mgShOld=(HBITMAP)SelectObject(s_mgShDC,s_mgShBmp);
+        // Clear the cache to the page scrim colour + scrim wash, then render
+        // the card shadow once. Subsequent paints just blit this surface (the
+        // 11 GDI+ path fills run once, not per hover repaint). The blit covers
+        // the same scrim pixels the dialog already painted, so it is seamless.
+        RECT all={0,0,W,H};
+        { HBRUSH sb=CreateSolidBrush(g_dark?RGB(6,9,14):RGB(28,36,48));
+          FillRect(s_mgShDC,&all,sb); DeleteObject(sb); }
+        gpFillAlpha(s_mgShDC,all,0,g_dark?RGB(0,0,0):RGB(20,28,40),120);
+        gpShadow(s_mgShDC,card,rad,spread,alpha);
+        s_mgShW=W; s_mgShH=H; s_mgShDark=g_dark?1:0; s_mgShRad=rad;
+        s_mgShSp=spread; s_mgShA=alpha; s_mgShCard=card;
+    }
+    BitBlt(dc,0,0,W,H,s_mgShDC,0,0,SRCCOPY);
+}
+
 #define MGD_CLASS L"AzEmpDetail"
 struct DetailState { EmpRow row; int hot; int paper; };
 static HWND s_mgd=NULL; static DetailState* s_dt=NULL;
@@ -522,9 +579,10 @@ static LRESULT CALLBACK mgdProc(HWND h, UINT m, WPARAM w, LPARAM l){
           FillRect(dc,&rc,sb); DeleteObject(sb); }
         gpFillAlpha(dc,rc,0,g_dark?RGB(0,0,0):RGB(20,28,40),120);
         RECT c=mgdCard(h);
-        gpShadow(dc,c,S(20),S(22),80);
-        { HBRUSH pb=CreateSolidBrush(g_theme.surface); FillRect(dc,&c,pb); DeleteObject(pb); }
-        gpGradRoundRect(dc,c,S(18),g_theme.surfaceTop,g_theme.surface,g_theme.border);
+        // v1.68.0: cached card shadow (11 GDI+ path fills) instead of per-paint.
+        gpShadowCached(dc0,dc,rc.right,rc.bottom,c,S(20),S(22),80);
+        gpGradRoundRectBg(dc,c,S(18),g_theme.surfaceTop,g_theme.surface,g_theme.border,
+            g_dark?RGB(6,9,14):RGB(28,36,48));
         SetBkMode(dc,TRANSPARENT);
         // close
         { RECT cb={c.left+S(14),c.top+S(14),c.left+S(40),c.top+S(40)};
@@ -702,9 +760,9 @@ static LRESULT CALLBACK mrProc(HWND h, UINT m, WPARAM w, LPARAM l){
           FillRect(dc,&rc,sb); DeleteObject(sb); }
         gpFillAlpha(dc,rc,0,g_dark?RGB(0,0,0):RGB(20,28,40),120);
         RECT c=mrCard(h);
-        gpShadow(dc,c,S(20),S(22),80);
-        { HBRUSH pb=CreateSolidBrush(g_theme.surface); FillRect(dc,&c,pb); DeleteObject(pb); }
-        gpGradRoundRect(dc,c,S(18),g_theme.surfaceTop,g_theme.surface,g_theme.border);
+        gpShadowCached(dc0,dc,rc.right,rc.bottom,c,S(20),S(22),80);
+        gpGradRoundRectBg(dc,c,S(18),g_theme.surfaceTop,g_theme.surface,g_theme.border,
+            g_dark?RGB(6,9,14):RGB(28,36,48));
         SetBkMode(dc,TRANSPARENT);
         // close
         { RECT cb={c.left+S(14),c.top+S(14),c.left+S(40),c.top+S(40)};
@@ -936,9 +994,9 @@ static LRESULT CALLBACK prProc(HWND h, UINT m, WPARAM w, LPARAM l){
           FillRect(dc,&rc,sb); DeleteObject(sb); }
         gpFillAlpha(dc,rc,0,g_dark?RGB(0,0,0):RGB(20,28,40),120);
         RECT c=prCard(h);
-        gpShadow(dc,c,S(20),S(22),80);
-        { HBRUSH pb=CreateSolidBrush(g_theme.surface); FillRect(dc,&c,pb); DeleteObject(pb); }
-        gpGradRoundRect(dc,c,S(18),g_theme.surfaceTop,g_theme.surface,g_theme.border);
+        gpShadowCached(dc0,dc,rc.right,rc.bottom,c,S(20),S(22),80);
+        gpGradRoundRectBg(dc,c,S(18),g_theme.surfaceTop,g_theme.surface,g_theme.border,
+            g_dark?RGB(6,9,14):RGB(28,36,48));
         SetBkMode(dc,TRANSPARENT);
         { RECT cb={c.left+S(14),c.top+S(14),c.left+S(40),c.top+S(40)};
           RECT ci={cb.left+S(5),cb.top+S(5),cb.right-S(5),cb.bottom-S(5)};
@@ -1331,6 +1389,8 @@ static LRESULT CALLBACK mmProc(HWND h, UINT m, WPARAM w, LPARAM l){
         s_ms->bSend  =createFlatButton(h,MM_B_SEND,L"ارسال پیام",ICO_BELL,BS_PRIMARY,0,0,10,10);
         s_ms->bCancel=createFlatButton(h,MM_B_CANCEL,L"انصراف",ICO_X,BS_OUTLINE,0,0,10,10);
         s_ms->bViewEmp=createFlatButton(h,MM_B_VIEWEMP,L"مشاهدهٔ کارمندان",ICO_USER,BS_OUTLINE,0,0,10,10);
+        HWND cardBtns[]={s_ms->bAttach,s_ms->bSend,s_ms->bCancel,s_ms->bViewEmp};
+        for(HWND b:cardBtns) setFlatButtonBg(b,g_theme.surface);
         s_ms->eEmpSrch=CreateWindowExW(0,L"EDIT",L"",
             WS_CHILD|WS_TABSTOP|ES_AUTOHSCROLL,0,0,10,10,h,(HMENU)MM_E_EMPSRCH,g_hInst,0);
         SendMessageW(s_ms->eEmpSrch,EM_SETCUEBANNER,TRUE,(LPARAM)L"جستجوی کارمند…");
@@ -1450,7 +1510,7 @@ static LRESULT CALLBACK mmProc(HWND h, UINT m, WPARAM w, LPARAM l){
           FillRect(dc,&rc,sb); DeleteObject(sb); }
         gpFillAlpha(dc,rc,0,g_dark?RGB(0,0,0):RGB(20,28,40),120);
         RECT c=mmCard(h);
-        gpShadow(dc,c,S(20),S(22),80);
+        gpShadowCached(dc0,dc,rc.right,rc.bottom,c,S(20),S(22),80);
         gpGradRoundRectBg(dc,c,S(18),g_theme.surfaceTop,g_theme.surface,g_theme.border,
             g_dark?RGB(6,9,14):RGB(28,36,48));
         SetBkMode(dc,TRANSPARENT);
@@ -1738,12 +1798,8 @@ static LRESULT CALLBACK neProc(HWND h, UINT m, WPARAM w, LPARAM l){
         SendMessageW(s_nes->eSto,EM_SETCUEBANNER,TRUE,(LPARAM)L"تا (۱۶:۰۰)");
         SendMessageW(s_nes->eHours,EM_SETCUEBANNER,TRUE,(LPARAM)L"ساعت/هفته");
         SendMessageW(s_nes->eHire,EM_SETCUEBANNER,TRUE,(LPARAM)L"۱۴۰۴/۰۳/۲۸");
-        s_nes->cDept=CreateWindowExW(0,L"COMBOBOX",L"",
-            WS_CHILD|WS_VISIBLE|WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL,
-            0,0,10,10,h,(HMENU)NE_CB_DEPT,g_hInst,0);
-        s_nes->cRole=CreateWindowExW(0,L"COMBOBOX",L"",
-            WS_CHILD|WS_VISIBLE|WS_TABSTOP|CBS_DROPDOWNLIST,
-            0,0,10,10,h,(HMENU)NE_CB_ROLE,g_hInst,0);
+        s_nes->cDept=createThemedCombo(h,NE_CB_DEPT);
+        s_nes->cRole=createThemedCombo(h,NE_CB_ROLE);
         SendMessageW(s_nes->cDept,WM_SETFONT,(WPARAM)g_fUI,TRUE);
         SendMessageW(s_nes->cRole,WM_SETFONT,(WPARAM)g_fUI,TRUE);
         s_nes->depts=loadDepts();
@@ -1765,6 +1821,8 @@ static LRESULT CALLBACK neProc(HWND h, UINT m, WPARAM w, LPARAM l){
         s_nes->bPhoto =createFlatButton(h,NE_B_PHOTO, L"بارگذاری عکس پرسنلی",ICO_USER,BS_OUTLINE,0,0,10,10);
         s_nes->bOk=createFlatButton(h,NE_B_OK,L"ثبت کارمند",ICO_PLUS,BS_PRIMARY,0,0,10,10);
         s_nes->bCancel=createFlatButton(h,NE_B_CANCEL,L"انصراف",ICO_X,BS_OUTLINE,0,0,10,10);
+        HWND cardBtns[]={s_nes->bIdCard,s_nes->bPhoto,s_nes->bOk,s_nes->bCancel};
+        for(HWND b:cardBtns) setFlatButtonBg(b,g_theme.surface);
         neLayout(h);
         return 0; }
     case WM_SIZE: neLayout(h); return 0;
@@ -1777,6 +1835,9 @@ static LRESULT CALLBACK neProc(HWND h, UINT m, WPARAM w, LPARAM l){
     case WM_CTLCOLORSTATIC:{ HDC dc=(HDC)w;
         SetTextColor(dc,g_theme.text); SetBkColor(dc,g_theme.surface);
         return (LRESULT)g_brSurface; }
+    case WM_DRAWITEM:
+        if(drawThemedComboItem((LPDRAWITEMSTRUCT)l)) return TRUE;
+        break;
     case WM_COMMAND:{ int id=LOWORD(w);
         if(id==NE_B_OK) neDoCreate(h);
         else if(id==NE_B_CANCEL) neClose();
@@ -1808,7 +1869,7 @@ static LRESULT CALLBACK neProc(HWND h, UINT m, WPARAM w, LPARAM l){
           FillRect(dc,&rc,sb); DeleteObject(sb); }
         gpFillAlpha(dc,rc,0,g_dark?RGB(0,0,0):RGB(20,28,40),120);
         RECT c=neCard(h);
-        gpShadow(dc,c,S(20),S(22),80);
+        gpShadowCached(dc0,dc,rc.right,rc.bottom,c,S(20),S(22),80);
         gpGradRoundRectBg(dc,c,S(18),g_theme.surfaceTop,g_theme.surface,g_theme.border,
             g_dark?RGB(6,9,14):RGB(28,36,48));
         SetBkMode(dc,TRANSPARENT);
@@ -1970,12 +2031,9 @@ static LRESULT CALLBACK npProc(HWND h, UINT m, WPARAM w, LPARAM l){
         s_nps->eBirth=mk(NP_E_BIRTH,0); s_nps->eMobile=mk(NP_E_MOBILE,0);
         s_nps->eLand=mk(NP_E_LAND,0); s_nps->eAddr=mk(NP_E_ADDR,0);
         SendMessageW(s_nps->eBirth,EM_SETCUEBANNER,TRUE,(LPARAM)L"۱۳۷۰/۰۵/۲۰");
-        s_nps->cGender=CreateWindowExW(0,L"COMBOBOX",L"",
-            WS_CHILD|WS_VISIBLE|WS_TABSTOP|CBS_DROPDOWNLIST,0,0,10,10,h,(HMENU)NP_CB_GENDER,g_hInst,0);
-        s_nps->cIns=CreateWindowExW(0,L"COMBOBOX",L"",
-            WS_CHILD|WS_VISIBLE|WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL,0,0,10,10,h,(HMENU)NP_CB_INS,g_hInst,0);
-        s_nps->cSupp=CreateWindowExW(0,L"COMBOBOX",L"",
-            WS_CHILD|WS_VISIBLE|WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL,0,0,10,10,h,(HMENU)NP_CB_SUPP,g_hInst,0);
+        s_nps->cGender=createThemedCombo(h,NP_CB_GENDER);
+        s_nps->cIns=createThemedCombo(h,NP_CB_INS);
+        s_nps->cSupp=createThemedCombo(h,NP_CB_SUPP);
         for(HWND cb:{s_nps->cGender,s_nps->cIns,s_nps->cSupp})
             SendMessageW(cb,WM_SETFONT,(WPARAM)g_fUI,TRUE);
         SendMessageW(s_nps->cGender,CB_ADDSTRING,0,(LPARAM)L"مرد");
@@ -1987,6 +2045,8 @@ static LRESULT CALLBACK npProc(HWND h, UINT m, WPARAM w, LPARAM l){
         SendMessageW(s_nps->cSupp,CB_SETCURSEL,0,0);
         s_nps->bOk=createFlatButton(h,NP_B_OK,L"ثبت بیمار",ICO_PLUS,BS_PRIMARY,0,0,10,10);
         s_nps->bCancel=createFlatButton(h,NP_B_CANCEL,L"انصراف",ICO_X,BS_OUTLINE,0,0,10,10);
+        setFlatButtonBg(s_nps->bOk,g_theme.surface);
+        setFlatButtonBg(s_nps->bCancel,g_theme.surface);
         npLayout(h); SetFocus(s_nps->eFirst);
         return 0; }
     case WM_SIZE: npLayout(h); return 0;
@@ -1999,6 +2059,9 @@ static LRESULT CALLBACK npProc(HWND h, UINT m, WPARAM w, LPARAM l){
     case WM_CTLCOLORSTATIC:{ HDC dc=(HDC)w;
         SetTextColor(dc,g_theme.text); SetBkColor(dc,g_theme.surface);
         return (LRESULT)g_brSurface; }
+    case WM_DRAWITEM:
+        if(drawThemedComboItem((LPDRAWITEMSTRUCT)l)) return TRUE;
+        break;
     case WM_COMMAND:{ int id=LOWORD(w);
         if(id==NP_B_OK) npDoSave(h);
         else if(id==NP_B_CANCEL) npClose();
@@ -2013,7 +2076,7 @@ static LRESULT CALLBACK npProc(HWND h, UINT m, WPARAM w, LPARAM l){
           FillRect(dc,&rc,sb); DeleteObject(sb); }
         gpFillAlpha(dc,rc,0,g_dark?RGB(0,0,0):RGB(20,28,40),120);
         RECT c=npCard(h);
-        gpShadow(dc,c,S(20),S(22),80);
+        gpShadowCached(dc0,dc,rc.right,rc.bottom,c,S(20),S(22),80);
         gpGradRoundRectBg(dc,c,S(18),g_theme.surfaceTop,g_theme.surface,g_theme.border,
             g_dark?RGB(6,9,14):RGB(28,36,48));
         SetBkMode(dc,TRANSPARENT);
@@ -2199,9 +2262,8 @@ static bool pcParseServicesModel(const std::wstring& jsonW, PcServicesModel& m){
     if((int)m.widths.size()!=m.cols) m.widths.assign(m.cols,1.0);
     if(m.labels.empty()){
         m.labels.clear();
-        const wchar_t* def[4]={L"ردیف",L"نام خدمت",L"کد",L"مبلغ"};
-        int nc=m.cols>4?m.cols:4;
-        for(int i=0;i<nc;++i) m.labels.push_back(i<4?std::wstring(def[i]):L"");
+        const wchar_t* def[4]={L"نام خدمت",L"شرح خدمت",L"تعداد",L"مبلغ کل"};
+        for(int i=0;i<m.cols;++i) m.labels.push_back(i<4?std::wstring(def[i]):L"");
     }
     return true;
 }
@@ -2209,47 +2271,56 @@ static void pcDrawServices(HDC dc, const PrintItem& it, const RECT& box, double 
     PcServicesModel m; if(!pcParseServicesModel(it.text,m)) return;
     int X0=box.left,Y0=box.top,X1=box.right,Y1=box.bottom;
     int W=X1-X0,H=Y1-Y0; if(W<=0||H<=0) return;
-    int nData=1;                                   // preview: one placeholder row
-    int total=(m.header?1:0)+nData; if(total<1) return;
     double sumw=0; for(double w:m.widths) sumw+=w; if(sumw<=0) sumw=m.cols;
-    std::vector<int> cx; cx.push_back(X1); double acc=0;
-    for(int c=0;c<m.cols;++c){ acc+=m.widths[c]; cx.push_back(X1-(int)(W*(acc/sumw))); }
-    std::vector<int> ry;
-    if(m.header){ int hh=(int)(H*0.16); if(hh<14)hh=14;   // §1.52.0: WYSIWYG — match pdDrawServices (printer.cpp) 16% header band
-        ry.push_back(Y0); ry.push_back(Y0+hh); ry.push_back(Y1); }
-    else { ry.push_back(Y0); ry.push_back(Y1); }
-    if(m.header){ RECT hr={cx[m.cols],ry[0],cx[0],ry[1]};
-        HBRUSH hb=CreateSolidBrush(RGB(31,95,214)); FillRect(dc,&hr,hb); DeleteObject(hb); }
+    std::vector<int> cx; cx.reserve(m.cols+1); cx.push_back(X1); double acc=0;
+    for(int c=0;c<m.cols;++c){
+        acc+=m.widths[c]; cx.push_back(c==m.cols-1?X0:X1-(int)(W*(acc/sumw)));
+    }
+
     double fontPt=it.fontPt>0?it.fontPt:8.5;
-    int lf=-(int)(fontPt*scPxMm*25.4/72.0 + 0.5); if(lf>-2) lf=-2;
-    HFONT fN=CreateFontW(lf,0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,
-        it.fontName.empty()?L"Vazirmatn":it.fontName.c_str());
+    int lf=-(int)(fontPt*scPxMm*25.4/72.0+0.5); if(lf>-2) lf=-2;
     HFONT fH=CreateFontW(lf,0,0,0,FW_BOLD,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,
         it.fontName.empty()?L"Vazirmatn":it.fontName.c_str());
-    int pad=S(3);
-    if(m.header){ HGDIOBJ of=SelectObject(dc,fH); SetTextColor(dc,RGB(255,255,255));
-        for(int c=0;c<m.cols;++c){ std::wstring cell=(c<(int)m.labels.size())?m.labels[c]:L"";
+    int hh=it.headerH>0?(int)(it.headerH*scPxMm+0.5):(int)(H*0.16);
+    if(hh<14) hh=14; if(hh>H) hh=H;
+    int rh=it.rowH>0?(int)(it.rowH*scPxMm+0.5):hh;
+    if(rh<12) rh=12; if(hh+rh>H) rh=H-hh;
+    if(rh<0) rh=0;
+    int total=m.header?1:0;
+    if(rh>0) ++total;
+    std::vector<int> ry; ry.reserve(total+1); ry.push_back(Y0);
+    if(m.header) ry.push_back(Y0+hh);
+    if(rh>0) ry.push_back((m.header?Y0+hh:Y0)+rh);
+    if((int)ry.size()!=total+1){ DeleteObject(fH); return; }
+
+    if(m.header){
+        DWORD fill=it.fillTransparent?0xEFEFEFu:(DWORD)it.fillColor;
+        int lum=(int)((((fill>>16)&0xFF)*30+((fill>>8)&0xFF)*59+(fill&0xFF)*11)/100);
+        RECT hr={cx[m.cols],ry[0],cx[0],ry[1]};
+        HBRUSH hb=CreateSolidBrush(pcCR((int)fill)); FillRect(dc,&hr,hb); DeleteObject(hb);
+        HGDIOBJ of=SelectObject(dc,fH);
+        SetTextColor(dc,lum<140?RGB(255,255,255):pcCR(it.textColor));
+        int pad=S(3);
+        for(int c=0;c<m.cols;++c){
+            std::wstring cell=c<(int)m.labels.size()?m.labels[c]:L"";
             RECT cr={cx[c+1]+pad,ry[0],cx[c]-pad,ry[1]};
             if(cr.right<=cr.left||cr.bottom<=cr.top) continue;
-            DrawTextW(dc,cell.c_str(),-1,&cr,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_END_ELLIPSIS|DT_NOPREFIX);
-        } SelectObject(dc,of); }
-    { HGDIOBJ of=SelectObject(dc,fN); SetTextColor(dc,pcCR(it.textColor));
-      const wchar_t* ph[4]={L"۱",L"نمونهٔ خدمت",L"۰۰۱",L"۱۰۰٬۰۰۰ ریال"};
-      int y0r=m.header?ry[1]:ry[0], y1r=m.header?ry[2]:ry[1];
-      for(int c=0;c<m.cols;++c){ std::wstring cell=(c<4)?std::wstring(ph[c]):L"";
-          RECT cr={cx[c+1]+pad,y0r,cx[c]-pad,y1r};
-          if(cr.right<=cr.left||cr.bottom<=cr.top) continue;
-          UINT al=(c==1)?(DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_END_ELLIPSIS|DT_NOPREFIX)
-                        :(DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_END_ELLIPSIS|DT_NOPREFIX);
-          DrawTextW(dc,cell.c_str(),-1,&cr,al);
-      } SelectObject(dc,of); }
-    DeleteObject(fN); DeleteObject(fH);
-    int bw=1; HPEN pen=CreatePen(PS_SOLID,bw,pcCR(it.borderColor)); HGDIOBJ op=SelectObject(dc,pen);
+            DrawTextW(dc,cell.c_str(),-1,&cr,
+                DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_END_ELLIPSIS|DT_NOPREFIX);
+        }
+        SelectObject(dc,of);
+    }
+    DeleteObject(fH);
+
+    // Recordless ready-template preview: show structure without fabricated
+    // service names, codes, quantities or prices. One compact blank row keeps
+    // the table editable and the unused page visibly blank.
+    int bw=(int)(it.borderWidth*scPxMm); if(bw<1) bw=1;
+    HPEN pen=CreatePen(PS_SOLID,bw,pcCR(it.borderColor)); HGDIOBJ op=SelectObject(dc,pen);
     for(int c=0;c<=m.cols;++c){ MoveToEx(dc,cx[c],ry[0],0); LineTo(dc,cx[c],ry[total]); }
     for(int rr=0;rr<=total;++rr){ MoveToEx(dc,cx[m.cols],ry[rr],0); LineTo(dc,cx[0],ry[rr]); }
     SelectObject(dc,op); DeleteObject(pen);
 }
-
 // preview-mode table: shows raw cell text (no live record substitution)
 static void pcDrawTable(HDC dc, const PrintItem& it, const RECT& box, double scPxMm){
     PcTable t; if(!pcParseTable(it.text,t)) return;
@@ -2525,7 +2596,10 @@ static LRESULT CALLBACK pcProc(HWND h, UINT m, WPARAM w, LPARAM l){
         s_pcs->bUpload  =createFlatButton(h,PC_B_UPLOAD,  L"بارگذاری",  ICO_ID,     BS_OUTLINE,0,0,10,10);
         s_pcs->bApply   =createFlatButton(h,PC_B_APPLY,   L"اعمال",     ICO_PLUS,   BS_PRIMARY,0,0,10,10);
         s_pcs->bClose   =createFlatButton(h,PC_B_CLOSE,   L"بستن",      ICO_X,      BS_OUTLINE,0,0,10,10);
-        if(!s_pcs->sects.empty()){ SendMessageW(s_pcs->list,LB_SETCURSEL,0,0);
+        HWND cardBtns[]={s_pcs->bZoomOut,s_pcs->bZoomIn,s_pcs->bEnlarge,
+            s_pcs->bDesign,s_pcs->bDownload,s_pcs->bUpload,s_pcs->bApply,s_pcs->bClose};
+        for(HWND b:cardBtns) setFlatButtonBg(b,g_theme.surface);
+        if(!s_pcs->sects.empty()){  SendMessageW(s_pcs->list,LB_SETCURSEL,0,0);
             s_pcs->sel=0; pcLoadPreview(); }
         pcLayout(h);
         return 0; }
@@ -2568,7 +2642,7 @@ static LRESULT CALLBACK pcProc(HWND h, UINT m, WPARAM w, LPARAM l){
           FillRect(dc,&rc,sb); DeleteObject(sb); }
         gpFillAlpha(dc,rc,0,g_dark?RGB(0,0,0):RGB(20,28,40),120);
         RECT c=pcCard(h);
-        gpShadow(dc,c,S(20),S(22),80);
+        gpShadowCached(dc0,dc,rc.right,rc.bottom,c,S(20),S(22),80);
         gpGradRoundRectBg(dc,c,S(18),g_theme.surfaceTop,g_theme.surface,g_theme.border,
             g_dark?RGB(6,9,14):RGB(28,36,48));
         SetBkMode(dc,TRANSPARENT);
@@ -2684,10 +2758,9 @@ static void mgEmptyState(HDC dc, RECT a, int icon, const wchar_t* head,
     int blockH=med+gap+hl+S(6)+sl;
     int by=cy-blockH/2; if(by<top+S(16)) by=top+S(16);
     RECT mr={cx-med/2,by,cx+med/2,by+med};
-    gpFillAlpha(dc,mr,med/2,blendColor(g_infoAccent,g_theme.surface,55),
-                g_dark?76:50);
-    gpRoundRect(dc,mr,med/2,CLR_INVALID,
-                blendColor(g_theme.border,g_infoAccent,42));
+    COLORREF medFill=blendColor(g_theme.surface,g_infoAccent,g_dark?25:18);
+    gpRoundRectBg(dc,mr,med/2,medFill,
+                  blendColor(g_theme.border,g_infoAccent,42),g_theme.surface);
     int isz=(med*44)/100;
     RECT ir={cx-isz/2,by+(med-isz)/2,cx+isz/2,by+(med-isz)/2+isz};
     drawIcon(dc,icon,ir,blendColor(g_infoAccent,g_theme.text,12),S(2)+1);
@@ -2746,7 +2819,7 @@ static RECT mgSummaryRect(HWND h, int i){      // i=0..3 across the top
     int cw=(totW-gap*(n-1))/n;
     int x=a.right-S(12)-(i+1)*cw-i*gap;        // RTL
     int y=a.top+mgHeadH()+S(16);
-    RECT r={x,y,x+cw,y+S(96)}; return r;
+    RECT r={x,y,x+cw,y+S(100)}; return r;
 }
 static RECT mgQuickRect(HWND h, int i){        // i=0..3 quick-action buttons
     RECT a=mgContentRect(h);
@@ -2754,8 +2827,8 @@ static RECT mgQuickRect(HWND h, int i){        // i=0..3 quick-action buttons
     int totW=a.right-a.left-S(24);
     int cw=(totW-gap*(n-1))/n;
     int x=a.right-S(12)-(i+1)*cw-i*gap;
-    int y=a.top+mgHeadH()+S(150);
-    RECT r={x,y,x+cw,y+S(110)}; return r;
+    int y=a.top+mgHeadH()+S(162);
+    RECT r={x,y,x+cw,y+S(108)}; return r;
 }
 
 // ---- layout: show/hide controls per page -----------------------------------
@@ -2964,48 +3037,112 @@ static void mgRefreshDash(){
     s_mg->dashValid = true;
 }
 
+// ----------------------------------------------------------------------------
+//  v1.69.0 DASHBOARD ENTRANCE ANIMATION.
+//  A subtle, performant "materialise" effect: the KPI cards, quick-action tiles
+//  and activity panel fade in from the card surface in a short staggered
+//  sequence, and the KPI figures count up from 0. It is realised WITHOUT any
+//  alpha-compositing / offscreen bitmap (the codebase double-buffers with plain
+//  BitBlt) — instead each element's fill, border, shadow and text colour is
+//  blended toward the card surface by (1-progress), so a low factor dissolves
+//  the element into its background and a factor of 1 draws it at full strength.
+//  Skipped on g_lowSpec; zero added cost once settled (progress == 1).
+// ----------------------------------------------------------------------------
+static float mgEase(float p){           // smoothstep — ease-in/out
+    if(p<0)p=0; if(p>1)p=1;
+    return p*p*(3.0f-2.0f*p);
+}
+// Per-group entrance factor in 0..1: `delay`/`span` are fractions of the whole
+// timeline, so groups appear in sequence (KPIs → tiles → activity panel).
+static float mgDashGroup(float anim, float delay, float span){
+    if(span<=0.0f) return mgEase(anim);
+    float p=(anim-delay)/span;
+    return mgEase(p);
+}
+// Blend a colour toward the card surface by (1-f); f=1 leaves it untouched.
+static COLORREF mgFade(COLORREF c, float f){
+    int pct=(int)((1.0f-f)*100.0f); if(pct<0)pct=0; if(pct>100)pct=100;
+    return blendColor(c, g_theme.surface, pct);
+}
+static void mgDashAnimStart(HWND h){
+    if(!s_mg) return;
+    if(g_lowSpec){ s_mg->dashAnim=1.0f; s_mg->dashAnimOn=false; return; }
+    s_mg->dashAnim=0.0f; s_mg->dashAnimOn=true;
+    SetTimer(h,MG_DASH_ANIM_TIMER,16,NULL);
+}
+static void mgDashAnimStop(HWND h){
+    if(!s_mg) return;
+    if(s_mg->dashAnimOn){ s_mg->dashAnimOn=false; KillTimer(h,MG_DASH_ANIM_TIMER); }
+    s_mg->dashAnim=1.0f;
+}
+
 static void mgPaintDash(HDC dc, HWND h){
     RECT a=mgContentRect(h);
     // v1.66.0: refresh dash cache once per visit (lazy, invalidated on page switch)
     if(!s_mg->dashValid) mgRefreshDash();
     int nSec=s_mg->dashSec,  nEmp=s_mg->dashEmp,  nOn=s_mg->dashOn;
     int nReq=s_mg->dashReq,  nPat=s_mg->dashPat,  nToday=s_mg->dashToday;
-    struct SumCard { const wchar_t* lbl; std::wstring val; COLORREF col; int ico; };
+    float anim = s_mg ? s_mg->dashAnim : 1.0f;   // v1.69.0 entrance factor
+    SetBkMode(dc,TRANSPARENT);
+
+    // ====================================================== KPI SUMMARY CARDS
+    // v1.69.0: each card materialises from the surface (staggered fade) and its
+    // figure counts up from 0; a thin glowing baseline pill in the metric's own
+    // colour anchors the card (design-language «پیل درخشان»). At rest (ef==1)
+    // every colour is full-strength, so steady state costs nothing extra.
+    struct SumCard { const wchar_t* lbl; int raw; COLORREF col; int ico; };
     SumCard cards[4]={
-        { L"بخش‌ها",          toFaDigits(std::to_wstring(nSec)), g_infoAccent,    ICO_SHIELD },
-        { L"کارمندان",         toFaDigits(std::to_wstring(nEmp)), g_theme.accent,  ICO_USER },
-        { L"آنلاین",          toFaDigits(std::to_wstring(nOn)),  g_theme.success, ICO_BELL },
-        { L"درخواست‌های نو",  toFaDigits(std::to_wstring(nReq)), nReq>0?g_infoAccent2:g_theme.textDim, ICO_GEAR },
+        { L"بخش‌ها",         nSec, g_infoAccent,    ICO_SHIELD },
+        { L"کارمندان",        nEmp, g_theme.accent,  ICO_USER  },
+        { L"برخط",           nOn,  g_theme.success, ICO_BELL   },
+        { L"درخواست‌های نو", nReq, nReq>0?g_infoAccent2:g_theme.textDim, ICO_GEAR },
     };
     for(int i=0;i<4;i++){
+        float ef=mgDashGroup(anim, 0.00f+(float)i*0.05f, 0.40f);
+        if(ef<=0.001f) continue;            // not yet on stage → leave surface
         RECT r=mgSummaryRect(h,i);
-        // v1.63.0 KPI TILE. Was a flat surface box; now an elevated card whose
-        // glyph sits in a medallion tinted with that metric's OWN colour, so the
-        // four KPIs are distinguishable at a glance instead of looking identical.
-        gpShadow(dc,r,S(14),S(7),g_dark?66:44);
-        gpGradRoundRectBg(dc,r,S(14),
-            blendColor(g_theme.surfaceTop,g_theme.surface,45),
-            g_theme.surface,
-            blendColor(g_theme.border,cards[i].col,26), g_theme.bg);
+        int shA=(int)((g_dark?66:44)*ef);
+        if(shA>2) gpShadow(dc,r,S(14),S(7),shA);
+        COLORREF top=blendColor(g_theme.surfaceTop,g_theme.surface,45);
+        COLORREF bord=blendColor(g_theme.border,cards[i].col,26);
+        gpGradRoundRectBg(dc,r,S(14), mgFade(top,ef), mgFade(g_theme.surface,ef),
+                          mgFade(bord,ef), g_theme.bg);
+        // glyph medallion (top-right) tinted with the metric's own colour
         RECT ir={r.right-S(56),r.top+S(16),r.right-S(20),r.top+S(52)};
         { RECT md=ir; InflateRect(&md,S(7),S(7));
           int mr2=(md.bottom-md.top)/2;
-          gpFillAlpha(dc,md,mr2,blendColor(cards[i].col,g_theme.surface,50),
-                      g_dark?80:48);
-          gpRoundRect(dc,md,mr2,CLR_INVALID,
-                      blendColor(g_theme.border,cards[i].col,48)); }
-        drawIcon(dc,cards[i].ico,ir,cards[i].col,S(2));
-        SetTextColor(dc,g_theme.text); SelectObject(dc,g_fHuge);
+          COLORREF medFill=blendColor(g_theme.surface,cards[i].col,g_dark?27:18);
+          COLORREF medBord=blendColor(g_theme.border,cards[i].col,48);
+          gpRoundRectBg(dc,md,mr2, mgFade(medFill,ef), mgFade(medBord,ef), g_theme.surface); }
+        drawIcon(dc,cards[i].ico,ir, mgFade(cards[i].col,ef), S(2));
+        // count-up figure (ticks 0 → cached value as the card materialises)
+        int shown=(int)((float)cards[i].raw * ef + 0.5f);
+        SetTextColor(dc, mgFade(g_theme.text,ef)); SelectObject(dc,g_fHuge);
         RECT vr={r.left+S(16),r.top+S(12),r.right-S(60),r.top+S(58)};
-        DrawTextW(dc,cards[i].val.c_str(),-1,&vr,DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
-        SetTextColor(dc,g_theme.textDim); SelectObject(dc,g_fSmall);
-        RECT lr={r.left+S(16),r.bottom-S(30),r.right-S(16),r.bottom-S(8)};
-        DrawTextW(dc,cards[i].lbl,-1,&lr,DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+        DrawTextW(dc,toFaDigits(std::to_wstring(shown)).c_str(),-1,&vr,
+            DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+        // label (kept clear of the baseline pill on the left)
+        SetTextColor(dc, mgFade(g_theme.textDim,ef)); SelectObject(dc,g_fSmall);
+        RECT lr={r.left+S(76),r.bottom-S(30),r.right-S(16),r.bottom-S(8)};
+        DrawTextW(dc,cards[i].lbl,-1,&lr,
+            DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
+        // glowing baseline pill (bottom-left) in the metric's colour
+        if(ef>0.02f){
+            RECT pill={r.left+S(16),r.bottom-S(13),r.left+S(16)+S(48),r.bottom-S(9)};
+            gpShadowColor(dc,pill,S(2),S(4),(int)(96*ef),cards[i].col);
+            gpRoundRect(dc,pill,S(2),mgFade(cards[i].col,ef),CLR_INVALID);
+        }
     }
-    // quick actions title
-    SetTextColor(dc,g_theme.text); SelectObject(dc,g_fUIB);
-    { RECT qr={a.left+S(12),a.top+mgHeadH()+S(124),a.right-S(12),a.top+mgHeadH()+S(148)};
-      DrawTextW(dc,L"دسترسی سریع",-1,&qr,DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX); }
+
+    // ======================================================== QUICK-ACTION TILES
+    RECT q0=mgQuickRect(h,0);
+    float efT=mgDashGroup(anim, 0.14f, 0.28f);     // section title
+    if(efT>0.001f){
+        SetTextColor(dc, mgFade(g_theme.text,efT)); SelectObject(dc,g_fUIB);
+        RECT qr={a.left+S(12), q0.top-S(30), a.right-S(12), q0.top-S(8)};
+        DrawTextW(dc,L"دسترسی سریع",-1,&qr,
+            DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+    }
     struct QA { const wchar_t* lbl; const wchar_t* sub; int ico; int page; };
     QA qa[4]={
         { L"ایجاد بخش",       L"افزودن بخش جدید",        ICO_PLUS,  PG_SECTS },
@@ -3014,80 +3151,119 @@ static void mgPaintDash(HDC dc, HWND h){
         { L"درخواست‌ها",      L"بررسی درخواست‌ها",       ICO_GEAR,  PG_REQS  },
     };
     for(int i=0;i<4;i++){
+        float ef=mgDashGroup(anim, 0.18f+(float)i*0.05f, 0.42f);
+        if(ef<=0.001f) continue;
         RECT r=mgQuickRect(h,i);
         bool hot=(s_mg&&s_mg->hot==MG_QA_BASE+i);
         mgRowShell(dc,r,hot,S(14),g_infoAccent);
-        RECT ir={r.left+(r.right-r.left)/2-S(18),r.top+S(18),r.left+(r.right-r.left)/2+S(18),r.top+S(54)};
-        // v1.63.0: centred glyph medallion; hover brightens the wash so the
-        // tile responds as one object rather than only changing its border.
+        RECT ir={r.left+(r.right-r.left)/2-S(18),r.top+S(18),
+                 r.left+(r.right-r.left)/2+S(18),r.top+S(54)};
+        // centred glyph medallion; hover brightens the wash so the tile responds
         { RECT md=ir; InflateRect(&md,S(8),S(8));
           int mr2=(md.bottom-md.top)/2;
-          gpFillAlpha(dc,md,mr2,
-              blendColor(hot?g_infoAccent:g_theme.accent,g_theme.surface,
-                         hot?42:56), hot?(g_dark?96:66):(g_dark?76:44));
-          gpRoundRect(dc,md,mr2,CLR_INVALID,
-              blendColor(g_theme.border,hot?g_infoAccent:g_theme.accent,
-                         hot?60:38)); }
-        drawIcon(dc,qa[i].ico,ir,hot?g_infoAccent:g_theme.accent,S(2));
-        SetTextColor(dc,g_theme.text); SelectObject(dc,g_fUIB);
+          COLORREF medAcc=hot?g_infoAccent:g_theme.accent;
+          COLORREF medFill=blendColor(g_theme.surface,medAcc,hot?29:20);
+          COLORREF medBord=blendColor(g_theme.border,medAcc,hot?60:38);
+          gpRoundRectBg(dc,md,mr2, mgFade(medFill,ef), mgFade(medBord,ef), g_theme.surface); }
+        drawIcon(dc,qa[i].ico,ir, mgFade(hot?g_infoAccent:g_theme.accent,ef), S(2));
+        SetTextColor(dc, mgFade(g_theme.text,ef)); SelectObject(dc,g_fUIB);
         RECT lr={r.left+S(8),r.top+S(60),r.right-S(8),r.top+S(84)};
         DrawTextW(dc,qa[i].lbl,-1,&lr,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
-        SetTextColor(dc,g_theme.textDim); SelectObject(dc,g_fSmall);
+        SetTextColor(dc, mgFade(g_theme.textDim,ef)); SelectObject(dc,g_fSmall);
         RECT sr={r.left+S(8),r.top+S(84),r.right-S(8),r.bottom-S(8)};
         DrawTextW(dc,qa[i].sub,-1,&sr,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
     }
 
-    // ------------------------------------------------------------------------
-    // CRM-style read-only activity panel: total patient roster and today's
-    // completed reception records, sourced only from the reception store.
-    {
-        int panelTop = a.top+mgHeadH()+S(150)+S(110)+S(20);   // below quick tiles
+    // =================================================== CLINIC-AT-A-GLANCE PANEL
+    // v1.69.0: replaced the flat two-chip + always-full «workload» bar with a
+    // real dashboard footer — a Jalali date / shift pill, three mini-stat tiles
+    // and a meaningful staff-presence gauge (online / total). Everything is read
+    // from the cached dash values, so no file/JSON I/O happens per paint.
+    float efP=mgDashGroup(anim, 0.30f, 0.50f);
+    if(efP>0.001f){
+        int panelTop = q0.bottom + S(18);          // derived from the tiles → never overlaps
         int panelBot = a.bottom-S(12);
-        if(panelBot - panelTop >= S(120)){
+        if(panelBot - panelTop >= S(150)){
             RECT pr={a.left+S(12),panelTop,a.right-S(12),panelBot};
-            gpRoundRectBg(dc,pr,S(14),g_theme.surface,g_theme.border,g_theme.bg);
-            // title
-            SetTextColor(dc,g_theme.text); SelectObject(dc,g_fUIB);
-            RECT tr={pr.left+S(16),pr.top+S(12),pr.right-S(16),pr.top+S(38)};
+            int shA=(int)((g_dark?60:40)*efP);
+            if(shA>2) gpShadow(dc,pr,S(14),S(7),shA);
+            gpGradRoundRectBg(dc,pr,S(14),
+                mgFade(blendColor(g_theme.surfaceTop,g_theme.surface,30),efP),
+                mgFade(g_theme.surface,efP), mgFade(g_theme.border,efP), g_theme.bg);
+            // ---- header: title (right) + Jalali date/shift pill (left) ----
+            int pillW=S(196), pillH=S(26), hy=pr.top+S(12);
+            RECT pp={pr.left+S(16),hy,pr.left+S(16)+pillW,hy+pillH};
+            if(efP>0.02f){
+                COLORREF ppFill=blendColor(g_theme.surface,g_theme.accent,g_dark?14:9);
+                gpShadowColor(dc,pp,pillH/2,S(4),(int)(80*efP),g_theme.accent);
+                gpRoundRectBg(dc,pp,pillH/2, mgFade(ppFill,efP),
+                    mgFade(blendColor(g_theme.border,g_theme.accent,45),efP), g_theme.surface);
+            }
+            SYSTEMTIME now=iranNow();
+            std::wstring ds=toFaDigits(jalaliDateShort(now))+L"  •  "+shiftName(detectShift());
+            SetTextColor(dc, mgFade(g_theme.accent,efP)); SelectObject(dc,g_fSmall);
+            DrawTextW(dc,ds.c_str(),-1,&pp,
+                DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+            SetTextColor(dc, mgFade(g_theme.text,efP)); SelectObject(dc,g_fUIB);
+            RECT tr={pp.right+S(12),hy,pr.right-S(16),hy+pillH};
             DrawTextW(dc,L"یک نگاه به فعالیت کلینیک",-1,&tr,
                 DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
-            // data — v1.66.0: using cached values (refreshed once per dash visit)
-            int busiest=nToday;
-            // two read-only metric chips (patients / today) — RTL, right→left
-            struct AC{ const wchar_t* lbl; std::wstring val; COLORREF col; int ico; };
-            AC ac[2]={
-                { L"کل بیماران ثبت‌شده", toFaDigits(std::to_wstring(nPat)),   g_theme.accent, ICO_USER },
-                { L"پذیرش‌های امروز",    toFaDigits(std::to_wstring(nToday)), g_infoAccent,   ICO_RECEIPT },
+            // ---- three mini-stat tiles ----
+            struct AC{ const wchar_t* lbl; int raw; COLORREF col; int ico; };
+            AC ac[3]={
+                { L"کل بیماران ثبت‌شده", nPat,   g_theme.accent,  ICO_USER   },
+                { L"پذیرش‌های امروز",    nToday, g_infoAccent,    ICO_RECEIPT },
+                { L"کارمندان برخط",     nOn,    g_theme.success, ICO_BELL    },
             };
-            int cy=pr.top+S(48);
-            int cellW=(pr.right-pr.left-S(32))/2;
-            for(int i=0;i<2;i++){
-                int cx=pr.right-S(16)-(i+1)*cellW;          // RTL
-                RECT cr={cx,cy,cx+cellW-S(8),cy+S(56)};
-                RECT ico={cr.right-S(44),cr.top+S(8),cr.right-S(14),cr.top+S(38)};
-                drawIcon(dc,ac[i].ico,ico,ac[i].col,S(2));
-                SetTextColor(dc,g_theme.text); SelectObject(dc,g_fTitle);
-                RECT vr={cr.left+S(6),cr.top+S(4),cr.right-S(48),cr.top+S(36)};
-                DrawTextW(dc,ac[i].val.c_str(),-1,&vr,DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
-                SetTextColor(dc,g_theme.textDim); SelectObject(dc,g_fSmall);
-                RECT lr={cr.left+S(6),cr.bottom-S(20),cr.right-S(6),cr.bottom};
-                DrawTextW(dc,ac[i].lbl,-1,&lr,DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
-            }
-            // workload bar: today vs busiest day on record
-            int barTop=cy+S(64);
-            if(barTop+S(24) <= pr.bottom-S(10)){
-                SetTextColor(dc,g_theme.textDim); SelectObject(dc,g_fSmall);
-                RECT wl={pr.left+S(16),barTop,pr.right-S(16),barTop+S(18)};
-                DrawTextW(dc,L"حجم کاری امروز نسبت به شلوغ‌ترین روز ثبت‌شده",-1,&wl,
+            int cy=pr.top+S(48), gap=S(14);
+            // purely gap-derived width (no visual floor): adjacent tiles are
+            // always separated by exactly `gap`, so they can NEVER overlap,
+            // however narrow the panel gets. The min-1 only guards against a
+            // negative-width rect on absurdly small windows.
+            int cellW=(pr.right-pr.left-S(32)-2*gap)/3; if(cellW<1) cellW=1;
+            for(int i=0;i<3;i++){
+                int cx=pr.right-S(16)-(i+1)*cellW-i*gap;     // RTL
+                RECT cr={cx,cy,cx+cellW,cy+S(64)};
+                gpRoundRectBg(dc,cr,S(12),
+                    mgFade(blendColor(g_theme.surface,ac[i].col,g_dark?12:8),efP),
+                    mgFade(blendColor(g_theme.border,ac[i].col,38),efP), g_theme.surface);
+                RECT md={cr.right-S(12)-S(36),cr.top+S(14),cr.right-S(12),cr.top+S(14)+S(36)};
+                int mr2=(md.bottom-md.top)/2;
+                COLORREF mf=blendColor(g_theme.surface,ac[i].col,g_dark?26:17);
+                COLORREF mb=blendColor(g_theme.border,ac[i].col,46);
+                gpRoundRectBg(dc,md,mr2, mgFade(mf,efP), mgFade(mb,efP), g_theme.surface);
+                RECT ico={md.left+S(6),md.top+S(6),md.right-S(6),md.bottom-S(6)};
+                drawIcon(dc,ac[i].ico,ico, mgFade(ac[i].col,efP), S(2));
+                int shown=(int)((float)ac[i].raw * efP + 0.5f);
+                SetTextColor(dc, mgFade(g_theme.text,efP)); SelectObject(dc,g_fTitle);
+                RECT vr={cr.left+S(12),cr.top+S(10),cr.right-S(12)-S(36)-S(8),cr.top+S(38)};
+                DrawTextW(dc,toFaDigits(std::to_wstring(shown)).c_str(),-1,&vr,
                     DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
-                RECT track={pr.left+S(16),barTop+S(20),pr.right-S(16),barTop+S(30)};
-                gpRoundRectBg(dc,track,S(5),g_theme.surface2,g_theme.border,g_theme.surface);
-                int den=busiest>0?busiest:1;
-                double frac=(double)nToday/(double)den; if(frac>1.0)frac=1.0; if(frac<0)frac=0;
+                SetTextColor(dc, mgFade(g_theme.textDim,efP)); SelectObject(dc,g_fSmall);
+                RECT lr={cr.left+S(12),cr.top+S(38),cr.right-S(12)-S(36)-S(8),cr.top+S(58)};
+                DrawTextW(dc,ac[i].lbl,-1,&lr,
+                    DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
+            }
+            // ---- staff-presence gauge (online / total) ----
+            int barTop=cy+S(64)+S(16);
+            if(barTop+S(34) <= pr.bottom-S(10)){
+                int den=nEmp>0?nEmp:1;
+                double frac=(double)nOn/(double)den; if(frac>1.0)frac=1.0; if(frac<0)frac=0;
+                std::wstring gl=L"حضور کارمندان — "+toFaDigits(std::to_wstring(nOn))+
+                    L" از "+toFaDigits(std::to_wstring(nEmp))+L" برخط";
+                SetTextColor(dc, mgFade(g_theme.textDim,efP)); SelectObject(dc,g_fSmall);
+                RECT wl={pr.left+S(16),barTop,pr.right-S(16),barTop+S(18)};
+                DrawTextW(dc,gl.c_str(),-1,&wl,
+                    DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
+                RECT track={pr.left+S(16),barTop+S(22),pr.right-S(16),barTop+S(32)};
+                gpRoundRectBg(dc,track,S(5),
+                    mgFade(g_theme.surface2,efP), mgFade(g_theme.border,efP), g_theme.surface);
                 int fillW=(int)((track.right-track.left)*frac);
                 if(fillW>0){
-                    RECT fillr={track.right-fillW,track.top,track.right,track.bottom}; // RTL fill
-                    gpRoundRectBg(dc,fillr,S(5),g_infoAccent,g_infoAccent,g_theme.surface2);
+                    RECT fillr={track.right-fillW,track.top,track.right,track.bottom};
+                    if(efP>0.02f) gpShadowColor(dc,fillr,S(5),S(4),(int)(90*efP),g_theme.success);
+                    gpRoundRectBg(dc,fillr,S(5), mgFade(g_theme.success,efP),
+                        mgFade(g_theme.success,efP), g_theme.surface2);
                 }
             }
         }
@@ -3125,10 +3301,9 @@ static void mgPaintSects(HDC dc, HWND h){
         // v1.63.0: the section glyph sits in its own tinted medallion
         { RECT md=ir; InflateRect(&md,S(6),S(6));
           int mr2=(md.bottom-md.top)/2;
-          gpFillAlpha(dc,md,mr2,blendColor(g_infoAccent,g_theme.surface,52),
-                      g_dark?76:46);
-          gpRoundRect(dc,md,mr2,CLR_INVALID,
-                      blendColor(g_theme.border,g_infoAccent,45)); }
+          COLORREF medFill=blendColor(g_theme.surface,g_infoAccent,g_dark?25:17);
+          gpRoundRectBg(dc,md,mr2,medFill,
+              blendColor(g_theme.border,g_infoAccent,45),g_theme.surface); }
         drawIcon(dc,ICO_SHIELD,ir,g_infoAccent,S(2));
         SetTextColor(dc,g_theme.text); SelectObject(dc,g_fUIB);
         RECT nr={r.left+S(14),r.top+S(16),r.right-S(56),r.top+S(46)};
@@ -3526,8 +3701,8 @@ static void mgPaintShell(HDC dc, HWND h){
     // v1.63.0: the page title now sits on a faint accent wash band that spans
     // the header, so the card has a real titlebar instead of floating text.
     { RECT hb={a.left+S(1),a.top+S(1),a.right-S(1),a.top+mgHeadH()};
-      gpFillAlpha(dc,hb,S(16),
-          blendColor(g_infoAccent,g_theme.surface,g_dark?72:84),g_dark?70:120); }
+      COLORREF headerFill=blendColor(g_theme.surface,g_infoAccent,g_dark?12:7);
+      gpRoundRectBg(dc,hb,S(16),headerFill,CLR_INVALID,g_theme.surface); }
     SetTextColor(dc,g_theme.text); SelectObject(dc,g_fBig);
     RECT hr={a.left+S(24),a.top+S(16),a.right-S(24),a.top+mgHeadH()-S(8)};
     DrawTextW(dc,mgCardTitle(s_mg?s_mg->page:0),-1,&hr,DT_RIGHT|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
@@ -3609,6 +3784,9 @@ static void mgGoPage(HWND h, int page){
     else if(page==PG_MSG){ mgLoadEmps(); }   // v1.22.0: show employee list
     else if(page==PG_PATIENTS){ mgPatientsLoadAsync(h); }
     else if(page==PG_SERVICES){ mgServicesClearForm(); mgServicesReload(); }
+    // v1.69.0: replay the subtle dashboard entrance each time the dash is shown;
+    // stop it (and the timer) whenever we navigate away.
+    if(page==PG_DASH) mgDashAnimStart(h); else mgDashAnimStop(h);
     mgLayout(h);
     InvalidateRect(h,NULL,TRUE);
 }
@@ -3632,6 +3810,7 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         s_mg->secAddMode=false; s_mg->autoId=true;
         s_mg->empSort=1; s_mg->msgCol=g_theme.textDim;
         s_mg->dashValid=false;  // v1.66.0: dash cache
+        s_mg->dashAnim=1.0f; s_mg->dashAnimOn=false;  // v1.69.0 entrance (started by mgGoPage)
         DWORD es=WS_CHILD|WS_TABSTOP|ES_AUTOHSCROLL;
         s_mg->eName=CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)MG_E_NAME,g_hInst,0);
         s_mg->eMgr =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)MG_E_MGR,g_hInst,0);
@@ -3660,11 +3839,13 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             WS_CHILD|WS_TABSTOP|ES_AUTOHSCROLL,0,0,10,10,h,(HMENU)MG_PT_SEARCH,g_hInst,0);
         SendMessageW(s_mg->ptSearch,WM_SETFONT,(WPARAM)g_fUI,TRUE);
         s_mg->ptAdd=createFlatButton(h,MG_PT_ADD,L"افزودن بیمار",ICO_PLUS,BS_PRIMARY,0,0,10,10);
-        s_mg->ptList=CreateWindowExW(WS_EX_CLIENTEDGE,WC_LISTVIEWW,L"",
+        s_mg->ptList=CreateWindowExW(0,WC_LISTVIEWW,L"",
             WS_CHILD|WS_TABSTOP|LVS_OWNERDATA|LVS_REPORT|LVS_SHOWSELALWAYS|LVS_SINGLESEL,
             0,0,10,10,h,(HMENU)MG_PT_LIST,g_hInst,0);
+        // Native GRIDLINES use fixed system-light colors under Wine; omit them
+        // so the themed body stays clean in both dark and light modes.
         ListView_SetExtendedListViewStyle(s_mg->ptList,
-            LVS_EX_FULLROWSELECT|LVS_EX_DOUBLEBUFFER|LVS_EX_GRIDLINES);
+            LVS_EX_FULLROWSELECT|LVS_EX_DOUBLEBUFFER);
         SendMessageW(s_mg->ptList,WM_SETFONT,(WPARAM)g_fUI,TRUE);
         {   // RTL report columns (rightmost first): #, name, nid, mobile,
             // v1.40.0 landline, gender, birth.
@@ -3675,6 +3856,7 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             for(int i=0;i<7;i++){ lc.pszText=(LPWSTR)cols[i].t; lc.cx=cols[i].w;
                 ListView_InsertColumn(s_mg->ptList,i,&lc); }
         }
+        applyThemedListView(s_mg->ptList);
         // ---- services page controls (v1.28.0) ----
         s_mg->svCode  =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)MG_SV_CODE,g_hInst,0);
         s_mg->svName  =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)MG_SV_NAME,g_hInst,0);
@@ -3690,13 +3872,18 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         s_mg->svEdit  =createFlatButton(h,MG_SV_EDIT,  L"ویرایش", ICO_GEAR, BS_OUTLINE,0,0,10,10);
         s_mg->svDelete=createFlatButton(h,MG_SV_DELETE,L"حذف",    ICO_TRASH,BS_DANGER, 0,0,10,10);
         s_mg->svClear =createFlatButton(h,MG_SV_CLEAR, L"فرم جدید",ICO_PLUS, BS_OUTLINE,0,0,10,10);
+        HWND pageBtns[]={s_mg->bAdd,s_mg->bAutoId,s_mg->bSecNew,s_mg->bSecBack,
+            s_mg->bAbc,s_mg->bNew,s_mg->bCreated,s_mg->bAddEmp,s_mg->bMsg,
+            s_mg->bReqs,s_mg->bProfReqs,s_mg->bNoteAttach,s_mg->bNoteSend,
+            s_mg->ptAdd,s_mg->svSave,s_mg->svEdit,s_mg->svDelete,s_mg->svClear};
+        for(HWND b:pageBtns) setFlatButtonBg(b,g_theme.surface);
         s_mg->svSearch=CreateWindowExW(0,L"EDIT",L"",
             WS_CHILD|WS_TABSTOP|ES_AUTOHSCROLL,0,0,10,10,h,(HMENU)MG_SV_SEARCH,g_hInst,0);
-        s_mg->svList  =CreateWindowExW(WS_EX_CLIENTEDGE,WC_LISTVIEWW,L"",
+        s_mg->svList  =CreateWindowExW(0,WC_LISTVIEWW,L"",
             WS_CHILD|WS_TABSTOP|LVS_OWNERDATA|LVS_REPORT|LVS_SHOWSELALWAYS|LVS_SINGLESEL,
             0,0,10,10,h,(HMENU)MG_SV_LIST,g_hInst,0);
         ListView_SetExtendedListViewStyle(s_mg->svList,
-            LVS_EX_FULLROWSELECT|LVS_EX_DOUBLEBUFFER|LVS_EX_GRIDLINES);
+            LVS_EX_FULLROWSELECT|LVS_EX_DOUBLEBUFFER);
         SendMessageW(s_mg->svList,WM_SETFONT,(WPARAM)g_fUI,TRUE);
         {   // RTL columns (rightmost first): کد | نام | دسته | مبلغ | وضعیت | ویرایش
             struct { const wchar_t* t; int w; } cols[]={
@@ -3706,6 +3893,7 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             for(int i=0;i<6;i++){ lc.pszText=(LPWSTR)cols[i].t; lc.cx=cols[i].w;
                 ListView_InsertColumn(s_mg->svList,i,&lc); }
         }
+        applyThemedListView(s_mg->svList);
         SendMessageW(s_mg->svSearch,WM_SETFONT,(WPARAM)g_fUI,TRUE);
         { HWND se[]={s_mg->svCode,s_mg->svName,s_mg->svCat,s_mg->svPrice,s_mg->svDesc};
           for(HWND e:se){ SendMessageW(e,WM_SETFONT,(WPARAM)g_fUI,TRUE); enableEnterNavigation(e); }
@@ -3746,10 +3934,23 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
 #endif
         return 0; }
     case WM_NCDESTROY: if(g_hManage==h) g_hManage=NULL;
+        if(s_mg && s_mg->dashAnimOn) KillTimer(h,MG_DASH_ANIM_TIMER);  // v1.69.0
+        mgFreeShadowCache();   // v1.68.0: release cached modal shadow DC
         if(s_mg){ delete s_mg->ptAll; s_mg->ptAll=nullptr;
                   delete s_mg; s_mg=NULL; } break;
     case WM_SIZE: if(s_mg) mgLayout(h); return 0;
-    case WM_APP_THEME: InvalidateRect(h,NULL,TRUE); return 0;
+    case WM_APP_THEME:
+        if(s_mg){
+            HWND pageBtns[]={s_mg->bAdd,s_mg->bAutoId,s_mg->bSecNew,s_mg->bSecBack,
+                s_mg->bAbc,s_mg->bNew,s_mg->bCreated,s_mg->bAddEmp,s_mg->bMsg,
+                s_mg->bReqs,s_mg->bProfReqs,s_mg->bNoteAttach,s_mg->bNoteSend,
+                s_mg->ptAdd,s_mg->svSave,s_mg->svEdit,s_mg->svDelete,s_mg->svClear};
+            for(HWND b:pageBtns) setFlatButtonBg(b,g_theme.surface);
+            applyThemedListView(s_mg->ptList);
+            applyThemedListView(s_mg->svList);
+        }
+        mgFreeShadowCache();   // v1.68.0: shadow cache is theme-coloured
+        InvalidateRect(h,NULL,TRUE); return 0;
     case WM_CTLCOLOREDIT:{ HDC dc=(HDC)w; SetTextColor(dc,g_theme.inputText);
         SetBkColor(dc,g_theme.inputBg); return (LRESULT)g_brInput; }
     case WM_CTLCOLORLISTBOX:{ HDC dc=(HDC)w; SetTextColor(dc,g_theme.inputText);
@@ -3771,10 +3972,24 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             s_mg->ptQuery=b; mgPatientsFilter();
             return 0;
         }
+        // v1.69.0: dashboard staggered entrance — advance 0→1 (~350 ms), repaint
+        // while running, then stop the timer so steady state has zero overhead.
+        if(s_mg && w==MG_DASH_ANIM_TIMER){
+            s_mg->dashAnim += 0.045f;
+            if(s_mg->dashAnim>=1.0f){ s_mg->dashAnim=1.0f; mgDashAnimStop(h); }
+            InvalidateRect(h,NULL,FALSE);
+            return 0;
+        }
+        break;
+    case WM_DRAWITEM:
+        if(drawThemedComboItem((LPDRAWITEMSTRUCT)l)) return TRUE;
         break;
     case WM_NOTIFY:{
         if(!s_mg) break;
         NMHDR* nh=(NMHDR*)l;
+        LRESULT headerResult=0;
+        if(nh && drawThemedListViewHeader((LPNMCUSTOMDRAW)l,&headerResult))
+            return headerResult;
         if(nh && nh->hwndFrom==s_mg->ptList){
             if(nh->code==LVN_GETDISPINFOW){
                 NMLVDISPINFOW* di=(NMLVDISPINFOW*)l;

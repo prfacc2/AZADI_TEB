@@ -147,6 +147,15 @@ struct SettingsWin {
     // offset (px, >=0); `contentH` is the laid-out content height of the page.
     int               scrollY = 0;
     int               contentH = 0;
+    // v1.68.0 PERF: cache of the static frame (outer rails + sheet shadow +
+    // sheet fill + side edges). These never change between paints unless the
+    // window resizes or the theme switches, yet gpShadow(spread 10) was issuing
+    // ~10 full-panel GDI+ path fills on EVERY WM_PAINT — including the frequent
+    // hover-driven repaints. Building them once into a backing DC and blitting
+    // per-paint removes that cost from the hot path.
+    HDC               bgDC = NULL;
+    HBITMAP           bgBmp = NULL;
+    int               bgW = 0, bgH = 0;
 };
 
 #define IDC_BACK_BTN   6900
@@ -845,19 +854,49 @@ static void paintSubHeader(HDC dc, SettingsWin* sw, RECT /*c*/){
         DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
 }
 
+// v1.68.0 PERF: build/free the static frame cache. The outer rails, the sheet
+// drop-shadow (gpShadow spread 10 → ~10 GDI+ path fills) and the sheet fill are
+// identical on every paint for a given size+theme, so they are rendered once
+// into bgDC and blitted. Only the dynamic content (home rows / sub-page header)
+// is redrawn on top per WM_PAINT.
+static void usFreeBg(SettingsWin* sw){
+    if(sw->bgBmp){ DeleteObject(sw->bgBmp); sw->bgBmp=NULL; }
+    if(sw->bgDC){ DeleteDC(sw->bgDC); sw->bgDC=NULL; }
+    sw->bgW=sw->bgH=0;
+}
+static void usBuildBg(SettingsWin* sw, HDC ref, int W, int H){
+    usFreeBg(sw);
+    sw->bgDC=CreateCompatibleDC(ref);
+    sw->bgBmp=CreateCompatibleBitmap(ref,W,H);
+    if(!sw->bgDC||!sw->bgBmp){ usFreeBg(sw); return; }
+    HGDIOBJ ob=SelectObject(sw->bgDC,sw->bgBmp);
+    RECT rc={0,0,W,H};
+    HBRUSH outer=CreateSolidBrush(g_theme.bg2); FillRect(sw->bgDC,&rc,outer); DeleteObject(outer);
+    RECT c=contentRectUnscrolled(sw); c.top=0; c.bottom=H;
+    RECT shadow=c; InflateRect(&shadow,S(3),0);
+    gpShadow(sw->bgDC,shadow,S(18),S(10),g_dark?55:24);
+    HBRUSH sheet=CreateSolidBrush(g_theme.surface); FillRect(sw->bgDC,&c,sheet); DeleteObject(sheet);
+    HPEN edge=CreatePen(PS_SOLID,1,g_theme.border); HGDIOBJ old=SelectObject(sw->bgDC,edge);
+    MoveToEx(sw->bgDC,c.left,0,NULL); LineTo(sw->bgDC,c.left,H);
+    MoveToEx(sw->bgDC,c.right-1,0,NULL); LineTo(sw->bgDC,c.right-1,H);
+    SelectObject(sw->bgDC,old); DeleteObject(edge);
+    (void)ob;
+    sw->bgW=W; sw->bgH=H;
+}
+
 static void paintWin(SettingsWin* sw, HDC dc0){
     RECT rc; GetClientRect(sw->hwnd,&rc);
-    uikit::MemDC mem(dc0,rc.right,rc.bottom);
-    // v1.59 messenger-style frame: darker side rails define the settings bounds,
-    // while the central sheet stays calm and readable (never black in light mode).
-    HBRUSH outer=CreateSolidBrush(g_theme.bg2); FillRect(mem.dc,&rc,outer); DeleteObject(outer);
-    RECT c=contentRectUnscrolled(sw); c.top=0; c.bottom=rc.bottom;
-    RECT shadow=c; InflateRect(&shadow,S(3),0); gpShadow(mem.dc,shadow,S(18),S(10),g_dark?55:24);
-    HBRUSH sheet=CreateSolidBrush(g_theme.surface); FillRect(mem.dc,&c,sheet); DeleteObject(sheet);
-    HPEN edge=CreatePen(PS_SOLID,1,g_theme.border); HGDIOBJ old=SelectObject(mem.dc,edge);
-    MoveToEx(mem.dc,c.left,0,NULL); LineTo(mem.dc,c.left,rc.bottom);
-    MoveToEx(mem.dc,c.right-1,0,NULL); LineTo(mem.dc,c.right-1,rc.bottom);
-    SelectObject(mem.dc,old); DeleteObject(edge);
+    int W=rc.right, H=rc.bottom;
+    uikit::MemDC mem(dc0,W,H);
+    // blit the cached static frame; rebuild it only on size/theme change.
+    if(!sw->bgDC || sw->bgW!=W || sw->bgH!=H) usBuildBg(sw,dc0,W,H);
+    if(sw->bgDC) BitBlt(mem.dc,0,0,W,H,sw->bgDC,0,0,SRCCOPY);
+    else{
+        // fallback if the cache could not be allocated (low-resource hosts)
+        HBRUSH outer=CreateSolidBrush(g_theme.bg2); FillRect(mem.dc,&rc,outer); DeleteObject(outer);
+        RECT c=contentRectUnscrolled(sw); c.top=0; c.bottom=H;
+        HBRUSH sheet=CreateSolidBrush(g_theme.surface); FillRect(mem.dc,&c,sheet); DeleteObject(sheet);
+    }
     RECT content=contentRect(sw);
     if(curPage(sw)==PAGE_HOME) paintHome(mem.dc,sw,content);
     else                        paintSubHeader(mem.dc,sw,content);
@@ -929,7 +968,7 @@ static LRESULT CALLBACK SettingsProc(HWND h,UINT m,WPARAM w,LPARAM l){
     case WM_PAINT:{ PAINTSTRUCT ps; HDC dc=BeginPaint(h,&ps); if(sw) paintWin(sw,dc);
         EndPaint(h,&ps); return 0; }
     case WM_SIZE:
-        if(sw){ clampScroll(sw); buildPage(sw); }
+        if(sw){ clampScroll(sw); buildPage(sw); usFreeBg(sw); }
         return 0;
     case WM_MOUSEWHEEL:{
         if(!sw) break;
@@ -1159,10 +1198,10 @@ static LRESULT CALLBACK SettingsProc(HWND h,UINT m,WPARAM w,LPARAM l){
             return 0;
         }
         break;
-    case WM_APP_THEME: InvalidateRect(h,NULL,TRUE); return 0;
+    case WM_APP_THEME: if(sw) usFreeBg(sw); InvalidateRect(h,NULL,TRUE); return 0;
     case WM_CLOSE: DestroyWindow(h); return 0;
     case WM_DESTROY:
-        if(sw){ destroyCtrls(sw);
+        if(sw){ destroyCtrls(sw); usFreeBg(sw);
             if(sw->hMain){ EnableWindow(sw->hMain,TRUE); SetForegroundWindow(sw->hMain); }
             delete sw; SetWindowLongPtrW(h,GWLP_USERDATA,0); }
         return 0;

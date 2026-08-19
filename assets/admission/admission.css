@@ -1648,3 +1648,605 @@ body{
 .theme-dark .payable-card{background:#174c9f;border-color:#4a8de7;}
 .theme-dark .tc-strip{background:#1d3f7d;}
 .theme-dark .queue-nav-row .btn-nav{background:#253246;border-color:#526a88;color:#cfe4ff;}
+
+/* ============================================================================
+   v1.67.0 — ADMISSION REFRESH
+   Professional white/medical-blue workspace based on the approved visual
+   direction. This final block is authoritative while preserving every existing
+   id and runtime contract. IE11-safe: flexbox only, physical spacing, literal
+   values, and paired -ms- declarations throughout.
+   ============================================================================ */
+
+/* --------------------------------------------------------- WORKSPACE FRAME */
+body{
+  background:#dce9f7;
+  background:-webkit-linear-gradient(top,#edf5fd 0%,#d8e6f6 100%);
+  background:linear-gradient(180deg,#edf5fd 0%,#d8e6f6 100%);
+  color:#112844;font-size:14px;font-weight:600;line-height:1.5;
+}
+.body{padding:14px;background:transparent;border-top:0;}
+.col-action,.col-left,.col-center{
+  height:100%;padding:10px;border:1px solid #bfd1e6;border-radius:17px;
+  background:#edf5fc;
+  background:-webkit-linear-gradient(top,#f5f9fe 0%,#e5f0fb 100%);
+  background:linear-gradient(180deg,#f5f9fe 0%,#e5f0fb 100%);
+  -webkit-box-shadow:0 9px 28px rgba(25,58,98,.10),inset 0 1px 0 #ffffff;
+  box-shadow:0 9px 28px rgba(25,58,98,.10),inset 0 1px 0 #ffffff;
+  overflow:hidden;
+}
+.col-action{width:280px;-ms-flex:0 0 280px;flex:0 0 280px;}
+.col-left{width:292px;-ms-flex:0 0 292px;flex:0 0 292px;}
+.col-center{
+  min-width:0;margin:0 12px;background:#f8fbff;
+  background:-webkit-linear-gradient(top,#ffffff 0%,#f2f7fd 100%);
+  background:linear-gradient(180deg,#ffffff 0%,#f2f7fd 100%);
+}
+.col.is-active{
+  border-color:#7ba8df;background-color:#f8fbff;
+  -webkit-box-shadow:0 0 0 2px rgba(25,112,221,.10),0 12px 30px rgba(25,58,98,.13);
+  box-shadow:0 0 0 2px rgba(25,112,221,.10),0 12px 30px rgba(25,58,98,.13);
+}
+
+/* --------------------------------------------------------------- SURFACES */
+.card{
+  margin-bottom:10px;border:1px solid #c9d9ea;border-radius:13px;background:#ffffff;
+  -webkit-box-shadow:0 3px 12px rgba(25,58,98,.07);
+  box-shadow:0 3px 12px rgba(25,58,98,.07);
+}
+.card-head{
+  min-height:43px;padding:9px 13px;border-bottom:1px solid #dce7f2;
+  background:#eaf3fd;
+  background:-webkit-linear-gradient(top,#f8fbff 0%,#e8f2fc 100%);
+  background:linear-gradient(180deg,#f8fbff 0%,#e8f2fc 100%);
+  -webkit-box-shadow:inset -3px 0 0 #1976e9;box-shadow:inset -3px 0 0 #1976e9;
+}
+.card-title{color:#123d70;font-size:14px;font-weight:900;}
+.ct-ico{color:#1976e9;margin-left:7px;}
+.card-body{padding:12px;}
+.fld > span{color:#304a67;font-size:12px;font-weight:800;margin-bottom:5px;}
+.inp,select.inp{
+  height:39px;padding:0 11px;border:1px solid #bfcfe1;border-radius:10px;
+  background:#f9fcff;color:#122a47;font-size:13.5px;font-weight:700;
+  -webkit-box-shadow:inset 0 1px 2px rgba(20,52,91,.04);
+  box-shadow:inset 0 1px 2px rgba(20,52,91,.04);
+}
+.inp:hover,select.inp:hover{border-color:#8eacd0;background:#ffffff;}
+.inp:focus,select.inp:focus{
+  border-color:#1976e9;background:#ffffff;
+  -webkit-box-shadow:0 0 0 3px rgba(25,118,233,.17);
+  box-shadow:0 0 0 3px rgba(25,118,233,.17);
+}
+.inp[readonly]{background:#edf4fb;color:#16467c;}
+.inp[disabled]{background:#e9f0f7;color:#657f9b;border-color:#cbd8e6;}
+.inp-sm{height:34px;font-size:12.5px;}
+.btn{
+  height:39px;padding:0 13px;border-radius:10px;border-width:1px;
+  font-size:13px;font-weight:850;
+}
+.btn-primary{
+  color:#ffffff;border-color:#0d58b6;background:#1976e9;
+  background:-webkit-linear-gradient(top,#318bf3 0%,#1264cd 100%);
+  background:linear-gradient(180deg,#318bf3 0%,#1264cd 100%);
+  -webkit-box-shadow:0 4px 12px rgba(25,118,233,.26);box-shadow:0 4px 12px rgba(25,118,233,.26);
+}
+.btn-primary:hover{
+  background:#0f63c8;background:-webkit-linear-gradient(top,#247be1 0%,#0e56b2 100%);
+  background:linear-gradient(180deg,#247be1 0%,#0e56b2 100%);
+}
+
+/* ----------------------------------------------------------- PATIENT RAIL */
+.profile-card{
+  color:#ffffff;border-color:#0e539d;background:#155eaa;
+  background:-webkit-linear-gradient(top,#1972c4 0%,#104b8d 100%);
+  background:linear-gradient(180deg,#1972c4 0%,#104b8d 100%);
+  -webkit-box-shadow:0 8px 20px rgba(17,79,146,.24);box-shadow:0 8px 20px rgba(17,79,146,.24);
+}
+.profile-card .profile-top{padding:14px 14px 9px;}
+.profile-card .avatar{
+  width:54px;height:54px;margin-left:11px;border:4px solid rgba(255,255,255,.28);
+  background:#ffffff;color:#1769b7;
+}
+.profile-kicker{margin-bottom:2px;color:#cce4ff;font-size:10.5px;font-weight:700;}
+.profile-card .pf-name{margin-bottom:2px;color:#ffffff;font-size:17px;font-weight:900;}
+.profile-card .pf-file,.profile-card .pf-file b{color:#d9ebff;}
+.profile-state{
+  display:-ms-flexbox;display:flex;-ms-flex-align:center;align-items:center;
+  margin:0 12px 10px;padding:7px 9px;border:1px solid rgba(255,255,255,.25);
+  border-radius:9px;background:rgba(255,255,255,.10);color:#f4f9ff;font-size:11px;
+}
+.profile-state .dot{
+  width:8px;height:8px;margin-left:7px;border-radius:50%;background:#6ee7a4;
+  -ms-flex:0 0 8px;flex:0 0 8px;
+}
+.profile-card .btn-erx{
+  height:36px;margin:0 12px 9px;border-color:rgba(255,255,255,.34);
+  background:rgba(255,255,255,.12);color:#ffffff;
+}
+.profile-card .btn-erx:hover{background:rgba(255,255,255,.20);border-color:#ffffff;color:#ffffff;}
+.profile-card .rx-row{padding:0 12px 9px;}
+.profile-card .rx-box{
+  padding:7px 6px;border-color:rgba(255,255,255,.22);border-radius:9px;
+  background:rgba(7,40,80,.17);
+}
+.profile-card .rx-box + .rx-box{margin-right:7px;}
+.profile-card .rx-lbl{color:#cfe4fa;font-size:10px;}
+.profile-card .rx-val{color:#ffffff;font-size:16px;}
+.profile-card .doctor-preview{
+  display:-ms-flexbox;display:flex;padding:0 12px 12px;border-top:0;background:transparent;
+}
+.profile-card .ps-line{
+  width:50%;padding:8px 6px;border:1px solid rgba(255,255,255,.22);
+  border-radius:9px;background:rgba(7,40,80,.17);text-align:center;
+  -ms-flex-direction:column;flex-direction:column;
+  -ms-flex-pack:center;justify-content:center;
+}
+.profile-card .ps-line + .ps-line{margin-top:0;margin-right:7px;}
+.profile-card .ps-key{display:none;}
+.profile-card .ps-cap{color:#cfe4fa;font-size:10px;font-weight:700;}
+.profile-card .ps-val{margin:1px 0 0;color:#ffffff;font-size:19px;line-height:1.15;}
+.profile-card .ps-unit{color:#cfe4fa;font-size:10px;}
+
+.action-card{padding:12px;border-color:#b8cce5;background:#ffffff;}
+.action-kicker{margin-bottom:9px;padding:0 2px 8px;color:#153f72;border-color:#dce7f2;}
+.action-card .btn-submit.btn-block{
+  height:52px;margin-bottom:8px;border-color:#0d58b6;border-radius:11px;
+  background:#1976e9;background:-webkit-linear-gradient(top,#318bf3 0%,#1264cd 100%);
+  background:linear-gradient(180deg,#318bf3 0%,#1264cd 100%);
+}
+.action-card .btn-danger.btn-block{height:40px;margin-bottom:0;font-size:13px;background:#fff9fa;}
+.queue-nav-row{margin-top:8px;}
+.queue-nav-row .btn-nav{height:38px;padding:0 6px;border-color:#bad4f0;background:#edf6ff;color:#155aa7;font-size:11.5px;}
+.queue-nav-row .btn-nav + .btn-nav{margin-right:7px;}
+
+/* print actions stay at the bottom-right, with a dominant print-last action */
+.print-card{-ms-flex-order:4;order:4;margin-top:auto;margin-bottom:0;border-color:#bdd0e7;}
+.print-card .card-body{padding:10px;}
+.print-grid{
+  display:-ms-flexbox;display:flex;-ms-flex-direction:row;flex-direction:row;
+  -ms-flex-wrap:wrap;flex-wrap:wrap;
+}
+.print-grid .btn-print{height:39px;margin-bottom:0;border-color:#b9cde3;background:#ffffff;color:#163a63;font-size:11.5px;}
+.print-grid .btn-print-primary{
+  width:100%;height:43px;margin-bottom:8px;color:#0e5fc1;border-color:#72a9e5;
+  background:#e8f3ff;-webkit-box-shadow:none;box-shadow:none;font-size:13px;
+}
+#btnPrtRx,#btnPrtIns{width:calc(50% - 4px);}
+#btnPrtRx{margin-left:8px;}
+.status-card{-ms-flex-order:5;order:5;margin-top:9px;margin-bottom:0;background:#edf5fb;box-shadow:none;}
+.status-card .card-body{padding:8px 10px;}
+.sync-badge{color:#52718e;font-size:11px;}
+
+/* ------------------------------------------------------------ MAIN FORM */
+.patient-card{-ms-flex:0 0 auto;flex:0 0 auto;}
+.patient-card .card-body{padding:10px 12px 6px;}
+.grid-4{margin:-4px -5px;}
+.grid-4 > .fld{padding:4px 5px;}
+.row-3{margin:0 -5px 10px;}
+.row-3 > .card{margin:0 5px;}
+.row-3 .card-head{padding:8px 11px;}
+.row-3 .card-body{padding:10px 11px;}
+.row-3 .fld > span{font-size:11.5px;}
+.row-3 .inp{height:36px;font-size:12.5px;}
+.doc-body .fld{margin-bottom:7px;}
+.datetime-card{
+  margin-bottom:10px;padding:10px 12px;border-color:#cbdbea;
+  -ms-flex-wrap:wrap;flex-wrap:wrap;
+  background:#ffffff;background:-webkit-linear-gradient(top,#ffffff 0%,#f2f7fd 100%);
+  background:linear-gradient(180deg,#ffffff 0%,#f2f7fd 100%);
+}
+.datetime-card .dt-half{-ms-flex:1 1 220px;flex:1 1 220px;min-width:200px;}
+.datetime-card .dt-half + .dt-half{margin-right:12px;}
+.datetime-card .dt-ico{
+  width:40px;height:40px;margin-left:9px;border:1px solid #bdd7f2;border-radius:10px;
+  background:#e7f2fe;color:#176fcf;
+}
+.datetime-card .dt-fld > span{margin-bottom:3px;color:#2c4a6b;font-size:11.5px;}
+.datetime-card .inp{height:36px;border-color:#c5d6e8;background:#f2f7fc;color:#123d70;}
+
+/* -------------------------------------------------------- SERVICE WORKSPACE */
+.col-center{-ms-flex-pack:start;justify-content:flex-start;}
+.col-center > .svc-card{
+  display:-ms-flexbox;display:flex;-ms-flex-direction:column;flex-direction:column;
+  width:100%;max-width:1600px;min-height:310px;margin-top:auto;margin-bottom:0;
+  -ms-flex:1 1 auto;flex:1 1 auto;
+  -ms-flex-item-align:center;-ms-grid-row-align:center;align-self:center;
+  border-color:#aec8e5;
+  -webkit-box-shadow:0 4px 16px rgba(16,58,108,.10);box-shadow:0 4px 16px rgba(16,58,108,.10);
+}
+.svc-card > .card-head{-ms-flex:0 0 auto;flex:0 0 auto;}
+.svc-card > .card-body{
+  display:-ms-flexbox;display:flex;-ms-flex-direction:column;flex-direction:column;
+  min-height:0;-ms-flex:1 1 auto;flex:1 1 auto;
+}
+.svc-search-wrap{width:260px;}
+#svcAddBtn{min-width:122px;}
+.svc-card .tbl-wrap,.svc-card .tbl-wrap.expanded,.svc-card .tbl-wrap.collapsed{
+  min-height:180px;max-height:none;-ms-flex:1 1 auto;flex:1 1 auto;
+  border-color:#c4d5e8;background:#ffffff;
+}
+.svc-tbl{min-width:1120px;table-layout:fixed;}
+.svc-tbl .c-row{width:44px;}
+.svc-tbl .c-name{width:170px;}
+.svc-tbl .c-code{width:86px;}
+.svc-tbl .c-desc{width:180px;}
+.svc-tbl .c-qty{width:64px;}
+.svc-tbl .c-free{width:70px;}
+.svc-tbl .c-price,.svc-tbl .c-disc,.svc-tbl .c-ins,.svc-tbl .c-pat{width:102px;}
+.svc-tbl .c-act{width:72px;}
+.tbl thead th{
+  height:39px;padding:7px 6px;background:#dceafa;color:#123f70;
+  border-bottom:2px solid #abc7e5;border-left-color:#c8daed;font-size:11.5px;
+}
+.tbl tbody td{height:40px;padding:6px;color:#1d3856;border-color:#dce6f0;font-size:11.5px;}
+.tbl tbody tr:nth-child(even){background:#f2f7fc;}
+.tbl tbody tr:hover{background:#e6f2ff;}
+.tbl .qty-inp,.svc-tbl .desc-inp,.svc-tbl .free-inp,.svc-tbl .disc-inp{height:29px;font-size:11.5px;}
+.svc-foot{
+  min-height:50px;padding:7px 9px;border-top-color:#b8cee5;
+  background:#e9f2fb;background:-webkit-linear-gradient(top,#f1f7fd 0%,#e3edf8 100%);
+  background:linear-gradient(180deg,#f1f7fd 0%,#e3edf8 100%);
+}
+.sf-cell span{font-size:10.5px;color:#55708d;}
+.sf-cell b{font-size:13px;color:#133d69;}
+
+/* ----------------------------------------------------- INVOICE / PAYMENT */
+.invoice-card{border-color:#a9c7e8;}
+.invoice-card .card-head{
+  color:#ffffff;border-bottom-color:#104d92;background:#1768b7;
+  background:-webkit-linear-gradient(top,#2078cc 0%,#12599f 100%);
+  background:linear-gradient(180deg,#2078cc 0%,#12599f 100%);
+  -webkit-box-shadow:none;box-shadow:none;
+}
+.invoice-card .card-title,.invoice-card .ct-ico{color:#ffffff;}
+.invoice-card .btn-icon{border-color:rgba(255,255,255,.35);background:rgba(255,255,255,.12);color:#ffffff;}
+.invoice-body{padding:8px 12px 10px;}
+.inv-group{margin-bottom:8px;padding-bottom:6px;border-bottom:1px dashed #c9d8e8;}
+.inv-group:last-child{margin-bottom:0;padding-bottom:0;border-bottom:0;}
+.inv-gtitle{margin-bottom:4px;padding-bottom:3px;border:0;color:#1765b6;font-size:11px;}
+.inv-line{min-height:26px;padding:2px 0;font-size:12px;}
+.inv-line span{color:#496580;}
+.inv-line b{color:#173957;font-size:12.5px;}
+.inv-remain{margin-top:4px;padding-top:6px;}
+
+.payable-card{
+  margin-top:0;margin-bottom:10px;padding:15px 13px;text-align:right;color:#ffffff;
+  border-color:#0d4d9c;background:#125da9;
+  background:-webkit-linear-gradient(top,#1c75ca 0%,#104b90 100%);
+  background:linear-gradient(180deg,#1c75ca 0%,#104b90 100%);
+  -webkit-box-shadow:0 8px 18px rgba(15,77,147,.24);box-shadow:0 8px 18px rgba(15,77,147,.24);
+}
+.payable-caption{color:#d4e9ff;font-size:12px;}
+.payable-value{
+  display:-ms-flexbox;display:flex;-ms-flex-align:end;align-items:flex-end;
+  -ms-flex-pack:justify;justify-content:space-between;margin:3px 0 0;
+}
+.payable-value b{color:#ffffff;font-size:28px;line-height:1.25;}
+.payable-value span{padding-bottom:4px;color:#d4e9ff;font-size:11px;}
+.payment-card{margin-bottom:10px;}
+.payment-card .card-body{padding:10px;}
+.payment-state{
+  display:-ms-flexbox;display:flex;-ms-flex-align:center;align-items:center;
+  padding:8px 9px;border:1px solid #aedfc6;border-radius:9px;
+  background:#effaf4;color:#187447;font-size:11px;
+}
+.payment-state .dot{
+  width:8px;height:8px;margin-left:7px;border-radius:50%;background:#24a869;
+  -ms-flex:0 0 8px;flex:0 0 8px;
+}
+.payment-shortcut{margin-top:7px;color:#66809b;font-size:10.5px;text-align:center;}
+.queue-hub-btn{
+  -ms-flex:0 0 auto;flex:0 0 auto;width:100%;height:46px;margin-top:auto;
+  color:#125aab;border-color:#84b2e1;background:#e4f1ff;font-size:12px;font-weight:900;
+}
+
+/* ------------------------------------------------------ CALM / WARM THEMES */
+body.theme-calm{background:#dfeff1;background:-webkit-linear-gradient(top,#eef8f8 0%,#d7e8eb 100%);background:linear-gradient(180deg,#eef8f8 0%,#d7e8eb 100%);}
+.theme-calm .col-action,.theme-calm .col-left{background:#e7f2f3;border-color:#bad4d7;}
+.theme-calm .col-center{background:#f8fcfc;border-color:#bad4d7;}
+.theme-calm .card-head{-webkit-box-shadow:inset -3px 0 0 #157a86;box-shadow:inset -3px 0 0 #157a86;}
+.theme-calm .ct-ico{color:#157a86;}
+.theme-calm .btn-primary,.theme-calm .btn-submit{background:#157a86;border-color:#116671;}
+.theme-calm .payable-card{background:#146d78;border-color:#0e5962;}
+body.theme-warm{background:#eee9e2;background:-webkit-linear-gradient(top,#f8f5f0 0%,#e7dfd5 100%);background:linear-gradient(180deg,#f8f5f0 0%,#e7dfd5 100%);}
+.theme-warm .col-action,.theme-warm .col-left{background:#f2eee9;border-color:#d5c7b7;}
+.theme-warm .col-center{background:#fcfaf7;border-color:#d5c7b7;}
+.theme-warm .card-head{-webkit-box-shadow:inset -3px 0 0 #815b3a;box-shadow:inset -3px 0 0 #815b3a;}
+.theme-warm .ct-ico{color:#815b3a;}
+.theme-warm .btn-primary,.theme-warm .btn-submit{background:#815b3a;border-color:#68472c;}
+.theme-warm .payable-card{background:#765136;border-color:#5d3d28;}
+
+/* ------------------------------------------------------------ DARK PARITY */
+body.theme-dark,.theme-dark body{
+  background:#0d1724;background:-webkit-linear-gradient(top,#111e2d 0%,#0a1420 100%);
+  background:linear-gradient(180deg,#111e2d 0%,#0a1420 100%);color:#e7f0fb;
+}
+.theme-dark .col-action,.theme-dark .col-left,.theme-dark .col-center{
+  background:#142235;background:-webkit-linear-gradient(top,#17283d 0%,#111d2d 100%);
+  background:linear-gradient(180deg,#17283d 0%,#111d2d 100%);border-color:#2e4864;
+  -webkit-box-shadow:0 8px 28px rgba(0,0,0,.30),inset 0 1px 0 rgba(255,255,255,.03);
+  box-shadow:0 8px 28px rgba(0,0,0,.30),inset 0 1px 0 rgba(255,255,255,.03);
+}
+.theme-dark .col-center{background:#111f30;}
+.theme-dark .card,.theme-dark .payment-card{background:#192b40;border-color:#35516d;box-shadow:0 4px 14px rgba(0,0,0,.22);}
+.theme-dark .card-head{
+  background:#213750;background:-webkit-linear-gradient(top,#253d58 0%,#1b3047 100%);
+  background:linear-gradient(180deg,#253d58 0%,#1b3047 100%);border-color:#37536f;
+  -webkit-box-shadow:inset -3px 0 0 #55a7ff;box-shadow:inset -3px 0 0 #55a7ff;
+}
+.theme-dark .card-title{color:#eff7ff;}
+.theme-dark .ct-ico{color:#72b8ff;}
+.theme-dark .fld > span,.theme-dark .datetime-card .dt-fld > span{color:#b8cce1;}
+.theme-dark .inp,.theme-dark select.inp{
+  background:#101c2b;color:#eff7ff;border-color:#3b5875;
+  -webkit-box-shadow:inset 0 1px 2px rgba(0,0,0,.25);box-shadow:inset 0 1px 2px rgba(0,0,0,.25);
+}
+.theme-dark .inp[readonly],.theme-dark .inp[disabled]{background:#17273a;color:#a9c3df;border-color:#314a64;}
+.theme-dark .avatar,.theme-dark .datetime-card .dt-ico{
+  background:#173958;border-color:#32658f;color:#73bbff;
+}
+.theme-dark .profile-card{
+  border-color:#3779ba;background:#124f8f;background:-webkit-linear-gradient(top,#1764ae 0%,#0d3e73 100%);
+  background:linear-gradient(180deg,#1764ae 0%,#0d3e73 100%);
+}
+.theme-dark .profile-card .avatar{background:#153f70;border-color:rgba(137,190,244,.45);color:#a9d4ff;}
+.theme-dark .action-card{background:#192b40;border-color:#35516d;}
+.theme-dark .action-kicker{color:#dcecff;border-color:#37536f;}
+.theme-dark .btn{background:#1b3047;color:#dceaf8;border-color:#42617f;}
+.theme-dark .btn-primary,.theme-dark .btn-submit{background:#216bc0;border-color:#4a9cf0;color:#ffffff;}
+.theme-dark .btn-danger{color:#ff9aad;border-color:#774359;background:#342638;}
+.theme-dark .queue-nav-row .btn-nav{color:#bedfff;background:#17314c;border-color:#315e89;}
+.theme-dark .print-grid .btn-print{color:#d9ecff;background:#1a3959;border-color:#3f78ad;}
+.theme-dark .print-grid .btn-print-primary{color:#d9ecff;background:#1a3959;border-color:#4f87bd;}
+.theme-dark .status-card{background:#14283a;border-color:#34516b;}
+.theme-dark .sync-badge{color:#a8bfd5;}
+.theme-dark .datetime-card{background:#192b40;border-color:#35516d;}
+.theme-dark .datetime-card .inp{background:#17273a;color:#d8ebff;border-color:#3b5875;}
+.theme-dark .svc-card .tbl-wrap{background:#122134;border-color:#36516d;}
+.theme-dark .tbl thead th{background:#24425f;color:#ecf6ff;border-color:#45637f;}
+.theme-dark .tbl tbody td{color:#d9e7f5;border-color:#2f485f;}
+.theme-dark .tbl tbody tr:nth-child(even){background:#172a3f;}
+.theme-dark .tbl tbody tr:hover{background:#203b58;}
+.theme-dark .svc-foot{background:#1d344c;border-color:#426381;}
+.theme-dark .sf-cell + .sf-cell{border-color:#395772;}
+.theme-dark .sf-cell span{color:#9eb7ce;}
+.theme-dark .sf-cell b{color:#ecf6ff;}
+.theme-dark .invoice-card{border-color:#3c6d9f;}
+.theme-dark .invoice-card .card-head{background:#174f88;border-color:#3c6d9f;box-shadow:none;}
+.theme-dark .invoice-body{background:#172a3e;}
+.theme-dark .inv-group{border-color:#39536c;}
+.theme-dark .inv-gtitle{color:#78bbff;}
+.theme-dark .inv-line span{color:#aec3d7;}
+.theme-dark .inv-line b{color:#f0f7ff;}
+.theme-dark .payable-card{background:#174f88;border-color:#4b93d7;}
+.theme-dark .payment-state{background:#17372e;border-color:#2f7057;color:#7fddb0;}
+.theme-dark .payment-shortcut{color:#809ab3;}
+.theme-dark .queue-hub-btn{color:#d9ecff;background:#173958;border-color:#3f78ad;}
+
+/* ------------------------------------------------------------- RESPONSIVE */
+@media (max-width:1500px){
+  .body{padding:10px;}
+  .col-action{width:252px;-ms-flex:0 0 252px;flex:0 0 252px;}
+  .col-left{width:264px;-ms-flex:0 0 264px;flex:0 0 264px;}
+  .col-center{margin:0 9px;}
+  .col-action,.col-left,.col-center{padding:8px;}
+  .card{margin-bottom:8px;}
+  .grid-4 > .fld{width:33.3333%;}
+  .grid-4 > .fld.fld-wide{width:66.6666%;}
+  .svc-search-wrap{width:205px;}
+}
+@media (max-width:1180px){
+  .app{height:auto;min-height:100vh;overflow:auto;}
+  .body{-ms-flex-wrap:wrap;flex-wrap:wrap;overflow:visible;}
+  .col{height:auto;overflow:visible;}
+  .col-action{
+    width:calc(50% - 5px);-ms-flex:0 0 calc(50% - 5px);flex:0 0 calc(50% - 5px);
+    -ms-flex-order:1;order:1;margin-left:5px;
+  }
+  .col-left{
+    width:calc(50% - 5px);-ms-flex:0 0 calc(50% - 5px);flex:0 0 calc(50% - 5px);
+    -ms-flex-order:2;order:2;margin-right:5px;
+  }
+  .col-center{
+    width:100%;-ms-flex:0 0 100%;flex:0 0 100%;-ms-flex-order:3;order:3;
+    min-height:800px;margin:10px 0 0;
+  }
+  .print-card,.queue-hub-btn{margin-top:10px;}
+}
+@media (max-width:760px){
+  .body{padding:7px;}
+  .col-action,.col-left,.col-center{
+    width:100%;-ms-flex:0 0 100%;flex:0 0 100%;margin:0 0 8px;
+  }
+  .grid-4 > .fld,.grid-4 > .fld.fld-wide{width:50%;}
+  .row-3{-ms-flex-wrap:wrap;flex-wrap:wrap;}
+  .row-3 > .card{width:100%;-ms-flex:0 0 calc(100% - 10px);flex:0 0 calc(100% - 10px);margin-bottom:8px;}
+  .datetime-card .dt-half{-ms-flex:1 1 100%;flex:1 1 100%;min-width:0;}
+  .datetime-card .dt-half + .dt-half{margin-top:8px;margin-right:0;}
+  .svc-card .card-head{-ms-flex-wrap:wrap;flex-wrap:wrap;}
+  .svc-card .head-tools{width:100%;margin-top:8px;}
+  .svc-search-wrap{width:auto;-ms-flex:1 1 auto;flex:1 1 auto;}
+  .col-center > .svc-card{min-height:520px;}
+}
+.svc-count{margin-right:7px;color:#607895;font-size:10px;font-weight:800;}
+.payment-state.pending{border-color:#c9d8e8;background:#f3f7fc;color:#607895;}
+.payment-state.pending .dot{background:#8fa5bb;}
+.theme-dark .svc-count{color:#9fb7cf;}
+.theme-dark .payment-state.pending{background:#17273a;border-color:#39536c;color:#9fb7cf;}
+.theme-dark .payment-state.pending .dot{background:#7f96ad;}
+/* Dark active-zone specificity: earlier focus rules are intentionally stronger
+   than base card-title rules, so match that specificity to keep headings bright. */
+.theme-dark .col.is-active .card-title{color:#eff7ff;}
+.theme-dark .col.is-active .ct-ico{color:#72b8ff;}
+.theme-dark .inv-remain span{color:#d5e3f2;}
+.theme-dark .inv-remain b{color:#ff91a5;}
+
+@media (max-width:1180px){
+  .col-left{-ms-flex-direction:column;flex-direction:column;}
+  .col-left > .card{
+    width:100%;-ms-flex:0 0 auto;flex:0 0 auto;margin-left:0;
+  }
+  .col-left > .payable-card{margin-top:0;}
+}
+
+/* ============================================================================
+   v1.68.0 — ADMISSION REDESIGN: coordinated colour variety + polished invoice
+   ----------------------------------------------------------------------------
+   The white theme stays white/clean, but every clinical zone now carries its
+   own restrained accent so the eye is no longer locked onto a single blue.
+   The mapping is semantic (coordinated, never random):
+     · PROFILE card + insurance ......... TEAL     (patient identity + coverage)
+     · PATIENT form + performer ......... VIOLET   (clinical intake)
+     · DOCTOR + SERVICES + queue ........ BLUE     (the working surface)
+     · INVOICE (صورت حساب) ............. AMBER    (billing breakdown)
+     · PAYABLE (مبلغ نهایی) + payment ... EMERALD  (the final amount — the hero)
+     · date/shift metadata + print ...... SLATE    (calm neutral)
+   The final payable total is rebuilt as a distinct, high-contrast hero card
+   with a soft breathing glow, so it can never blend into its neighbours again.
+   Trident-safe: literal colours, no custom properties, no grid, no flex `gap`,
+   no logical properties; every modern flex prop carries its -ms- pair.
+   Animations use paired -webkit-/unprefixed keyframes (IE11 honours unprefixed).
+   The accent rules are guarded with chained :not() so the optional calm/warm/
+   dark palettes keep their own character untouched.
+   ============================================================================ */
+
+/* ------------------------------------------------------- ENTRANCE + MOTION --- */
+@-webkit-keyframes azFade{from{opacity:0}to{opacity:1}}
+@keyframes azFade{from{opacity:0}to{opacity:1}}
+/* slow, soft breathing glow reserved for the final-payable hero total */
+@-webkit-keyframes azGlow{0%,100%{-webkit-box-shadow:0 8px 22px rgba(5,150,105,.30);}50%{-webkit-box-shadow:0 12px 30px rgba(5,150,105,.46);}}
+@keyframes azGlow{0%,100%{box-shadow:0 8px 22px rgba(5,150,105,.30);}50%{box-shadow:0 12px 30px rgba(5,150,105,.46);}}
+
+/* one gentle fade-in for the workspace cards (opacity only → never blocks the
+   hover transform below; runs behind the loader so there is no flash). */
+.body .card{-webkit-animation:azFade .4s ease both;animation:azFade .4s ease both;}
+.body .card:nth-child(1){-webkit-animation-delay:.02s;animation-delay:.02s;}
+.body .card:nth-child(2){-webkit-animation-delay:.05s;animation-delay:.05s;}
+.body .card:nth-child(3){-webkit-animation-delay:.08s;animation-delay:.08s;}
+.body .card:nth-child(4){-webkit-animation-delay:.11s;animation-delay:.11s;}
+.body .card:nth-child(5){-webkit-animation-delay:.14s;animation-delay:.14s;}
+.body .card:nth-child(6){-webkit-animation-delay:.17s;animation-delay:.17s;}
+
+/* tactile press on every button */
+.btn:active,.btn-submit:active{-webkit-transform:translateY(1px);transform:translateY(1px);}
+
+/* hover lift reserved for the compact rail cards (keeps the dense centre still) */
+.col-action .card,.col-left .card{
+  -webkit-transition:-webkit-transform .16s ease,border-color .16s ease;
+  transition:transform .16s ease,border-color .16s ease;
+}
+.col-action .card:hover,.col-left .card:hover{
+  -webkit-transform:translateY(-2px);transform:translateY(-2px);
+}
+
+/* stable, aligned digits on Chromium (IE gracefully ignores this property) */
+.sf-cell b,.inv-line b,.inv-remain b,.payable-value b{font-variant-numeric:tabular-nums;}
+
+/* --------------------------------------- DEFAULT WHITE-THEME ACCENT MAP ---
+   (calm/warm/dark keep their own palettes — these accents are scoped to the
+   default white theme so they never bleed into the optional themes.) */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .card-head{
+  -webkit-box-shadow:inset -3px 0 0 #64748b;box-shadow:inset -3px 0 0 #64748b;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .ct-ico{color:#64748b;}
+
+/* PATIENT form + performer → VIOLET (clinical intake) */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .card-head,
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(3) .card-head{
+  -webkit-box-shadow:inset -3px 0 0 #7c3aed;box-shadow:inset -3px 0 0 #7c3aed;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .ct-ico,
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(3) .ct-ico{color:#7c3aed;}
+
+/* INSURANCE → TEAL (coverage, ties to the profile identity) */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(1) .card-head{
+  -webkit-box-shadow:inset -3px 0 0 #0d9488;box-shadow:inset -3px 0 0 #0d9488;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(1) .ct-ico{color:#0d9488;}
+
+/* DOCTOR + SERVICES → BLUE (the working surface stays blue) */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(2) .card-head,
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card > .card-head{
+  -webkit-box-shadow:inset -3px 0 0 #2563eb;box-shadow:inset -3px 0 0 #2563eb;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(2) .ct-ico,
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card > .card-head .ct-ico{color:#2563eb;}
+
+/* PAYMENT status → EMERALD (ties to the final amount) */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payment-card .card-head{
+  -webkit-box-shadow:inset -3px 0 0 #059669;box-shadow:inset -3px 0 0 #059669;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payment-card .ct-ico{color:#059669;}
+
+/* date + shift metadata → SLATE (quiet, clearly separated) */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .datetime-card .dt-ico{
+  background:#eef2f7;border:1px solid #dbe3ec;color:#475569;
+}
+
+/* ---------------------------------------------------- PROFILE CARD → TEAL ---
+   The top-right identity card kept its coloured surface, but the old single
+   blue is replaced with a calm clinical teal (one of the white-theme accents). */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card{
+  color:#ffffff;border:1px solid #0f766e;
+  background:#0d9488;
+  background:-webkit-linear-gradient(top,#14b8a6 0%,#0f766e 100%);
+  background:linear-gradient(180deg,#14b8a6 0%,#0f766e 100%);
+  -webkit-box-shadow:0 8px 22px rgba(13,148,136,.28);box-shadow:0 8px 22px rgba(13,148,136,.28);
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .avatar{color:#0f766e;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .rx-box,
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .ps-line{
+  background:rgba(2,40,38,.22);border-color:rgba(255,255,255,.20);
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .profile-state .dot{background:#6ee7a4;}
+
+/* ------------------------------------------------- INVOICE → AMBER (polished) */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .invoice-card{border-color:#e3c58c;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .invoice-card .card-head{
+  border-bottom:1px solid #b45309;
+  background:#f59e0b;
+  background:-webkit-linear-gradient(top,#fbbf24 0%,#b45309 100%);
+  background:linear-gradient(180deg,#fbbf24 0%,#b45309 100%);
+  -webkit-box-shadow:none;box-shadow:none;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .invoice-card .card-title,
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .invoice-card .ct-ico{color:#ffffff;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .invoice-card .btn-icon{
+  border-color:rgba(255,255,255,.45);background:rgba(255,255,255,.16);color:#ffffff;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .invoice-body{background:#fffdf6;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inv-gtitle{
+  color:#b45309;border-bottom:2px solid #f1d49a;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inv-line span{color:#8a6a3c;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inv-line b{color:#3a2912;}
+/* «مانده قابل پرداخت» reads as a clear amber pill inside the breakdown */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inv-remain{
+  margin-top:8px;padding:9px 11px;border:1px solid #f0d79a;border-radius:10px;
+  background:#fff4d8;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inv-remain span{color:#7a5621;font-weight:800;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inv-remain b{color:#b45309;font-weight:900;font-size:14px;}
+
+/* ----------------------------- PAYABLE (مبلغ نهایی) → EMERALD HERO TOTAL ---
+   The single most important number on the page: rebuilt as a distinct, high-
+   contrast emerald card with a large tabular figure and a soft breathing glow
+   so it stands cleanly apart from the amber invoice above it. */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payable-card{
+  margin-top:0;margin-bottom:10px;padding:16px 15px;text-align:right;color:#ffffff;
+  border:1px solid #047857;
+  background:#059669;
+  background:-webkit-linear-gradient(top,#10b981 0%,#047857 100%);
+  background:linear-gradient(180deg,#10b981 0%,#047857 100%);
+  -webkit-box-shadow:0 8px 22px rgba(5,150,105,.30);box-shadow:0 8px 22px rgba(5,150,105,.30);
+  -webkit-animation:azGlow 3.6s ease-in-out infinite;animation:azGlow 3.6s ease-in-out infinite;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payable-caption{
+  color:#d1fae5;font-size:12px;font-weight:800;letter-spacing:.2px;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payable-value{margin:6px 0 2px;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payable-value b{
+  color:#ffffff;font-size:30px;font-weight:900;line-height:1.2;letter-spacing:.3px;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payable-value span{
+  padding-bottom:5px;color:#bbf7d0;font-size:11px;font-weight:800;
+}

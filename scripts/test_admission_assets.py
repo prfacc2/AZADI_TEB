@@ -25,7 +25,7 @@ in the build environment, so this script encodes the contract statically:
      the removed controls (عدم پرداخت / پذیرش جدید / انصراف) are gone, and the
      two navigation buttons (صندوق نرفته‌ها / صف پذیرش) are present.
   5. admission.js: ES5 only (no let/const/arrow/template literals), the queue
-     overlay opens through the helper, and the drag is clamped.
+     overlay opens through the helper, and no retired drag plumbing remains.
 """
 import re, sys
 from pathlib import Path
@@ -191,7 +191,8 @@ need("=>" not in js_code, "admission.js uses arrow functions (not ES5)")
 need("`" not in js_code, "admission.js uses template literals (not ES5)")
 need("openQueuePanel" in js_code, "the queue overlay no longer opens through its helper")
 need("queueBackdrop" in js_code, "admission.js does not drive the full-screen queue backdrop")
-need("clamp(" in js_code, "the queue drag clamp helper was removed")
+need("wireDrag" not in js_code and "queueDrag" not in js_code,
+     "retired draggable queue plumbing is still present")
 need("blacklist.remove" in js_code, "admission.js does not call blacklist.remove (رفع مسدودی)")
 
 # ------------------------------------------------------------------- report

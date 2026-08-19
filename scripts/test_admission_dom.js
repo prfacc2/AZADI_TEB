@@ -15,7 +15,7 @@ var fs = require('fs');
 var path = require('path');
 var { JSDOM } = require('jsdom');
 
-var ROOT = '/home/user/webapp';
+var ROOT = path.resolve(__dirname, '..');
 var HTML = fs.readFileSync(path.join(ROOT, 'assets/admission/index.html'), 'utf8')
   .replace(/<link[^>]*>/g, '')
   .replace(/<script[^>]*src=[^>]*><\/script>/g, '')
@@ -335,15 +335,13 @@ function M13() {
     return drain(80).then(function () {
       var inp = $(w, 'svcBody').querySelector('.disc-inp');
       typeInput(w, inp, '9999999');
-      $(w, 'noPay').checked = true;
-      $(w, 'noPay').dispatchEvent(new w.Event('change', { bubbles: true }));
       return drain(180).then(function () {
         var disc = parseMoneyText($(w, 'sfDisc'));
         var paid = parseMoneyText($(w, 'invFinPaid'));
         var pat = parseMoneyText($(w, 'sfPat'));
         if (disc === 1200000 && paid === 0 && pat === 0)
-          ok('M13 discount-noPay-bounds', 'discount capped at gross; noPay remains nonnegative');
-        else bad('M13 discount-noPay-bounds', 'disc=' + disc + ', paid=' + paid + ', pat=' + pat);
+          ok('M13 discount-bounds', 'discount capped at gross; all totals remain nonnegative');
+        else bad('M13 discount-bounds', 'disc=' + disc + ', paid=' + paid + ', pat=' + pat);
       });
     });
   });

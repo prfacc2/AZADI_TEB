@@ -287,8 +287,14 @@
     setText($('invFinPaid'), money(paid));
     setText($('invRemain'), money(sumPat - paid));
 
-    /* total card */
+    /* total card + compact payment state */
     setText($('tcVal'), money(sumPat));
+    if ($('paymentState')) {
+      $('paymentState').className = state.services.length ? 'payment-state' : 'payment-state pending';
+      setText($('paymentStateText'), state.services.length ?
+        'مانده قبض آماده دریافت است' :
+        'پس از افزودن خدمت، وضعیت پرداخت نمایش داده می‌شود');
+    }
     scheduleBillSync();
     return { gross: sumGross, disc: sumDisc, org: sumOrg, supp: sumSupp, pat: sumPat, paid: paid };
   }
@@ -315,18 +321,112 @@
     }, 0);
   }
 
+  function serviceKey(v) {
+    /* Keep byte-for-byte semantics with C++ serviceIdentityKey(): all three
+       digit sets normalize to ASCII; ZWNJ/LRM/RLM/whitespace runs collapse to
+       one interior space and vanish at boundaries. */
+    return String(v == null ? '' : v)
+      .replace(/[۰-۹]/g, function (d) { return String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)); })
+      .replace(/[٠-٩]/g, function (d) { return String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)); })
+      .replace(/[ي]/g, 'ی').replace(/[ك]/g, 'ک')
+      .replace(/[\u0009-\u000d \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\u200c\u200e\u200f]+/g, ' ')
+      .replace(/^ +| +$/g, '')
+      .replace(/[A-Z]/g, function (c) { return c.toLowerCase(); });
+  }
+
+  function sameServiceIdentity(code, name, rowCode, rowName) {
+    var bothCoded = !!(code && rowCode);
+    if (bothCoded) return rowCode === code;
+    return !!(name && rowName && rowName === name);
+  }
+
+  function serviceEffectiveUnit(svc) {
+    var unit = Number(svc && svc.freeRate ? svc.freePrice : svc && svc.price) || 0;
+    if (unit < 0) unit = 0;
+    return Math.round(unit);
+  }
+
+  function sameServiceVariant(code, name, svc, rowCode, rowName, row) {
+    return sameServiceIdentity(code, name, rowCode, rowName) &&
+      !!svc.freeRate === !!row.freeRate && serviceEffectiveUnit(svc) === serviceEffectiveUnit(row);
+  }
+
+  function preferredServiceText(a, b) {
+    a = String(a || ''); b = String(b || '');
+    if (!a) return b; if (!b) return a;
+    var ak = serviceKey(a), bk = serviceKey(b);
+    if (ak < bk) return a; if (bk < ak) return b;
+    return b < a ? b : a;
+  }
+
+  function compareServiceVariants(a, b) {
+    var ac = serviceKey(a.code || ''), bc = serviceKey(b.code || '');
+    var an = serviceKey(a.name || ''), bn = serviceKey(b.name || '');
+    var ad = serviceKey(a.desc || ''), bd = serviceKey(b.desc || '');
+    var ak = ac || an, bk = bc || bn;
+    if (ak < bk) return -1; if (ak > bk) return 1;
+    if (!!a.freeRate !== !!b.freeRate) return a.freeRate ? 1 : -1;
+    var ap = serviceEffectiveUnit(a), bp = serviceEffectiveUnit(b);
+    if (ap !== bp) return ap < bp ? -1 : 1;
+    return ad < bd ? -1 : (ad > bd ? 1 : 0);
+  }
+
+  function sortServiceVariants() { state.services.sort(compareServiceVariants); }
+
   function addServiceRow(svc) {
-    /* price ALWAYS from the catalog — never typed by the operator */
+    /* Merge repeated catalogue selections immediately. The server performs the
+       same canonicalization again and remains authoritative for every amount. */
+    var code = serviceKey(svc.code || '');
+    var name = serviceKey(svc.name || '');
+    var incomingQty = Number(svc.qty) || 1;
+    if (incomingQty < 1) incomingQty = 1; else if (incomingQty > 999) incomingQty = 999;
+    var i, row, rowCode, bothCoded;
+    for (i = 0; i < state.services.length; i++) {
+      row = state.services[i];
+      rowCode = serviceKey(row.code || '');
+      bothCoded = !!(code && rowCode);
+      if (sameServiceVariant(code, name, svc, rowCode, serviceKey(row.name || ''), row)) {
+        row.qty = Math.min(999, (Number(row.qty) || 1) + incomingQty);
+        row.discount = Math.min(serviceEffectiveUnit(row) * row.qty,
+          Math.max(0, Number(row.discount) || 0) + Math.max(0, Number(svc.discount) || 0));
+        /* Match the server's deterministic promotion rule: a coded catalogue
+           row replaces an uncoded fallback wholesale, while an uncoded row can
+           never overwrite an already-coded service's authoritative metadata or
+           price. Equal codes may refresh from the same catalogue identity. */
+        if (!rowCode && code) {
+          row.code = svc.code || '';
+          row.name = svc.name || row.name;
+          row.desc = svc.desc || '';
+          row.category = svc.category || '';
+          row.price = Number(svc.price) || 0;
+        } else if (rowCode && !code) {
+          /* Keep the coded/catalogue variant authoritative. */
+        } else {
+          row.code = preferredServiceText(row.code, svc.code);
+          row.name = preferredServiceText(row.name, svc.name);
+          row.desc = preferredServiceText(row.desc, svc.desc);
+          row.category = preferredServiceText(row.category, svc.category);
+          if (bothCoded) row.price = Number(svc.price) || 0;
+        }
+        sortServiceVariants();
+        scheduleRender();
+        return false;
+      }
+    }
     state.services.push({
       code: svc.code || '', name: svc.name || '', desc: svc.desc || '', category: svc.category || '',
-      qty: 1, price: Number(svc.price) || 0, discount: 0, freeRate: false, freePrice: 0
+      qty: incomingQty, price: Number(svc.price) || 0, discount: Number(svc.discount) || 0,
+      freeRate: !!svc.freeRate, freePrice: Number(svc.freePrice) || 0
     });
+    sortServiceVariants();
     scheduleRender();
+    return true;
   }
 
   function renderServices() {
     var body = $('svcBody');
     if (!body) return;
+    setText($('svcCount'), toFa(state.services.length) + ' ردیف');
     if (!state.services.length) {
       body.innerHTML = '<tr><td colspan="11" class="empty">خدمتی افزوده نشده است</td></tr>';
       return;
@@ -413,6 +513,7 @@
     var full = trimStr((p.first || '') + ' ' + (p.last || ''));
     setText($('pfName'), full || 'بیمار جدید');
     setText($('pfFile'), toFa(p.file || p.nid || '----'));
+    setText($('profileStateText'), full ? 'اطلاعات بیمار کامل و آماده پذیرش است' : 'برای شروع، مشخصات بیمار را وارد کنید');
 
     /* B2: auto-select the supplementary insurance when we recall one */
     if (p.suppIdx != null && p.suppIdx >= 0 && $('insSupp') &&
@@ -1127,10 +1228,14 @@
     on($('hdrSettings'), 'click', function () { Bridge.call('ui.settings', {}); });
     on($('btnErx'), 'click', function () { Bridge.call('rx.electronic', collectRecord()); });
 
-    /* F8 = print last */
+    /* F8 = print last; Ctrl+Enter = submit and issue the current receipt. */
     on(document, 'keydown', function (e) {
       e = e || window.event; var key = e.keyCode || e.which;
       if (key === 119) { Bridge.call('print.last', {}); }        /* F8 */
+      else if (key === 13 && e.ctrlKey) {
+        if (e.preventDefault) e.preventDefault(); else e.returnValue = false;
+        saveAdmission();
+      }
     });
   }
 
@@ -1319,6 +1424,7 @@
     state.services = []; state.patient = null; state.catalog = []; state.overrideBlock = false;
     setText($('pfName'), 'بیمار جدید');
     setText($('pfFile'), '----');
+    setText($('profileStateText'), 'برای شروع، مشخصات بیمار را وارد کنید');
     if ($('patResults')) $('patResults').innerHTML = '<div class="empty">نتیجه‌ای نیست</div>';
     if ($('docResults')) $('docResults').innerHTML = '<div class="empty">نتیجه‌ای نیست</div>';
     renderSvcSuggest([]);
@@ -1337,7 +1443,11 @@
   function subscribeEvents() {
     Bridge.on('patient.load', function (d) { fillPatient(d); });
     Bridge.on('services.update', function (d) {
-      if (d.rows) { state.services = d.rows; renderServices(); recompute(); }
+      if (d.rows) {
+        state.services = [];
+        for (var ui = 0; ui < d.rows.length; ui++) addServiceRow(d.rows[ui]);
+        renderServices(); recompute();
+      }
     });
     Bridge.on('queue.update', function (d) { renderQueue(d.rows || []); });
     Bridge.on('ps.update', function (d) { updatePS(d); });
@@ -1443,7 +1553,10 @@
       if (r.date) setText($('tbDate'), toFa(r.date));
       if (r.time) setText($('tbClock'), toFa(r.time));
       if (r.patient) fillPatient(r.patient);
-      if (r.services) { state.services = r.services; }
+      if (r.services) {
+        state.services = [];
+        for (var ri = 0; ri < r.services.length; ri++) addServiceRow(r.services[ri]);
+      }
       if (r.ps) updatePS(r.ps);
       applyMode(r.mode || 'simple');
       applyZoom(r.zoom || 100);

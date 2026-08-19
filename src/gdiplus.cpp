@@ -21,13 +21,25 @@ using namespace Gdiplus;
 static ULONG_PTR s_gdipToken = 0;
 static bool      s_gdipOK    = false;
 
+// GDI+ keeps resource streams for lazy image decoding. Cached images therefore
+// must keep their IStream alive until the image itself is destroyed.
+static void freeCachedResourceImages();
+
 void gdipStartup(){
     GdiplusStartupInput in;
     if(GdiplusStartup(&s_gdipToken, &in, NULL) == Ok)
         s_gdipOK = true;
 }
 void gdipShutdown(){
-    if(s_gdipOK){ GdiplusShutdown(s_gdipToken); s_gdipOK=false; }
+    if(s_gdipOK){
+        // Images must be deleted before GdiplusShutdown. Their retained streams
+        // own the copied HGLOBAL resource bytes and are released immediately
+        // afterwards, so shutdown is leak-free even in debug/smoke early exits.
+        gpFreeBackgroundCache();
+        freeCachedResourceImages();
+        GdiplusShutdown(s_gdipToken);
+        s_gdipOK=false;
+    }
 }
 
 static inline Color C(COLORREF c, int a=255){
@@ -53,7 +65,7 @@ void gpRoundRect(HDC dc, RECT rc, int rad, COLORREF fill, COLORREF border, int a
     Graphics g(dc); g.SetSmoothingMode(SmoothingModeAntiAlias);
     Rect r(rc.left, rc.top, rc.right-rc.left-1, rc.bottom-rc.top-1);
     GraphicsPath p; roundPath(p,r,rad);
-    SolidBrush br(C(fill,alpha)); g.FillPath(&br,&p);
+    if(fill!=CLR_INVALID){ SolidBrush br(C(fill,alpha)); g.FillPath(&br,&p); }
     if(border!=CLR_INVALID){ Pen pn(C(border,alpha),1.0f); g.DrawPath(&pn,&p); }
 }
 
@@ -70,7 +82,18 @@ void gpGradRoundRect(HDC dc, RECT rc, int rad, COLORREF top, COLORREF bottom, CO
 }
 
 void gpFillAlpha(HDC dc, RECT rc, int rad, COLORREF fill, int alpha){
-    gpRoundRect(dc, rc, rad, fill, CLR_INVALID, alpha);
+    if(alpha<=0) return;
+    if(alpha>=255){ gpRoundRect(dc,rc,rad,fill,CLR_INVALID,255); return; }
+    // GDI+ can fail to create translucent brushes on older/low-resource hosts.
+    // Alpha overlays are decoration, so leave the already-painted opaque host
+    // untouched rather than falling back to an incorrect fully opaque colour.
+    if(!s_gdipOK) return;
+    Graphics g(dc); g.SetSmoothingMode(SmoothingModeAntiAlias);
+    Rect r(rc.left,rc.top,rc.right-rc.left-1,rc.bottom-rc.top-1);
+    if(r.Width<=0 || r.Height<=0) return;
+    GraphicsPath p; roundPath(p,r,rad);
+    SolidBrush br(C(fill,alpha));
+    if(br.GetLastStatus()==Ok) g.FillPath(&br,&p);
 }
 
 // ---------------------------------------------------------------------------
@@ -203,12 +226,11 @@ void gpLine(HDC dc, int x1,int y1,int x2,int y2, COLORREF col, float w, int alph
 }
 
 // ----------------------------------------------------- background image -----
-//  Decode the embedded JPEG (RCDATA 103/104) once and cache it. The image is
-//  loaded from an IStream wrapped around the resource bytes.
-static Image* s_bgLight = NULL;
-static Image* s_bgDark  = NULL;
-
-static Image* loadBgImage(int resId){
+//  Decode an embedded JPEG/PNG into an Image while retaining the source stream.
+//  Image::FromStream may decode lazily; releasing `st` while the Image is cached
+//  is explicitly unsupported and caused empty logo circles on some GDI+ builds.
+static Image* loadResourceImage(int resId, IStream** retainedStream){
+    if(retainedStream) *retainedStream=NULL;
     HRSRC hr = FindResourceW(g_hInst, MAKEINTRESOURCEW(resId), RT_RCDATA);
     if(!hr) return NULL;
     HGLOBAL hg = LoadResource(g_hInst, hr);
@@ -217,14 +239,28 @@ static Image* loadBgImage(int resId){
     if(!dat || !sz) return NULL;
     HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, sz);
     if(!mem) return NULL;
-    void* p = GlobalLock(mem); memcpy(p, dat, sz); GlobalUnlock(mem);
+    void* p = GlobalLock(mem);
+    if(!p){ GlobalFree(mem); return NULL; }
+    memcpy(p, dat, sz); GlobalUnlock(mem);
     IStream* st = NULL;
     if(CreateStreamOnHGlobal(mem, TRUE, &st) != S_OK){ GlobalFree(mem); return NULL; }
     Image* img = Image::FromStream(st);
-    st->Release();   // stream owns the HGLOBAL now (TRUE), released with image use
-    if(img && img->GetLastStatus()!=Ok){ delete img; img=NULL; }
+    if(!img || img->GetLastStatus()!=Ok){
+        delete img;
+        st->Release();
+        return NULL;
+    }
+    if(retainedStream) *retainedStream=st;
+    else st->Release();
     return img;
 }
+
+// Decode the embedded JPEG (RCDATA 103/104) once and cache it together with its
+// owning stream. The stream owns the copied HGLOBAL (fDeleteOnRelease=TRUE).
+static Image*   s_bgLight       = NULL;
+static Image*   s_bgDark        = NULL;
+static IStream* s_bgLightStream = NULL;
+static IStream* s_bgDarkStream  = NULL;
 
 // ---------------------------------------------------------------------------
 //  v1.63.0 PERFORMANCE FIX — cached background composite.
@@ -262,7 +298,8 @@ void gpFreeBackgroundCache(){
 static bool buildBgComposite(HDC ref, int W, int H, bool dark,
                              COLORREF scrim, int scrimA){
     Image*& slot = dark ? s_bgDark : s_bgLight;
-    if(!slot) slot = loadBgImage(dark ? 104 : 103);
+    IStream*& stream = dark ? s_bgDarkStream : s_bgLightStream;
+    if(!slot) slot = loadResourceImage(dark ? 104 : 103, &stream);
     if(!slot) return false;
     REAL iw = (REAL)slot->GetWidth(), ih = (REAL)slot->GetHeight();
     if(iw<=0||ih<=0) return false;
@@ -309,32 +346,37 @@ bool gpDrawBackground(HDC dc, RECT rc, bool dark, COLORREF scrim, int scrimA){
 //  Real (raster) icons embedded as RCDATA PNGs are drawn white-on-alpha and
 //  recoloured to any theme colour at draw time via a GDI+ colour matrix. This
 //  gives the print buttons proper image icons that still adapt to the theme.
-static Image* s_iconCache[8] = {0};   // small fixed cache keyed by slot
-static int    s_iconResId[8] = {0};
+static const int RES_IMAGE_CACHE_SIZE = 16;
+static Image*   s_iconCache[RES_IMAGE_CACHE_SIZE] = {0};
+static IStream* s_iconStream[RES_IMAGE_CACHE_SIZE] = {0};
+static int      s_iconResId[RES_IMAGE_CACHE_SIZE] = {0};
 
-static Image* loadResImage(int resId){
-    HRSRC hr = FindResourceW(g_hInst, MAKEINTRESOURCEW(resId), RT_RCDATA);
-    if(!hr) return NULL;
-    HGLOBAL hg = LoadResource(g_hInst, hr);
-    DWORD   sz = SizeofResource(g_hInst, hr);
-    void*  dat = LockResource(hg);
-    if(!dat || !sz) return NULL;
-    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, sz);
-    if(!mem) return NULL;
-    void* p = GlobalLock(mem); memcpy(p, dat, sz); GlobalUnlock(mem);
-    IStream* st = NULL;
-    if(CreateStreamOnHGlobal(mem, TRUE, &st) != S_OK){ GlobalFree(mem); return NULL; }
-    Image* img = Image::FromStream(st);
-    st->Release();
-    if(img && img->GetLastStatus()!=Ok){ delete img; img=NULL; }
-    return img;
-}
 static Image* cachedResImage(int resId){
-    for(int i=0;i<8;i++) if(s_iconResId[i]==resId && s_iconCache[i]) return s_iconCache[i];
-    for(int i=0;i<8;i++) if(!s_iconCache[i]){
-        s_iconCache[i]=loadResImage(resId); s_iconResId[i]=resId; return s_iconCache[i];
+    for(int i=0;i<RES_IMAGE_CACHE_SIZE;i++)
+        if(s_iconResId[i]==resId) return s_iconCache[i];
+    for(int i=0;i<RES_IMAGE_CACHE_SIZE;i++) if(s_iconResId[i]==0){
+        // Cache failures too; otherwise a missing/corrupt resource is decoded
+        // again on every paint and can become a persistent FPS drain.
+        s_iconResId[i]=resId;
+        s_iconCache[i]=loadResourceImage(resId,&s_iconStream[i]);
+        return s_iconCache[i];
     }
-    return loadResImage(resId);   // cache full → load transient (rare)
+    // The app currently embeds fewer image resources than the fixed cache can
+    // hold. Refuse an uncached lazy image rather than returning one whose stream
+    // cannot be owned and whose lifetime the caller cannot express.
+    return NULL;
+}
+
+static void freeCachedResourceImages(){
+    delete s_bgLight; s_bgLight=NULL;
+    delete s_bgDark;  s_bgDark=NULL;
+    if(s_bgLightStream){ s_bgLightStream->Release(); s_bgLightStream=NULL; }
+    if(s_bgDarkStream){ s_bgDarkStream->Release(); s_bgDarkStream=NULL; }
+    for(int i=0;i<RES_IMAGE_CACHE_SIZE;i++){
+        delete s_iconCache[i]; s_iconCache[i]=NULL;
+        if(s_iconStream[i]){ s_iconStream[i]->Release(); s_iconStream[i]=NULL; }
+        s_iconResId[i]=0;
+    }
 }
 
 //  Draw RCDATA PNG `resId` centred & aspect-fit inside `rc`, recoloured to

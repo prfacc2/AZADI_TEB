@@ -6,6 +6,8 @@
 //  This is the single source of truth — the UI never fabricates prices,
 //  identities or bill amounts.
 // ============================================================================
+#include "service_identity.h"
+#include "service_canonicalization.h"
 
 // ---- serialize a PatientRow to JSON (v1.40.0 struct-based, authoritative) ---
 //  The struct overload is the single source of truth for the wire format; the
@@ -130,8 +132,8 @@ static bool adCatalogPrice(const std::vector<ServiceDef>& catalog,
     double n=0;
     std::string codeU; jsonGetString(obj,"code",codeU);
     std::string nameU; jsonGetString(obj,"name",nameU);
-    std::wstring want     = normDigits(trim(u82w(codeU)));
-    std::wstring wantName = trim(u82w(nameU));
+    std::wstring want     = serviceIdentityKey(u82w(codeU));
+    std::wstring wantName = serviceIdentityKey(u82w(nameU));
 
     if(freeRate){
         // Manual («آزاد») rate row: trust the typed amount, but still bind the
@@ -139,7 +141,7 @@ static bool adCatalogPrice(const std::vector<ServiceDef>& catalog,
         price = (jsonGetNumber(obj,"freePrice",n) && n>0) ? (long long)llround(n) : 0;
         if(defOut && !want.empty()){
             for(const auto& s:catalog)
-                if(s.status!=0 && normDigits(trim(s.code))==want){ *defOut=&s; break; }
+                if(s.status!=0 && serviceIdentityKey(s.code)==want){ *defOut=&s; break; }
         }
         return !(want.empty() && wantName.empty() && price<=0);
     }
@@ -147,18 +149,19 @@ static bool adCatalogPrice(const std::vector<ServiceDef>& catalog,
     // exact code match first — price 0 is accepted (رایگان است، حذف نمی‌شود)
     if(!want.empty()){
         for(const auto& s:catalog){
-            if(s.status!=0 && normDigits(trim(s.code))==want){
+            if(s.status!=0 && serviceIdentityKey(s.code)==want){
                 price=s.price; if(price<0) price=0;
                 if(defOut) *defOut=&s;
                 return true;
             }
         }
     }
-    // fallback — match by NAME so a row whose code was cleared in the form
-    // still binds to its catalogue entry and prints with real data.
-    if(!wantName.empty()){
+    // Name is only a fallback when the submitted row has no code. A non-empty
+    // unmatched code must not silently bind to a different same-named service,
+    // because that would change both identity and authoritative catalogue price.
+    if(want.empty()&&!wantName.empty()){
         for(const auto& s:catalog){
-            if(s.status!=0 && trim(s.name)==wantName){
+            if(s.status!=0 && serviceIdentityKey(s.name)==wantName){
                 price=s.price; if(price<0) price=0;
                 if(defOut) *defOut=&s;
                 return true;
@@ -166,13 +169,11 @@ static bool adCatalogPrice(const std::vector<ServiceDef>& catalog,
         }
     }
     // Not in the catalogue at all (deleted/deactivated service, or a row typed
-    // by hand). NEVER drop it: keep whatever the form sent so the operator sees
-    // on paper exactly what they selected on screen.
+    // by hand). Keep its identity so it still prints, but never trust a normal-
+    // rate amount supplied by the browser: only an explicitly enabled manual/
+    // free rate may carry a submitted unit price.
     if(!want.empty() || !wantName.empty()){
         price=0;
-        if(jsonGetNumber(obj,"price",n) && n>0)          price=(long long)llround(n);
-        else if(jsonGetNumber(obj,"freePrice",n) && n>0) price=(long long)llround(n);
-        else if(jsonGetNumber(obj,"unit",n) && n>0)      price=(long long)llround(n);
         return true;
     }
     return false;   // truly empty row
@@ -305,14 +306,100 @@ static AdPatient adReadPatient(const std::string& body){
 }
 
 // ---- compute the bill for a record body (server-authoritative) -------------
-//  Mirrors the JS calc but is the trusted copy used for persistence + print.
-//  آزاد (base pct 0) → patient pays the full net; insured → reduced.
+// Services are first canonicalized by catalogue code/name. Repeated selections
+// merge into one line by adding quantity and discount; only then are every
+// amount and insurance share recomputed from authoritative unit prices.
 struct AdBill {
     long long gross=0, disc=0, org=0, supp=0, pat=0, paid=0;
     int insIdx=0, suppIdx=0, basePct=0, suppPct=0;
 };
+static std::vector<ServiceLine> adCanonicalServices(const std::string& body,
+        const std::vector<ServiceDef>& catalog,int basePct,int suppPct){
+    std::vector<ServiceLine> lines;
+    // Identity codes preserve what the browser actually submitted. Catalogue
+    // enrichment may fill an empty ServiceLine.code later, but duplicate-name
+    // fallback must still know that this particular selection arrived uncoded.
+    std::vector<std::wstring> identityCodes;
+    std::vector<bool> identityFreeRates;
+    std::string arr; jsonGetRaw(body,"services",arr);
+    size_t pos=0;
+    while(pos<arr.size()){
+        size_t o=arr.find('{',pos); if(o==std::string::npos) break;
+        int depth=0; bool inStr=false; size_t q=o;
+        for(;q<arr.size();++q){
+            char c=arr[q];
+            if(inStr){ if(c=='\\'){q++;continue;} if(c=='"') inStr=false; continue; }
+            if(c=='"'){ inStr=true; continue; }
+            if(c=='{') depth++;
+            else if(c=='}'){ depth--; if(depth==0){ q++; break; } }
+        }
+        std::string obj=arr.substr(o,q-o); pos=q;
+        long long unitPrice=0;
+        bool freeRate=jsonGetBool(obj,"freeRate",false);
+        const ServiceDef* def=nullptr;
+        if(!adCatalogPrice(catalog,obj,unitPrice,&def)) continue;
+
+        ServiceLine ln;
+        std::string cs,ns,cats,desc;
+        if(jsonGetString(obj,"code",cs))       ln.code=normDigits(trim(u82w(cs)));
+        if(jsonGetString(obj,"name",ns))       ln.name=trim(u82w(ns));
+        std::wstring identityCode=serviceIdentityKey(ln.code);
+        if(jsonGetString(obj,"category",cats)) ln.category=trim(u82w(cats));
+        if(jsonGetString(obj,"desc",desc))     ln.desc=trim(u82w(desc));
+        if(def){
+            ln.code=normDigits(trim(def->code));
+            ln.name=trim(def->name);
+            ln.category=trim(def->category);
+            ln.desc=trim(def->desc);
+            if(ln.desc.empty()) ln.desc=ln.category;
+        } else if(!freeRate) {
+            // Unknown/deactivated normal-rate rows may remain visible, but their
+            // amount is never accepted from the browser. A manual/free row keeps
+            // its explicitly submitted freePrice as its effective unit rate.
+            unitPrice=0;
+        }
+        if(ln.name.empty()){
+            if(!ln.desc.empty()) ln.name=ln.desc;
+            else if(!ln.category.empty()) ln.name=ln.category;
+            else ln.name=ln.code;
+        }
+
+        double qty=1,discount=0;
+        jsonGetNumber(obj,"qty",qty); jsonGetNumber(obj,"discount",discount);
+        if(qty<1) qty=1; if(qty>999) qty=999;
+        ln.qty=(int)qty; ln.price=unitPrice<0?0:unitPrice;
+        ln.discount=(long long)llround(discount); if(ln.discount<0) ln.discount=0;
+        long long gross=ln.price*(long long)ln.qty;
+        if(ln.discount>gross) ln.discount=gross;
+
+        // Codes are the primary identity. A shared display name is only a
+        // fallback when at least one row genuinely has no code; normal/free or
+        // effective-price variants remain distinct.
+        serviceCanonicalAdd(lines,identityCodes,identityFreeRates,ln,
+                            identityCode,freeRate);
+    }
+
+    for(auto& ln:lines){
+        int qty=ln.qty>0?ln.qty:1;
+        long long gross=ln.price*(long long)qty;
+        if(ln.discount<0) ln.discount=0; if(ln.discount>gross) ln.discount=gross;
+        long long net=gross-ln.discount;
+        long long org=(long long)llround((double)net*basePct/100.0);
+        if(org<0) org=0; if(org>net) org=net;
+        long long afterBase=net-org;
+        long long sup=(long long)llround((double)afterBase*suppPct/100.0);
+        if(sup<0) sup=0; if(sup>afterBase) sup=afterBase;
+        ln.insShare=org+sup;
+        ln.patShare=afterBase-sup;
+    }
+    // Stable variant ordering makes canonical rows, printed order and totals
+    // identical for normal→free and free→normal submissions.
+    serviceCanonicalSort(lines,identityCodes,identityFreeRates);
+    return lines;
+}
 static AdBill adComputeBill(const std::string& body,
-                            const std::vector<ServiceDef>& catalog){
+                            const std::vector<ServiceDef>& catalog,
+                            std::vector<ServiceLine>* canonicalOut=nullptr){
     AdBill b;
     bool hasIns=jsonGetBool(body,"hasIns",false);
     double d;
@@ -323,62 +410,40 @@ static AdBill adComputeBill(const std::string& body,
     if(b.suppIdx<0 || b.suppIdx>=N_SUPP) b.suppIdx=0;
     if(hasIns) b.basePct=INSURANCES[b.insIdx].pct;
     if(b.suppPct<=0) b.suppPct=SUPP_INSURANCES[b.suppIdx].pct;
-    // Never permit malformed client percentages to create a negative patient
-    // share or an insurer share above the net invoice.
     if(b.basePct<0) b.basePct=0; if(b.basePct>100) b.basePct=100;
     if(b.suppPct<0) b.suppPct=0; if(b.suppPct>100) b.suppPct=100;
     if(!hasIns){ b.basePct=0; b.insIdx=0; }
 
-    // Walk the services array. Normal rates are always resolved from the live
-    // Management catalog; only an explicitly enabled free-rate row may carry a
-    // manual freePrice. This is the authoritative C++ pricing boundary.
-    std::string arr; jsonGetRaw(body,"services",arr);
-    // iterate objects inside arr
-    size_t p=0;
-    while(p<arr.size()){
-        size_t o=arr.find('{',p); if(o==std::string::npos) break;
-        int depth=0; bool inStr=false; size_t q=o;
-        for(;q<arr.size();++q){
-            char c=arr[q];
-            if(inStr){ if(c=='\\'){q++;continue;} if(c=='"') inStr=false; continue; }
-            if(c=='"'){ inStr=true; continue; }
-            if(c=='{') depth++;
-            else if(c=='}'){ depth--; if(depth==0){ q++; break; } }
-        }
-        std::string obj=arr.substr(o,q-o);
-        p=q;
-        long long unitPrice=0;
-        double qty=1, discount=0;
-        if(!adCatalogPrice(catalog,obj,unitPrice)) continue;
-        jsonGetNumber(obj,"qty",qty);
-        jsonGetNumber(obj,"discount",discount);
-        if(qty<1) qty=1; if(qty>999) qty=999;
-        long long g=unitPrice*(long long)qty;
-        long long ds=(long long)llround(discount);
-        if(ds<0) ds=0; if(ds>g) ds=g;
-        long long net=g-ds; if(net<0) net=0;
+    std::vector<ServiceLine> lines=adCanonicalServices(body,catalog,b.basePct,b.suppPct);
+    for(const auto& ln:lines){
+        long long gross=ln.price*(long long)(ln.qty>0?ln.qty:1);
+        b.gross+=gross; b.disc+=ln.discount; b.pat+=ln.patShare;
+    }
+    // ServiceLine stores combined base+supp insurance. Split it into invoice
+    // buckets with the same authoritative formula used for each canonical row.
+    for(const auto& ln:lines){
+        long long net=ln.price*(long long)(ln.qty>0?ln.qty:1)-ln.discount;
         long long org=(long long)llround((double)net*b.basePct/100.0);
+        if(org<0) org=0; if(org>net) org=net;
         long long afterBase=net-org;
         long long sup=(long long)llround((double)afterBase*b.suppPct/100.0);
-        if(org<0) org=0; if(org>net) org=net;
-        afterBase=net-org;
         if(sup<0) sup=0; if(sup>afterBase) sup=afterBase;
-        long long patShare=afterBase-sup;
-        b.gross+=g; b.disc+=ds; b.org+=org; b.supp+=sup; b.pat+=patShare;
+        b.org+=org; b.supp+=sup;
     }
-    bool noPay=jsonGetBool(body,"noPay",false);
-    b.paid = noPay ? 0 : b.pat;
+    b.paid=jsonGetBool(body,"noPay",false)?0:b.pat;
+    if(canonicalOut) *canonicalOut=lines;
     return b;
 }
 static AdBill adComputeBill(const std::string& body){
-    return adComputeBill(body,loadServices());
+    return adComputeBill(body,loadServices(),nullptr);
 }
 
 // ---- build a ReceptionRecord from a record body ---------------------------
 static ReceptionRecord adBuildRecord(const std::string& body){
     AdPatient p=adReadPatient(body);
     const std::vector<ServiceDef> catalog=loadServices();
-    AdBill b=adComputeBill(body,catalog);
+    std::vector<ServiceLine> canonicalServices;
+    AdBill b=adComputeBill(body,catalog,&canonicalServices);
     ReceptionRecord r;
     r.firstName=p.first; r.lastName=p.last; r.nationalId=p.nid;
     r.fatherName=p.father; r.birthDate=p.birth; r.gender=p.gender;
@@ -409,79 +474,9 @@ static ReceptionRecord adBuildRecord(const std::string& body){
     r.paid=b.paid;
     r.insPercent=b.basePct; r.suppPercent=b.suppPct;
 
-    // §1.51.0: capture the services list so the print pipeline (PIT_SERVICES)
-    // can render a dynamic services table. We re-walk the same JSON array the
-    // bill walker used and compute per-line insurance/patient shares with the
-    // identical formula so the printed table always matches the bill totals.
-    {
-        int basePct=b.basePct, suppPct=b.suppPct;
-        std::string arr; jsonGetRaw(body,"services",arr);
-        size_t pos=0;
-        while(pos<arr.size()){
-            size_t o=arr.find('{',pos); if(o==std::string::npos) break;
-            int depth=0; bool inStr=false; size_t q=o;
-            for(;q<arr.size();++q){
-                char c=arr[q];
-                if(inStr){ if(c=='\\'){q++;continue;} if(c=='"') inStr=false; continue; }
-                if(c=='"'){ inStr=true; continue; }
-                if(c=='{') depth++;
-                else if(c=='}'){ depth--; if(depth==0){ q++; break; } }
-            }
-            std::string obj=arr.substr(o,q-o);
-            pos=q;
-            ServiceLine ln;
-            std::string cs, ns, cats, desc;
-            if(jsonGetString(obj,"code",cs))       ln.code=normDigits(u82w(cs));
-            if(jsonGetString(obj,"name",ns))       ln.name=u82w(ns);
-            if(jsonGetString(obj,"category",cats)) ln.category=u82w(cats);
-            if(jsonGetString(obj,"desc",desc))     ln.desc=u82w(desc);
-            long long unitPrice=0;
-            double qty=1, discount=0;
-            const ServiceDef* def=nullptr;
-            if(!adCatalogPrice(catalog,obj,unitPrice,&def)) continue;
-            // v1.60.0 — HARD BIND to the Management catalogue. نام/شرح/دسته/کد
-            // of the printed line ALWAYS come from the catalogue entry that
-            // priced the row; the HTML form is never trusted for these fields.
-            // This is what finally puts «تزریقات + تعداد + شرح» on EVERY print.
-            if(def){
-                if(!def->name.empty())     ln.name     = def->name;
-                if(!def->category.empty()) ln.category = def->category;
-                if(!def->desc.empty())     ln.desc     = def->desc;
-                else if(ln.desc.empty())   ln.desc     = def->category;
-                if(ln.code.empty()) ln.code=normDigits(def->code);
-            }
-            // v1.61.0 — a printed line must never be blank. If neither the
-            // catalogue nor the form supplied a name, fall back to the code or
-            // the category so the services table always shows something real.
-            if(trim(ln.name).empty()){
-                if(!trim(ln.category).empty())   ln.name=ln.category;
-                else if(!trim(ln.code).empty())  ln.name=L"خدمت "+ln.code;
-                else if(!trim(ln.desc).empty())  ln.name=ln.desc;
-                else                             ln.name=L"خدمت";
-            }
-            if(trim(ln.desc).empty()) ln.desc = trim(ln.category).empty()? ln.name : ln.category;
-            jsonGetNumber(obj,"qty",qty);
-            jsonGetNumber(obj,"discount",discount);
-            if(qty<1) qty=1; if(qty>999) qty=999;
-            ln.price=unitPrice;
-            ln.qty=(int)qty;
-            ln.discount=(long long)llround(discount);
-            long long maxDisc=ln.price*(long long)ln.qty;
-            if(ln.discount<0) ln.discount=0;
-            if(ln.discount>maxDisc) ln.discount=maxDisc;
-            long long g=ln.price*(long long)ln.qty;
-            long long net=g-ln.discount; if(net<0) net=0;
-            long long org=(long long)llround((double)net*basePct/100.0);
-            long long afterBase=net-org;
-            long long sup=(long long)llround((double)afterBase*suppPct/100.0);
-            if(org<0) org=0; if(org>net) org=net;
-            afterBase=net-org;
-            if(sup<0) sup=0; if(sup>afterBase) sup=afterBase;
-            ln.insShare=org+sup;
-            ln.patShare=afterBase-sup;
-            r.services.push_back(ln);
-        }
-    }
+    // Print exactly the canonical rows used for the authoritative bill.
+    r.services.swap(canonicalServices);
+
     return r;
 }
 

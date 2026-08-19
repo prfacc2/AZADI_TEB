@@ -168,6 +168,7 @@
   var transport = null;      /* 'webview' | 'external' | 'http' */
   var readyCbs = [];
   var isReady = false;
+  var allowHttp = global.__AZADI_DEV_ALLOW_HTTP__ === true;
 
   function bridgeReadyFire() {
     if (isReady) return;
@@ -217,7 +218,7 @@
       if (typeof d === 'string') { d = parseJson(d); if (!d) return; }
       handleInbound(d);
     });
-    try { wv.postMessage(JSON.stringify({ verb: 'ready', id: 'ready', page: _pageId })); } catch (e) {}
+    try { wv.postMessage({ verb: 'ready', id: 'ready', page: _pageId }); } catch (e) {}
     bridgeReadyFire();
     return true;
   }
@@ -229,7 +230,7 @@
     pending[id] = d;
     try {
       global.chrome.webview.postMessage(
-        JSON.stringify({ verb: verb, id: id, page: _pageId, payload: payload || {} }));
+        { verb: verb, id: id, page: _pageId, payload: payload || {} });
     } catch (e) { delete pending[id]; d.reject(e); return d.promise(); }
     setTimeout(function () {
       if (pending[id]) { delete pending[id]; d.reject(new Error('timeout: ' + verb)); }
@@ -324,7 +325,10 @@
   function rawCall(verb, payload) {
     if (transport === 'webview') return callWebView(verb, payload);
     if (transport === 'external') return callExternal(verb, payload);
-    return callHttp(verb, payload);
+    if (transport === 'http' && allowHttp) return callHttp(verb, payload);
+    var d = new Deferred();
+    d.reject(new Error('native bridge unavailable'));
+    return d.promise();
   }
 
   /* dedup key — identical concurrent (verb,payload) requests share one call. */
@@ -494,9 +498,12 @@
   /* ======================================================================= */
   _pageId = readPageId();
 
-  /* auto-select transport: WebView2 → window.external (serverless MSHTML) →
-     HTTP (dev harness only). */
-  if (!initWebView()) { if (!initExternal()) initHttp(); }
+  /* Production embedded pages require a native transport. Standalone dev
+     harnesses must explicitly set window.__AZADI_DEV_ALLOW_HTTP__ = true. */
+  if (!initWebView() && !initExternal() && allowHttp) initHttp();
+  if (!transport) {
+    try { global.__AZADI_BRIDGE_FATAL__ = 'native bridge unavailable'; } catch (e) {}
+  }
 
   /* apply the persisted theme early (best-effort). */
   (function () {

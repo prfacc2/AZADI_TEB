@@ -55,6 +55,7 @@ static void mshtmlSetBrowserEmulation(){
 // ============================================================================
 struct MshtmlExternal : public IDispatch {
     LONG rc=1;
+    volatile LONG initHits=0;
     static const DISPID DISPID_AZCALL=1;
     virtual ~MshtmlExternal(){}
 
@@ -100,6 +101,7 @@ struct MshtmlExternal : public IDispatch {
             return out;
         };
         std::string verb=argStr(0);
+        if(verb=="init") InterlockedIncrement(&initHits);
         std::string payload=argStr(1); if(payload.empty()) payload="{}";
         std::string page=argStr(2);
         std::string reply=AdmissionDispatchVerb(verb,payload,page);
@@ -301,133 +303,170 @@ static LRESULT CALLBACK mshtmlHostProc(HWND h, UINT m, WPARAM w, LPARAM l){
 // ---------------------------------------------------------------------------
 static HWND MshtmlAdmission_CreateView(HWND parent){
     if(!parent) return nullptr;
-    // v1.66.0: serverless — the page is inlined from RCDATA, no host needed.
-    if(AdmissionInlinePage(false).empty()) return nullptr;
+    const std::string& page=AdmissionInlinePage(false);
+    if(page.empty()) return nullptr;
     mshtmlSetBrowserEmulation();
-    if(FAILED(OleInitialize(NULL))) { /* may already be init'd */ }
+    OleInitialize(NULL); // S_FALSE is normal when this UI thread is initialized.
 
     static bool cls=false; static const wchar_t* CLS=L"AzMshtmlAdmHost";
     if(!cls){
         WNDCLASSW wc={}; wc.lpfnWndProc=mshtmlHostProc; wc.hInstance=g_hInst;
         wc.hCursor=LoadCursor(NULL,IDC_ARROW);
         wc.hbrBackground=(HBRUSH)(COLOR_WINDOW+1);
-        wc.lpszClassName=CLS; RegisterClassW(&wc); cls=true;
+        wc.lpszClassName=CLS;
+        if(!RegisterClassW(&wc) && GetLastError()!=ERROR_CLASS_ALREADY_EXISTS)
+            return nullptr;
+        cls=true;
     }
     RECT rc; GetClientRect(parent,&rc);
-    HWND host=CreateWindowExW(0,CLS,L"",WS_CHILD|WS_VISIBLE|WS_CLIPCHILDREN,
+    // Keep the host hidden until activation, navigation, document.write and
+    // the native bridge have all succeeded; callers otherwise see a blank box.
+    HWND host=CreateWindowExW(0,CLS,L"",WS_CHILD|WS_CLIPCHILDREN,
         0,0,rc.right,rc.bottom,parent,NULL,g_hInst,NULL);
     if(!host) return nullptr;
 
     MshtmlView* v=new MshtmlView(); v->host=host;
     MshtmlHost* site=new MshtmlHost(host); v->site=site;
+    bool registered=false;
+    auto fail=[&]()->HWND{
+        if(registered){
+            std::lock_guard<std::mutex> lk(g_mshtmlMx);
+            g_mshtmlViews.erase(host);
+            registered=false;
+        }
+        // v1.68.0 CRASH FIX — correct OLE teardown order. Close() must run
+        // BEFORE any interface ref is dropped or the host window is destroyed:
+        // it synchronously deactivates in-place and stops the control, calling
+        // back into the (still-alive) site. Releasing ipao/wb first, or tearing
+        // down the window while Trident still holds queued callbacks, lets a
+        // late callback dispatch into a half-destroyed MshtmlHost vtable → a
+        // call through a wild/freed pointer (the reported 0xC0000005 with
+        // EIP=0xFFxxxxxx, "Fault: <unknown>"). Order: Stop → Close → disconnect
+        // site → release interfaces → release object → destroy window →
+        // release site → delete view.
+        if(v->wb) v->wb->Stop();
+        if(v->oleObj){
+            v->oleObj->Close(OLECLOSE_NOSAVE);
+            v->oleObj->SetClientSite(NULL);
+        }
+        if(v->ipao){ v->ipao->Release(); v->ipao=nullptr; }
+        if(v->wb){ v->wb->Release(); v->wb=nullptr; }
+        if(v->oleObj){ v->oleObj->Release(); v->oleObj=nullptr; }
+        if(IsWindow(host)) DestroyWindow(host);
+        site->Release(); delete v;
+        Breadcrumb(L"admission mshtml: create failed → native fallback");
+        return nullptr;
+    };
 
     IOleObject* oleObj=nullptr;
     HRESULT hr=CoCreateInstance(CLSID_WebBrowser,NULL,CLSCTX_INPROC_SERVER,
         IID_IOleObject,(void**)&oleObj);
-    if(FAILED(hr)||!oleObj){
-        DestroyWindow(host); site->Release(); delete v; return nullptr;
-    }
+    if(FAILED(hr)||!oleObj) return fail();
     v->oleObj=oleObj; site->oleObj=oleObj;
-    oleObj->SetClientSite(site);
+    hr=oleObj->SetClientSite(site);
+    if(FAILED(hr)) return fail();
 
-    // Register our IDocHostUIHandler on the control so MSHTML consults it for
-    // TranslateAccelerator (this is what routes Tab/Enter/Ctrl+A into the page).
-    {
-        ICustomDocLocal* cd=nullptr;
-        if(SUCCEEDED(oleObj->QueryInterface(IID_ICustomDoc_local,(void**)&cd)) && cd){
-            cd->SetUIHandler(static_cast<IDocHostUIHandler*>(site));
-            cd->Release();
-        }
-    }
-
-    // in-place activate
     RECT r2; GetClientRect(host,&r2);
     hr=oleObj->DoVerb(OLEIVERB_INPLACEACTIVATE,NULL,site,0,host,&r2);
+    if(FAILED(hr)) return fail();
 
-    // Grab the in-place active object so the message pump can call
-    // IOleInPlaceActiveObject::TranslateAccelerator on every WM_KEYDOWN.
-    if(SUCCEEDED(hr)){
-        IOleInPlaceActiveObject* ipao=nullptr;
-        if(SUCCEEDED(oleObj->QueryInterface(IID_IOleInPlaceActiveObject,(void**)&ipao)) && ipao)
-            v->ipao=ipao;
-    }
+    hr=oleObj->QueryInterface(IID_IOleInPlaceActiveObject,(void**)&v->ipao);
+    if(FAILED(hr) || !v->ipao) return fail();
 
     IWebBrowser2* wb=nullptr;
-    if(SUCCEEDED(oleObj->QueryInterface(IID_IWebBrowser2,(void**)&wb)) && wb){
-        v->wb=wb; site->wb=wb;
-        // Suppress any legacy script-error dialogs (the old "Script Error / Do you
-        // want to continue…" popups). With ES5-safe JS there should be none, but
-        // this guarantees a clean, dialog-free surface no matter what.
-        wb->put_Silent(VARIANT_TRUE);
-        wb->put_Width(r2.right); wb->put_Height(r2.bottom);
-        { std::lock_guard<std::mutex> lk(g_mshtmlMx); g_mshtmlViews[host]=v; }
-        // Give the WebBrowser control keyboard focus so it owns the tab-stop
-        // chain the moment the admission tab becomes visible.
-        SetFocus(host);
-        // v1.66.0 SERVERLESS: navigate to about:blank (no protocol, no zone
-        // lockdown, no network at all), pump until the blank document is
-        // READYSTATE_COMPLETE, then write the fully-inlined page into it.
-        // Writing into a NULL/still-loading document is the classic cause of a
-        // silently blank Trident view, hence the bounded readiness pump.
-        VARIANT ve; VariantInit(&ve);
-        BSTR burl=SysAllocString(L"about:blank");
-        wb->Navigate(burl,&ve,&ve,&ve,&ve);
-        SysFreeString(burl);
-        {
-            DWORD t0=GetTickCount(); MSG pm;
-            for(;;){
-                READYSTATE rs=READYSTATE_UNINITIALIZED;
-                if(SUCCEEDED(wb->get_ReadyState(&rs)) && rs==READYSTATE_COMPLETE) break;
-                if(GetTickCount()-t0>6000) break;
-                if(PeekMessageW(&pm,NULL,0,0,PM_REMOVE)){
-                    TranslateMessage(&pm); DispatchMessageW(&pm);
-                } else Sleep(5);
-            }
-        }
-        bool wrote=false;
-        {
-            IDispatch* dd=nullptr;
-            if(SUCCEEDED(wb->get_Document(&dd)) && dd){
-                IHTMLDocument2* doc=nullptr;
-                if(SUCCEEDED(dd->QueryInterface(IID_IHTMLDocument2,(void**)&doc)) && doc){
-                    const std::string& page=AdmissionInlinePage(false);
-                    std::wstring wpage=u82w(page);
-                    BSTR bpage=SysAllocStringLen(wpage.c_str(),(UINT)wpage.size());
-                    SAFEARRAY* sa=SafeArrayCreateVector(VT_VARIANT,0,1);
-                    if(sa && bpage){
-                        VARIANT* pv=nullptr;
-                        if(SUCCEEDED(SafeArrayAccessData(sa,(void**)&pv)) && pv){
-                            pv[0].vt=VT_BSTR; pv[0].bstrVal=bpage;
-                            SafeArrayUnaccessData(sa);
-                            doc->write(sa);
-                            doc->close();
-                            wrote=true;
-                        }
-                    }
-                    if(sa) SafeArrayDestroy(sa);   // frees bpage (owned by the array)
-                    else if(bpage) SysFreeString(bpage);
-                    doc->Release();
-                }
-                dd->Release();
-            }
-        }
-        if(!wrote){
-            // no document — tear down so the caller falls back to native GDI.
-            { std::lock_guard<std::mutex> lk(g_mshtmlMx); g_mshtmlViews.erase(host); }
-            if(v->ipao){ v->ipao->Release(); v->ipao=nullptr; }
-            wb->Stop(); wb->Release(); v->wb=nullptr;
-            oleObj->Close(OLECLOSE_NOSAVE); oleObj->SetClientSite(NULL);
-            oleObj->Release(); v->oleObj=nullptr;
-            DestroyWindow(host); site->Release(); delete v;
-            return nullptr;
-        }
-        return host;
-    }
+    hr=oleObj->QueryInterface(IID_IWebBrowser2,(void**)&wb);
+    if(FAILED(hr)||!wb) return fail();
+    v->wb=wb; site->wb=wb;
+    if(FAILED(wb->put_Silent(VARIANT_TRUE)) ||
+       FAILED(wb->put_Width(r2.right)) || FAILED(wb->put_Height(r2.bottom)))
+        return fail();
 
-    // failed to get IWebBrowser2
-    oleObj->Release(); v->oleObj=nullptr;
-    DestroyWindow(host); site->Release(); delete v;
-    return nullptr;
+    // Navigate to an in-process blank document and require actual readiness.
+    VARIANT ve; VariantInit(&ve);
+    BSTR burl=SysAllocString(L"about:blank");
+    if(!burl) return fail();
+    hr=wb->Navigate(burl,&ve,&ve,&ve,&ve);
+    SysFreeString(burl);
+    if(FAILED(hr)) return fail();
+
+    bool docReady=false;
+    DWORD t0=GetTickCount(); MSG pm;
+    while(GetTickCount()-t0<=6000){
+        READYSTATE rs=READYSTATE_UNINITIALIZED;
+        if(SUCCEEDED(wb->get_ReadyState(&rs)) && rs==READYSTATE_COMPLETE){
+            docReady=true; break;
+        }
+        if(PeekMessageW(&pm,NULL,0,0,PM_REMOVE)){
+            TranslateMessage(&pm); DispatchMessageW(&pm);
+        } else Sleep(5);
+    }
+    if(!docReady) return fail();
+
+    IDispatch* dd=nullptr;
+    hr=wb->get_Document(&dd);
+    if(FAILED(hr)||!dd) return fail();
+    // ICustomDoc belongs to the loaded HTML document, not the outer OLE object.
+    // Installing it here makes window.external and accelerator routing reliable.
+    ICustomDocLocal* cd=nullptr;
+    hr=dd->QueryInterface(IID_ICustomDoc_local,(void**)&cd);
+    if(FAILED(hr)||!cd){ dd->Release(); return fail(); }
+    hr=cd->SetUIHandler(static_cast<IDocHostUIHandler*>(site));
+    cd->Release();
+    if(FAILED(hr)){ dd->Release(); return fail(); }
+    IHTMLDocument2* doc=nullptr;
+    hr=dd->QueryInterface(IID_IHTMLDocument2,(void**)&doc);
+    dd->Release();
+    if(FAILED(hr)||!doc) return fail();
+
+    std::wstring wpage=u82w(page);
+    BSTR bpage=SysAllocStringLen(wpage.c_str(),(UINT)wpage.size());
+    SAFEARRAY* sa=SafeArrayCreateVector(VT_VARIANT,0,1);
+    if(!sa || !bpage){
+        if(sa) SafeArrayDestroy(sa);
+        if(bpage) SysFreeString(bpage);
+        doc->Release(); return fail();
+    }
+    VARIANT* pv=nullptr;
+    hr=SafeArrayAccessData(sa,(void**)&pv);
+    if(FAILED(hr)||!pv){
+        SafeArrayDestroy(sa); SysFreeString(bpage);
+        doc->Release(); return fail();
+    }
+    VariantInit(&pv[0]);
+    pv[0].vt=VT_BSTR; pv[0].bstrVal=bpage; // SAFEARRAY owns the BSTR now.
+    hr=SafeArrayUnaccessData(sa);
+    if(FAILED(hr)){
+        SafeArrayDestroy(sa);
+        doc->Release(); return fail();
+    }
+    hr=doc->write(sa);
+    if(SUCCEEDED(hr)) hr=doc->close();
+    SafeArrayDestroy(sa);
+    doc->Release();
+    if(FAILED(hr)) return fail();
+
+    // Require the bundled JS to call init through window.external before
+    // exposing the child. A parser/bridge failure therefore falls back to the
+    // native form instead of leaving a blank or permanently loading host.
+    bool bridgeReady=false;
+    t0=GetTickCount();
+    while(GetTickCount()-t0<=6000){
+        if(InterlockedCompareExchange(&site->external->initHits,0,0)>0){
+            bridgeReady=true; break;
+        }
+        if(PeekMessageW(&pm,NULL,0,0,PM_REMOVE)){
+            TranslateMessage(&pm); DispatchMessageW(&pm);
+        } else Sleep(5);
+    }
+    if(!bridgeReady) return fail();
+
+    {
+        std::lock_guard<std::mutex> lk(g_mshtmlMx);
+        g_mshtmlViews[host]=v; registered=true;
+    }
+    ShowWindow(host,SW_SHOW);
+    SetFocus(host);
+    return host;
 }
 
 static void MshtmlAdmission_Resize(HWND host, int, int){ mshtmlResize(host); }
@@ -467,9 +506,17 @@ static void MshtmlAdmission_Destroy(HWND host){
     { std::lock_guard<std::mutex> lk(g_mshtmlMx);
       auto it=g_mshtmlViews.find(host); if(it!=g_mshtmlViews.end()){ v=it->second; g_mshtmlViews.erase(it); } }
     if(!v) return;
+    // v1.68.0: same correct teardown order as the create-time fail() path —
+    // Close+disconnect first (site alive for deactivation callbacks), then
+    // release interfaces/object, then destroy the window, then release site.
+    if(v->wb) v->wb->Stop();
+    if(v->oleObj){
+        v->oleObj->Close(OLECLOSE_NOSAVE);
+        v->oleObj->SetClientSite(NULL);
+    }
     if(v->ipao){ v->ipao->Release(); v->ipao=nullptr; }
-    if(v->wb){ v->wb->Stop(); v->wb->Release(); v->wb=nullptr; }
-    if(v->oleObj){ v->oleObj->Close(OLECLOSE_NOSAVE); v->oleObj->SetClientSite(NULL); v->oleObj->Release(); v->oleObj=nullptr; }
+    if(v->wb){ v->wb->Release(); v->wb=nullptr; }
+    if(v->oleObj){ v->oleObj->Release(); v->oleObj=nullptr; }
     if(v->site) v->site->Release();
     if(IsWindow(host)) DestroyWindow(host);
     delete v;

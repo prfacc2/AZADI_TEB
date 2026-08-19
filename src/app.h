@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.66.0"
+#define APP_VERSION_W   L"1.68.0"
 
 // ----------------------------------------------------------- logging policy -
 //  RELEASE 1.2.0 (Section A): all general user-behavior logging is gated behind
@@ -157,6 +157,11 @@ void  fillRoundRect(HDC dc, RECT rc, int rad, COLORREF fill, COLORREF border);
 //  drawThemedComboItem in the parent.
 HWND  createThemedCombo(HWND parent, int id);
 bool  drawThemedComboItem(LPDRAWITEMSTRUCT dis);
+//  Theme a report ListView and its native header. Safe for admin/management
+//  tables; call again after applyTheme() to refresh all colors in place.
+void  applyThemedListView(HWND list);
+//  Handle NM_CUSTOMDRAW for a ListView header themed by applyThemedListView().
+bool  drawThemedListViewHeader(LPNMCUSTOMDRAW cd, LRESULT* result);
 
 // ---------------------------------------------------------------- GDI+ -----
 //  v1.3.0: a thin GDI+ helper layer gives us the "richer colours, lighting,

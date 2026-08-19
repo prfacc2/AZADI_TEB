@@ -5,6 +5,65 @@
 
 ---
 
+## 1.68.0 — 2026-08-19 — رفع کرش پذیرش + اتصال طراح چاپ به مرورگر + ردیف‌های فشرده + رفع افت FPS
+
+### Fixed — رفع کرش پذیرش بیمار (0xC0000005 ACCESS_VIOLATION)
+- `src/web_admission_mshtml.inc`: ترتیب تخریب کنترل OLE/MSHTML اصلاح شد. نسخهٔ ۱.۶۷ ابتدا pointerهای ipao/wb را آزاد و پنجره را نابود می‌کرد و سپس `OleClose` را صدا می‌زد؛ یک callback دیررسِ Trident (deactivate/GetExternal) داخل یک MshtmlHost نیمه‌تخریب‌شده دیسپچ می‌شد و از طریق یک vtable آزادشده فراخوانی می‌کرد (همین خطای EIP=0xFFxxxxxx). ترتیب درست اعمال شد: Stop → Close → SetClientSite(NULL) → آزادسازی interfaceها → DestroyWindow → release site. در هر دو مسیر create-time fail() و MshtmlAdmission_Destroy.
+- `src/app.rc` + `src/web_admission_host.inc`: `WebView2Loader.dll` (x86) به‌عنوان RCDATA 700 داخل EXE جاسازی و در اولین استفاده به `%LOCALAPPDATA%\DarmanPlus\runtime` استخراج می‌شود؛ ماشین‌های ویندوز ۱۰/۱۱ با رانتایم Evergreen (Edge) موتور Chromium پایدار را فعال می‌کنند و از مسیر MSHTML عبور می‌کنند. روی سیستم‌های بدون رانتایم، fallback MSHTML اصلاح‌شده باقی می‌ماند.
+
+### Fixed — اتصال طراح چاپ به مرورگر (reconnect)
+- `src/web_designer.h` / `web_designer.cpp`: v1.67 مسیر طراح وب را قطع کرده و فقط پنل نیتیو را باز می‌کرد. نسخهٔ ۱.۶۶ (میزبان loopback + ShellExecute در مرورگر پیش‌فرض) بازیابی شد و `PrintDesigner_OpenCore` (print_designer_ui.inc) دوباره ابتدا طراح مرورگر را ترجیح می‌دهد و فقط در صورت شکست به پنل نیتیو برمی‌گردد.
+
+### Changed — ردیف‌های فشردهٔ Excel-مانند در طراح چاپ
+- `src/print_designer_templates.inc` + `assets/designer/templates.js`: ارتفاع ردیف قالب‌ها از 5.0–6.2mm به 4.0–4.6mm کاهش یافت (به اندازهٔ یک خط 8.5pt + padding کم). موتور چاپ همچنان ردیف را فقط در صورت نیاز (متن چندخطی) بزرگ می‌کند تا فضا از همان اول اشغال نشود. تست floor به 3.8mm به‌روز شد.
+
+### Fixed — رفع افت FPS پنل تنظیمات
+- `src/user_settings.cpp`: سایهٔ sheet مرکزی (gpShadow spread 10 ≈ ۱۰ path fill) در هر WM_PAINT بازرسمی می‌شد و با repaint ناشی از hover ردیف‌ها باعث افت فریم می‌شد. frame ایستا (rails + shadow + sheet) در یک backing DC کش و per-paint blit می‌شود؛ فقط محتوای پویا redraw می‌شود. کش در WM_SIZE/WM_APP_THEME بی‌اعتبار و در destroy آزاد می‌گردد.
+
+### Changed — بازطراحی پذیرش بیمار + پنل مدیریت/CRM
+- `assets/admission/*`: تم سفید با تنوع رنگی حرفه‌ای (هر بخش رنگ متمایز)، صورتحساب و مبلغ نهایی برجسته و خوانا، انیمیشن‌های نوین، حفظ قرارداد پل C++ و محاسبات.
+- پنل مدیریت/CRM: حرفه‌ای‌تر، بدون تداخل ظاهری، انیمیشن/افکت نوین مطابق زبان طراحی ۱.۶۳.۰.
+
+---
+
+## 1.67.0 — 2026-08-18 — پذیرش مستقل و حرفه‌ای + چاپ پویای خدمات + رفع کامل تداخل‌های ظاهری
+
+### Fixed — اجرای پذیرش بدون localhost و fallback قطعی
+- `src/web_admission_embed.inc`: ساخت صفحه فقط در صورت وجود و جایگزینی صحیح همهٔ RCDATAها انجام می‌شود؛ bundle ناقص دیگر به‌عنوان صفحهٔ موفق پذیرفته نمی‌شود.
+- `src/web_admission_host.inc` / `web_admission_mshtml.inc`: میزبان تا موفقیت navigation/write، پل C++ و پیام `init` مخفی می‌ماند؛ timeout یا شکست موتور، کنترل را به فرم نیتیو برمی‌گرداند.
+- state callbackهای WebView2 از stack به حافظهٔ heap با عمر کنترل‌شده منتقل شد تا callback دیررس باعث خرابی حافظه نشود.
+- `assets/admission/bridge.js` و `assets/shell/common.js`: fallback HTTP در محصول غیرفعال است و فقط با پرچم صریح harness توسعه فعال می‌شود.
+- `src/setup_splash.cpp`: فونت تعبیه‌شدهٔ Vazirmatn در هر اجرا داخل process بارگذاری می‌شود؛ نصب دائمی همچنان فقط در صورت نیاز انجام می‌شود.
+
+### Changed — بازطراحی حرفه‌ای پذیرش بیمار
+- `assets/admission/index.html`, `admission.css`, `admission.js`: رابط سه‌ستونهٔ سفید/آبی با پروفایل و عملیات در راست، اطلاعات و خدمات در مرکز، و صورت‌حساب/پرداخت در چپ بازطراحی شد.
+- خدمات فضای بزرگ و چندردیفی دارند؛ تاریخ و شیفت کنار هم و واکنش‌گرا هستند؛ ثبت قبض و سه عملیات چاپ داخل ریل راست قرار دارند.
+- تم‌های تیره، آرام و گرم با همان ساختار و کنتراست هماهنگ شدند؛ overlay صف و صندوق تمام‌صفحه و غیرقابل‌برش باقی ماند.
+- قرارداد DOM، شناسه‌ها و پل C++ حفظ شد؛ `Ctrl+Enter` ثبت و صدور قبض را انجام می‌دهد.
+
+### Fixed — اتصال دقیق خدمات به هر ۳۰ قالب چاپ (`tpl_migration_1_67`)
+- `src/print_designer_templates.inc` و `assets/designer/templates.js`: همهٔ presetها حداقل نام خدمت، شرح، تعداد و مبلغ ردیف را دارند و هر قالب دقیقاً یک جدول خدمات و یک بارکد متصل به پذیرش نگه می‌دارد.
+- `src/printer.cpp`: تعداد ردیف‌ها از خدمات واقعی می‌آید؛ ردیف خالی تزئینی حذف شد، مرز نهایی ردیف‌ها کامل شد و دسترسی خارج از محدوده رفع گردید.
+- ارتفاع جدول از حالت فشرده شروع می‌شود و با خدمات رشد می‌کند؛ شرح بلند wrap می‌شود و overflow با ردیف ادامهٔ خوانا نمایش داده می‌شود، نه ردیف‌های ۴ پیکسلی.
+- `src/manage.inc`: preview طرح آماده دیگر «نمونه خدمت» یا مبلغ ساختگی نشان نمی‌دهد.
+- `src/web_admission_api.inc` و `assets/admission/admission.js`: خدمت تکراری بر اساس کد/نام ادغام و مبلغ authoritative دوباره محاسبه می‌شود.
+
+### Fixed — دکمه‌ها، لوگو، تم تیره و گوشه‌های گرد
+- `src/gdiplus.cpp`: stream تصاویر RCDATA تا پایان عمر cache نگه داشته می‌شود؛ لوگو و آیکون‌ها دیگر هنگام decode تنبل خالی نمی‌شوند و cache شکست از decode تکراری جلوگیری می‌کند.
+- `src/theme.cpp`: دکمه‌ها در شکست تخصیص buffer هم مستقیم و opaque رسم می‌شوند؛ `CLR_INVALID` دیگر به fill سفید تبدیل نمی‌شود و متن همیشه کنتراست خوانا دارد.
+- پس‌زمینهٔ واقعی کارت/toolbar برای دکمه‌های ورود، ادمین، مدیریت، تنظیمات چاپ و طراح تنظیم شد؛ مثلث‌های مربعی گوشه‌های گرد و مدال‌های سفید تم تیره حذف شدند.
+- `src/manage.inc` و `settings.cpp`: cacheهای داشبورد/تنظیمات حفظ شدند و repaintهای تعاملی به ناحیهٔ لازم محدود ماندند.
+
+### Changed — طراح چاپ کاملاً داخل برنامه
+- `src/web_designer.cpp` / `src/web_designer.h`: میزبان Winsock، URL تصادفی `127.0.0.1` و باز شدن مرورگر خارجی از محصول حذف شد.
+- `src/print_designer_ui.inc`: طراح نیتیو کامل مستقیماً باز می‌شود و ذخیره، import/export، جدول خدمات و اتصال طرح به بخش را حفظ می‌کند.
+- تبدیل JSON (`Design_ToWebJson` / `Design_FromWebJson`) برای سازگاری فایل‌های طرح قبلی باقی ماند.
+
+### Testing and release
+- تست‌های admission asset، DOM (۱۳ سناریو)، template parity/migration و syntax جاوااسکریپت به‌روز و سبز شدند.
+- `build.sh` smokeهای admission را با timeout و prefix ایزوله اجرا می‌کند؛ نبود موتور HTML به fallback سالم نیتیو منتهی می‌شود.
+- نسخه در `APP_VERSION_W`، VERSIONINFO، README، PROJECT_GUIDE و `update/version.txt` روی ۱.۶۷.۰ همگام شد.
+
 ## 1.66.0 — 2026-08-18 — پذیرش بدون سرور محلی + رفع باگ‌های ظاهری + جدول خدمات فشرده
 
 ### Fixed — پذیرش بیمار بدون نیاز به HTTP محلی (serverless embedded UI)

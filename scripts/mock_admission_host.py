@@ -88,7 +88,12 @@ class H(BaseHTTPRequestHandler):
             return
         d, name, ct = ent
         with open(os.path.join(d, name), "rb") as f:
-            self._send(200, ct, f.read())
+            body = f.read()
+        if name == "index.html":
+            marker = b'<script src="common.js"></script>'
+            dev = b'<script>window.__AZADI_DEV_ALLOW_HTTP__ = true;</script>\n  ' + marker
+            body = body.replace(marker, dev, 1)
+        self._send(200, ct, body)
 
     def do_POST(self):
         n = int(self.headers.get("Content-Length", 0))

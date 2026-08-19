@@ -16,13 +16,12 @@
 //    tear-off, dual-block), each with three variants → 30 distinct designs.
 //  * EVERY single one of the 30 carries the dynamic services table
 //    (PIT_SERVICES) bound to the live ReceptionRecord.services vector, and its
-//    box height is COMPUTED so the table always claims every millimetre left
-//    between the patient block and the totals — typically 15–22 service rows
-//    on A4, instead of the 8–10 the old cookie-cutter allowed.
+//    box height is COMPUTED from the safe space between patient details and
+//    totals. The renderer paints only real runtime rows, leaving the rest blank.
 //  * The table is a REAL TABLE (ruled grid, pinned header/row heights, RTL
 //    column classification by caption) — never a stack of labels.
 //  * Eight different, correctly-classified column presets are used across the
-//    30 designs (3→7 columns: ردیف / نام خدمت / شرح خدمت / نوع خدمت / کد خدمت /
+//    30 designs (4→7 columns: ردیف / نام خدمت / شرح خدمت / نوع خدمت / کد خدمت /
 //    تعداد / مبلغ واحد / تخفیف / سهم بیمه / سهم بیمار / مبلغ کل), so a clinic
 //    can pick the level of detail it wants and still get real data in it.
 //
@@ -129,16 +128,9 @@ static PrintItem mkPhoto(double x,double y,double w,double h){
 //  caption of each column decides its meaning (pdSvcColOf), so a clinic may
 //  reorder or delete columns in the designer and the data still lands right.
 //
-//  v1.62.0 — EIGHT column presets, every caption verified against
-//  printer.cpp::pdSvcColOf so no column is ever mis-classified:
-//     SVC3       نام خدمت | شرح خدمت | تعداد
-//     SVC4_ROW   ردیف | نام خدمت | شرح خدمت | تعداد
-//     SVC4_CAT   نام خدمت | نوع خدمت | تعداد | مبلغ کل
-//     SVC5       ردیف | نام خدمت | شرح خدمت | تعداد | مبلغ کل
-//     SVC5_CODE  ردیف | کد خدمت | نام خدمت | تعداد | مبلغ کل
-//     SVC6_FIN   ردیف | نام خدمت | تعداد | مبلغ واحد | تخفیف | مبلغ کل
-//     SVC6_INS   ردیف | نام خدمت | تعداد | مبلغ کل | سهم بیمه | سهم بیمار
-//     SVC7       ردیف | کد خدمت | نام خدمت | شرح خدمت | تعداد | مبلغ واحد | مبلغ کل
+//  v1.67.0 — every preset contains the four authoritative columns required on
+//  every receipt: نام خدمت | شرح خدمت | تعداد | مبلغ کل. Optional columns may
+//  add row/code/category/unit/insurance detail but never replace those four.
 // ---------------------------------------------------------------------------
 enum SvcPreset {
     SVC3 = 0, SVC4_ROW, SVC4_CAT, SVC5, SVC5_CODE, SVC6_FIN, SVC6_INS, SVC7,
@@ -148,39 +140,39 @@ enum SvcPreset {
 static std::wstring svcModelJson(int preset){
     switch(preset){
     case SVC4_ROW:
-        return L"{\"cols\":4,\"header\":true,\"widths\":[0.07,0.48,0.30,0.15],"
-               L"\"labels\":[\"ردیف\",\"نام خدمت\",\"شرح خدمت\",\"تعداد\"]}";
+        return L"{\"cols\":5,\"header\":true,\"widths\":[0.07,0.36,0.25,0.10,0.22],"
+               L"\"labels\":[\"ردیف\",\"نام خدمت\",\"شرح خدمت\",\"تعداد\",\"مبلغ کل\"]}";
     case SVC4_CAT:
-        return L"{\"cols\":4,\"header\":true,\"widths\":[0.40,0.24,0.11,0.25],"
-               L"\"labels\":[\"نام خدمت\",\"نوع خدمت\",\"تعداد\",\"مبلغ کل\"]}";
+        return L"{\"cols\":5,\"header\":true,\"widths\":[0.32,0.18,0.22,0.09,0.19],"
+               L"\"labels\":[\"نام خدمت\",\"نوع خدمت\",\"شرح خدمت\",\"تعداد\",\"مبلغ کل\"]}";
     case SVC5:
         return L"{\"cols\":5,\"header\":true,\"widths\":[0.07,0.36,0.25,0.10,0.22],"
                L"\"labels\":[\"ردیف\",\"نام خدمت\",\"شرح خدمت\",\"تعداد\",\"مبلغ کل\"]}";
     case SVC5_CODE:
-        return L"{\"cols\":5,\"header\":true,\"widths\":[0.07,0.15,0.44,0.10,0.24],"
-               L"\"labels\":[\"ردیف\",\"کد خدمت\",\"نام خدمت\",\"تعداد\",\"مبلغ کل\"]}";
+        return L"{\"cols\":6,\"header\":true,\"widths\":[0.06,0.12,0.29,0.22,0.09,0.22],"
+               L"\"labels\":[\"ردیف\",\"کد خدمت\",\"نام خدمت\",\"شرح خدمت\",\"تعداد\",\"مبلغ کل\"]}";
     case SVC6_FIN:
-        return L"{\"cols\":6,\"header\":true,\"widths\":[0.06,0.34,0.09,0.17,0.14,0.20],"
-               L"\"labels\":[\"ردیف\",\"نام خدمت\",\"تعداد\",\"مبلغ واحد\",\"تخفیف\",\"مبلغ کل\"]}";
+        return L"{\"cols\":7,\"header\":true,\"widths\":[0.05,0.27,0.20,0.08,0.14,0.11,0.15],"
+               L"\"labels\":[\"ردیف\",\"نام خدمت\",\"شرح خدمت\",\"تعداد\",\"مبلغ واحد\","
+               L"\"تخفیف\",\"مبلغ کل\"]}";
     case SVC6_INS:
-        return L"{\"cols\":6,\"header\":true,\"widths\":[0.06,0.32,0.09,0.18,0.17,0.18],"
-               L"\"labels\":[\"ردیف\",\"نام خدمت\",\"تعداد\",\"مبلغ کل\",\"سهم بیمه\",\"سهم بیمار\"]}";
+        return L"{\"cols\":7,\"header\":true,\"widths\":[0.05,0.26,0.20,0.08,0.15,0.13,0.13],"
+               L"\"labels\":[\"ردیف\",\"نام خدمت\",\"شرح خدمت\",\"تعداد\",\"مبلغ کل\","
+               L"\"سهم بیمه\",\"سهم بیمار\"]}";
     case SVC7:
         return L"{\"cols\":7,\"header\":true,\"widths\":[0.05,0.11,0.27,0.20,0.08,0.14,0.15],"
                L"\"labels\":[\"ردیف\",\"کد خدمت\",\"نام خدمت\",\"شرح خدمت\",\"تعداد\","
                L"\"مبلغ واحد\",\"مبلغ کل\"]}";
     case SVC3:
     default:
-        return L"{\"cols\":3,\"header\":true,\"widths\":[0.55,0.30,0.15],"
-               L"\"labels\":[\"نام خدمت\",\"شرح خدمت\",\"تعداد\"]}";
+        return L"{\"cols\":4,\"header\":true,\"widths\":[0.39,0.29,0.10,0.22],"
+               L"\"labels\":[\"نام خدمت\",\"شرح خدمت\",\"تعداد\",\"مبلغ کل\"]}";
     }
 }
 
-// Build the live services table. `headFill` == 0 → no fill (pure line-art, so a
-// monochrome design prints monochrome). rowH/headerH are pinned in mm, which is
-// what guarantees a clean, evenly-ruled table for ANY number of services: the
-// print engine keeps the pinned pitch and, when a very long bill needs more
-// rows than the box has, shrinks the whole table uniformly instead of clipping.
+// Build the live services table. `headFill` == 0 keeps a monochrome line-art
+// header. rowH/headerH are the compact initial pitch; the print renderer grows
+// individual rows for wrapped prose without filling the unused page area.
 static PrintItem mkServices(double x,double y,double w,double h,double pt,
                             int preset,unsigned headFill,double bw,
                             double rowH,double headerH){
@@ -395,9 +387,8 @@ static double patientPhoto(PrintDesign& d,double y,double pt){
 }
 
 // ---- SERVICES BLOCK — the centrepiece -------------------------------------
-//  `reserve` = millimetres that must stay free BELOW the table (totals etc.).
-//  The table height is whatever is left, so services always get the maximum
-//  possible room on the page — never a cramped 8-row box again.
+// `reserve` keeps totals/footer clear. The item owns the available frame, but
+// pdDrawServices paints only the header plus real rows; unused page stays blank.
 static double servicesBlock(PrintDesign& d,double y,double pt,int preset,
                             unsigned headFill,double bw,double rowH,
                             double reserve,bool caption,double footY){
@@ -408,8 +399,7 @@ static double servicesBlock(PrintDesign& d,double y,double pt,int preset,
         y+=8;
     }
     double h = footY - reserve - y;
-    if(h < 40) h = 40;                       // never collapse the table
-    if(h > 120) h = 120;                     // v1.66.0: compact (was 200)
+    if(h < 18) h = 18;                       // header + compact honest row
     double headerH = rowH + 0.8;
     d.items.push_back(mkServices(PG_M,y,PG_CW,h,pt-0.5,preset,headFill,bw,rowH,headerH));
     return y+h+3;
@@ -424,8 +414,7 @@ static double servicesBlockAt(PrintDesign& d,double x,double w,double y,double p
         y+=8;
     }
     double h = footY - reserve - y;
-    if(h < 40) h = 40;
-    if(h > 120) h = 120;                     // v1.66.0: compact (was 200)
+    if(h < 18) h = 18;
     double headerH = rowH + 0.8;
     PrintItem it=mkServices(x,y,w,h,pt-0.5,preset,headFill,bw,rowH,headerH);
     d.items.push_back(it);
@@ -575,36 +564,36 @@ struct TplSpec {
 };
 
 static const TplSpec TPL[30] = {
-  /* 01 */ {0,0, SVC4_ROW , 0x1F6FEB, 0xF2F6FC, 0xE8EDF4, 0.40, 5.8, false},
-  /* 02 */ {0,1, SVC5     , 0x0B5ED7, 0xF1F5FB, 0xE4EBF5, 0.40, 5.6, false},
-  /* 03 */ {0,2, SVC3     , 0x2F6F4E, 0xF1F7F3, 0x000000, 0.30, 6.2, false},
-  /* 04 */ {1,0, SVC5     , 0x0B5ED7, 0xF3F7FD, 0xDDE7F6, 0.40, 5.6, false},
-  /* 05 */ {1,1, SVC6_INS , 0x1F6FEB, 0xF2F6FC, 0xE1E9F5, 0.40, 5.4, false},
-  /* 06 */ {1,2, SVC4_CAT , 0x6A0DAD, 0xF6F2FA, 0xEAE1F4, 0.40, 5.8, false},
-  /* 07 */ {2,0, SVC7     , 0x14532D, 0xF2F7F3, 0xE6EDE8, 0.35, 5.2, true },
-  /* 08 */ {2,1, SVC6_FIN , 0x0B5ED7, 0xF2F6FC, 0xE4EBF5, 0.35, 5.2, true },
-  /* 09 */ {2,2, SVC5_CODE, 0x8A2E2E, 0xFAF2F2, 0xF0E3E3, 0.35, 5.4, true },
-  /* 10 */ {3,0, SVC5     , 0x0284C7, 0xEFF7FC, 0xDCEEF8, 0.35, 5.6, false},
-  /* 11 */ {3,1, SVC4_ROW , 0x0F766E, 0xEFF7F6, 0xE0EEEC, 0.35, 5.8, false},
-  /* 12 */ {3,2, SVC6_FIN , 0x6A0DAD, 0xF5F1FA, 0xE9E0F3, 0.35, 5.4, false},
-  /* 13 */ {4,0, SVC4_ROW , 0x000000, 0xFFFFFF, 0x000000, 0.30, 6.0, false},
-  /* 14 */ {4,1, SVC5     , 0x000000, 0xFFFFFF, 0x000000, 0.45, 5.8, true },
-  /* 15 */ {4,2, SVC7     , 0x000000, 0xFFFFFF, 0x000000, 0.30, 5.2, false},
-  /* 16 */ {5,0, SVC5     , 0x4F46E5, 0xF2F2FC, 0xE2E1F7, 0.35, 5.6, false},
-  /* 17 */ {5,1, SVC4_CAT , 0x0F766E, 0xF0F7F6, 0xE1EFEC, 0.35, 5.8, false},
-  /* 18 */ {5,2, SVC6_INS , 0xB45309, 0xFDF6EC, 0xF6E9D2, 0.35, 5.4, false},
-  /* 19 */ {6,0, SVC4_CAT , 0x0E7490, 0xEFF8FA, 0xDFF0F4, 0.40, 5.8, false},
-  /* 20 */ {6,1, SVC5     , 0x14532D, 0xF1F6F2, 0xE4EDE7, 0.40, 5.6, false},
-  /* 21 */ {6,2, SVC3     , 0x6A0DAD, 0xF6F2FA, 0x000000, 0.30, 6.2, false},
-  /* 22 */ {7,0, SVC6_FIN , 0x0B5ED7, 0xF2F6FC, 0xE2EAF5, 0.35, 5.4, false},
-  /* 23 */ {7,1, SVC6_INS , 0x8A2E2E, 0xFAF2F2, 0xEFE2E2, 0.35, 5.4, false},
-  /* 24 */ {7,2, SVC7     , 0x14532D, 0xF1F6F2, 0xE3ECE6, 0.30, 5.0, true },
-  /* 25 */ {8,0, SVC4_ROW , 0x334155, 0xF4F6F8, 0xE5E9EE, 0.40, 5.6, false},
-  /* 26 */ {8,1, SVC5     , 0x0F766E, 0xEFF7F6, 0xDEEDEA, 0.40, 5.4, false},
-  /* 27 */ {8,2, SVC3     , 0x6A0DAD, 0xF6F2FA, 0xE9E0F3, 0.40, 5.8, false},
-  /* 28 */ {9,0, SVC5     , 0x1F6FEB, 0xF2F6FC, 0xE4ECF7, 0.40, 5.6, false},
-  /* 29 */ {9,1, SVC6_FIN , 0xB45309, 0xFDF6EC, 0xF6E9D2, 0.40, 5.4, false},
-  /* 30 */ {9,2, SVC5_CODE, 0x6A0DAD, 0xF6F2FA, 0xE9E0F3, 0.40, 5.6, true },
+  /* 01 */ {0,0, SVC4_ROW , 0x1F6FEB, 0xF2F6FC, 0xE8EDF4, 0.40, 4.4, false},
+  /* 02 */ {0,1, SVC5     , 0x0B5ED7, 0xF1F5FB, 0xE4EBF5, 0.40, 4.3, false},
+  /* 03 */ {0,2, SVC3     , 0x2F6F4E, 0xF1F7F3, 0x000000, 0.30, 4.6, false},
+  /* 04 */ {1,0, SVC5     , 0x0B5ED7, 0xF3F7FD, 0xDDE7F6, 0.40, 4.3, false},
+  /* 05 */ {1,1, SVC6_INS , 0x1F6FEB, 0xF2F6FC, 0xE1E9F5, 0.40, 4.2, false},
+  /* 06 */ {1,2, SVC4_CAT , 0x6A0DAD, 0xF6F2FA, 0xEAE1F4, 0.40, 4.4, false},
+  /* 07 */ {2,0, SVC7     , 0x14532D, 0xF2F7F3, 0xE6EDE8, 0.35, 4.1, true },
+  /* 08 */ {2,1, SVC6_FIN , 0x0B5ED7, 0xF2F6FC, 0xE4EBF5, 0.35, 4.1, true },
+  /* 09 */ {2,2, SVC5_CODE, 0x8A2E2E, 0xFAF2F2, 0xF0E3E3, 0.35, 4.2, true },
+  /* 10 */ {3,0, SVC5     , 0x0284C7, 0xEFF7FC, 0xDCEEF8, 0.35, 4.3, false},
+  /* 11 */ {3,1, SVC4_ROW , 0x0F766E, 0xEFF7F6, 0xE0EEEC, 0.35, 4.4, false},
+  /* 12 */ {3,2, SVC6_FIN , 0x6A0DAD, 0xF5F1FA, 0xE9E0F3, 0.35, 4.2, false},
+  /* 13 */ {4,0, SVC4_ROW , 0x000000, 0xFFFFFF, 0x000000, 0.30, 4.5, false},
+  /* 14 */ {4,1, SVC5     , 0x000000, 0xFFFFFF, 0x000000, 0.45, 4.4, true },
+  /* 15 */ {4,2, SVC7     , 0x000000, 0xFFFFFF, 0x000000, 0.30, 4.1, false},
+  /* 16 */ {5,0, SVC5     , 0x4F46E5, 0xF2F2FC, 0xE2E1F7, 0.35, 4.3, false},
+  /* 17 */ {5,1, SVC4_CAT , 0x0F766E, 0xF0F7F6, 0xE1EFEC, 0.35, 4.4, false},
+  /* 18 */ {5,2, SVC6_INS , 0xB45309, 0xFDF6EC, 0xF6E9D2, 0.35, 4.2, false},
+  /* 19 */ {6,0, SVC4_CAT , 0x0E7490, 0xEFF8FA, 0xDFF0F4, 0.40, 4.4, false},
+  /* 20 */ {6,1, SVC5     , 0x14532D, 0xF1F6F2, 0xE4EDE7, 0.40, 4.3, false},
+  /* 21 */ {6,2, SVC3     , 0x6A0DAD, 0xF6F2FA, 0x000000, 0.30, 4.6, false},
+  /* 22 */ {7,0, SVC6_FIN , 0x0B5ED7, 0xF2F6FC, 0xE2EAF5, 0.35, 4.2, false},
+  /* 23 */ {7,1, SVC6_INS , 0x8A2E2E, 0xFAF2F2, 0xEFE2E2, 0.35, 4.2, false},
+  /* 24 */ {7,2, SVC7     , 0x14532D, 0xF1F6F2, 0xE3ECE6, 0.30, 4.0, true },
+  /* 25 */ {8,0, SVC4_ROW , 0x334155, 0xF4F6F8, 0xE5E9EE, 0.40, 4.3, false},
+  /* 26 */ {8,1, SVC5     , 0x0F766E, 0xEFF7F6, 0xDEEDEA, 0.40, 4.2, false},
+  /* 27 */ {8,2, SVC3     , 0x6A0DAD, 0xF6F2FA, 0xE9E0F3, 0.40, 4.4, false},
+  /* 28 */ {9,0, SVC5     , 0x1F6FEB, 0xF2F6FC, 0xE4ECF7, 0.40, 4.3, false},
+  /* 29 */ {9,1, SVC6_FIN , 0xB45309, 0xFDF6EC, 0xF6E9D2, 0.40, 4.2, false},
+  /* 30 */ {9,2, SVC5_CODE, 0x6A0DAD, 0xF6F2FA, 0xE9E0F3, 0.40, 4.3, true },
 };
 
 // v1.62.0 — the 30 Persian gallery names. Previously these lived only in
@@ -960,6 +949,7 @@ void Designs_Init(){
     std::vector<PrintDesign> existing; Designs_Builtins(existing);
     const int N = 30;
     auto stamp=[](){
+        setSetting(L"tpl_migration_1_67", L"1");
         setSetting(L"tpl_migration_1_66", L"1");
         setSetting(L"tpl_migration_1_65", L"1");
         setSetting(L"tpl_migration_1_62", L"1");
@@ -975,24 +965,9 @@ void Designs_Init(){
         stamp();
         return;
     }
-    // v1.66.0 migration: compact services table — max height 120mm (was 200),
-    // reduced row heights (~5.0–6.2mm, was 6.4–7.6mm). Same overwrite-by-position
-    // contract; ids and section bindings preserved.
-    if(getSetting(L"tpl_migration_1_66", L"0") != L"1"){
-        for(int i=0;i<N;i++){
-            PrintDesign fresh=buildTemplate(i);
-            if(i<(int)existing.size()){ fresh.id=existing[i].id; Designs_Update(fresh); }
-            else Designs_Insert(fresh);
-        }
-        for(size_t i=N;i<existing.size();++i) Designs_Delete(existing[i].id);
-        stamp();
-    }
-    // v1.65.0 migration: rebuilt templates (single barcode per page, deduped
-    // hdrSplit receipt number, unique accents for 10/16/19/25). Same idempotent
-    // overwrite-by-position contract as 1.62 — ids and section bindings survive.
-    if(getSetting(L"tpl_migration_1_65", L"0") != L"1"){
-        // Overwrite the first N stored builtins in order (preserving their
-        // ids/bindings), insert any missing, DELETE surplus beyond N.
+    // v1.67.0 migration: rebuild all builtins with the mandatory service
+    // columns and runtime-sized rows. Preserve ids and section bindings.
+    if(getSetting(L"tpl_migration_1_67", L"0") != L"1"){
         for(int i=0;i<N;i++){
             PrintDesign fresh=buildTemplate(i);
             if(i<(int)existing.size()){ fresh.id=existing[i].id; Designs_Update(fresh); }

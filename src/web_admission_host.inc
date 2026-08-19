@@ -22,6 +22,8 @@ struct AdView {
     ICoreWebView2* web=nullptr;
     EventRegistrationToken msgTok{0};
     EventRegistrationToken accelTok{0};
+    EventRegistrationToken navTok{0};
+    volatile LONG bridgeReady=0;
 };
 static std::map<HWND,AdView*> g_adViews;
 static std::mutex g_adViewsMx;
@@ -36,6 +38,43 @@ static PFN_CreateWebView2Env         pCreateEnv=nullptr;
 static PFN_GetAvailableBrowserVersion pGetVer=nullptr;
 static bool adLoaderTried=false;
 
+// Extract the embedded WebView2Loader.dll (RCDATA 700) to a per-user writable
+// folder and return its full path. The EXE folder is often read-only (Program
+// Files), so we use %LOCALAPPDATA%\DarmanPlus\runtime. Idempotent: a file that
+// already matches the embedded size is reused (no per-launch rewrite churn).
+static std::wstring adExtractLoaderPath(){
+    wchar_t base[MAX_PATH]={0};
+    if(FAILED(SHGetFolderPathW(NULL,CSIDL_LOCAL_APPDATA,NULL,0,base))) return L"";
+    std::wstring dir=base; dir+=L"\\DarmanPlus\\runtime";
+    CreateDirectoryW(dir.c_str(),NULL);   // ok if it already exists
+    std::wstring path=dir+L"\\WebView2Loader.dll";
+
+    // Load the embedded blob so we can (re)write it when missing or truncated.
+    HRSRC hr=FindResourceW(g_hInst,MAKEINTRESOURCEW(700),RT_RCDATA);
+    if(!hr) return L"";
+    DWORD need=SizeofResource(g_hInst,hr);
+    HGLOBAL hg=LoadResource(g_hInst,hr); if(!hg) return L"";
+    void* dat=LockResource(hg); if(!dat||!need) return L"";
+
+    bool write=true;
+    HANDLE ex=CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ,NULL,
+                          OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);
+    if(ex!=INVALID_HANDLE_VALUE){
+        DWORD sz=GetFileSize(ex,NULL);
+        CloseHandle(ex);
+        if(sz==need) write=false;     // unchanged build → reuse the cached copy
+    }
+    if(write){
+        HANDLE hf=CreateFileW(path.c_str(),GENERIC_WRITE,0,NULL,
+                              CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
+        if(hf!=INVALID_HANDLE_VALUE){
+            DWORD wr=0; WriteFile(hf,dat,need,&wr,NULL); CloseHandle(hf);
+            if(wr!=need) return L"";  // partial write → refuse to load it
+        } else return L"";
+    }
+    return path;
+}
+
 static void adLoadLoader(){
     if(adLoaderTried) return; adLoaderTried=true;
     HMODULE m=LoadLibraryW(L"WebView2Loader.dll");
@@ -45,6 +84,15 @@ static void adLoadLoader(){
         std::wstring p=path; size_t s=p.find_last_of(L"\\/"); if(s!=std::wstring::npos) p=p.substr(0,s+1);
         p+=L"WebView2Loader.dll";
         m=LoadLibraryW(p.c_str());
+    }
+    if(!m){
+        // v1.68.0: last resort — the redistributable loader extracted from the
+        // embedded RCDATA blob to a per-user folder. This lights up the modern
+        // Chromium engine on machines that have the Evergreen runtime but no
+        // loose loader DLL beside the EXE (the common case for a single-file
+        // build). A failure here just leaves pCreateEnv NULL → MSHTML fallback.
+        std::wstring extracted=adExtractLoaderPath();
+        if(!extracted.empty()) m=LoadLibraryW(extracted.c_str());
     }
     if(m){
         pCreateEnv=reinterpret_cast<PFN_CreateWebView2Env>(
@@ -83,6 +131,10 @@ struct MsgHandler : public ICoreWebView2WebMessageReceivedEventHandler {
         jsonGetString(body,"verb",verb);
         jsonGetString(body,"id",id);
         jsonGetString(body,"page",page);
+        if(verb=="init"){
+            AdView* v=adViewFor(host);
+            if(v) InterlockedExchange(&v->bridgeReady,1);
+        }
         std::string payload; if(!jsonGetRaw(body,"payload",payload)) payload="{}";
         std::string result=AdmissionDispatchVerb(verb,payload,page);
         // reply: {"id":"<id>","result":<result>}
@@ -128,11 +180,56 @@ struct AccelHandler : public ICoreWebView2AcceleratorKeyPressedEventHandler {
     }
 };
 
+// Heap-owned state shared by both WebView2 completion callbacks. The caller
+// releases its reference after the bounded wait; callbacks keep their own
+// references, so a late completion can never write to a dead stack frame.
+struct CreateState {
+    LONG rc=1;
+    volatile LONG done=0;
+    volatile LONG cancelled=0;
+    volatile LONG navReady=0;
+    HRESULT hr=E_PENDING;
+    HWND host;
+    explicit CreateState(HWND h):host(h){}
+    void AddRef(){ InterlockedIncrement(&rc); }
+    void Release(){ if(!InterlockedDecrement(&rc)) delete this; }
+    bool IsCancelled(){ return InterlockedCompareExchange(&cancelled,0,0)!=0; }
+    void Cancel(){ InterlockedExchange(&cancelled,1); }
+    void Complete(HRESULT h){ hr=h; InterlockedExchange(&done,1); }
+};
+
+// Navigation completion is the readiness boundary for an embedded view: a
+// controller alone can exist while NavigateToString failed, yielding a blank
+// host. Only a successful navigation publishes completion to the caller.
+struct NavHandler : public ICoreWebView2NavigationCompletedEventHandler {
+    LONG rc=1; CreateState* state;
+    explicit NavHandler(CreateState* s):state(s){ state->AddRef(); }
+    virtual ~NavHandler(){ state->Release(); }
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override {
+        if(!ppv) return E_POINTER;
+        if(IsEqualIID(riid,IID_IUnknown)||
+           IsEqualIID(riid,IID_ICoreWebView2NavigationCompletedEventHandler_)){
+            *ppv=this; InterlockedIncrement(&rc); return S_OK; }
+        *ppv=nullptr; return E_NOINTERFACE;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&rc); }
+    ULONG STDMETHODCALLTYPE Release() override { LONG r=InterlockedDecrement(&rc); if(!r) delete this; return r; }
+    HRESULT STDMETHODCALLTYPE Invoke(ICoreWebView2*,
+            ICoreWebView2NavigationCompletedEventArgs* args) override {
+        if(state->IsCancelled()) return S_OK;
+        BOOL ok=FALSE;
+        HRESULT hr=args?args->get_IsSuccess(&ok):E_POINTER;
+        if(SUCCEEDED(hr) && ok) InterlockedExchange(&state->navReady,1);
+        else state->Complete(FAILED(hr)?hr:E_FAIL);
+        return S_OK;
+    }
+};
+
 // Controller-created handler.
 struct CtrlHandler : public ICoreWebView2CreateCoreWebView2ControllerCompletedHandler {
-    LONG rc=1; HWND host; volatile LONG* done; HRESULT* outHr;
-    CtrlHandler(HWND h, volatile LONG* d, HRESULT* o):host(h),done(d),outHr(o){}
-    virtual ~CtrlHandler(){}
+    LONG rc=1; CreateState* state;
+    explicit CtrlHandler(CreateState* s):state(s){ state->AddRef(); }
+    virtual ~CtrlHandler(){ state->Release(); }
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override {
         if(!ppv) return E_POINTER;
         if(IsEqualIID(riid,IID_IUnknown)||
@@ -143,45 +240,49 @@ struct CtrlHandler : public ICoreWebView2CreateCoreWebView2ControllerCompletedHa
     ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&rc); }
     ULONG STDMETHODCALLTYPE Release() override { LONG r=InterlockedDecrement(&rc); if(!r) delete this; return r; }
     HRESULT STDMETHODCALLTYPE Invoke(HRESULT result, ICoreWebView2Controller* ctrl) override {
-        *outHr=result;
-        if(SUCCEEDED(result) && ctrl){
-            AdView* v=adViewFor(host);
-            if(v){
-                ctrl->AddRef(); v->ctrl=ctrl;
-                ctrl->get_CoreWebView2(&v->web);
-                // subscribe to accelerator keys so Tab/Enter/Ctrl+A/arrows are
-                // handled by the WebView (and thus reach the page's keydown).
-                {
-                    AccelHandler* ah=new AccelHandler();
-                    ctrl->add_AcceleratorKeyPressed(ah, &v->accelTok);
-                    ah->Release();
-                }
-                if(v->web){
-                    // wire JS -> C++
-                    MsgHandler* mh=new MsgHandler(host);
-                    v->web->add_WebMessageReceived(mh, &v->msgTok);
-                    mh->Release();
-                    // size + load the fully-inlined page DIRECTLY (v1.66.0:
-                    // serverless — no loopback host, no ports, no sockets).
-                    RECT rc; GetClientRect(host,&rc);
-                    ctrl->put_Bounds(rc);
-                    ctrl->put_IsVisible(TRUE);
-                    const std::string& page=AdmissionInlinePage(true);
-                    if(!page.empty())
-                        v->web->NavigateToString(u82w(page).c_str());
-                }
-            }
-        }
-        InterlockedExchange(done,1);
+        if(state->IsCancelled()) return S_OK;
+        if(FAILED(result) || !ctrl){ state->Complete(FAILED(result)?result:E_FAIL); return S_OK; }
+
+        AdView* v=adViewFor(state->host);
+        if(!v){ state->Complete(E_ABORT); return S_OK; }
+        ctrl->AddRef(); v->ctrl=ctrl;
+        HRESULT hr=ctrl->get_CoreWebView2(&v->web);
+        if(FAILED(hr) || !v->web){ state->Complete(FAILED(hr)?hr:E_FAIL); return S_OK; }
+
+        // Subscribe before navigation so completion cannot be missed.
+        NavHandler* nh=new NavHandler(state);
+        hr=v->web->add_NavigationCompleted(nh,&v->navTok);
+        nh->Release();
+        if(FAILED(hr)){ state->Complete(hr); return S_OK; }
+
+        AccelHandler* ah=new AccelHandler();
+        hr=ctrl->add_AcceleratorKeyPressed(ah,&v->accelTok);
+        ah->Release();
+        if(FAILED(hr)){ state->Complete(hr); return S_OK; }
+
+        MsgHandler* mh=new MsgHandler(state->host);
+        hr=v->web->add_WebMessageReceived(mh,&v->msgTok);
+        mh->Release();
+        if(FAILED(hr)){ state->Complete(hr); return S_OK; }
+
+        RECT bounds; GetClientRect(state->host,&bounds);
+        hr=ctrl->put_Bounds(bounds);
+        if(SUCCEEDED(hr)) hr=ctrl->put_IsVisible(TRUE);
+        if(FAILED(hr)){ state->Complete(hr); return S_OK; }
+
+        const std::string& page=AdmissionInlinePage(true);
+        if(page.empty()){ state->Complete(E_FAIL); return S_OK; }
+        hr=v->web->NavigateToString(u82w(page).c_str());
+        if(FAILED(hr)) state->Complete(hr);
         return S_OK;
     }
 };
 
-// Environment-created handler → immediately create the controller.
+// Environment-created handler -> immediately create the controller.
 struct EnvHandler : public ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler {
-    LONG rc=1; HWND host; volatile LONG* done; HRESULT* outHr;
-    EnvHandler(HWND h, volatile LONG* d, HRESULT* o):host(h),done(d),outHr(o){}
-    virtual ~EnvHandler(){}
+    LONG rc=1; CreateState* state;
+    explicit EnvHandler(CreateState* s):state(s){ state->AddRef(); }
+    virtual ~EnvHandler(){ state->Release(); }
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override {
         if(!ppv) return E_POINTER;
         if(IsEqualIID(riid,IID_IUnknown)||
@@ -192,13 +293,14 @@ struct EnvHandler : public ICoreWebView2CreateCoreWebView2EnvironmentCompletedHa
     ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&rc); }
     ULONG STDMETHODCALLTYPE Release() override { LONG r=InterlockedDecrement(&rc); if(!r) delete this; return r; }
     HRESULT STDMETHODCALLTYPE Invoke(HRESULT result, ICoreWebView2Environment* env) override {
+        if(state->IsCancelled()) return S_OK;
         if(SUCCEEDED(result) && env){
-            CtrlHandler* ch=new CtrlHandler(host,done,outHr);
-            HRESULT hr=env->CreateCoreWebView2Controller(host, ch);
+            CtrlHandler* ch=new CtrlHandler(state);
+            HRESULT hr=env->CreateCoreWebView2Controller(state->host,ch);
             ch->Release();
-            if(FAILED(hr)){ *outHr=hr; InterlockedExchange(done,1); }
+            if(FAILED(hr)) state->Complete(hr);
         } else {
-            *outHr=result; InterlockedExchange(done,1);
+            state->Complete(FAILED(result)?result:E_FAIL);
         }
         return S_OK;
     }
@@ -219,6 +321,8 @@ static std::wstring adUserDataFolder(){
 // ============================================================================
 //  Public API
 // ============================================================================
+static bool WV2_DestroyView(HWND view);
+
 static bool WV2_Available(){
     adLoadLoader();
     if(!pCreateEnv) return false;
@@ -251,42 +355,54 @@ static HWND WV2_CreateView(HWND parent){
         wc.hCursor=LoadCursor(NULL,IDC_ARROW);
         wc.hbrBackground=(HBRUSH)(COLOR_WINDOW+1);
         wc.lpszClassName=CLS;
-        RegisterClassW(&wc); cls=true;
+        if(!RegisterClassW(&wc) && GetLastError()!=ERROR_CLASS_ALREADY_EXISTS)
+            return nullptr;
+        cls=true;
     }
     RECT rc; GetClientRect(parent,&rc);
-    HWND host=CreateWindowExW(0,CLS,L"",WS_CHILD|WS_VISIBLE|WS_CLIPCHILDREN,
+    HWND host=CreateWindowExW(0,CLS,L"",WS_CHILD|WS_CLIPCHILDREN,
         0,0,rc.right,rc.bottom,parent,NULL,g_hInst,NULL);
     if(!host) return nullptr;
 
     AdView* v=new AdView(); v->host=host;
     { std::lock_guard<std::mutex> lk(g_adViewsMx); g_adViews[host]=v; }
 
-    volatile LONG done=0; HRESULT outHr=E_FAIL;
+    CreateState* state=new CreateState(host);
+    // Hold one extra reference across cancellation/teardown. WebView2 owns the
+    // callback refs, but Close() can synchronously release those callbacks.
+    state->AddRef();
     std::wstring udf=adUserDataFolder();
-    EnvHandler* eh=new EnvHandler(host,&done,&outHr);
+    EnvHandler* eh=new EnvHandler(state);
     HRESULT hr=pCreateEnv(nullptr, udf.empty()?nullptr:udf.c_str(), nullptr, eh);
     eh->Release();
-    if(FAILED(hr)){
-        DestroyWindow(host);
-        { std::lock_guard<std::mutex> lk(g_adViewsMx); g_adViews.erase(host); }
-        delete v; return nullptr;
-    }
+    if(FAILED(hr)) state->Complete(hr);
 
-    // pump until the controller callback fires (bounded ~6s)
+    // Pump until both navigation and the JS bridge are ready (or an async
+    // setup step fails), not merely until a controller exists.
     DWORD start=GetTickCount();
     MSG msg;
-    while(!InterlockedCompareExchange(&done,0,0)){
+    while(!InterlockedCompareExchange(&state->done,0,0) &&
+          !(InterlockedCompareExchange(&state->navReady,0,0) &&
+            InterlockedCompareExchange(&v->bridgeReady,0,0))){
         if(GetTickCount()-start>6000) break;
         if(PeekMessageW(&msg,NULL,0,0,PM_REMOVE)){
             TranslateMessage(&msg); DispatchMessageW(&msg);
         } else Sleep(5);
     }
 
-    if(!v->ctrl || !v->web){
-        DestroyWindow(host);
-        { std::lock_guard<std::mutex> lk(g_adViewsMx); g_adViews.erase(host); }
-        delete v; return nullptr;
+    bool ready=InterlockedCompareExchange(&state->done,0,0)==0 &&
+               InterlockedCompareExchange(&state->navReady,0,0)!=0 &&
+               InterlockedCompareExchange(&v->bridgeReady,0,0)!=0 &&
+               v->ctrl && v->web;
+    if(!ready) state->Cancel();
+    state->Release(); // caller/wait reference
+    if(!ready){
+        WV2_DestroyView(host);
+        state->Release(); // teardown guard
+        return nullptr;
     }
+    state->Release(); // teardown guard
+    ShowWindow(host,SW_SHOW);
     return host;
 }
 
@@ -327,8 +443,15 @@ static bool WV2_DestroyView(HWND view){
     { std::lock_guard<std::mutex> lk(g_adViewsMx);
       auto it=g_adViews.find(view); if(it!=g_adViews.end()){ v=it->second; g_adViews.erase(it); } }
     if(!v) return false;   // not a WebView2 view
-    if(v->web){ v->web->remove_WebMessageReceived(v->msgTok); v->web->Release(); v->web=nullptr; }
-    if(v->ctrl){ v->ctrl->remove_AcceleratorKeyPressed(v->accelTok); v->ctrl->Close(); v->ctrl->Release(); v->ctrl=nullptr; }
+    if(v->web){
+        if(v->navTok.value) v->web->remove_NavigationCompleted(v->navTok);
+        if(v->msgTok.value) v->web->remove_WebMessageReceived(v->msgTok);
+        v->web->Release(); v->web=nullptr;
+    }
+    if(v->ctrl){
+        if(v->accelTok.value) v->ctrl->remove_AcceleratorKeyPressed(v->accelTok);
+        v->ctrl->Close(); v->ctrl->Release(); v->ctrl=nullptr;
+    }
     if(IsWindow(view)) DestroyWindow(view);
     delete v;
     return true;

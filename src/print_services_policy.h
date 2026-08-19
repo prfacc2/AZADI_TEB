@@ -1,0 +1,34 @@
+#pragma once
+#include <cstddef>
+#include <string>
+
+enum PdContinuationItemKind {
+    PDCI_OTHER=0,
+    PDCI_FRAME,
+    PDCI_LOGO,
+    PDCI_PHOTO,
+    PDCI_FIELD
+};
+
+// Explicit continuation-page whitelist. It intentionally ignores geometry:
+// moving a barcode, QR, total, payment field, signature or footer above the
+// service table must never make it repeat. Only page identity,
+// patient/reception context and the page shell may repeat before the final page.
+inline bool pdContinuationRepeatAllowed(PdContinuationItemKind itemKind,
+                                        const std::wstring& normalizedField){
+    if(itemKind==PDCI_FRAME||itemKind==PDCI_LOGO||itemKind==PDCI_PHOTO) return true;
+    if(itemKind!=PDCI_FIELD) return false;
+    static const wchar_t* const safe[]={
+        L"{first}",L"{last}",L"{full}",L"{father}",L"{nid}",L"{birth}",
+        L"{gender}",L"{mobile}",L"{landline}",L"{address}",L"{ptype}",
+        L"{ins}",L"{supp}",L"{insno}",L"{insexp}",L"{queue}",L"{date}",
+        L"{time}",L"{datetime}",L"{shift}",L"{dept}",L"{doctor}",L"{user}",
+        L"{receiptNo}",L"{apptdate}",L"{appttime}",L"{appttype}",
+        L"{regdate}",L"{regtime}",L"{nationalcard}",L"{refdoctor}",L"{room}",
+        L"{doctorcode}",L"{performer}",L"{performercode}",L"{specialty}",
+        L"{specialtycode}",L"{servicetype}",L"{eprescription}",L"{referralno}"
+    };
+    for(std::size_t i=0;i<sizeof(safe)/sizeof(safe[0]);++i)
+        if(normalizedField==safe[i]) return true;
+    return false;
+}

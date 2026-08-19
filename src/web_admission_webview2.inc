@@ -140,7 +140,7 @@ struct ICoreWebView2WebMessageReceivedEventHandler : public IUnknown {
 struct ICoreWebView2NavigationCompletedEventArgs : public IUnknown {
   virtual HRESULT STDMETHODCALLTYPE get_IsSuccess(BOOL*) = 0;
   virtual HRESULT STDMETHODCALLTYPE get_WebErrorStatus(int*) = 0;
-  virtual HRESULT STDMETHODCALLTYPE get_NavigationId(UINT64*) = 0;
+  virtual HRESULT STDMETHODCALLTYPE get_NavigationId(ULONGLONG*) = 0;
 };
 
 struct ICoreWebView2NavigationCompletedEventHandler : public IUnknown {
