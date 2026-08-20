@@ -8,6 +8,14 @@
   'use strict';
   var Crm = global.Crm;
 
+  /* Live-format the price input with thousand separators (ریال). Strips every
+     non-digit (commas, spaces, …) and re-groups in 3s, shown in Persian digits
+     to match the rest of the panel. On save the commas are stripped again. */
+  function fmtPriceInput(inp) {
+    var digits = Crm.enDigits(inp.value || '').replace(/[^0-9]/g, '');
+    inp.value = digits ? Crm.faDigits(Crm.fmtMoney(+digits)) : '';
+  }
+
   function load(host, q) {
     Crm.call('crm.services.list', { q: q || '' }).then(function (d) {
       render(host, d.rows || [], q);
@@ -88,6 +96,11 @@
     foot.innerHTML = '<button class="crm-btn ghost" id="mCancel">انصراف</button><button class="crm-btn primary" id="mSave">ذخیره</button>';
     m.card.appendChild(foot);
     Crm.$('mCancel').onclick = m.close;
+    var priceEl = Crm.$('sPrice');
+    if (priceEl) {
+      priceEl.onkeyup = function () { fmtPriceInput(priceEl); };
+      priceEl.onblur = function () { fmtPriceInput(priceEl); };
+    }
     Crm.$('mSave').onclick = function () {
       var payload = {
         originalCode: Crm.$('sOrig').value,

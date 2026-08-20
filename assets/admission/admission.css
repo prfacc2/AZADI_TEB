@@ -912,10 +912,14 @@ body.theme-dark{background:#111827;color:#e5edf7;}
 .col.is-active .card-title{font-weight:900;color:#0b326d;}
 .col.is-active .card{border-color:#b5c9e3;}
 
-/* Right rail visual order: profile → submit/issue → connection status. */
+/* Right rail visual order: profile → date/shift → submit/issue → print →
+   status. v1.71.0: the date/shift card (تاریخ پذیرش و شیفت) must sit DIRECTLY
+   below the patient profile — it had no explicit order so it defaulted to 0 and
+   jumped to the top of the rail. Profile is now the first item at top-right. */
 .profile-card{-ms-flex-order:1;order:1;}
-.action-card{-ms-flex-order:2;order:2;}
-.status-card{-ms-flex-order:3;order:3;}
+.datetime-card{-ms-flex-order:2;order:2;}
+.action-card{-ms-flex-order:3;order:3;}
+.status-card{-ms-flex-order:5;order:5;}
 .action-kicker{
   color:#153c73;font-size:13px;font-weight:900;padding:0 2px 9px;margin-bottom:10px;
   border-bottom:1px solid #ccdae9;
@@ -2533,9 +2537,14 @@ body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payable-value span{font
 .cs-val{font-size:15px;font-weight:900;color:#0d2144;margin-left:5px;}
 .cs-sep{width:1px;height:20px;background:#cfdcee;margin:0 4px;}
 
-/* patient-details: centre-align every field + its label */
-.patient-card .fld > span{text-align:center;}
-.patient-card .inp{text-align:center;}
+/* patient-details (v1.71.0): the earlier centre-alignment of the labels and
+   input text is REVERTED — labels stay RIGHT-aligned and the text inside every
+   textbox stays RIGHT-aligned (RTL), exactly as before. Only the field block is
+   centred inside the section (max-width + auto side margins) so the inputs read
+   as a centred cluster; the text alignment itself is unchanged. */
+.patient-card .fld > span{text-align:right;}
+.patient-card .inp{text-align:right;}
+.patient-card .pt-grid{max-width:900px;margin-right:auto;margin-left:auto;}
 
 /* two admission-operation buttons: warm amber + cool blue, with spacing */
 .queue-action-btns{
@@ -2563,3 +2572,19 @@ body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payable-value span{font
 .theme-dark .cs-cap{color:#b8cce1;}
 .theme-dark .cs-val{color:#ecf6ff;}
 .theme-dark .cs-sep{background:#34516d;}
+
+/* v1.71.0 — doctor live-search: the «جستجو» button is gone (search is LIVE as
+   the operator types); the old <select id="doc2name"> dropdown is replaced by a
+   read-only display field that mirrors the suggestion pick (so the name is no
+   longer shown twice), and each suggestion row carries a medical-council ID
+   badge — name + specialty + medicalId. */
+.doc-name-display{background:#eef4ff;color:#0f2547;font-weight:700;cursor:default;}
+.doc-name-display:focus{border-color:#b7c6da;-webkit-box-shadow:none;box-shadow:none;background:#eef4ff;}
+.doc-name-display::-webkit-input-placeholder{color:#8496ab;font-weight:600;}
+.doc-name-display::-moz-placeholder{color:#8496ab;font-weight:600;}
+.doc-name-display:-ms-input-placeholder{color:#8496ab;font-weight:600;}
+.mini-list .row .r-code{
+  font-size:11px;font-weight:800;color:#1d4ed8;
+  background:#e8f0ff;border:1px solid #c7dbff;border-radius:6px;
+  padding:1px 7px;white-space:nowrap;
+}
