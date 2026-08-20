@@ -6,6 +6,7 @@
 #include "app.h"
 #include "backup_log.h"
 #include "web_admission.h"
+#include "web_crm.h"          // v1.70.0: embedded HTML CRM management surface
 #include "web_thread_pool.h"   // v1.40.0: WM_APP_UI_TASK marshalling (RunOnUiThread)
 #include <stdio.h>
 #ifdef AZ_DEBUG_BUILD
@@ -1204,6 +1205,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
     // host / port at all), so «پذیرش بیمار» opens instantly.
     WebAdmission_Prepare();
 
+    // v1.70.0: prepare the embedded CRM management surface EAGERLY at launch —
+    // pre-builds the fully-inlined HTML management page (serverless, attached to
+    // the program) so «مدیریت درمانگاه» opens instantly when SC_MANAGE is hit.
+    WebCrm_Prepare();
+
     // responsive scale: based on monitor size + DPI
     HDC sdc=GetDC(NULL);
     int dpi = GetDeviceCaps(sdc,LOGPIXELSY);
@@ -1498,6 +1504,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
         // listener never fires (the root cause of the broken navigation).
         if(WebAdmission_TranslateAccel(&msg)){
             continue;   // message consumed by the browser control
+        }
+        // v1.70.0: give the embedded CRM management browser the same chance to
+        // consume accelerator keys (Tab / Enter / Ctrl+A / arrows, …).
+        if(WebCrm_TranslateAccel(&msg)){
+            continue;
         }
 
         TranslateMessage(&msg);

@@ -4698,6 +4698,15 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
 }
 
 HWND createManageScreen(HWND frame){
+    // v1.70.0: the native GDI manage panel is DISABLED. The management surface
+    // is now an embedded HTML CRM (assets/crm, hosted by src/web_crm.*) shown via
+    // WebCrm_CreateScreen — the same WebView2/MSHTML pattern the admission page
+    // uses. SC_MANAGE switches to that screen. The ORIGINAL native GDI panel
+    // body is preserved verbatim under #if 0 below so it can be re-enabled by
+    // flipping the guard (and removing the WebCrm_CreateScreen return).
+    return WebCrm_CreateScreen(frame);
+#if 0
+    // ---- original native GDI manage panel (disabled v1.70.0) ----
     static bool reg=false;
     if(!reg){
         WNDCLASSW wc={0};
@@ -4711,6 +4720,7 @@ HWND createManageScreen(HWND frame){
         rc.left,rc.top,rc.right-rc.left,rc.bottom-rc.top,frame,NULL,g_hInst,NULL);
     if(s_mg) mgLayout(h);
     return h;
+#endif
 }
 
 // §1.19.1 — public «تنظیمات چاپ» entry, reachable from the management Settings
