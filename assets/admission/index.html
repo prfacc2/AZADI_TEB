@@ -200,24 +200,23 @@
           </section>
         </div>
 
-        <!-- v1.70.1: P/S counters + turn preview -- compact strip above the services list. -->
+        <!-- v1.70.1: P/S counters + turn preview -- compact strip above the services list.
+             v1.73.0: status shown as COLOURED BADGES (background tint) instead of plain
+             text labels — P=green, S=amber, ثبت‌شده=light green, در انتظار=light amber. -->
         <div class="counter-strip" id="counterStrip" title="آمار امروز">
-          <span class="cs-item">
+          <span class="cs-item cs-p">
             <span class="cs-key cs-key-p">P</span>
-            <span class="cs-cap">پرداختی</span>
             <span class="cs-val" id="psPVal">۰</span>
           </span>
-          <span class="cs-item">
+          <span class="cs-item cs-s">
             <span class="cs-key cs-key-s">S</span>
-            <span class="cs-cap">صندوق</span>
             <span class="cs-val" id="psSVal">۰</span>
           </span>
-          <span class="cs-sep" aria-hidden="true"></span>
-          <span class="cs-item">
+          <span class="cs-item cs-reg">
             <span class="cs-cap">ثبت‌شده</span>
             <span class="cs-val" id="tpReg">۰</span>
           </span>
-          <span class="cs-item">
+          <span class="cs-item cs-wait">
             <span class="cs-cap">در انتظار</span>
             <span class="cs-val" id="tpWait">۰</span>
           </span>

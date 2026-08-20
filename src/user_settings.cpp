@@ -411,22 +411,12 @@ static void buildReceptionPage(SettingsWin* sw){
     CheckRadioButton(sw->hwnd,IDC_PANEL_BASE+80,IDC_PANEL_BASE+81,
         mode==L"full"?IDC_PANEL_BASE+81:IDC_PANEL_BASE+80);
 
-    addSettingsLabel(sw,L"بزرگ‌نمایی فرم (۸۰ تا ۱۳۰ درصد)",x,y+S(66),w);
-    HWND zoom=CreateWindowExW(0,L"COMBOBOX",L"",
-        WS_CHILD|WS_VISIBLE|CBS_DROPDOWNLIST|WS_VSCROLL,x,y+S(90),w,S(180),sw->hwnd,
-        (HMENU)(INT_PTR)(IDC_PANEL_BASE+82),g_hInst,NULL);
-    SendMessageW(zoom,WM_SETFONT,(WPARAM)g_fUI,TRUE); sw->ctrls.push_back(zoom);
-    int current=_wtoi(getSetting(L"reception.zoom"+suffix,
-                       getSetting(L"reception.zoom",L"100")).c_str());
-    const int levels[]={80,90,100,110,120,130}; int selected=2;
-    for(int i=0;i<6;i++){
-        std::wstring label=toFaDigits(std::to_wstring(levels[i])+L"٪");
-        SendMessageW(zoom,CB_ADDSTRING,0,(LPARAM)label.c_str());
-        if(levels[i]==current) selected=i;
-    }
-    SendMessageW(zoom,CB_SETCURSEL,selected,0);
+    /* v1.73.0: the «بزرگ‌نمایی فرم» dropdown was REMOVED from the settings panel
+       — zoom is now set only via Ctrl+scroll on the admission page and persists
+       on its own (reception.zoom.save). Only the display mode (ساده/کامل) remains
+       here, so the save button moves up to where the zoom row used to sit. */
     HWND save=createFlatButton(sw->hwnd,IDC_PANEL_BASE+83,L"ذخیره تنظیمات نمایش",
-        ICO_CHECK,BS_PRIMARY,x,y+S(132),w,S(38));
+        ICO_CHECK,BS_PRIMARY,x,y+S(66),w,S(38));
     sw->ctrls.push_back(save);
 }
 
@@ -1076,12 +1066,16 @@ static LRESULT CALLBACK SettingsProc(HWND h,UINT m,WPARAM w,LPARAM l){
         case IDC_PANEL_BASE+83: {
             std::wstring suffix=sw->user.username.empty()?L"":L"."+sw->user.username;
             bool full=SendMessageW(GetDlgItem(h,IDC_PANEL_BASE+81),BM_GETCHECK,0,0)==BST_CHECKED;
-            int zi=(int)SendMessageW(GetDlgItem(h,IDC_PANEL_BASE+82),CB_GETCURSEL,0,0);
-            const int levels[]={80,90,100,110,120,130}; if(zi<0||zi>5) zi=2;
             setSetting(L"reception.mode"+suffix,full?L"full":L"simple");
-            setSetting(L"reception.zoom"+suffix,std::to_wstring(levels[zi]));
+            /* v1.73.0: the zoom dropdown is gone from this panel; re-send the
+               currently persisted zoom (chosen via Ctrl+scroll) so applying the
+               display settings does NOT reset the user's zoom level. Default is
+               now 90% (was 80%). */
+            int zoom=_wtoi(getSetting(L"reception.zoom"+suffix,
+                               getSetting(L"reception.zoom",L"90")).c_str());
+            if(zoom<80||zoom>200) zoom=90;
             std::string payload=std::string("{\"mode\":\"")+(full?"full":"simple")+
-                "\",\"zoom\":"+std::to_string(levels[zi])+"}";
+                "\",\"zoom\":"+std::to_string(zoom)+"}";
             WebAdmission_PushEvent("reception.settings",payload);
             MessageBoxW(h,L"تنظیمات پذیرش برای این کاربر ذخیره شد.",
                 L"تنظیمات پذیرش",MB_OK|MB_ICONINFORMATION);

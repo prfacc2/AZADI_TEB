@@ -40,7 +40,7 @@
     doctors: [],
     ps: { P: 0, S: 0 },
     mode: 'simple',
-    zoom: 80,
+    zoom: 90,
     overrideBlock: false,
     ready: false
   };
@@ -1261,13 +1261,13 @@
     });
 
     /* v1.70.0: Ctrl+scroll = zoom in/out. Persists the chosen zoom per-user
-       so it survives app restarts. Default is 80%. */
+       so it survives app restarts. Default is 90% (v1.73.0: was 80%). */
     on(document, 'wheel', function (e) {
       e = e || window.event;
       if (!e.ctrlKey) return;
       if (e.preventDefault) e.preventDefault(); else e.returnValue = false;
       var delta = e.wheelDelta || (e.detail ? -e.detail : 0);
-      var z = state.zoom || 80;
+      var z = state.zoom || 90;
       z += (delta > 0) ? 5 : -5;
       if (z < 80) z = 80; if (z > 200) z = 200;
       applyZoom(z);
@@ -1275,24 +1275,47 @@
     });
   }
 
-  /* v1.72.0: ZOOM rework — content never overflows the web view at any zoom.
-     The .app shell is a FIXED clip boundary (100vw x 100vh, overflow:hidden in
-     admission.css) whose dimensions JS never touches, so the page can never
-     spill outside the user's screen. Zoom is applied to the inner workspace
-     (#appBody = .body) ONLY: it is enlarged by 1/scale and then zoomed back, so
-     the rendered workspace always fills the shell exactly (no empty gap when
-     zooming out, no overflow when zooming in) while only the content scales.
-     The columns use percentage flex-basis, so they scale with the workspace and
-     nothing is pushed off-screen at any level (80-200%). Default 80%, Ctrl+scroll
-     persists per-user (unchanged). */
+  /* v1.73.0: ZOOM rework — content never overflows the web view at any zoom.
+     The .app shell is a FIXED clip boundary (width:100%, height:100vh,
+     overflow:hidden in admission.css) whose size JS NEVER touches, so the page
+     can never spill outside the user's screen. Zoom is applied to the inner
+     workspace (#appBody = .body) as the CSS `zoom` property ONLY — no container
+     is ever resized (the old enlarge-by-1/scale trick that set width/height to
+     10000/z caused left-side overflow in RTL and is gone). The browser scales
+     the content inside the fixed shell and clips anything that would spill past
+     it. Columns use percentage flex-basis that sums to 100%, so they scale with
+     the workspace and never push each other off-screen. If a browser ignores
+     `zoom` (some MSHTML builds), fall back to transform:scale() anchored at the
+     centre so the content stays centred and the .app overflow:hidden still clips
+     the overflow. We never apply both — that would double-scale. Default 90%;
+     Ctrl+scroll persists per-user (unchanged). */
   function applyZoom(z) {
     state.zoom = z;
     var host = $('appBody');            /* the inner workspace (.body) */
     if (!host) return;
-    var c = 10000 / z;                  /* 1/scale as a percent (125 at 80%) */
-    host.style.zoom = z + '%';
-    host.style.height = c + '%';        /* enlarged, then zoomed back to 100% */
-    host.style.width = c + '%';         /* enlarged, then zoomed back to 100% */
+    host.style.zoom = z + '%';          /* primary: CSS zoom scales content in place */
+    /* Detect whether `zoom` actually reflowed the element. A width:100% element
+       that honoured zoom reports a scaled offsetWidth; one that ignored it
+       reports the shell's full width. Fall back to transform:scale() then. */
+    var shell = $('app');
+    var took = false;
+    if (shell) {
+      var sw = shell.offsetWidth, hw = host.offsetWidth;
+      if (sw && hw) took = Math.round(hw) !== Math.round(sw);
+    }
+    host.style.webkitTransformOrigin = 'center center';
+    host.style.msTransformOrigin = 'center center';
+    host.style.transformOrigin = 'center center';
+    if (took || z === 100) {
+      host.style.webkitTransform = '';
+      host.style.msTransform = '';
+      host.style.transform = '';
+    } else {
+      var f = z / 100;
+      host.style.webkitTransform = 'scale(' + f + ')';
+      host.style.msTransform = 'scale(' + f + ')';
+      host.style.transform = 'scale(' + f + ')';
+    }
   }
   function applyMode(mode) {
     state.mode = mode === 'full' ? 'full' : 'simple';
@@ -1522,8 +1545,8 @@
     Bridge.on('reception.settings', function (d) {
       var root = document.documentElement;
       var mode = d && d.mode === 'full' ? 'full' : 'simple';
-      var zoom = Number(d && d.zoom) || 80;
-      if (zoom < 80 || zoom > 200) zoom = 80;
+      var zoom = Number(d && d.zoom) || 90;
+      if (zoom < 80 || zoom > 200) zoom = 90;
       state.mode = mode; state.zoom = zoom;
       if (root) root.className = root.className.replace(/\bmode-(simple|full)\b/g, '') + ' mode-' + mode;
       if (document.body) {
@@ -1627,7 +1650,7 @@
       }
       if (r.ps) updatePS(r.ps);
       applyMode(r.mode || 'simple');
-      applyZoom(r.zoom || 100);
+      applyZoom(r.zoom || 90);
       document.body.className = String(document.body.className || '')
         .replace(/\btheme-(dark|calm|warm)\b/g, '').replace(/\s+/g, ' ');
       if (r.theme === 'dark') document.body.className += ' theme-dark';

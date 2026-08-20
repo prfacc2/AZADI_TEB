@@ -500,8 +500,8 @@ static std::string admissionApi(const std::string& verb, const std::string& body
                            getSetting(L"reception.mode",L"simple"));
         if(mode!=L"full") mode=L"simple";
         int zoom=_wtoi(getSetting(L"reception.zoom"+suffix,
-                       getSetting(L"reception.zoom",L"80")).c_str());
-        if(zoom<80||zoom>200) zoom=80;
+                       getSetting(L"reception.zoom",L"90")).c_str());
+        if(zoom<80||zoom>200) zoom=90;
         o+="\"date\":"+jstr(adTodayJalali())+",";
         o+="\"time\":"+jstr(adNowTime())+",";
         o+="\"shift\":"+jstr(shiftName(g_session.shift))+",";
