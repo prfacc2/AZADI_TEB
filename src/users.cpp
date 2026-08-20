@@ -93,6 +93,36 @@ bool removeUser(const std::wstring& username){
     return false;
 }
 
+//  v1.70.0: update an EXISTING user account's fullname / dept / role and,
+//  when `newPassword` is non-empty, replace its password hash. Used by the
+//  embedded HTML CRM «کاربران» (employees) page to edit a user without
+//  deleting/re-adding it. Keeps the canonical users.dat format unchanged
+//  (reuses saveUsers, preserves any forward-compat extra columns). Returns
+//  false with an error string when the username is unknown or the name is
+//  blank. The reserved «prf» account cannot be edited here.
+bool updateUserAccount(const std::wstring& username, const std::wstring& fullname,
+                       const std::wstring& dept, int role,
+                       const std::wstring& newPassword, std::wstring& err){
+    if(trim(username).empty()){ err=L"نام کاربری خالی است."; return false; }
+    if(trim(fullname).empty()){ err=L"نام نمی‌تواند خالی باشد."; return false; }
+    if(username==L"prf"){ err=L"این نام کاربری رزرو شده است."; return false; }
+    if(role!=ROLE_RECEPTION && role!=ROLE_ADMIN) role=ROLE_RECEPTION;
+    auto us=loadUsers();
+    bool found=false;
+    for(auto& u:us){
+        if(u.username==username){
+            u.fullname=fullname; u.dept=dept; u.role=role;
+            if(!newPassword.empty()) u.hash=hashPassword(newPassword);
+            found=true; break;
+        }
+    }
+    if(!found){ err=L"این کاربر یافت نشد."; return false; }
+    saveUsers(us);
+    setSetting(L"name_override_"+username, fullname);
+    logLine(L"user updated: "+username);
+    return true;
+}
+
 //  §5: apply an admin-approved profile-name change. Updates the user record in
 //  users.dat AND records a display-name override so a stale cached login also
 //  reflects the new name. Returns false if the username is unknown.

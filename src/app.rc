@@ -66,6 +66,28 @@
 601 RCDATA "../assets/pages/ping/ping.css"
 602 RCDATA "../assets/pages/ping/ping.js"
 
+// v1.70.0: embedded HTML/CSS/JS CRM Management surface — the «مدیریت درمانگاه»
+// panel rendered by an embedded WebView2 (or the universal MSHTML fallback)
+// inside the manage tab, replacing the legacy native C++/GDI manage panel. The
+// page is fully INLINED from these blobs (serverless: no local server / port),
+// and talks to C++ through the window.external.azCall / postMessage bridge
+// handled by src/web_crm.cpp. Ids 800..810 are RESERVED for the CRM and MUST
+// NOT collide with the admission (400..405), shell (500..502), ping (600..602)
+// or WebView2Loader (700) blocks. The shared shell assets (500..502) are also
+// pulled in by the inliner so the CRM page reuses the common RTL/Vazirmatn
+// runtime + AzBridge transport.
+800 RCDATA "../assets/crm/index.html"
+801 RCDATA "../assets/crm/crm.css"
+802 RCDATA "../assets/crm/crm.js"
+803 RCDATA "../assets/crm/dashboard.js"
+804 RCDATA "../assets/crm/sections.js"
+805 RCDATA "../assets/crm/patients.js"
+806 RCDATA "../assets/crm/doctors.js"
+807 RCDATA "../assets/crm/services.js"
+808 RCDATA "../assets/crm/employees.js"
+809 RCDATA "../assets/crm/messages.js"
+810 RCDATA "../assets/crm/settings.js"
+
 // v1.68.0: the redistributable WebView2 loader (x86). Extracted to a per-user
 // writable folder at first use so the embedded Patient-Admission surface can
 // light up the modern Chromium engine on any machine that has the Evergreen
@@ -77,8 +99,8 @@
 1 24 "app.manifest"
 
 VS_VERSION_INFO VERSIONINFO
-  FILEVERSION 1,69,0,0
-  PRODUCTVERSION 1,69,0,0
+  FILEVERSION 1,70,0,0
+  PRODUCTVERSION 1,70,0,0
   FILEFLAGSMASK 0x3fL
   FILEFLAGS 0x0L
   FILEOS 0x40004L
@@ -91,11 +113,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "DarmanPlus"
             VALUE "FileDescription", "DarmanPlus Clinic Reception & Management System"
-            VALUE "FileVersion", "1.69.0.0"
+            VALUE "FileVersion", "1.70.0.0"
             VALUE "InternalName", "DarmanPlus"
             VALUE "OriginalFilename", "DarmanPlus.exe"
             VALUE "ProductName", "DarmanPlus"
-            VALUE "ProductVersion", "1.69.0"
+            VALUE "ProductVersion", "1.70.0"
         END
     END
     BLOCK "VarFileInfo"

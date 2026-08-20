@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.69.0"
+#define APP_VERSION_W   L"1.70.0"
 
 // ----------------------------------------------------------- logging policy -
 //  RELEASE 1.2.0 (Section A): all general user-behavior logging is gated behind
@@ -303,6 +303,11 @@ std::vector<User> loadUsers();
 bool addUser(const User& u, std::wstring& err);
 bool removeUser(const std::wstring& username);
 bool setUserFullName(const std::wstring& username, const std::wstring& fullname); // §5
+// v1.70.0: edit an existing user (fullname/dept/role) and optionally reset its
+// password (when newPassword is non-empty). Used by the HTML CRM employees page.
+bool updateUserAccount(const std::wstring& username, const std::wstring& fullname,
+                       const std::wstring& dept, int role,
+                       const std::wstring& newPassword, std::wstring& err);
 bool verifyLogin(const std::wstring& u, const std::wstring& p,
                  int wantRole, User& out, std::wstring& err);
 std::wstring hashPassword(const std::wstring& p);

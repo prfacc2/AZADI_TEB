@@ -40,7 +40,7 @@
     doctors: [],
     ps: { P: 0, S: 0 },
     mode: 'simple',
-    zoom: 100,
+    zoom: 80,
     overrideBlock: false,
     ready: false
   };
@@ -248,11 +248,11 @@
     setText($('tcVal'), money(b.pat));
   }
   function scheduleBillSync() {
-    if (!state.ready || _billSyncTimer) return;
-    _billSyncTimer = setTimeout(function () {
-      _billSyncTimer = null;
-      Bridge.call('bill.compute', authoritativeBillPayload()).then(applyAuthoritativeBill);
-    }, 100);
+    if (!state.ready) return;
+    // v1.70.0: sync immediately (was 100ms delay which caused a brief flash of
+    // wrong values). The authoritative C++ recompute is fast enough to run
+    // synchronously without freezing the UI.
+    Bridge.call('bill.compute', authoritativeBillPayload()).then(applyAuthoritativeBill);
   }
 
   function recompute() {
@@ -882,6 +882,21 @@
     on($('docSearch'), 'keydown', function (e) { e = e || window.event; if ((e.keyCode || e.which) === 13) { if (e.preventDefault) e.preventDefault(); doDocSearch(); } });
     on($('docCode'), 'keydown', function (e) { e = e || window.event; if ((e.keyCode || e.which) === 13) { if (e.preventDefault) e.preventDefault(); doDocByCode(); } });
 
+    /* v1.70.1: doctor LIVE search -- results refresh as the operator types
+       (debounced), mirroring the service live-search UX. Enter and the search
+       button still fire doDocSearch() via the handlers above. */
+    var docTimer = null;
+    function docLiveSearch() {
+      if (docTimer) clearTimeout(docTimer);
+      var q = $('docSearch') ? trimStr($('docSearch').value) : '';
+      if (!q) { renderDocResults([]); return; }
+      docTimer = setTimeout(function () {
+        Bridge.call('doctor.search', { q: q }).then(function (r) { renderDocResults(r.rows || r.doctors || []); });
+      }, 180);
+    }
+    on($('docSearch'), 'input', docLiveSearch);
+    on($('docSearch'), 'keyup', docLiveSearch);
+
     /* service live search */
     var svcTimer = null;
     function svcSearch() {
@@ -1240,13 +1255,28 @@
         saveAdmission();
       }
     });
+
+    /* v1.70.0: Ctrl+scroll = zoom in/out. Persists the chosen zoom per-user
+       so it survives app restarts. Default is 80%. */
+    on(document, 'wheel', function (e) {
+      e = e || window.event;
+      if (!e.ctrlKey) return;
+      if (e.preventDefault) e.preventDefault(); else e.returnValue = false;
+      var delta = e.wheelDelta || (e.detail ? -e.detail : 0);
+      var z = state.zoom || 80;
+      z += (delta > 0) ? 5 : -5;
+      if (z < 80) z = 80; if (z > 200) z = 200;
+      applyZoom(z);
+      Bridge.call('reception.zoom.save', { zoom: z });
+    });
   }
 
-  /* v1.60.0: zoom controls removed. applyZoom() is kept as a harmless no-op
-     (state/init still passes a value through it) but never scales the page. */
+  /* v1.70.0: applyZoom now actually scales the page. Default 80%, user can
+     change via Ctrl+scroll (persists per-user). */
   function applyZoom(z) {
-    state.zoom = 100;
-    var app=$('app'); if(app){ app.style.zoom = ''; app.style.height = ''; }
+    state.zoom = z;
+    var app=$('app'); if(app){ app.style.zoom = z + '%'; }
+    if(document.body) document.body.style.zoom = z + '%';
   }
   function applyMode(mode) {
     state.mode = mode === 'full' ? 'full' : 'simple';
@@ -1476,14 +1506,14 @@
     Bridge.on('reception.settings', function (d) {
       var root = document.documentElement;
       var mode = d && d.mode === 'full' ? 'full' : 'simple';
-      var zoom = Number(d && d.zoom) || 100;
-      if (zoom < 80 || zoom > 130) zoom = 100;
-      state.mode = mode; state.zoom = 100;  // v1.69.0: always 100%, no zoom
+      var zoom = Number(d && d.zoom) || 80;
+      if (zoom < 80 || zoom > 200) zoom = 80;
+      state.mode = mode; state.zoom = zoom;
       if (root) root.className = root.className.replace(/\bmode-(simple|full)\b/g, '') + ' mode-' + mode;
       if (document.body) {
         document.body.className = document.body.className.replace(/\bmode-(simple|full)\b/g, '') + ' mode-' + mode;
-        document.body.style.zoom = '';  // v1.69.0: force 100%, never scale
       }
+      applyZoom(zoom);
       toast('تنظیمات نمایش پذیرش اعمال شد', 'ok');
     });
     Bridge.on('native.print', function (d) {

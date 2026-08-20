@@ -7,6 +7,7 @@
 #include "print_designer.h"   // §1.19.0: print-settings (section design preview/apply)
 #include "sections.h"         // §1.19.0: section list for print-settings page
 #include "web_admission.h"    // live catalog/insurance sync to embedded Admission
+#include "web_crm.h"          // v1.70.0: embedded HTML CRM management surface
 #include <commctrl.h>
 #include <stdio.h>
 #include <algorithm>

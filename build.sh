@@ -33,7 +33,8 @@ SRCS="src/main.cpp src/util.cpp src/handlers.cpp src/theme.cpp src/users.cpp \
       src/backup_log_viewer.cpp src/backup_mtf.cpp src/saved_messages.cpp \
       src/setup_splash.cpp src/web_designer.cpp src/services.cpp \
       src/blacklist.cpp src/web_admission.cpp \
-      src/web_pages.cpp src/web_thread_pool.cpp src/web_ping_api.cpp"
+      src/web_pages.cpp src/web_thread_pool.cpp src/web_ping_api.cpp \
+      src/web_crm.cpp"
 
 $CXX -std=c++17 -O2 -s -municode -mwindows \
     -DUNICODE -D_UNICODE -D_WIN32_IE=0x0700 \
