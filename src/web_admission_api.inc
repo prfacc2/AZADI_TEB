@@ -49,7 +49,13 @@ static std::string serviceJson(const ServiceDef& s){
     o+="\"dept\":"+jstr(s.dept)+",";
     o+="\"desc\":"+jstr(s.desc)+",";
     o+="\"insType\":"+jstr(s.insType)+",";
+    o+="\"insName\":"+jstr(s.insName)+",";
+    o+="\"multiplier\":"+jstr(s.multiplier)+",";
     o+="\"price\":"+jnum(s.price)+",";
+    // v1.75.0: expose the tariff prices so the JS billing can pick the right one
+    o+="\"priceFree\":"+jnum(s.priceFree)+",";
+    o+="\"priceGov\":"+jnum(s.priceGov)+",";
+    o+="\"priceIns\":"+jnum(s.priceIns)+",";
     o+="\"status\":"+jnum(s.status);
     o+="}";
     return o;
@@ -163,7 +169,8 @@ static std::string adBlockJson(const BlacklistEntry& b){
 // کامل بیمه). Only a completely empty row is rejected.
 static bool adCatalogPrice(const std::vector<ServiceDef>& catalog,
                            const std::string& obj,long long& price,
-                           const ServiceDef** defOut=nullptr){
+                           const ServiceDef** defOut=nullptr,
+                           bool hasIns=false){
     bool freeRate=jsonGetBool(obj,"freeRate",false);
     double n=0;
     std::string codeU; jsonGetString(obj,"code",codeU);
@@ -183,10 +190,22 @@ static bool adCatalogPrice(const std::vector<ServiceDef>& catalog,
     }
 
     // exact code match first — price 0 is accepted (رایگان است، حذف نمی‌شود)
+    // v1.75.0: select the tariff price based on the patient's insurance type.
+    //   - no insurance / آزاد → priceFree (or s.price as legacy fallback)
+    //   - government insurance → priceGov
+    //   - base insurance → priceIns
+    //   This ensures the price defined in the CRM services page actually flows
+    //   to the admission billing calculation.
     if(!want.empty()){
         for(const auto& s:catalog){
             if(s.status!=0 && serviceIdentityKey(s.code)==want){
-                price=s.price; if(price<0) price=0;
+                // v1.75.0: pick the tariff that matches the patient's insurance
+                if(hasIns){
+                    price = s.priceIns>0 ? s.priceIns : s.price;
+                } else {
+                    price = s.priceFree>0 ? s.priceFree : s.price;
+                }
+                if(price<0) price=0;
                 if(defOut) *defOut=&s;
                 return true;
             }
@@ -198,7 +217,12 @@ static bool adCatalogPrice(const std::vector<ServiceDef>& catalog,
     if(want.empty()&&!wantName.empty()){
         for(const auto& s:catalog){
             if(s.status!=0 && serviceIdentityKey(s.name)==wantName){
-                price=s.price; if(price<0) price=0;
+                if(hasIns){
+                    price = s.priceIns>0 ? s.priceIns : s.price;
+                } else {
+                    price = s.priceFree>0 ? s.priceFree : s.price;
+                }
+                if(price<0) price=0;
                 if(defOut) *defOut=&s;
                 return true;
             }
@@ -373,7 +397,8 @@ static std::vector<ServiceLine> adCanonicalServices(const std::string& body,
         long long unitPrice=0;
         bool freeRate=jsonGetBool(obj,"freeRate",false);
         const ServiceDef* def=nullptr;
-        if(!adCatalogPrice(catalog,obj,unitPrice,&def)) continue;
+        bool hasIns=jsonGetBool(body,"hasIns",false);
+        if(!adCatalogPrice(catalog,obj,unitPrice,&def,hasIns)) continue;
 
         ServiceLine ln;
         std::string cs,ns,cats,desc;

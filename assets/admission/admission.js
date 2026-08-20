@@ -197,7 +197,20 @@
   function computeRow(s) {
     var qty = Number(s.qty) || 1;
     if (qty < 1) qty = 1; else if (qty > 999) qty = 999;
-    var unitPrice = s.freeRate ? (Number(s.freePrice) || 0) : (Number(s.price) || 0);
+    /* v1.75.0: pick unit price based on insurance type, matching the C++
+     * adCatalogPrice logic. freeRate rows use freePrice. Otherwise:
+     *   hasIns → priceIns (insurance tariff), else → priceFree (free tariff).
+     * Falls back to s.price (legacy base) if the tariff field is 0. */
+    var unitPrice;
+    if (s.freeRate) {
+      unitPrice = Number(s.freePrice) || 0;
+    } else if (hasIns() && Number(s.priceIns) > 0) {
+      unitPrice = Number(s.priceIns);
+    } else if (!hasIns() && Number(s.priceFree) > 0) {
+      unitPrice = Number(s.priceFree);
+    } else {
+      unitPrice = Number(s.price) || 0;
+    }
     if (unitPrice < 0) unitPrice = 0;
     var gross = unitPrice * qty;
     var disc = Number(s.discount) || 0;
