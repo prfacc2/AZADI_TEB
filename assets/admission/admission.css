@@ -2382,7 +2382,7 @@ body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .print-card .card-head{
 .col-action .datetime-card .dt-half{-ms-flex:1 1 100%;flex:1 1 100%;min-width:0;}
 .col-action .datetime-card .dt-half + .dt-half{margin-right:0;margin-top:7px;}
 .col-action .datetime-card .dt-ico{width:26px;height:26px;margin-left:7px;border-radius:8px;background:#e7f2fe;color:#176fcf;}
-.col-action .datetime-card .dt-fld > span{margin-bottom:2px;font-size:10px;color:#3d5573;font-weight:800;}
+.col-action .datetime-card .dt-fld > span{margin-bottom:2px;font-size:10px;color:#1f3a5f;font-weight:800;}
 .col-action .datetime-card .inp{height:28px;font-size:11px;border-color:#c5d6e8;background:#f5f9fd;color:#123d70;}
 
 /* ------------------------------- 4. CENTER: patient details sub-separator + variety ---
@@ -2392,7 +2392,7 @@ body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .print-card .card-head{
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .card-head{border-bottom:1px solid #e6def7;}
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .card-title{color:#5b21b6;}
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .ct-ico{color:#7c3aed;}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .fld > span{color:#4c3a6b;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .fld > span{color:#372853;}
 .pt-sep{
   width:100%;height:0;margin:4px 0;
   border:0;border-top:1px solid #e2e8f0;
@@ -2487,3 +2487,79 @@ body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payable-value span{font
 .theme-dark .col-left .ps-unit{color:#9fb7cf;}
 .theme-dark .col-left .ps-key-p{background:#16a34a;}
 .theme-dark .col-left .ps-key-s{background:#f0a800;}
+
+/* ============================================================================
+   v1.70.1 — ADMISSION LAYOUT FIX
+   Right rail reordered (profile -> date/shift -> operations -> print); the
+   sync-status card is ordered last so the four feature cards read consecutively.
+   P/S counters + turn preview consolidated into one compact strip at the top of
+   the centre workspace (moved out of the left rail and the profile card); the
+   same IDs are preserved (psPVal/psSVal/tpReg/tpWait). Patient-details fields are
+   centre-aligned. The two admission-operation buttons get distinct warm/cool
+   colours + spacing. Doctor live-search elements are styled. All form labels are
+   bolder + darker (were too faint).
+   ============================================================================ */
+
+/* right rail: park the sync-status card beneath the print cluster */
+.status-card{-ms-flex-order:5;order:5;}
+
+/* compact counter strip (P/S + turn preview) above the services list */
+.counter-strip{
+  display:-ms-flexbox;display:flex;
+  -ms-flex-direction:row;flex-direction:row;
+  -ms-flex-align:center;align-items:center;
+  -ms-flex-pack:center;justify-content:center;
+  -ms-flex-wrap:wrap;flex-wrap:wrap;
+  width:100%;-ms-flex:0 0 auto;flex:0 0 auto;
+  margin:0 0 10px;padding:7px 12px;
+  border:1px solid #c9d8e8;border-radius:10px;background:#f3f7fc;
+}
+.cs-item{
+  display:-ms-inline-flexbox;display:inline-flex;
+  -ms-flex-direction:row;flex-direction:row;
+  -ms-flex-align:center;align-items:center;
+  white-space:nowrap;
+}
+.cs-item + .cs-item{margin-right:12px;}
+.cs-key{
+  width:22px;height:22px;border-radius:6px;font-size:11px;font-weight:800;color:#fff;
+  display:-ms-inline-flexbox;display:inline-flex;
+  -ms-flex-align:center;align-items:center;-ms-flex-pack:center;justify-content:center;
+  margin-left:7px;
+}
+.cs-key-p{background:#16a34a;}
+.cs-key-s{background:#f0a800;}
+.cs-cap{font-size:11.5px;font-weight:700;color:#33465f;margin-left:6px;}
+.cs-val{font-size:15px;font-weight:900;color:#0d2144;margin-left:5px;}
+.cs-sep{width:1px;height:20px;background:#cfdcee;margin:0 4px;}
+
+/* patient-details: centre-align every field + its label */
+.patient-card .fld > span{text-align:center;}
+.patient-card .inp{text-align:center;}
+
+/* two admission-operation buttons: warm amber + cool blue, with spacing */
+.queue-action-btns{
+  display:-ms-flexbox;display:flex;-ms-flex-direction:column;flex-direction:column;
+}
+.queue-action-btns .btn{height:42px;font-size:12.5px;font-weight:800;margin-bottom:10px;}
+.queue-action-btns .btn:last-child{margin-bottom:0;}
+.btn-queue-add{background:#f59e0b;border:1px solid #d97706;color:#fff;}
+.btn-queue-add:hover{background:#d97706;}
+.btn-queue-add2{background:#2563eb;border:1px solid #1d4ed8;color:#fff;}
+.btn-queue-add2:hover{background:#1d4ed8;}
+.theme-dark .btn-queue-add{background:#b9720a;border-color:#8a5406;color:#fff;}
+.theme-dark .btn-queue-add2{background:#1d4ed8;border-color:#1746b0;color:#fff;}
+
+/* doctor live-search listbox (kept compact inside the narrow row-3 card) */
+.doc-results{max-height:118px;margin-top:6px;}
+
+/* labels made more prominent -- bolder + darker (were too faint) */
+.fld > span{font-weight:700;color:#1a2738;font-size:13px;}
+.inv-line span{font-weight:700;color:#26384f;}
+.sf-cell span{font-weight:700;color:#3a4f6a;}
+
+/* dark-theme parity for the new strip */
+.theme-dark .counter-strip{background:#172231;border-color:#3a4a60;}
+.theme-dark .cs-cap{color:#b8cce1;}
+.theme-dark .cs-val{color:#ecf6ff;}
+.theme-dark .cs-sep{background:#34516d;}

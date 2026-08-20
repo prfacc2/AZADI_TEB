@@ -882,6 +882,21 @@
     on($('docSearch'), 'keydown', function (e) { e = e || window.event; if ((e.keyCode || e.which) === 13) { if (e.preventDefault) e.preventDefault(); doDocSearch(); } });
     on($('docCode'), 'keydown', function (e) { e = e || window.event; if ((e.keyCode || e.which) === 13) { if (e.preventDefault) e.preventDefault(); doDocByCode(); } });
 
+    /* v1.70.1: doctor LIVE search -- results refresh as the operator types
+       (debounced), mirroring the service live-search UX. Enter and the search
+       button still fire doDocSearch() via the handlers above. */
+    var docTimer = null;
+    function docLiveSearch() {
+      if (docTimer) clearTimeout(docTimer);
+      var q = $('docSearch') ? trimStr($('docSearch').value) : '';
+      if (!q) { renderDocResults([]); return; }
+      docTimer = setTimeout(function () {
+        Bridge.call('doctor.search', { q: q }).then(function (r) { renderDocResults(r.rows || r.doctors || []); });
+      }, 180);
+    }
+    on($('docSearch'), 'input', docLiveSearch);
+    on($('docSearch'), 'keyup', docLiveSearch);
+
     /* service live search */
     var svcTimer = null;
     function svcSearch() {
