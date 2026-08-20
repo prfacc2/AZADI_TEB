@@ -148,19 +148,37 @@ static void calcKey(HWND h, CalcState* s, const std::wstring& k){
     InvalidateRect(h, NULL, FALSE);
 }
 
+// Visual key categories drive the per-button colour scheme (not the math —
+// calcKey/calcEval stay unchanged). Classified from KEYS so the paint layer
+// never duplicates the operator/magic-char logic.
+enum CalcKeyType { CK_DIGIT, CK_OP, CK_FUNC, CK_EQ };
+static CalcKeyType calcKeyType(int i){
+    const wchar_t* k = KEYS[i];
+    if(wcscmp(k,L"=")==0) return CK_EQ;
+    if(wcscmp(k,L"+")==0 || wcscmp(k,L"\u2212")==0 ||
+       wcscmp(k,L"\u00D7")==0 || wcscmp(k,L"\u00F7")==0) return CK_OP;
+    if(wcscmp(k,L"C")==0 || wcscmp(k,L"\u232B")==0 ||
+       wcscmp(k,L"%")==0 || wcscmp(k,L"\u00B1")==0 ||
+       wcscmp(k,L".")==0) return CK_FUNC;
+    return CK_DIGIT;
+}
+
 static void calcLayout(HWND h, RECT& disp, RECT cells[20]){
     RECT rc; GetClientRect(h,&rc);
-    int pad = S(12);
-    int dispH = S(110);
+    int pad = S(16);
+    int dispH = S(118);
     disp = { pad, pad, rc.right-pad, pad+dispH };
-    int gy = disp.bottom + S(10);
-    int gw = rc.right - 2*pad, gh = rc.bottom - gy - pad;
-    int cw = gw/4, ch = gh/5;
+    int gridY = disp.bottom + S(10);
+    int gridW = rc.right - 2*pad;
+    int gridH = rc.bottom - gridY - pad;
+    int cw = gridW/4, ch = gridH/5;
+    int inset = S(5);                 // gap between adjacent keys
     for(int r2=0;r2<5;r2++) for(int c=0;c<4;c++){
         int i = r2*4+c;
-        // RTL: column 0 at right
+        // RTL: column 0 sits at the right edge (manual — no WS_EX_LAYOUTRTL)
         int cx = rc.right - pad - (c+1)*cw;
-        cells[i] = { cx+S(3), gy+r2*ch+S(3), cx+cw-S(3), gy+(r2+1)*ch-S(3) };
+        cells[i] = { cx+inset, gridY+r2*ch+inset,
+                     cx+cw-inset, gridY+(r2+1)*ch-inset };
     }
 }
 static int cellHit(HWND h, POINT pt){
@@ -235,53 +253,110 @@ static LRESULT CALLBACK calcProc(HWND h, UINT m, WPARAM w, LPARAM l){
         HDC dc=CreateCompatibleDC(dc0);
         HBITMAP bmp=CreateCompatibleBitmap(dc0,rc.right,rc.bottom);
         HGDIOBJ obm=SelectObject(dc,bmp);
-        // Use the deeper bg2 tone so the white key/display surfaces stand out
-        // clearly in the light theme (they previously blended into the bg).
+        // Window background: the deeper bg2 tone so the bright display/key
+        // surfaces pop off the page in the light theme (on the plain bg they
+        // previously blended in). Depth comes from the panel + key shadows.
         { HBRUSH bb=CreateSolidBrush(g_theme.bg2); FillRect(dc,&rc,bb); DeleteObject(bb); }
 
         RECT disp, cells[20]; calcLayout(h,disp,cells);
-        // display panel
-        fillRoundRect(dc,disp,S(14),g_theme.surface,g_theme.border);
-        SetBkMode(dc,TRANSPARENT);
-        // history line
-        SetTextColor(dc,g_theme.textDim);
-        SelectObject(dc,g_fSmall);
-        RECT hr={disp.left+S(14),disp.top+S(10),disp.right-S(14),disp.top+S(34)};
-        DrawTextW(dc,toFaDigits(s->history).c_str(),-1,&hr,
-            DT_LEFT|DT_SINGLELINE|DT_NOPREFIX);
-        // main number
-        SetTextColor(dc, s->err? g_theme.danger : g_theme.text);
-        SelectObject(dc,g_fHuge);
-        RECT mr={disp.left+S(14),disp.top+S(32),disp.right-S(14),disp.bottom-S(10)};
-        std::wstring shown = s->err ? s->display : toFaDigits(groupNum(s->display));
-        DrawTextW(dc,shown.c_str(),-1,&mr,
-            DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX|DT_END_ELLIPSIS);
+        int dispRad = S(16);
+        int keyRad  = S(12);
 
-        // keys
+        // ---- display panel: soft drop shadow + gradient card ----
+        gpShadow(dc, disp, dispRad, S(10), 70);
+        gpGradRoundRectBg(dc, disp, dispRad, g_theme.surfaceTop, g_theme.surface,
+                          g_theme.border, g_theme.bg2);
+
+        SetBkMode(dc, TRANSPARENT);
+        // history line — muted, right-aligned, proper RTL reading order
+        SetTextColor(dc, g_theme.textDim);
+        SelectObject(dc, g_fSmall);
+        RECT hr={ disp.left+S(16), disp.top+S(12),
+                  disp.right-S(16), disp.top+S(36) };
+        DrawTextW(dc, toFaDigits(s->history).c_str(), -1, &hr,
+            DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
+        // main number — right-aligned (calculator style). DT_RTLREADING is added
+        // ONLY for the Persian error text: a leading minus on a number would be
+        // mirrored to the wrong side under RTL reading, so numbers stay LTR-safe.
+        SetTextColor(dc, s->err ? g_theme.danger : g_theme.text);
+        SelectObject(dc, g_fHuge);
+        RECT mr={ disp.left+S(16), disp.top+S(36),
+                  disp.right-S(16), disp.bottom-S(12) };
+        std::wstring shown = s->err ? s->display : toFaDigits(groupNum(s->display));
+        DWORD nfmt = DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX|DT_END_ELLIPSIS;
+        if(s->err) nfmt |= DT_RTLREADING;
+        DrawTextW(dc, shown.c_str(), -1, &mr, nfmt);
+
+        // ---- keys: modern elevated rounded buttons ----
         for(int i=0;i<20;i++){
+            CalcKeyType kt = calcKeyType(i);
             const wchar_t* k = KEYS[i];
-            bool isOp = (i%4==3) || i<4;
-            bool isEq = wcscmp(k,L"=")==0;
-            COLORREF fill = isEq ? g_theme.accent
-                          : isOp ? g_theme.surface2 : g_theme.surface;
-            COLORREF txt  = isEq ? g_theme.accentText
-                          : isOp ? g_theme.accent : g_theme.text;
-            if(i==s->hot)  fill = isEq ? g_theme.accentHover : g_theme.hover;
-            if(i==s->press){
-                RECT r2=cells[i]; r2.top+=2; r2.bottom+=2;
-                fillRoundRect(dc,r2,S(12),fill,g_theme.border);
-                SetTextColor(dc,txt);
-                SelectObject(dc,g_fTitle);
-                DrawTextW(dc,k,-1,&r2,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX);
-                continue;
+            bool hot = (i==s->hot);
+            bool pressed = (i==s->press);
+
+            // base fill (top/bottom gradient stops) + ink + border per category
+            COLORREF fillTop, fillBot, txt, border;
+            if(kt==CK_EQ){                       // hero action — solid accent
+                fillTop=g_theme.accentHover; fillBot=g_theme.accent;
+                txt=g_theme.accentText;      border=CLR_INVALID;
+            } else if(kt==CK_OP){                // operators — soft accent wash
+                fillTop=blendColor(g_theme.surface, g_theme.accent, 22);
+                fillBot=blendColor(g_theme.surface, g_theme.accent, 12);
+                txt=g_theme.accent;
+                border=blendColor(g_theme.border, g_theme.accent, 30);
+            } else if(kt==CK_FUNC){              // utilities — muted, recede
+                fillTop=fillBot=blendColor(g_theme.surface2, g_theme.border, 15);
+                txt=g_theme.textDim; border=g_theme.border;
+            } else {                             // digits — clean card
+                fillTop=blendColor(g_theme.surface, g_theme.surfaceTop, 50);
+                fillBot=g_theme.surface;
+                txt=g_theme.text;      border=g_theme.border;
             }
-            fillRoundRect(dc,cells[i],S(12),fill,
-                isEq?CLR_INVALID:g_theme.border);
-            SetTextColor(dc,txt);
-            SelectObject(dc,g_fTitle);
-            RECT cr = cells[i];
-            DrawTextW(dc,k,-1,&cr,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX);
+
+            // hover: lift + brighten
+            if(hot){
+                if(kt==CK_EQ){
+                    fillBot=blendColor(g_theme.accent, g_theme.accentHover, 55);
+                } else if(kt==CK_OP){
+                    fillTop=blendColor(g_theme.surface, g_theme.accent, 32);
+                    fillBot=blendColor(g_theme.surface, g_theme.accent, 20);
+                } else if(kt==CK_FUNC){
+                    fillTop=fillBot=g_theme.hover;
+                } else {
+                    fillTop=g_theme.surfaceTop;
+                    fillBot=blendColor(g_theme.surface, g_theme.surfaceTop, 60);
+                }
+            }
+
+            RECT cell = cells[i];
+
+            // elevation: equals always casts an accent glow; others lift on hover
+            if(!pressed){
+                if(kt==CK_EQ)
+                    gpShadowColor(dc, cell, keyRad, S(hot?8:6), hot?115:85, g_theme.accent);
+                else if(hot)
+                    gpShadow(dc, cell, keyRad, S(4), 50);
+            }
+            if(pressed){
+                // sink down + lose the shadow; darken toward the page bg (darkens
+                // in both themes). Equals keeps its gradient, just shifts.
+                cell.top += S(2); cell.bottom += S(2);
+                if(kt==CK_EQ){ fillTop=g_theme.accentHover; fillBot=g_theme.accent; }
+                else fillTop=fillBot=blendColor(fillBot, g_theme.bg2, 34);
+            }
+
+            // corners filled with the window bg so the AA rounded edges blend
+            if(kt==CK_FUNC)
+                gpRoundRectBg(dc, cell, keyRad, fillBot, border, g_theme.bg2);
+            else
+                gpGradRoundRectBg(dc, cell, keyRad, fillTop, fillBot, border, g_theme.bg2);
+
+            SetTextColor(dc, txt);
+            SelectObject(dc, g_fTitle);
+            DrawTextW(dc, k, -1, &cell,
+                DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX);
         }
+
         BitBlt(dc0,0,0,rc.right,rc.bottom,dc,0,0,SRCCOPY);
         SelectObject(dc,obm); DeleteObject(bmp); DeleteDC(dc);
         EndPaint(h,&ps);
