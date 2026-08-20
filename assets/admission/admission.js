@@ -555,24 +555,23 @@
     state.doctors = rows || [];
     if (!rows || !rows.length) { box.innerHTML = '<div class="empty">نتیجه‌ای نیست</div>'; return; }
     var html = '', i, doc, lim = Math.min(rows.length, 25);
+    /* v1.71.0: each suggestion shows name + specialty + medical-council ID,
+       so the operator can confirm the match before clicking. */
     for (i = 0; i < lim; i++) {
       doc = rows[i];
-      html += '<div class="row" data-d="' + i + '"><span class="r-name">' + esc(doc.name || '') +
-        '</span><span class="r-sub">' + esc(doc.specialty || '') + '</span></div>';
+      html += '<div class="row" data-d="' + i + '">' +
+        '<span class="r-name">' + esc(doc.name || '') + '</span>' +
+        '<span class="r-sub">' + esc(doc.specialty || '') + '</span>' +
+        (doc.code ? '<span class="r-code">' + esc(toFa(doc.code)) + '</span>' : '') +
+        '</div>';
     }
     box.innerHTML = html;   /* delegated click — wired once in wire() */
   }
   function selectDoctor(doc, ix) {
-    /* populate the doctor <select> options and select this one */
-    var sel = $('doc2name');
-    if (sel) {
-      sel.innerHTML = '';
-      var opt = document.createElement('option');
-      opt.value = doc.name || '';
-      opt.appendChild(document.createTextNode((doc.name || '') + (doc.specialty ? ' — ' + doc.specialty : '')));
-      sel.appendChild(opt);
-      sel.selectedIndex = 0;
-    }
+    /* v1.71.0: the <select id="doc2name"> dropdown is gone — the doctor name is
+       shown in a read-only display field that mirrors the suggestion pick, and
+       the medical-council ID (#doc2code) is auto-filled from the same row. */
+    if ($('doc2name')) $('doc2name').value = doc.name || '';
     if ($('doc2code') && doc.code) $('doc2code').value = toFa(doc.code);
     refreshDoctorStats(doc.name || '');
   }
@@ -876,9 +875,8 @@
     var dates = document.querySelectorAll('[data-date]'), di;
     for (di = 0; di < dates.length; di++) wireDateField(dates[di]);
 
-    /* doctor search */
-    on($('docSearchBtn'), 'click', doDocSearch);
-    on($('docCodeBtn'), 'click', doDocByCode);
+    /* doctor search — v1.71.0: the «جستجو» button is removed; search is LIVE
+       (docLiveSearch below fires on every keystroke). Enter still re-runs it. */
     on($('docSearch'), 'keydown', function (e) { e = e || window.event; if ((e.keyCode || e.which) === 13) { if (e.preventDefault) e.preventDefault(); doDocSearch(); } });
     on($('docCode'), 'keydown', function (e) { e = e || window.event; if ((e.keyCode || e.which) === 13) { if (e.preventDefault) e.preventDefault(); doDocByCode(); } });
 
@@ -1271,12 +1269,22 @@
     });
   }
 
-  /* v1.70.0: applyZoom now actually scales the page. Default 80%, user can
-     change via Ctrl+scroll (persists per-user). */
+  /* v1.70.0: applyZoom scales the page via the IE/Chromium `zoom` property.
+     v1.71.0: a bare `zoom` shrinks the .app layout box, so the page no longer
+     fills the web view — an empty band appears at the bottom (and side), and
+     zooming out makes it worse. Fix: enlarge the .app shell by 1/scale BEFORE
+     zooming, so the rendered size stays 100vh x 100% at every level and only
+     the content shrinks. Zooming OUT (the default 80%) now shrinks items with
+     no gap and no layout shift; zooming IN scales up the same full-height box.
+     Default 80%, Ctrl+scroll persists per-user (unchanged). */
   function applyZoom(z) {
     state.zoom = z;
-    var app=$('app'); if(app){ app.style.zoom = z + '%'; }
-    if(document.body) document.body.style.zoom = z + '%';
+    var app = $('app');
+    if (!app) return;
+    var c = 10000 / z;              /* 1/scale as a percent (125 at 80%) */
+    app.style.zoom = z + '%';
+    app.style.height = c + 'vh';    /* enlarged, then zoomed back to 100vh */
+    app.style.width = c + '%';      /* enlarged, then zoomed back to 100%  */
   }
   function applyMode(mode) {
     state.mode = mode === 'full' ? 'full' : 'simple';
@@ -1455,7 +1463,7 @@
       'svcSearch', 'qsNid', 'qsFile', 'docCode', 'docSearch'];
     var i;
     for (i = 0; i < ids.length; i++) { if ($(ids[i])) $(ids[i]).value = ''; }
-    if ($('doc2name')) $('doc2name').innerHTML = '<option value="">— انتخاب —</option>';
+    if ($('doc2name')) $('doc2name').value = '';
     if ($('perfname')) $('perfname').innerHTML = '<option value="">— انتخاب —</option>';
     if ($('insSuppPct')) $('insSuppPct').value = '0';
     if ($('insMain')) $('insMain').selectedIndex = 0;

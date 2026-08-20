@@ -171,10 +171,7 @@
               پزشک معالج</span></div>
             <div class="card-body doc-body">
               <label class="fld"><span>جستجوی پزشک</span>
-                <div class="search-wrap">
-                  <input type="text" id="docSearch" class="inp" data-nav placeholder="نام یا کد پزشک…" />
-                  <button type="button" class="btn btn-primary btn-sm" id="docSearchBtn">جستجو</button>
-                </div>
+                <input type="text" id="docSearch" class="inp" data-nav placeholder="نام یا کد پزشک…" autocomplete="off" />
               </label>
               <div class="mini-list doc-results" id="docResults"><div class="empty">نتیجه‌ای نیست</div></div>
               <label class="fld"><span>شماره نظام پزشکی</span>
@@ -184,7 +181,7 @@
                 </div>
               </label>
               <label class="fld"><span>نام پزشک</span>
-                <select id="doc2name" class="inp" data-nav><option value="">— انتخاب —</option></select>
+                <input type="text" id="doc2name" class="inp doc-name-display" data-nav readonly placeholder="از لیست جستجو انتخاب کنید" />
               </label>
             </div>
           </section>
