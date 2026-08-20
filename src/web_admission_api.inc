@@ -56,19 +56,51 @@ static std::string serviceJson(const ServiceDef& s){
 }
 
 // ---- insurance lists (base + supplementary) --------------------------------
+// v1.74: merged with the user-managed «تعریف بیمه» registry. The canonical
+// hardcoded table is overridden per-index by any user definition (name + سهم
+// سازمان) and extended with user-added rows, so the admission dropdown shows
+// exactly the insurances defined in the CRM. Positions 0..N-1 stay stable so
+// existing patient records keep their meaning; user-added rows append after.
 static std::string insurancesJson(){
+    auto defs=loadInsDefs();
+    int maxIdx=N_INSURANCES-1;
+    for(const auto& d:defs) if(d.idx>maxIdx) maxIdx=d.idx;
     std::string o="[";
-    for(int i=0;i<N_INSURANCES;i++){
-        if(i)o+=",";
-        o+="{\"name\":"+jstr(INSURANCES[i].name)+",\"pct\":"+jnum(INSURANCES[i].pct)+"}";
+    bool first=true;
+    for(int i=0;i<=maxIdx;i++){
+        const InsDef* def=nullptr;
+        for(const auto& d:defs) if(d.idx==i){ def=&d; break; }
+        std::wstring name; int pct;
+        if(def){
+            if(!def->groupName.empty())      name=def->groupName;
+            else if(!def->insCode.empty())    name=def->insCode;
+            else if(i<N_INSURANCES)           name=INSURANCES[i].name;
+        } else if(i<N_INSURANCES){ name=INSURANCES[i].name; }
+        else continue;
+        if(name.empty()) continue;
+        pct=Ins_Percent(i);
+        if(!first) o+=","; first=false;
+        o+="{\"name\":"+jstr(name)+",\"pct\":"+jnum(pct)+"}";
     }
     o+="]"; return o;
 }
 static std::string suppInsurancesJson(){
+    auto defs=loadSuppDefs();
+    int maxIdx=N_SUPP-1;
+    for(const auto& d:defs) if(d.idx>maxIdx) maxIdx=d.idx;
     std::string o="[";
-    for(int i=0;i<N_SUPP;i++){
-        if(i)o+=",";
-        o+="{\"name\":"+jstr(SUPP_INSURANCES[i].name)+",\"pct\":"+jnum(SUPP_INSURANCES[i].pct)+"}";
+    bool first=true;
+    for(int i=0;i<=maxIdx;i++){
+        const SuppDef* def=nullptr;
+        for(const auto& d:defs) if(d.idx==i){ def=&d; break; }
+        std::wstring name; int pct;
+        if(def && !def->name.empty()) name=def->name;
+        else if(i<N_SUPP) name=SUPP_INSURANCES[i].name;
+        else continue;
+        if(name.empty()) continue;
+        pct=Supp_Percent(i);
+        if(!first) o+=","; first=false;
+        o+="{\"name\":"+jstr(name)+",\"pct\":"+jnum(pct)+"}";
     }
     o+="]"; return o;
 }
@@ -619,9 +651,14 @@ static std::string admissionApi(const std::string& verb, const std::string& body
             wchar_t cb[16]; swprintf(cb,16,L"%d",(int)i+1);
             std::wstring dcode=cb;
             bool hit;
-            if(!code.empty()) hit = (dcode==code) || (normDigits(q).empty()?false:false);
+            if(!code.empty())
+                // v1.74.0: when code is provided (numeric input), search by medical
+                // council ID and doc code — NOT just the doctor's list index.
+                hit = (dcode==code)
+                     || wcontains(d.medicalId,code) || wcontains(d.medicalId,normDigits(code))
+                     || wcontains(d.docCode,code) || wcontains(d.docCode,normDigits(code))
+                     || wcontains(d.name,code);
             else hit = q.empty() || wcontains(d.name,q) || wcontains(d.specialty,q)
-                       // v1.69.0: also search by medical council ID (کد نظام پزشکی)
                        || wcontains(d.medicalId,q) || wcontains(d.medicalId,normDigits(q))
                        || wcontains(d.docCode,q) || wcontains(d.docCode,normDigits(q));
             if(!hit) continue;

@@ -21,7 +21,11 @@ struct Section {
     // unchanged. Routing/binding (print designer, future sync) must key off the
     // STABLE category prefix + id/code, never the display name (`name_fa`).
     std::wstring net_meta;
-    Section():id(0),is_active(1){}
+    // v1.74: subsection support. parent_id > 0 means this row is a زیربخش that
+    // belongs to the section whose id == parent_id; 0 means it is a top-level
+    // section. Stored as an optional 9th column so older files load unchanged.
+    int          parent_id;
+    Section():id(0),is_active(1),parent_id(0){}
 };
 
 // Stable durable CATEGORY codes (§7). Section display names may change; these

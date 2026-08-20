@@ -559,6 +559,10 @@ static void recalc(TabPage* t){
     int suppIdx = (int)SendMessageW(t->cSupp,CB_GETCURSEL,0,0);
     if(insIdx<0  || insIdx>=N_INSURANCES) insIdx=0;
     if(suppIdx<0 || suppIdx>=N_SUPP)      suppIdx=0;
+    // v1.74: honour a user-defined سهم سازمان from the «تعریف بیمه» registry —
+    // Ins_Percent/Supp_Percent fall back to the hardcoded table when no def exists.
+    int baseInsPct  = Ins_Percent(insIdx);   if(baseInsPct  < 0) baseInsPct  = INSURANCES[insIdx].pct;
+    int baseSuppPct = Supp_Percent(suppIdx); if(baseSuppPct < 0) baseSuppPct = SUPP_INSURANCES[suppIdx].pct;
 
     long long price = 0;
     // ---- v1.25.0: when the خدمات table has rows, the bill is the SUM of the
@@ -571,7 +575,7 @@ static void recalc(TabPage* t){
             long long line = s.price * (s.qty>0?s.qty:1);
             long long ldisc = s.discount;
             long long baseAfterDisc = line - ldisc; if(baseAfterDisc<0) baseAfterDisc=0;
-            s.insShare = baseAfterDisc * INSURANCES[insIdx].pct / 100;
+            s.insShare = baseAfterDisc * baseInsPct / 100;
             s.patShare = baseAfterDisc - s.insShare;
             grand += line;
         }
@@ -598,9 +602,9 @@ static void recalc(TabPage* t){
     for(auto& s : t->services) disc += s.discount;
 
     t->total      = price;
-    t->mainShare  = price * INSURANCES[insIdx].pct / 100;
+    t->mainShare  = price * baseInsPct / 100;
     t->baseDiff   = price - t->mainShare;                 // مابه‌التفاوت پایه
-    t->orgShare   = t->baseDiff * SUPP_INSURANCES[suppIdx].pct / 100;
+    t->orgShare   = t->baseDiff * baseSuppPct / 100;
     t->patientShare = t->baseDiff - t->orgShare;
     long long pay = t->patientShare - disc;
     if(pay < 0) pay = 0;
@@ -3159,7 +3163,8 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             int si=(int)SendMessageW(t->cSuppPanel,CB_GETCURSEL,0,0);
             if(si>=0 && si<N_SUPP){
                 SendMessageW(t->cSupp,CB_SETCURSEL,si,0);
-                wchar_t pb[16]; swprintf(pb,16,L"%d",SUPP_INSURANCES[si].pct);
+                int sp=Supp_Percent(si); if(sp<0) sp=SUPP_INSURANCES[si].pct;
+                wchar_t pb[16]; swprintf(pb,16,L"%d",sp);
                 SetWindowTextW(t->eSuppPct,toFaDigits(pb).c_str());
                 recalc(t); InvalidateRect(h,NULL,FALSE);
             }

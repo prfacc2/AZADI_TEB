@@ -79,10 +79,14 @@
     var p = Crm.pages[pageId];
     if (!p) { Crm.toast('صفحه یافت نشد: ' + pageId, 'err'); return; }
     Crm.state.page = pageId;
-    var items = document.querySelectorAll('.crm-nav-item[data-page]');
+    /* Active state is toggled on every nav target that carries data-page —
+       both the (retired) sidebar items and the new quick-access tiles, so the
+       redesign needs no special-casing here. */
+    var items = document.querySelectorAll('[data-page]');
     for (var i = 0; i < items.length; i++) {
       var on = items[i].getAttribute('data-page') === pageId;
-      items[i].className = 'crm-nav-item' + (on ? ' active' : '');
+      var base = items[i].className.replace(/\s+active/g, '');
+      items[i].className = base + (on ? ' active' : '');
     }
     var host = $('crmPage');
     if (!host) return;
@@ -90,7 +94,13 @@
     try { p.render(host); }
     catch (e) { if (global.console) console.error(e); host.innerHTML = '<div class="crm-banner err">خطا در بارگذاری صفحه.</div>'; }
     host.scrollTop = 0;
+    /* keep the top-bar search in sync with whatever page we land on */
+    var s = $('navSearch');
+    if (s && pageId !== 'dashboard') { s.value = ''; }
   };
+
+  /* jump back to the categorized home (dashboard) — used by the top-bar logo */
+  Crm.home = function () { Crm.nav('dashboard'); };
 
   /* ---- shared page header builder --------------------------------------- */
   Crm.head = function (host, title, sub) {
@@ -120,6 +130,49 @@
     bg.onclick = function (ev) { if (ev.target === bg) close(); };
     Crm._lastModalBody = body;
     return { card: card, body: body, close: close };
+  };
+
+  /* ---- themed confirm/alert dialogs (replace browser confirm()/alert()) --
+     The MSHTML/WebView shell blocks native dialogs in some configs and they
+     never match the panel theme, so every delete/confirm flow routes through
+     these. confirm(msg, onYes, opts) calls onYes() only when the operator
+     picks «بله»; alert(msg, opts) is a single-button notice. Both return the
+     modal handle (with .close) so callers can dismiss programmatically. */
+  Crm.confirm = function (msg, onYes, opts) {
+    opts = opts || {};
+    var m = Crm.modal(opts.title || 'تأیید عملیات', null);
+    var body = m.body;
+    var ic = opts.danger
+      ? '<svg viewBox="0 0 24 24" width="34" height="34"><path fill="#dc2626" d="M12 2L1 21h22L12 2zm0 6l6.5 11h-13L12 8zm-1 4v4h2v-4h-2zm0 5v2h2v-2h-2z"/></svg>'
+      : '<svg viewBox="0 0 24 24" width="34" height="34"><path fill="#2f6fe4" d="M12 2a10 10 0 100 20 10 10 0 000-20zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>';
+    body.innerHTML =
+      '<div class="crm-confirm">' +
+        '<div class="crm-confirm-ic">' + ic + '</div>' +
+        '<div class="crm-confirm-msg">' + esc(msg) + '</div>' +
+      '</div>';
+    var foot = el('div', 'crm-modal-foot');
+    var noBtn = el('button', 'crm-btn ghost', opts.noLabel || 'خیر');
+    var yesBtn = el('button', 'crm-btn ' + (opts.danger ? 'danger' : 'primary'), opts.yesLabel || 'بله، تأیید می‌کنم');
+    foot.appendChild(noBtn);
+    foot.appendChild(yesBtn);
+    m.card.appendChild(foot);
+    function done(ok) { m.close(); if (ok && typeof onYes === 'function') { try { onYes(); } catch (e) { if (global.console) console.error(e); } } }
+    noBtn.onclick = function () { done(false); };
+    yesBtn.onclick = function () { done(true); };
+    return m;
+  };
+
+  Crm.alert = function (msg, opts) {
+    opts = opts || {};
+    var m = Crm.modal(opts.title || 'اعلان', null);
+    var body = m.body;
+    body.innerHTML = '<div class="crm-confirm"><div class="crm-confirm-msg">' + esc(msg) + '</div></div>';
+    var foot = el('div', 'crm-modal-foot');
+    var okBtn = el('button', 'crm-btn primary', opts.okLabel || 'تأیید');
+    foot.appendChild(okBtn);
+    m.card.appendChild(foot);
+    okBtn.onclick = m.close;
+    return m;
   };
 
   /* ---- table helper ----------------------------------------------------- */
@@ -212,17 +265,35 @@
 
   /* ---- wire static controls --------------------------------------------- */
   function wireNav() {
-    var items = document.querySelectorAll('.crm-nav-item[data-page]');
+    /* Every element that carries data-page navigates — covers the new
+       quick-access tiles AND any legacy sidebar items. */
+    var items = document.querySelectorAll('[data-page]');
     for (var i = 0; i < items.length; i++) {
       (function (btn) {
         btn.onclick = function () { Crm.nav(btn.getAttribute('data-page')); };
       })(items[i]);
     }
+    var home = $('navHome');
+    if (home) home.onclick = function () { Crm.home(); };
     var backup = $('navBackup');
     if (backup) backup.onclick = function () {
       Crm.toast('در حال باز کردن پشتیبان‌گیری…', 'info');
       Crm.call('crm.backup', {}).then(function () {}, function () { Crm.toast('پشتیبان‌گیری ناموفق بود.', 'err'); });
     };
+    /* top-bar global search: jump home and filter the tile grid live */
+    var search = $('navSearch');
+    if (search) {
+      search.onkeyup = function () {
+        if (Crm.state.page !== 'dashboard') {
+          Crm.nav('dashboard');           /* nav renders the (filtered) home */
+        } else {
+          var host = $('crmPage');
+          if (host) { host.innerHTML = ''; Crm.pages.dashboard.render(host); }
+        }
+        var s2 = $('navSearch');
+        if (s2) s2.focus();
+      };
+    }
   }
 
   /* ---- listen for C++ push events --------------------------------------- */

@@ -152,10 +152,11 @@
   }
 
   function del(host, p) {
-    if (!confirm('حذف پرونده بیمار «' + p.first + ' ' + p.last + '» (' + p.nid + ')؟')) return;
-    Crm.call('crm.patients.delete', { nid: p.nid }).then(function () {
-      Crm.toast('بیمار حذف شد.', 'ok'); load(host, '');
-    }, function () { Crm.toast('حذف ناموفق بود.', 'err'); });
+    Crm.confirm('حذف پرونده بیمار «' + p.first + ' ' + p.last + '» (' + p.nid + ')؟', function () {
+      Crm.call('crm.patients.delete', { nid: p.nid }).then(function () {
+        Crm.toast('بیمار حذف شد.', 'ok'); load(host, '');
+      }, function () { Crm.toast('حذف ناموفق بود.', 'err'); });
+    }, { danger: true });
   }
 
   Crm.pages.patients = {

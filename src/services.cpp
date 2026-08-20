@@ -45,9 +45,19 @@ std::vector<ServiceDef> loadServices(){
         s.status   = _wtoi(f[7].c_str());
         if(f.size()>8)  s.created  = f[8];
         if(f.size()>9)  s.modified = f[9];
+        // v1.74 professional tariffs (columns 10..17). Older files have only 10
+        // columns and load with every tariff at 0 / empty — unchanged behaviour.
+        if(f.size()>10) s.insName     = f[10];
+        if(f.size()>11) s.multiplier  = f[11];
+        if(f.size()>12) s.priceFree   = _wtoi64(f[12].c_str());
+        if(f.size()>13) s.priceFreeNew= _wtoi64(f[13].c_str());
+        if(f.size()>14) s.priceGov    = _wtoi64(f[14].c_str());
+        if(f.size()>15) s.priceGovNew = _wtoi64(f[15].c_str());
+        if(f.size()>16) s.priceIns    = _wtoi64(f[16].c_str());
+        if(f.size()>17) s.priceInsNew = _wtoi64(f[17].c_str());
         // §H: keep any future extra columns verbatim (already unescaped here;
-        // re-escaped on save).
-        for(size_t i=10;i<f.size();i++){ s.extra+=L"|"; s.extra+=svcEsc(f[i]); }
+        // re-escaped on save). v1.74 tariffs occupy 10..17, so extras start at 18.
+        for(size_t i=18;i<f.size();i++){ s.extra+=L"|"; s.extra+=svcEsc(f[i]); }
         out.push_back(s);
     }
     return out;
@@ -58,12 +68,25 @@ static void saveServices(const std::vector<ServiceDef>& v){
     for(auto&s:v){
         wchar_t pb[32]; swprintf(pb,32,L"%lld",s.price);
         wchar_t sb[8];  swprintf(sb,8,L"%d",s.status);
+        wchar_t pf[32];  swprintf(pf,32,L"%lld",s.priceFree);
+        wchar_t pfn[32]; swprintf(pfn,32,L"%lld",s.priceFreeNew);
+        wchar_t pg[32];  swprintf(pg,32,L"%lld",s.priceGov);
+        wchar_t pgn[32]; swprintf(pgn,32,L"%lld",s.priceGovNew);
+        wchar_t pi[32];  swprintf(pi,32,L"%lld",s.priceIns);
+        wchar_t pin[32]; swprintf(pin,32,L"%lld",s.priceInsNew);
         out += svcEsc(s.code)+L"|"+svcEsc(s.name)+L"|"+svcEsc(s.category)+L"|"+
                svcEsc(s.dept)+L"|"+pb+L"|"+svcEsc(s.insType)+L"|"+svcEsc(s.desc)+L"|"+
-               sb+L"|"+svcEsc(s.created)+L"|"+svcEsc(s.modified)+s.extra+L"\r\n";
+               sb+L"|"+svcEsc(s.created)+L"|"+svcEsc(s.modified)+L"|"+
+               svcEsc(s.insName)+L"|"+svcEsc(s.multiplier)+L"|"+
+               pf+L"|"+pfn+L"|"+pg+L"|"+pgn+L"|"+pi+L"|"+pin+
+               s.extra+L"\r\n";
     }
     writeFileUtf8(servicesPath(),out,false);
 }
+
+// v1.74: bulk persist used by the price round/adjust verb so a single operation
+// rewrites services.dat once instead of N round-trips through updateService().
+bool saveAllServices(const std::vector<ServiceDef>& v){ saveServices(v); return true; }
 
 const ServiceDef* findService(const std::wstring& code){
     static std::vector<ServiceDef> cache;

@@ -42,10 +42,19 @@ const int N_SUPP = sizeof(SUPP_INSURANCES)/sizeof(SUPP_INSURANCES[0]);
 //  misleading «۰٪». Nothing here is ever randomised or guessed.
 // ---------------------------------------------------------------------------
 int Ins_Percent(int idx){
+    // v1.74: honour a user-defined سهم سازمان from the «تعریف بیمه» registry
+    // when present, else fall back to the hardcoded table. Out-of-range → -1
+    // so the {ins_percent} token prints empty rather than a fake 0٪.
+    if(const InsDef* d=insDefByIndex(idx)){
+        if(d->orgShare>=0) return d->orgShare;
+    }
     if(idx<0 || idx>=N_INSURANCES) return -1;
     return INSURANCES[idx].pct;
 }
 int Supp_Percent(int idx){
+    if(const SuppDef* d=suppDefByIndex(idx)){
+        if(d->franchiseOrgPct>0) return d->franchiseOrgPct;
+    }
     if(idx<0 || idx>=N_SUPP) return -1;
     return SUPP_INSURANCES[idx].pct;
 }

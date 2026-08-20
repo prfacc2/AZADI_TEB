@@ -322,6 +322,69 @@ extern const InsuranceDef SUPP_INSURANCES[];extern const int N_SUPP;
 int Ins_Percent(int idx);
 int Supp_Percent(int idx);
 
+// v1.74 — user-managed insurance DEFINITIONS (base + supplementary). A registry
+// of the full contract / tariff / franchise / colour metadata the «تعریف بیمه»
+// page edits. Stored in data\insdefs.dat / data\suppdefs.dat (pipe-delimited,
+// one record per line, UTF-8). `idx` is the stable key: for the predefined
+// Iranian insurances it matches the position in INSURANCES[] / SUPP_INSURANCES[]
+// so existing patient records keep their meaning; user-added rows take the next
+// free idx. Ins_Percent/Supp_Percent honour a definition's orgShare when present
+// (else fall back to the hardcoded table), so an edited سهم سازمان flows to the
+// printed percent + billing spots that use those lookups — no random/test data.
+struct InsDef {
+    int          idx;            // stable key (aligns with INSURANCES[] for predefined)
+    std::wstring sectionCode;    // بخش
+    std::wstring insCode;        // کد بیمه
+    int          orgShare;       // سهم سازمان (٪) — -1 = inherit hardcoded pct
+    std::wstring groupName;      // نام گروه
+    std::wstring flipName;       // نام وارونه
+    std::wstring contractCode;   // کد قرارداد
+    std::wstring insType;        // دولتی / خصوصی
+    long long    tech;           // مبلغ فنی
+    long long    prof;           // مبلغ حرفه‌ای
+    long long    cons;           // مبلغ مصرفی
+    int          active;
+    std::wstring created, modified;
+    InsDef():idx(-1),orgShare(-1),tech(0),prof(0),cons(0),active(1){}
+};
+struct SuppDef {
+    int          idx;            // stable key (aligns with SUPP_INSURANCES[])
+    std::wstring sectionCode;    // بخش
+    std::wstring insSpec;        // مشخصات بیمه
+    std::wstring name;           // نام بیمه تکمیلی
+    std::wstring tariffType;     // نوع تعرفه
+    std::wstring franchise;      // فرانشیز (دستی/پیش‌فرض)
+    int          franchiseDefault; // پیش‌فرض دستی در پذیرش (1/0)
+    int          byLaw;          // محاسبه بر اساس قانون بیمه (1/0)
+    long long    ceiling;        // مبلغ سقف
+    std::wstring insTypeCode;    // کد نوع بیمه
+    std::wstring contractCode;   // کد قرارداد
+    long long    tech, prof, cons;       // فنی / حرفه‌ای / مصرفی
+    int          franchiseOrgPct;        // درصد سهم سازمان در فرانشیز
+    int          defaultOff;     // بدون فرانشیز اگر بیمه پایه پذیرفته شد (1/0)
+    std::wstring priceCalcType;  // دولتی / خصوصی (پیش‌فرض خصوصی)
+    int          difference;     // اختلاف (پیش‌فرض خاموش)
+    std::wstring color;          // رنگ (#rrggbb)
+    // table columns
+    std::wstring validityDate;   // تاریخ اعتبار
+    std::wstring username;       // نام کاربری
+    std::wstring nationalId;     // کد ملی (الزامی)
+    int          booklet;        // دفترچه (1/0)
+    std::wstring fileName;       // نام فایل
+    int          active;
+    std::wstring created, modified;
+    SuppDef():idx(-1),franchiseDefault(1),byLaw(0),ceiling(0),tech(0),prof(0),cons(0),
+              franchiseOrgPct(0),defaultOff(0),difference(0),booklet(0),active(1){}
+};
+std::vector<InsDef>  loadInsDefs();
+bool  upsertInsDef(const InsDef& d);
+bool  deleteInsDef(int idx);
+const InsDef*  insDefByIndex(int idx);
+std::vector<SuppDef> loadSuppDefs();
+bool  upsertSuppDef(const SuppDef& d);
+bool  deleteSuppDef(int idx);
+const SuppDef* suppDefByIndex(int idx);
+
 // -------------------------------------------------------------- tariffs ----
 //  Default service tariffs (Rial) so the program computes the bill itself.
 //  Indexed by patient-visit type: 0=عادی 1=سرپایی 2=بستری.
@@ -560,21 +623,37 @@ void       heartbeatUser(const std::wstring& username);  // §G: refresh presenc
 struct ServiceDef {
     std::wstring code;      // کد خدمت (unique)
     std::wstring name;      // نام خدمت
-    std::wstring category;  // دسته/گروه
+    std::wstring category;  // دسته/گروه (kept on disk for back-compat; UI retired v1.74)
     std::wstring dept;      // بخش (department id or name)
-    long long    price;     // مبلغ پایه (ریال)
-    std::wstring insType;   // نوع بیمه (free text / label)
+    long long    price;     // مبلغ پایه (ریال) — kept as the legacy base price
+    std::wstring insType;   // نوع بیمه (legacy free text; UI retired v1.74)
     std::wstring desc;      // توضیحات
     int          status;    // 1=فعال 0=غیرفعال
     std::wstring created;   // تاریخ ایجاد (Jalali)
     std::wstring modified;  // تاریخ ویرایش (Jalali)
+    // v1.74 — professional service definition. insName is the base-insurance
+    // name (matches an entry the insurance page manages); multiplier is a raw
+    // decimal string ("1.5") so the UI/billing parse it identically. The six
+    // tariff columns hold the current + «new» Rial prices for آزاد / دولتی /
+    // بیمه tariffs. They are appended AFTER `modified` and BEFORE the §H
+    // forward-compat `extra` catch-all, so older 10-column files load unchanged.
+    std::wstring insName;   // نام بیمه (base insurance name)
+    std::wstring multiplier;// ضریب (decimal string, e.g. "1.5")
+    long long    priceFree;     // قیمت آزاد
+    long long    priceFreeNew;  // قیمت آزاد جدید
+    long long    priceGov;      // قیمت دولتی
+    long long    priceGovNew;   // قیمت دولتی جدید
+    long long    priceIns;      // قیمت بیمه
+    long long    priceInsNew;   // قیمت بیمه جدید
     std::wstring extra;     // §H forward-compat: unknown trailing columns
-    ServiceDef():price(0),status(1){}
+    ServiceDef():price(0),status(1),priceFree(0),priceFreeNew(0),
+                 priceGov(0),priceGovNew(0),priceIns(0),priceInsNew(0){}
 };
 std::vector<ServiceDef> loadServices();
 bool  addService(const ServiceDef& s, std::wstring& err);   // insert (code must be unique)
 bool  updateService(const ServiceDef& s, std::wstring& err);// edit by code
 bool  removeService(const std::wstring& code);
+bool  saveAllServices(const std::vector<ServiceDef>& v);    // v1.74: bulk persist (round/adjust)
 const ServiceDef* findService(const std::wstring& code);    // NULL when not found
 
 // ------------------------------------------------------------------ kartabl --
