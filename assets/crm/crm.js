@@ -75,13 +75,22 @@
   };
 
   /* ---- navigation ------------------------------------------------------- */
-  Crm.nav = function (pageId) {
+  /* In-memory back stack so the «بازگشت» button can step to the previous page.
+     A plain nav pushes where we came from; a back nav is flagged silent so it
+     does not re-push and loop. */
+  Crm._hist = [];
+
+  Crm.nav = function (pageId, opts) {
+    opts = opts || {};
     var p = Crm.pages[pageId];
     if (!p) { Crm.toast('صفحه یافت نشد: ' + pageId, 'err'); return; }
+    if (!opts.silent && Crm.state.page && Crm.state.page !== pageId) {
+      Crm._hist.push(Crm.state.page);
+    }
     Crm.state.page = pageId;
     /* Active state is toggled on every nav target that carries data-page —
-       both the (retired) sidebar items and the new quick-access tiles, so the
-       redesign needs no special-casing here. */
+       the quick-access tiles, the definitions-hub buttons AND the hamburger
+       drawer items, so the redesign needs no special-casing here. */
     var items = document.querySelectorAll('[data-page]');
     for (var i = 0; i < items.length; i++) {
       var on = items[i].getAttribute('data-page') === pageId;
@@ -99,16 +108,97 @@
     if (s && pageId !== 'dashboard') { s.value = ''; }
   };
 
+  /* step back to the previous page (or home when the stack is empty) */
+  Crm.back = function () {
+    var prev = Crm._hist.pop();
+    Crm.nav(prev || 'dashboard', { silent: true });
+  };
+
   /* jump back to the categorized home (dashboard) — used by the top-bar logo */
   Crm.home = function () { Crm.nav('dashboard'); };
 
   /* ---- shared page header builder --------------------------------------- */
   Crm.head = function (host, title, sub) {
     var h = el('div', 'crm-page-head');
+    /* بازگشت — a back button is prepended on every page except the dashboard
+       (home). It pops the in-memory nav stack so the operator returns to
+       whatever page/category they came from. The chevron points right because
+       the panel is RTL (back = towards the reading start). */
+    if (Crm.state.page !== 'dashboard') {
+      var back = el('button', 'crm-back');
+      back.setAttribute('type', 'button');
+      back.innerHTML =
+        '<span class="crm-back-ic"><svg viewBox="0 0 24 24" width="18" height="18">' +
+        '<path fill="currentColor" d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg></span>' +
+        '<span class="crm-back-lbl">بازگشت</span>';
+      back.onclick = function () { Crm.back(); };
+      h.appendChild(back);
+    }
     h.appendChild(el('h2', 'crm-page-title', esc(title)));
     if (sub) h.appendChild(el('span', 'crm-page-sub', esc(sub)));
     host.appendChild(h);
     return h;
+  };
+
+  /* ---- hamburger nav drawer -------------------------------------------- */
+  /* The categorized navigation lives in a slide-out drawer (Crm.categories is
+     published by dashboard.js, which owns the CATEGORIES table + icons). The
+     drawer body is rebuilt on every open so the active item stays in sync. */
+  function menuIcon(t, size) {
+    return '<svg viewBox="0 0 24 24" width="' + size + '" height="' + size + '">' +
+           '<path fill="currentColor" d="' + t.ic + '"/></svg>';
+  }
+  function menuItem(t) {
+    var b = el('button', 'crm-menu-item');
+    b.setAttribute('data-page', t.page);
+    if (Crm.state.page === t.page) b.className += ' active';
+    b.innerHTML =
+      '<span class="crm-menu-ic ' + esc(t.color || '') + '">' + menuIcon(t, 20) + '</span>' +
+      '<span class="crm-menu-lbl">' + esc(t.label) + '</span>';
+    b.onclick = function () { Crm.nav(t.page); Crm.closeMenu(); };
+    return b;
+  }
+  function buildMenu() {
+    var body = $('crmMenuBody');
+    if (!body) return;
+    var cats = Crm.categories;
+    if (!cats || !cats.length) return;
+    body.innerHTML = '';
+    /* dashboard / home entry first */
+    var home = el('button', 'crm-menu-item');
+    home.setAttribute('data-page', 'dashboard');
+    if (Crm.state.page === 'dashboard') home.className += ' active';
+    home.innerHTML =
+      '<span class="crm-menu-ic home"><svg viewBox="0 0 24 24" width="20" height="20">' +
+      '<path fill="currentColor" d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg></span>' +
+      '<span class="crm-menu-lbl">داشبورد</span>';
+    home.onclick = function () { Crm.nav('dashboard'); Crm.closeMenu(); };
+    body.appendChild(home);
+    /* then every category and its tiles, grouped under a heading */
+    for (var c = 0; c < cats.length; c++) {
+      var cat = cats[c];
+      var head = el('div', 'crm-menu-cat');
+      head.innerHTML = '<span class="crm-menu-dot" style="background:' + cat.dot + '"></span>' +
+                       '<span>' + esc(cat.title) + '</span>';
+      body.appendChild(head);
+      for (var i = 0; i < cat.tiles.length; i++) body.appendChild(menuItem(cat.tiles[i]));
+    }
+  }
+  Crm.openMenu = function () {
+    buildMenu();
+    var m = $('crmMenu'), b = $('crmMenuBackdrop');
+    if (m) { m.className = 'crm-menu open'; m.setAttribute('aria-hidden', 'false'); }
+    if (b) b.className = 'crm-menu-backdrop open';
+  };
+  Crm.closeMenu = function () {
+    var m = $('crmMenu'), b = $('crmMenuBackdrop');
+    if (m) { m.className = 'crm-menu'; m.setAttribute('aria-hidden', 'true'); }
+    if (b) b.className = 'crm-menu-backdrop';
+  };
+  Crm.toggleMenu = function () {
+    var m = $('crmMenu');
+    if (m && (' ' + m.className + ' ').indexOf(' open ') >= 0) Crm.closeMenu();
+    else Crm.openMenu();
   };
 
   /* ---- simple modal helper (returns the card + a close fn) -------------- */
@@ -280,6 +370,21 @@
       Crm.toast('در حال باز کردن پشتیبان‌گیری…', 'info');
       Crm.call('crm.backup', {}).then(function () {}, function () { Crm.toast('پشتیبان‌گیری ناموفق بود.', 'err'); });
     };
+    /* hamburger drawer: the top-bar button toggles it; the in-drawer close
+       button, the backdrop and the Esc key all dismiss it. The drawer body
+       itself is populated from Crm.categories when it first opens. */
+    var burger = $('navMenu');
+    if (burger) burger.onclick = function () { Crm.toggleMenu(); };
+    var mClose = $('crmMenuClose');
+    if (mClose) mClose.onclick = function () { Crm.closeMenu(); };
+    var mBackdrop = $('crmMenuBackdrop');
+    if (mBackdrop) mBackdrop.onclick = function () { Crm.closeMenu(); };
+    function onKey(ev) {
+      ev = ev || window.event;
+      if (ev.keyCode === 27) Crm.closeMenu();      /* Esc */
+    }
+    if (document.addEventListener) document.addEventListener('keydown', onKey);
+    else if (document.attachEvent) document.attachEvent('onkeydown', onKey);
     /* top-bar global search: jump home and filter the tile grid live */
     var search = $('navSearch');
     if (search) {

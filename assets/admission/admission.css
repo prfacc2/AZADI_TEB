@@ -2801,3 +2801,353 @@ body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payable-value span{font
   background:-webkit-linear-gradient(top,#2f62e6 0%,#1740bd 100%);
   background:linear-gradient(180deg,#2f62e6 0%,#1740bd 100%);
 }
+
+/* ============================================================================
+   v1.75.0 — ADMISSION UI POLISH (درمان پلاس)
+   ----------------------------------------------------------------------------
+   Additive cascade block (appended last → wins). User requests addressed:
+     · TAB/ENTER navigation starts نام → نام‌خانوادگی → کد ملی and auto-focuses
+       the national-ID field when nothing is selected (handled in admission.js).
+     · P/S (پرداختی/صندوق) and turn-preview (ثبت‌شده/در انتظار) counters split
+       into two breathing groups with a thin divider between them.
+     · A coordinated PASTEL palette: every clinical zone carries its own subtle,
+       elegant tint (never bold, never flat white) — رسمی اداری شیک.
+     · The صورت‌حساب (invoice) breakdown rebuilt as a detailed, professional
+       panel: tinted groups, prominent tabular figures, visible insurance %.
+     · The صندوق نرفته‌ها / صف پذیرش full-screen overlay redesigned with a richer
+       header, a summary strip, avatar patient rows and a polished table.
+   Trident-safe: literal colours, no custom properties / grid / gap / logical
+   props; every modern flex prop carries its -ms- pair. The accent overrides are
+   guarded with chained :not() so calm/warm/dark keep their own palettes.
+   ============================================================================ */
+
+/* ------------------------------------------------- 1. PAGE + RAILS (pastel) --- */
+body{
+  background:#e6eef8;
+  background:-webkit-linear-gradient(top,#f0f6fc 0%,#dbe6f4 100%);
+  background:linear-gradient(180deg,#f0f6fc 0%,#dbe6f4 100%);
+  color:#13263f;
+}
+.col-action,.col-left{
+  background:#eef5f1;
+  background:-webkit-linear-gradient(top,#f4f9f6 0%,#e6efe9 100%);
+  background:linear-gradient(180deg,#f4f9f6 0%,#e6efe9 100%);
+  border:1px solid #c7d8e6;border-radius:16px;
+  -webkit-box-shadow:0 8px 24px rgba(25,58,98,.08),inset 0 1px 0 #ffffff;
+  box-shadow:0 8px 24px rgba(25,58,98,.08),inset 0 1px 0 #ffffff;
+}
+.col-center{
+  background:#f2f6fb;
+  background:-webkit-linear-gradient(top,#fafcff 0%,#eaf1fa 100%);
+  background:linear-gradient(180deg,#fafcff 0%,#eaf1fa 100%);
+  border:1px solid #c7d8e6;border-radius:16px;
+  -webkit-box-shadow:0 8px 24px rgba(25,58,98,.08),inset 0 1px 0 #ffffff;
+  box-shadow:0 8px 24px rgba(25,58,98,.08),inset 0 1px 0 #ffffff;
+}
+
+/* ----------------------------------------------------- 2. CARD PASTEL TINTS ---
+   Each section gets a faint, distinct pastel body so the surface is no longer
+   one flat white sheet (subtle — never in-your-face). Scoped to the default
+   white theme; calm/warm/dark keep their own palettes. */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .card{
+  background:#ffffff;border:1px solid #d2deec;border-radius:13px;
+  -webkit-box-shadow:0 2px 5px rgba(20,45,80,.06),0 7px 18px rgba(20,45,80,.07);
+  box-shadow:0 2px 5px rgba(20,45,80,.06),0 7px 18px rgba(20,45,80,.07);
+}
+/* patient form (مشخصات بیمار) → soft lavender */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .card-body{
+  background:#f7f5fe;
+  background:-webkit-linear-gradient(top,#fbfaff 0%,#f3f0fb 100%);
+  background:linear-gradient(180deg,#fbfaff 0%,#f3f0fb 100%);
+}
+/* insurance (بیمه و نوع پذیرش) → soft mint */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(1) .card-body{
+  background:#f0faf4;
+  background:-webkit-linear-gradient(top,#f5fcf7 0%,#ebf7f0 100%);
+  background:linear-gradient(180deg,#f5fcf7 0%,#ebf7f0 100%);
+}
+/* doctor (پزشک معالج) → soft sky */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(2) .card-body{
+  background:#f0f7ff;
+  background:-webkit-linear-gradient(top,#f6fbff 0%,#e9f3fc 100%);
+  background:linear-gradient(180deg,#f6fbff 0%,#e9f3fc 100%);
+}
+/* performer (انجام دهنده) → soft lilac */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(3) .card-body{
+  background:#f6f4fc;
+  background:-webkit-linear-gradient(top,#fbfaff 0%,#f1edf8 100%);
+  background:linear-gradient(180deg,#fbfaff 0%,#f1edf8 100%);
+}
+/* services list → soft blue working surface */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card .card-body{
+  background:#eef3fa;
+}
+/* action + print rails → soft frosted panels */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .action-card,
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .print-card{
+  background:rgba(248,251,254,.7);
+  border:1px solid #cddcec;
+  -webkit-box-shadow:0 4px 14px rgba(31,95,214,.08);
+  box-shadow:0 4px 14px rgba(31,95,214,.08);
+}
+
+/* ----------------------------------- 3. COUNTER STRIP — P/S vs TURN PREVIEW ---
+   A thin vertical divider splits the پرداختی/صندوق group (right) from the
+   ثبت‌شده/در انتظار turn-preview group (left), with breathing room on each
+   side so the two clusters read as separate stat groups. */
+.counter-strip{
+  margin:0 0 8px;padding:7px 12px;
+  border:1px solid #cfdae8;border-radius:13px;
+  background:#ffffff;
+  background:-webkit-linear-gradient(top,#ffffff 0%,#f1f6fc 100%);
+  background:linear-gradient(180deg,#ffffff 0%,#f1f6fc 100%);
+  -webkit-box-shadow:0 2px 8px rgba(20,45,80,.06);
+  box-shadow:0 2px 8px rgba(20,45,80,.06);
+}
+.cs-item{padding:5px 12px;border-radius:10px;}
+.cs-item + .cs-item{margin-right:8px;}
+.cs-p{background:#e4f5ea;border-color:#bfe6cb;}
+.cs-s{background:#fdf2d6;border-color:#f1d89c;}
+.cs-reg{background:#eaf6ef;border-color:#c2e5d0;}
+.cs-wait{background:#fef3e3;border-color:#f4d9b0;}
+.cs-key{width:21px;height:21px;border-radius:6px;}
+.cs-val{font-size:15.5px;}
+.cs-sep{
+  width:2px;height:30px;margin:0 18px;
+  -ms-flex:0 0 2px;flex:0 0 2px;
+  background:#cdd9e8;border-radius:2px;
+}
+@media (max-width:560px){
+  .cs-sep{display:none;}
+  .counter-strip .cs-reg{margin-right:14px;}
+}
+
+/* ----------------------------- 4. INVOICE — DETAILED PROFESSIONAL BREAKDOWN ---
+   Each بیمه group becomes a tinted panel with a coloured title rule; figures
+   are right-aligned tabular numbers; the insurance % (set in admission.js) sits
+   inside the title so the calculation path is visible at a glance. The مبلغ
+   نهایی group and the مانده قابل پرداخت remainder read as the climax. */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .invoice-card{border-color:#e6cb8c;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .invoice-card .card-head{
+  background:#f59e0b;
+  background:-webkit-linear-gradient(top,#fbbf24 0%,#b45309 100%);
+  background:linear-gradient(180deg,#fbbf24 0%,#b45309 100%);
+  border-bottom:1px solid #b45309;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .invoice-body{
+  padding:11px 12px 12px;
+  background:#fffdf6;
+  background:-webkit-linear-gradient(top,#fffef9 0%,#fdf8ea 100%);
+  background:linear-gradient(180deg,#fffef9 0%,#fdf8ea 100%);
+}
+.inv-group{
+  margin-bottom:10px;padding:10px 12px 9px;
+  border:1px solid #efdca8;border-radius:12px;
+  background:#fffdf6;
+  background:-webkit-linear-gradient(top,#fffef9 0%,#fdf7e6 100%);
+  background:linear-gradient(180deg,#fffef9 0%,#fdf7e6 100%);
+}
+.inv-group:last-child{
+  margin-bottom:0;border-color:#e0c896;
+  background:#fffaf0;
+  background:-webkit-linear-gradient(top,#fffdf6 0%,#fcf2dd 100%);
+  background:linear-gradient(180deg,#fffdf6 0%,#fcf2dd 100%);
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inv-gtitle{
+  margin-bottom:7px;padding-bottom:6px;font-size:12.5px;font-weight:900;
+  color:#92660a;letter-spacing:.2px;border-bottom:1px solid #f1dca0;
+}
+.inv-line{
+  display:-ms-flexbox;display:flex;
+  -ms-flex-pack:justify;justify-content:space-between;
+  -ms-flex-align:center;align-items:center;
+  min-height:25px;padding:3px 2px;font-size:12.5px;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inv-line span{color:#7a5a2c;font-weight:700;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inv-line b{
+  color:#2f2008;font-weight:800;font-variant-numeric:tabular-nums;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inv-remain{
+  margin-top:8px;padding:10px 12px;border:1px solid #f0d79a;border-radius:10px;
+  background:#fff4d8;
+  display:-ms-flexbox;display:flex;
+  -ms-flex-pack:justify;justify-content:space-between;
+  -ms-flex-align:center;align-items:center;
+  font-size:13px;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inv-remain span{color:#7a5621;font-weight:800;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inv-remain b{
+  color:#b45309;font-weight:900;font-size:15px;font-variant-numeric:tabular-nums;
+}
+
+/* -------------------------- 5. QUEUE / CASH-DESK OVERLAY — REDESIGNED PAGE ---
+   A refined gradient header with a title + subtitle, a summary strip (count
+   card + hint), and a polished table: rounded card, sticky header, zebra rows,
+   avatar patient cells, file-code badges, wait pills and clear action buttons.
+   Only background/colour/spacing are touched — the position:fixed / inset-0 /
+   z-index / flex-column contract from v1.64.0 is preserved untouched. */
+.queue-overlay{background:#eef3fa;color:#1f2d3d;}
+.queue-overlay-head{
+  padding:13px 20px;min-height:62px;
+  background:#1f6feb;
+  background:-webkit-linear-gradient(top,#2f7ff0 0%,#1656c4 100%);
+  background:linear-gradient(180deg,#2f7ff0 0%,#1656c4 100%);
+  -webkit-box-shadow:0 6px 18px rgba(31,111,235,.28);
+  box-shadow:0 6px 18px rgba(31,111,235,.28);
+}
+.queue-overlay-head .qov-title{font-size:16px;}
+.queue-overlay-head .qov-title-stack{
+  display:-ms-inline-flexbox;display:inline-flex;
+  -ms-flex-direction:column;flex-direction:column;
+  -ms-flex-align:start;align-items:flex-start;
+}
+.queue-overlay-head .qov-title-main{font-size:16px;font-weight:900;color:#ffffff;line-height:1.2;}
+.queue-overlay-head .qov-subtitle{font-size:11.5px;font-weight:600;color:#d6e6ff;margin-top:2px;}
+.queue-overlay-head .tabs{
+  background:rgba(255,255,255,.18);border-radius:11px;padding:4px;margin-right:16px;
+}
+.queue-overlay-head .tab{
+  padding:8px 16px;border-radius:9px;font-size:13px;font-weight:800;margin-left:5px;
+}
+.queue-overlay-head .tab.active{
+  background:#ffffff;color:#1f6feb;
+  -webkit-box-shadow:0 2px 6px rgba(0,0,0,.12);box-shadow:0 2px 6px rgba(0,0,0,.12);
+}
+.queue-overlay-head .head-tools .inp{
+  background:rgba(255,255,255,.94);border:1px solid rgba(255,255,255,.5);
+}
+.queue-overlay-head .qov-close{
+  width:40px;height:40px;font-size:22px;border-radius:11px;
+  background:rgba(255,255,255,.20);border:1px solid rgba(255,255,255,.45);
+}
+.queue-overlay-head .qov-close:hover{background:rgba(255,255,255,.34);}
+.queue-overlay-body{padding:18px 20px;}
+
+/* summary strip: a prominent count card on the right + a hint on the left */
+.qov-summary{
+  display:-ms-flexbox;display:flex;
+  -ms-flex-direction:row;flex-direction:row;
+  -ms-flex-align:center;align-items:center;
+  margin-bottom:14px;
+}
+.qov-sum-card{
+  display:-ms-inline-flexbox;display:inline-flex;
+  -ms-flex-direction:column;flex-direction:column;
+  -ms-flex-align:center;align-items:center;
+  -ms-flex-pack:center;justify-content:center;
+  min-width:128px;padding:11px 20px;margin-left:16px;
+  border:1px solid #cdddf2;border-radius:13px;
+  background:#ffffff;
+  background:-webkit-linear-gradient(top,#ffffff 0%,#eaf3ff 100%);
+  background:linear-gradient(180deg,#ffffff 0%,#eaf3ff 100%);
+  -webkit-box-shadow:0 4px 12px rgba(31,111,235,.12);
+  box-shadow:0 4px 12px rgba(31,111,235,.12);
+}
+.qov-sum-num{font-size:27px;font-weight:900;color:#1f6feb;line-height:1.1;font-variant-numeric:tabular-nums;}
+.qov-sum-lbl{font-size:11.5px;font-weight:700;color:#5b7290;margin-top:3px;}
+.qov-sum-hint{
+  -ms-flex:1 1 auto;flex:1 1 auto;
+  padding:11px 15px;border:1px dashed #cdddf2;border-radius:11px;
+  background:#f7faff;color:#5b7290;font-size:12px;font-weight:600;
+}
+
+/* table: rounded card, sticky header, zebra, hover */
+.queue-overlay-body .tbl-wrap{
+  border:1px solid #d3e0f0;border-radius:14px;background:#ffffff;overflow:hidden;
+  -webkit-box-shadow:0 4px 16px rgba(31,60,110,.08);
+  box-shadow:0 4px 16px rgba(31,60,110,.08);
+}
+.queue-overlay-body .tbl thead th{
+  background:#eaf2fe;color:#123d70;font-weight:900;font-size:12px;
+  padding:13px 14px;border-bottom:2px solid #c4d6ef;border-left:1px solid #d8e6f5;
+}
+.queue-overlay-body .tbl thead th:last-child{border-left:none;}
+.queue-overlay-body .tbl tbody td{
+  padding:12px 14px;border-bottom:1px solid #eef3fb;border-left:1px solid #f1f5fb;
+  color:#26384f;font-size:13px;font-weight:600;
+}
+.queue-overlay-body .tbl tbody td:last-child{border-left:none;}
+.queue-overlay-body .tbl tbody tr:nth-child(even){background:#f6faff;}
+.queue-overlay-body .tbl tbody tr:hover{background:#e9f2ff;}
+
+/* patient cell: avatar initial + name */
+.q-pname{text-align:right;white-space:nowrap;}
+.q-pname .q-avatar{
+  display:-ms-inline-flexbox;display:inline-flex;
+  -ms-flex-align:center;align-items:center;
+  -ms-flex-pack:center;justify-content:center;
+  width:34px;height:34px;border-radius:50%;
+  background:#e6efff;color:#1f5fd6;font-weight:900;font-size:14px;
+  margin-left:10px;vertical-align:middle;
+}
+.q-pname .q-pname-text{font-weight:800;color:#16314f;vertical-align:middle;}
+.q-idx{color:#8497ad;font-weight:700;}
+.q-date,.q-time{color:#41546c;font-variant-numeric:tabular-nums;}
+.q-file-badge{
+  display:-ms-inline-flexbox;display:inline-flex;
+  -ms-flex-align:center;align-items:center;
+  -ms-flex-pack:center;justify-content:center;
+  padding:3px 11px;border:1px solid #c9dcf7;border-radius:8px;
+  background:#eef5ff;color:#1553a8;font-weight:800;font-size:12px;
+  font-variant-numeric:tabular-nums;white-space:nowrap;
+}
+.q-wait-pill{
+  display:-ms-inline-flexbox;display:inline-flex;
+  -ms-flex-align:center;align-items:center;
+  padding:3px 11px;border:1px solid #f0d9a8;border-radius:8px;
+  background:#fff6e0;color:#8a5a1c;font-weight:700;font-size:11.5px;
+  white-space:nowrap;
+}
+.q-act{white-space:nowrap;text-align:center;}
+.q-act-btn{
+  border:1px solid #d3e0f0;border-radius:9px;background:#ffffff;
+  font-family:inherit;font-size:11.5px;font-weight:800;cursor:pointer;
+  padding:6px 11px;margin-left:7px;
+  -webkit-transition:background .14s,border-color .14s,color .14s;
+  transition:background .14s,border-color .14s,color .14s;
+}
+.q-recall{color:#1f5fd6;border-color:#c5d8f4;}
+.q-recall:hover{background:#eef5ff;border-color:#1f6feb;color:#154ea5;}
+.q-remove{color:#d21d43;border-color:#ecc1c6;}
+.q-remove:hover{background:#fdeaec;border-color:#d21d43;}
+.queue-overlay-body .tbl tbody td.q-empty{
+  padding:46px 14px;text-align:center;color:#8497ad;font-size:14px;font-weight:700;
+}
+.queue-foot{
+  padding:14px 4px 2px;
+  border-top:1px solid #e3ecf6;background:transparent;
+}
+.q-count{font-size:13px;color:#41546c;font-weight:700;}
+.q-count b{color:#1f6feb;font-weight:900;font-variant-numeric:tabular-nums;}
+
+/* ----------------------------------------------------- 6. DARK-THEME PARITY --- */
+.theme-dark .counter-strip{
+  background:rgba(23,34,49,.6);border-color:#3a4a60;
+}
+.theme-dark .cs-sep{background:#3a4a60;}
+.theme-dark .qov-sum-card{
+  background:#1b2839;border-color:#3a4a60;
+  background:-webkit-linear-gradient(top,#213047 0%,#172536 100%);
+  background:linear-gradient(180deg,#213047 0%,#172536 100%);
+}
+.theme-dark .qov-sum-num{color:#7fb3f7;}
+.theme-dark .qov-sum-lbl{color:#b8cce1;}
+.theme-dark .qov-sum-hint{background:#17273a;border-color:#3a4a60;color:#b8cce1;}
+.theme-dark .queue-overlay{background:#0f1a28;color:#e5edf7;}
+.theme-dark .queue-overlay-body .tbl-wrap{background:#142235;border-color:#34516d;}
+.theme-dark .queue-overlay-body .tbl thead th{background:#24425f;color:#ecf6ff;border-color:#45637f;}
+.theme-dark .queue-overlay-body .tbl tbody td{color:#d9e7f5;border-color:#2f485f;}
+.theme-dark .queue-overlay-body .tbl tbody tr:nth-child(even){background:#172a3f;}
+.theme-dark .queue-overlay-body .tbl tbody tr:hover{background:#203b58;}
+.theme-dark .q-pname .q-avatar{background:#213958;color:#8ab4ef;}
+.theme-dark .q-pname .q-pname-text{color:#eaf3ff;}
+.theme-dark .q-file-badge{background:#17314c;border-color:#315e89;color:#bcd6ff;}
+.theme-dark .q-wait-pill{background:#2a2310;border-color:#6b531c;color:#f1d28a;}
+.theme-dark .q-act-btn{background:#1b3047;border-color:#42617f;color:#dceaf8;}
+.theme-dark .q-recall{color:#8ab4ef;border-color:#315e89;}
+.theme-dark .q-recall:hover{background:#213047;border-color:#7fb3f7;}
+.theme-dark .q-remove{color:#ff9aad;border-color:#774359;}
+.theme-dark .q-remove:hover{background:#342638;border-color:#d21d43;}
+.theme-dark .queue-overlay-body .tbl tbody td.q-empty{color:#93a6bd;}
+.theme-dark .q-count{color:#aec3d7;}
+.theme-dark .q-count b{color:#7fb3f7;}

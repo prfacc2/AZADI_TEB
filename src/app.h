@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.74.0"
+#define APP_VERSION_W   L"1.75.0"
 
 // ----------------------------------------------------------- logging policy -
 //  RELEASE 1.2.0 (Section A): all general user-behavior logging is gated behind
@@ -512,7 +512,7 @@ HWND createAdminScreen(HWND frame);      // admin.cpp
 HWND createManageScreen(HWND frame);     // admin.cpp
 
 // v1.7.0: header→reception action routing. The frame header (main.cpp) owns
-// the «پذیرش جدید» / «تب جدید» buttons and routes them to the
+// the «پذیرش بیمار» / «تب جدید» buttons and routes them to the
 // active reception screen via these helpers. RA_* names the requested action.
 //  v1.60.0: «نوبت‌دهی» (RA_APPOINTMENT) removed — the feature no longer exists.
 enum RecAction { RA_NEWPAT=0, RA_NEWTAB=2 };

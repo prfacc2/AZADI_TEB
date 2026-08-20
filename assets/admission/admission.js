@@ -197,7 +197,20 @@
   function computeRow(s) {
     var qty = Number(s.qty) || 1;
     if (qty < 1) qty = 1; else if (qty > 999) qty = 999;
-    var unitPrice = s.freeRate ? (Number(s.freePrice) || 0) : (Number(s.price) || 0);
+    /* v1.75.0: pick unit price based on insurance type, matching the C++
+     * adCatalogPrice logic. freeRate rows use freePrice. Otherwise:
+     *   hasIns → priceIns (insurance tariff), else → priceFree (free tariff).
+     * Falls back to s.price (legacy base) if the tariff field is 0. */
+    var unitPrice;
+    if (s.freeRate) {
+      unitPrice = Number(s.freePrice) || 0;
+    } else if (hasIns() && Number(s.priceIns) > 0) {
+      unitPrice = Number(s.priceIns);
+    } else if (!hasIns() && Number(s.priceFree) > 0) {
+      unitPrice = Number(s.priceFree);
+    } else {
+      unitPrice = Number(s.price) || 0;
+    }
     if (unitPrice < 0) unitPrice = 0;
     var gross = unitPrice * qty;
     var disc = Number(s.discount) || 0;
@@ -271,6 +284,14 @@
     setText($('sfDisc'), money(sumDisc));
     setText($('sfIns'), money(sumOrg + sumSupp));
     setText($('sfPat'), money(sumPat));
+
+    /* v1.75.0: show the active insurance percentages in the invoice group
+       titles so the calculation breakdown is visible at a glance. */
+    var bPct = baseInsPct();
+    var sPct = suppInsPct();
+    setText($('invGMain'), 'بیمه اصلی' + (bPct > 0 ? ' (' + toFa(bPct) + '٪)' : ''));
+    setText($('invGSupp'), 'بیمه مکمل' + (sPct > 0 ? ' (' + toFa(sPct) + '٪)' : ''));
+    setText($('invGFin'), 'مبلغ نهایی');
 
     /* invoice — بیمه اصلی */
     setText($('invMainTotal'), money(sumGross));
@@ -608,31 +629,54 @@
   /* ==========================================================================
      QUEUE — صندوق نرفته‌ها
      ========================================================================== */
+  /* v1.75.0: the overlay header subtitle + summary card reflect the active
+     queue kind so the surface reads as a deliberate page, not a bare table. */
+  function updateQueueChrome() {
+    var isAdm = state.queueKind === 'admission';
+    setText($('qovSubtitle'),
+      isAdm ? 'بیمارانی که در صف پذیرش منتظر دریافت نوبت هستند'
+            : 'پذیرش‌های ثبت‌شده‌ای که هنوز به صندوق نرفته‌اند');
+    setText($('qovSumLbl'),
+      isAdm ? 'مورد در صف پذیرش' : 'مورد در صندوق نرفته‌ها');
+    setText($('qovHint'),
+      isAdm ? 'برای صدور نوبت یا حذف هر ردیف از دکمه‌های سمت چپ استفاده کنید'
+            : 'برای بازخوانی یا حذف هر ردیف از دکمه‌های سمت چپ استفاده کنید');
+  }
   function renderQueue(rows) {
     state.queue = rows || state.queue || [];
     var body = $('queueBody');
     if (!body) return;
     var filter = filterQueue(state.queue);
     state.queueView = filter;             /* v1.50.0: delegated handlers read this */
-    setText($('qCount'), toFa(state.queue.length));
+    var total = state.queue.length;
+    setText($('qCount'), toFa(total));
+    setText($('qCountSum'), toFa(total));
+    updateQueueChrome();
     if (!filter.length) {
-      body.innerHTML = '<tr><td colspan="7" class="empty">' +
+      body.innerHTML = '<tr><td colspan="7" class="empty q-empty">' +
         (state.queueKind === 'admission' ? 'موردی در صف پذیرش نیست' : 'موردی در صندوق نیست') + '</td></tr>';
       return;
     }
     var html = '', i, q, lim = Math.min(filter.length, 60);
     for (i = 0; i < lim; i++) {
       q = filter[i];
+      var nm = trimStr(String(q.name || '—'));
+      var pinit = toFa(nm.charAt(0) || '؟');
+      var file = toFa(q.barcode || q.nid || '—');
+      var mins = (q.minsAgo != null)
+        ? '<span class="q-wait-pill">' + toFa(q.minsAgo) + ' دقیقه</span>'
+        : '—';
       html += '<tr>' +
-        '<td>' + toFa(i + 1) + '</td>' +
-        '<td class="td-name">' + esc(q.name || '') + '</td>' +
-        '<td>' + toFa(q.barcode || q.nid || '') + '</td>' +
-        '<td>' + toFa(q.date || '') + '</td>' +
-        '<td>' + toFa(q.time || '') + '</td>' +
-        '<td>' + toFa(q.minsAgo != null ? (q.minsAgo + ' دقیقه') : '') + '</td>' +
-        '<td>' +
-          '<button type="button" class="act-btn act-repeat" title="بازخوانی" data-q="' + i + '">⟳</button>' +
-          '<button type="button" class="act-btn act-del" title="حذف" data-qdel="' + i + '">✕</button>' +
+        '<td class="q-idx">' + toFa(i + 1) + '</td>' +
+        '<td class="q-pname"><span class="q-avatar">' + esc(pinit) + '</span>' +
+          '<span class="q-pname-text">' + esc(nm) + '</span></td>' +
+        '<td class="q-file"><span class="q-file-badge">' + esc(file) + '</span></td>' +
+        '<td class="q-date">' + toFa(q.date || '—') + '</td>' +
+        '<td class="q-time">' + toFa(q.time || '—') + '</td>' +
+        '<td class="q-wait">' + mins + '</td>' +
+        '<td class="q-act">' +
+          '<button type="button" class="q-act-btn q-recall" title="بازخوانی" data-q="' + i + '">بازخوانی</button>' +
+          '<button type="button" class="q-act-btn q-remove" title="حذف" data-qdel="' + i + '">×</button>' +
         '</td>' +
       '</tr>';
     }
@@ -663,15 +707,20 @@
      NAVIGATION (B1) — Enter / Tab advance through an EXPLICIT hard-coded id
      order that matches the secretary's real visual/logical workflow, NOT the
      raw DOM order (wrappers rearrange cells under RTL, so DOM order is wrong).
+     v1.75.0: the order now follows the on-screen grid field-by-field without
+     skipping — نام (first) → نام خانوادگی (last) → کد ملی (nid) → تاریخ تولد →
+     جنسیت → موبایل → … — exactly the order the eye travels down the form. When
+     no field is focused (page open / form cleared) the cursor auto-lands on the
+     national-ID (کد ملی) field so a patient can be looked up immediately.
      Auxiliary search boxes and the table qty cells are deliberately NOT here —
      they keep their own dedicated Enter handlers.
      ========================================================================== */
   var NAV_ORDER = [
-    'nid', 'first', 'last', 'father',
-    'birth', 'gender', 'mobile', 'phone', 'addr',
+    'first', 'last', 'nid',
+    'birth', 'gender', 'mobile', 'father', 'phone', 'addr',
     'insMain', 'insType', 'ptype', 'insSuppPct',
-    'apptDate', 'apptShift',
     'doc2code', 'doc2name', 'perfcode', 'perfname',
+    'apptDate', 'apptShift',
     'insBooklet', 'insValid', 'rxDate', 'insSupp'
   ];
 
@@ -744,6 +793,23 @@
       for (i = oi - 1; i >= 0; i--) {
         var el = $(NAV_ORDER[i]); if (el && isVisible(el)) { focusEl(el); return; }
       }
+    }
+  }
+
+  /* v1.75.0: when NO field is currently focused (page just opened, or the form
+     was just cleared), land the cursor on the national-ID (کد ملی) field so the
+     receptionist can look up a patient straight away. If an input/select/textarea
+     already owns focus we leave it untouched. */
+  function autoFocusNid() {
+    var ae = document.activeElement;
+    var tag = ae && ae.tagName ? String(ae.tagName).toUpperCase() : '';
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+    var n = $('nid');
+    if (!n) return;
+    try { n.focus(); } catch (e) {}
+    if (n.select) { try { n.select(); } catch (e2) {} }
+    else if (n.setSelectionRange) {
+      try { n.setSelectionRange(0, (n.value || '').length); } catch (e3) {}
     }
   }
 
@@ -1508,7 +1574,9 @@
     if ($('docResults')) $('docResults').innerHTML = '';
     renderSvcSuggest([]);
     renderServices(); recompute();
-    if ($('first')) $('first').focus();
+    /* v1.75.0: after clearing, no field is selected → auto-focus کد ملی (nid)
+       so the next patient can be looked up immediately. */
+    autoFocusNid();
   }
 
   function updatePS(ps) {
@@ -1665,6 +1733,8 @@
       state.ready = true;
       hideLoader();
       toast('پذیرش بیمار آماده است', 'ok');
+      /* v1.75.0: no field is focused yet → auto-land on کد ملی (national ID). */
+      setTimeout(autoFocusNid, 60);
     })['catch'](function (err) {
       setSync('err', 'قطع ارتباط با برنامه');
       renderServices(); recompute();

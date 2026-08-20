@@ -115,7 +115,12 @@ static std::string CrmBuildInlinePage(bool withFontFace){
        !crmLoadRes(808,empJs)     || empJs.empty()     ||
        !crmLoadRes(809,msgJs)     || msgJs.empty()     ||
        !crmLoadRes(810,setJs)     || setJs.empty())
+    {
+      std::string insJs; if(!crmLoadRes(811,insJs) || insJs.empty()) return "";
+      if(!crmReplaceRequired(html,"<script src=\"insurance.js\"></script>",
+                          "<script>\n"+insJs+"\n</script>"))
         return "";
+    }
     if(!crmStripFontFace(commonCss) || !crmStripFontFace(crmCss)) return "";
 
     std::string face;
@@ -152,6 +157,13 @@ static std::string CrmBuildInlinePage(bool withFontFace){
        !crmReplaceRequired(html,"<script src=\"settings.js\"></script>",
                           "<script>\n"+setJs+"\n</script>"))
         return "";
+    // v1.75.0: insurance.js (RCDATA 811) — was missing from the bundle
+    {
+      std::string insJs; if(!crmLoadRes(811,insJs) || insJs.empty()) return "";
+      if(!crmReplaceRequired(html,"<script src=\"insurance.js\"></script>",
+                          "<script>\n"+insJs+"\n</script>"))
+        return "";
+    }
     return html;
 }
 
