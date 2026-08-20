@@ -161,10 +161,11 @@
   }
 
   function del(host, d) {
-    if (!confirm('حذف «' + d.name + '»؟')) return;
-    Crm.call('crm.doctors.delete', { idx: d.idx }).then(function () {
-      Crm.toast('پزشک حذف شد.', 'ok'); load(host, '');
-    }, function () { Crm.toast('حذف ناموفق بود.', 'err'); });
+    Crm.confirm('حذف «' + d.name + '»؟', function () {
+      Crm.call('crm.doctors.delete', { idx: d.idx }).then(function () {
+        Crm.toast('پزشک حذف شد.', 'ok'); load(host, '');
+      }, function () { Crm.toast('حذف ناموفق بود.', 'err'); });
+    }, { danger: true });
   }
 
   Crm.pages.doctors = {

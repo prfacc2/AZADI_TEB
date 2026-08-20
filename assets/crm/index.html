@@ -24,73 +24,33 @@
 
   <div id="app" class="crm-app" aria-hidden="true">
 
-    <!-- v1.71: the CRM top bar (clock / user label / theme button) was removed.
-         Date, time and appearance are owned by the C++ shell settings, so
-         rendering them here was redundant. The sidebar nav + main stay. -->
+    <!-- v1.74: the right sidebar menu (crm-nav) is RETIRED. Navigation is now a
+         categorized quick-access tile grid rendered on the Dashboard (home) page
+         plus a top bar with a global search, backup button and message badge.
+         Static element IDs the JS depends on (navMsgBadge, navBackup) are kept. -->
+    <!-- ======================= TOP BAR ======================= -->
+    <header class="crm-topbar">
+      <button class="crm-topbar-brand" id="navHome" title="خانه">
+        <span class="crm-topbar-logo">
+          <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M19 8h-2V6a4 4 0 00-8 0H7a2 2 0 00-2 2v12a2 2 0 002 2h12a2 2 0 002-2V8a2 2 0 00-2-2zm-8-2a2 2 0 014 0v2h-4V6zm5 9h-2v2h-2v-2H8v-2h2v-2h2v2h2v2z"/></svg>
+        </span>
+        <span class="crm-topbar-name">مدیریت درمانگاه</span>
+      </button>
+      <div class="crm-topbar-search">
+        <input class="crm-input" id="navSearch" placeholder="جستجوی دسترسی سریع…" />
+        <span class="crm-search-ic"><svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M10 2a8 8 0 105.3 14L20 20.7 21.7 19l-4.7-4.7A8 8 0 0010 2zm0 2a6 6 0 110 12 6 6 0 010-12z"/></svg></span>
+      </div>
+      <div class="crm-topbar-actions">
+        <button class="crm-topbar-btn" id="navBackup" title="پشتیبان‌گیری">
+          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M19 12v7H5v-7H3v9h18v-9h-2zm-6 .67l2.59-2.58L17 11.5l-5 5-5-5 1.41-1.41L11 12.67V3h2v9.67z"/></svg>
+          <span>پشتیبان</span>
+        </button>
+        <span class="crm-topbar-badge" id="navMsgBadge" style="display:none">0</span>
+      </div>
+    </header>
+
     <!-- ======================= BODY ======================= -->
     <div class="crm-body">
-
-      <!-- ---------------------- SIDEBAR NAV ---------------------- -->
-      <aside class="crm-nav" id="crmNav">
-        <button class="crm-nav-item active" data-page="dashboard">
-          <span class="crm-nav-ic">
-            <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
-          </span>
-          <span class="crm-nav-lbl">داشبورد</span>
-        </button>
-        <button class="crm-nav-item" data-page="sections">
-          <span class="crm-nav-ic">
-            <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M4 4h7v7H4V4zm9 0h7v7h-7V4zM4 13h7v7H4v-7zm9 0h7v7h-7v-7z"/></svg>
-          </span>
-          <span class="crm-nav-lbl">بخش‌ها</span>
-        </button>
-        <button class="crm-nav-item" data-page="patients">
-          <span class="crm-nav-ic">
-            <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 12a5 5 0 100-10 5 5 0 000 10zm0 2c-4 0-9 2-9 6v2h18v-2c0-4-5-6-9-6z"/></svg>
-          </span>
-          <span class="crm-nav-lbl">بیماران</span>
-        </button>
-        <button class="crm-nav-item" data-page="doctors">
-          <span class="crm-nav-ic">
-            <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M19 3h-4.5v3H12V3H7a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2zm-6 14h-2v-2h2v2zm0-4h-2V8h2v5z"/></svg>
-          </span>
-          <span class="crm-nav-lbl">پزشکان و پرستاران</span>
-        </button>
-        <button class="crm-nav-item" data-page="services">
-          <span class="crm-nav-ic">
-            <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M7 4V2h10v2h5v3H2V4h5zm-3 5h16l-1 11a2 2 0 01-2 2H7a2 2 0 01-2-2L4 9zm5 2v7h2v-7H9zm4 0v7h2v-7h-2z"/></svg>
-          </span>
-          <span class="crm-nav-lbl">خدمات</span>
-        </button>
-        <button class="crm-nav-item" data-page="employees">
-          <span class="crm-nav-ic">
-            <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M16 11c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 3-1.34 3-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.67 0-8 1.34-8 4v2h10v-2c0-1.1.45-2.1 1.18-2.83C10.5 13.4 8.9 13 8 13zm8 0c-.62 0-1.4.12-2.22.34A4.01 4.01 0 0116 17v2h8v-2c0-2.66-5.33-4-8-4z"/></svg>
-          </span>
-          <span class="crm-nav-lbl">کاربران</span>
-        </button>
-        <button class="crm-nav-item" data-page="messages">
-          <span class="crm-nav-ic">
-            <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M4 4h16v12H7l-3 3V4zm2 3v2h12V7H6zm0 4v2h8v-2H6z"/></svg>
-          </span>
-          <span class="crm-nav-lbl">کارتابل</span>
-          <span class="crm-nav-badge" id="navMsgBadge" style="display:none">0</span>
-        </button>
-        <button class="crm-nav-item" data-page="settings">
-          <span class="crm-nav-ic">
-            <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M19.4 13a7.8 7.8 0 000-2l2-1.6-2-3.4-2.5 1a7.8 7.8 0 00-1.7-1l-.4-2.6H9.2l-.4 2.6a7.8 7.8 0 00-1.7 1l-2.5-1-2 3.4L4.6 11a7.8 7.8 0 000 2l-2 1.6 2 3.4 2.5-1c.5.4 1.1.7 1.7 1l.4 2.6h4.4l.4-2.6c.6-.3 1.2-.6 1.7-1l2.5 1 2-3.4-2-1.6zM12 15.5A3.5 3.5 0 1112 8.5a3.5 3.5 0 010 7z"/></svg>
-          </span>
-          <span class="crm-nav-lbl">تنظیمات و پشتیبان</span>
-        </button>
-
-        <div class="crm-nav-foot">
-          <button class="crm-nav-item crm-nav-action" id="navBackup">
-            <span class="crm-nav-ic">
-              <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M19 12v7H5v-7H3v9h18v-9h-2zm-6 .67l2.59-2.58L17 11.5l-5 5-5-5 1.41-1.41L11 12.67V3h2v9.67z"/></svg>
-            </span>
-            <span class="crm-nav-lbl">پشتیبان‌گیری</span>
-          </button>
-        </div>
-      </aside>
 
       <!-- ---------------------- MAIN CONTENT ---------------------- -->
       <main class="crm-main" id="crmMain">
@@ -113,6 +73,7 @@
   <script src="services.js"></script>
   <script src="employees.js"></script>
   <script src="messages.js"></script>
+  <script src="insurance.js"></script>
   <script src="settings.js"></script>
 </body>
 </html>

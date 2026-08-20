@@ -1,10 +1,39 @@
 /* ============================================================================
-   dashboard.js — CRM Dashboard page (KPIs + quick stats). ES5-only.
-   Registers on window.Crm.pages.dashboard. Calls crm.dashboard.
+   dashboard.js — CRM Dashboard / home (KPIs + categorized quick-access tiles).
+   ES5-only. Registers on window.Crm.pages.dashboard. Calls crm.dashboard.
+   v1.74: the retired right sidebar is replaced by this categorized tile grid;
+   the top-bar search (#navSearch) filters the tiles live.
    ============================================================================ */
 (function (global) {
   'use strict';
   var Crm = global.Crm;
+
+  /* quick-access tiles grouped by category. Each tile navigates to its page.
+     'ic' is an inline SVG path drawn inside a coloured badge. */
+  var CATEGORIES = [
+    { title: 'تعاریف', dot: '#7c3aed', tiles: [
+      { page: 'sectionsHub', label: 'تعریف بخش و زیربخش', sub: 'بخش‌ها و زیربخش‌های درمانگاه', color: 'violet',
+        ic: 'M4 4h7v7H4V4zm9 0h7v7h-7V4zM4 13h7v7H4v-7zm9 0h7v7h-7v-7z' },
+      { page: 'insurance', label: 'تعریف بیمه', sub: 'بیمه پایه و تکمیلی', color: 'teal',
+        ic: 'M12 2L4 5v6c0 5 3.4 9.5 8 11 4.6-1.5 8-6 8-11V5l-8-3zm-1 13l-3-3 1.4-1.4L11 12.2l4.6-4.6L17 9l-6 6z' }
+    ] },
+    { title: 'مدیریت روزمره', dot: '#2f6fe4', tiles: [
+      { page: 'patients', label: 'بیماران', sub: 'جستجو و پرونده بیماران', color: '',
+        ic: 'M12 12a5 5 0 100-10 5 5 0 000 10zm0 2c-4 0-9 2-9 6v2h18v-2c0-4-5-6-9-6z' },
+      { page: 'doctors', label: 'پزشکان و پرستاران', sub: 'نیروی درمانی و قراردادها', color: 'green',
+        ic: 'M19 3h-4.5v3H12V3H7a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2zm-6 14h-2v-2h2v2zm0-4h-2V8h2v5z' },
+      { page: 'services', label: 'خدمات و تعرفه‌ها', sub: 'تعریف خدمات و قیمت‌ها', color: 'amber',
+        ic: 'M7 4V2h10v2h5v3H2V4h5zm-3 5h16l-1 11a2 2 0 01-2 2H7a2 2 0 01-2-2L4 9zm5 2v7h2v-7H9zm4 0v7h2v-7h-2z' }
+    ] },
+    { title: 'سیستم', dot: '#475569', tiles: [
+      { page: 'employees', label: 'کاربران', sub: 'کاربران و بخش‌های سازمانی', color: 'rose',
+        ic: 'M16 11c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 3-1.34 3-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.67 0-8 1.34-8 4v2h10v-2c0-1.1.45-2.1 1.18-2.83C10.5 13.4 8.9 13 8 13zm8 0c-.62 0-1.4.12-2.22.34A4.01 4.01 0 0116 17v2h8v-2c0-2.66-5.33-4-8-4z' },
+      { page: 'messages', label: 'کارتابل', sub: 'صندوق پیام‌های دریافتی', color: 'slate',
+        ic: 'M4 4h16v12H7l-3 3V4zm2 3v2h12V7H6zm0 4v2h8v-2H6z' },
+      { page: 'settings', label: 'تنظیمات و پشتیبان', sub: 'پیکربندی و پشتیبان‌گیری', color: 'slate',
+        ic: 'M19.4 13a7.8 7.8 0 000-2l2-1.6-2-3.4-2.5 1a7.8 7.8 0 00-1.7-1l-.4-2.6H9.2l-.4 2.6a7.8 7.8 0 00-1.7 1l-2.5-1-2 3.4L4.6 11a7.8 7.8 0 000 2l-2 1.6 2 3.4 2.5-1c.5.4 1.1.7 1.7 1l.4 2.6h4.4l.4-2.6c.6-.3 1.2-.6 1.7-1l2.5 1 2-3.4-2-1.6zM12 15.5A3.5 3.5 0 1112 8.5a3.5 3.5 0 010 7z' }
+    ] }
+  ];
 
   function kpi(label, value, foot, kind) {
     var card = Crm.el('div', 'crm-kpi' + (kind ? ' ' + kind : ''));
@@ -15,13 +44,55 @@
     return card;
   }
 
+  function tileNode(t) {
+    var b = Crm.el('button', 'crm-tile');
+    b.setAttribute('data-page', t.page);
+    if (Crm.state.page === t.page) b.className += ' active';
+    b.innerHTML =
+      '<span class="crm-tile-ic ' + Crm.esc(t.color || '') + '">' +
+        '<svg viewBox="0 0 24 24" width="24" height="24"><path fill="currentColor" d="' + t.ic + '"/></svg>' +
+      '</span>' +
+      '<span class="crm-tile-lbl">' + Crm.esc(t.label) + '</span>' +
+      '<span class="crm-tile-sub">' + Crm.esc(t.sub) + '</span>';
+    b.onclick = function () { Crm.nav(t.page); };
+    return b;
+  }
+
+  function renderTiles(host, q) {
+    var fq = (q || '').toLowerCase();
+    for (var c = 0; c < CATEGORIES.length; c++) {
+      var cat = CATEGORIES[c];
+      var matched = [];
+      for (var i = 0; i < cat.tiles.length; i++) {
+        var t = cat.tiles[i];
+        if (!fq || ('' + t.label).toLowerCase().indexOf(fq) >= 0 ||
+            ('' + t.sub).toLowerCase().indexOf(fq) >= 0 ||
+            ('' + t.page).toLowerCase().indexOf(fq) >= 0) matched.push(t);
+      }
+      if (!matched.length) continue;
+      var wrap = Crm.el('div', 'crm-cat');
+      var title = Crm.el('div', 'crm-cat-title');
+      title.innerHTML = '<span class="dot" style="background:' + cat.dot + '"></span>' + Crm.esc(cat.title);
+      wrap.appendChild(title);
+      var grid = Crm.el('div', 'crm-tiles');
+      for (var k = 0; k < matched.length; k++) grid.appendChild(tileNode(matched[k]));
+      wrap.appendChild(grid);
+      host.appendChild(wrap);
+    }
+    if (!host.childNodes.length) {
+      host.appendChild(Crm.el('div', 'crm-banner info', 'موردی مطابق جستجو یافت نشد.'));
+    }
+  }
+
   Crm.pages.dashboard = {
     title: 'داشبورد',
     render: function (host) {
-      Crm.head(host, 'داشبورد مدیریت', 'نمای کلی آمار درمانگاه');
+      var q = '';
+      var s = Crm.$('navSearch');
+      if (s) q = s.value;
+      Crm.head(host, 'داشبورد مدیریت', 'نمای کلی و دسترسی سریع');
       var kpis = Crm.el('div', 'crm-kpis');
       host.appendChild(kpis);
-      /* placeholder while loading */
       kpis.appendChild(kpi('بیماران', '…', '', ''));
       kpis.appendChild(kpi('پزشکان و پرستاران', '…', '', 'k-green'));
       kpis.appendChild(kpi('خدمات', '…', '', 'k-amber'));
@@ -46,14 +117,17 @@
           'ساعت: ' + Crm.faDigits(d.time || '--:--:--') +
           '</div>' +
           '<div style="font-size:13px;color:#475569;line-height:2">' +
-          'از منوی کناری برای مدیریت بخش‌ها، بیماران، پزشکان، خدمات، کاربران، ' +
-          'کارتابل پیام‌ها و تنظیمات سیستم استفاده کنید. تغییرات بلافاصله در ' +
-          'سیستم ذخیره و در صفحه پذیرش اعمال می‌شود.' +
+          'از کارت‌های دسترسی سریع زیر برای مدیریت بخش‌ها، زیربخش‌ها، بیماران، ' +
+          'پزشکان، خدمات، بیمه‌ها، کاربران، کارتابل پیام‌ها و تنظیمات سیستم ' +
+          'استفاده کنید. تغییرات بلافاصله ذخیره و در صفحه پذیرش اعمال می‌شود.' +
           '</div>';
         host.appendChild(card);
+
+        renderTiles(host, q);
       }, function () {
         kpis.innerHTML = '';
         kpis.appendChild(Crm.el('div', 'crm-banner err', 'بارگذاری آمار ناموفق بود.'));
+        renderTiles(host, q);
       });
     }
   };

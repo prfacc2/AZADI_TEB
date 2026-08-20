@@ -20,6 +20,7 @@ static std::string crmSectionJson(const Section& s){
     o+="\"name\":"+jstr(s.name_fa)+",";
     o+="\"kind\":"+jstr(s.kind)+",";
     o+="\"kindLabel\":"+jstr(Sections_KindLabel(s.kind))+",";
+    o+="\"parentId\":"+jnum(s.parent_id)+",";
     o+="\"active\":";
     o+=(s.is_active?"true":"false");
     o+=",\"createdAt\":"+jstr(s.created_at)+",";
@@ -39,7 +40,16 @@ static std::string crmServiceJson(const ServiceDef& s){
     o+="\"desc\":"+jstr(s.desc)+",";
     o+="\"status\":"+jnum(s.status)+",";
     o+="\"created\":"+jstr(s.created)+",";
-    o+="\"modified\":"+jstr(s.modified)+"";
+    o+="\"modified\":"+jstr(s.modified)+",";
+    // v1.74 professional tariffs
+    o+="\"insName\":"+jstr(s.insName)+",";
+    o+="\"multiplier\":"+jstr(s.multiplier)+",";
+    o+="\"priceFree\":"+jnum(s.priceFree)+",";
+    o+="\"priceFreeNew\":"+jnum(s.priceFreeNew)+",";
+    o+="\"priceGov\":"+jnum(s.priceGov)+",";
+    o+="\"priceGovNew\":"+jnum(s.priceGovNew)+",";
+    o+="\"priceIns\":"+jnum(s.priceIns)+",";
+    o+="\"priceInsNew\":"+jnum(s.priceInsNew)+"";
     o+="}";
     return o;
 }
@@ -130,22 +140,109 @@ static std::string crmMsgJson(const KMsg& m, int idx){
     return o;
 }
 
-// base + supplementary insurance lists (for the patient form selectors)
-static std::string crmInsurancesJson(){
+// base + supplementary insurance lists (for the patient form selectors).
+// v1.74: the canonical hardcoded lists are replaced by crmInsListJson /
+// crmSuppListJson (merged with the user-managed registry) — see below.
+
+// v1.74 — merged insurance/supplementary lists: the canonical hardcoded table,
+// overridden per-index by any user definition (name + org share), and extended
+// with user-added rows. Keeps idx 0..N-1 stable so existing patient records keep
+// their meaning while user-defined سهم سازمان / names flow everywhere.
+static std::string crmInsListJson(){
+    auto defs=loadInsDefs();
+    int maxIdx=N_INSURANCES-1;
+    for(const auto& d:defs) if(d.idx>maxIdx) maxIdx=d.idx;
     std::string o="[";
-    for(int i=0;i<N_INSURANCES;i++){
-        if(i)o+=",";
-        o+="{\"idx\":"+jnum(i)+",\"name\":"+jstr(INSURANCES[i].name)+"}";
+    bool first=true;
+    for(int i=0;i<=maxIdx;i++){
+        const InsDef* def=nullptr;
+        for(const auto& d:defs) if(d.idx==i){ def=&d; break; }
+        std::wstring name; int pct;
+        if(def){
+            if(!def->groupName.empty())      name=def->groupName;
+            else if(!def->insCode.empty())    name=def->insCode;
+            else if(i<N_INSURANCES)           name=INSURANCES[i].name;
+        } else if(i<N_INSURANCES){ name=INSURANCES[i].name; }
+        else continue;
+        if(name.empty()) continue;
+        pct=Ins_Percent(i);
+        if(!first) o+=","; first=false;
+        o+="{\"idx\":"+jnum(i)+",\"name\":"+jstr(name)+",\"pct\":"+jnum(pct)+"}";
     }
     o+="]"; return o;
 }
-static std::string crmSuppInsurancesJson(){
+static std::string crmSuppListJson(){
+    auto defs=loadSuppDefs();
+    int maxIdx=N_SUPP-1;
+    for(const auto& d:defs) if(d.idx>maxIdx) maxIdx=d.idx;
     std::string o="[";
-    for(int i=0;i<N_SUPP;i++){
-        if(i)o+=",";
-        o+="{\"idx\":"+jnum(i)+",\"name\":"+jstr(SUPP_INSURANCES[i].name)+"}";
+    bool first=true;
+    for(int i=0;i<=maxIdx;i++){
+        const SuppDef* def=nullptr;
+        for(const auto& d:defs) if(d.idx==i){ def=&d; break; }
+        std::wstring name; int pct;
+        if(def && !def->name.empty()) name=def->name;
+        else if(i<N_SUPP) name=SUPP_INSURANCES[i].name;
+        else continue;
+        if(name.empty()) continue;
+        pct=Supp_Percent(i);
+        if(!first) o+=","; first=false;
+        o+="{\"idx\":"+jnum(i)+",\"name\":"+jstr(name)+",\"pct\":"+jnum(pct)+"}";
     }
     o+="]"; return o;
+}
+static std::string crmInsDefJson(const InsDef& d){
+    std::string o="{";
+    o+="\"idx\":"+jnum(d.idx)+",";
+    o+="\"sectionCode\":"+jstr(d.sectionCode)+",";
+    o+="\"insCode\":"+jstr(d.insCode)+",";
+    o+="\"orgShare\":"+jnum(d.orgShare)+",";
+    o+="\"groupName\":"+jstr(d.groupName)+",";
+    o+="\"flipName\":"+jstr(d.flipName)+",";
+    o+="\"contractCode\":"+jstr(d.contractCode)+",";
+    o+="\"insType\":"+jstr(d.insType)+",";
+    o+="\"tech\":"+jnum(d.tech)+",";
+    o+="\"prof\":"+jnum(d.prof)+",";
+    o+="\"cons\":"+jnum(d.cons)+",";
+    o+="\"total\":"+jnum(d.tech+d.prof+d.cons)+",";
+    o+="\"active\":"; o+=(d.active?"true":"false"); o+=",";
+    o+="\"created\":"+jstr(d.created)+",";
+    o+="\"modified\":"+jstr(d.modified)+"";
+    o+="}";
+    return o;
+}
+static std::string crmSuppDefJson(const SuppDef& d){
+    std::string o="{";
+    o+="\"idx\":"+jnum(d.idx)+",";
+    o+="\"sectionCode\":"+jstr(d.sectionCode)+",";
+    o+="\"insSpec\":"+jstr(d.insSpec)+",";
+    o+="\"name\":"+jstr(d.name)+",";
+    o+="\"tariffType\":"+jstr(d.tariffType)+",";
+    o+="\"franchise\":"+jstr(d.franchise)+",";
+    o+="\"franchiseDefault\":"+jnum(d.franchiseDefault)+",";
+    o+="\"byLaw\":"+jnum(d.byLaw)+",";
+    o+="\"ceiling\":"+jnum(d.ceiling)+",";
+    o+="\"insTypeCode\":"+jstr(d.insTypeCode)+",";
+    o+="\"contractCode\":"+jstr(d.contractCode)+",";
+    o+="\"tech\":"+jnum(d.tech)+",";
+    o+="\"prof\":"+jnum(d.prof)+",";
+    o+="\"cons\":"+jnum(d.cons)+",";
+    o+="\"total\":"+jnum(d.tech+d.prof+d.cons)+",";
+    o+="\"franchiseOrgPct\":"+jnum(d.franchiseOrgPct)+",";
+    o+="\"defaultOff\":"+jnum(d.defaultOff)+",";
+    o+="\"priceCalcType\":"+jstr(d.priceCalcType)+",";
+    o+="\"difference\":"+jnum(d.difference)+",";
+    o+="\"color\":"+jstr(d.color)+",";
+    o+="\"validityDate\":"+jstr(d.validityDate)+",";
+    o+="\"username\":"+jstr(d.username)+",";
+    o+="\"nationalId\":"+jstr(d.nationalId)+",";
+    o+="\"booklet\":"+jnum(d.booklet)+",";
+    o+="\"fileName\":"+jstr(d.fileName)+",";
+    o+="\"active\":"; o+=(d.active?"true":"false"); o+=",";
+    o+="\"created\":"+jstr(d.created)+",";
+    o+="\"modified\":"+jstr(d.modified)+"";
+    o+="}";
+    return o;
 }
 
 // current Jalali date + time strings (header clock + record stamps)
@@ -216,8 +313,20 @@ static std::string crmApi(const std::string& verb, const std::string& body){
         o+="\"employees\":"+jnum((long long)loadUsers().size())+",";
         o+="\"today\":"+jnum((long long)countTodayReceptions())+",";
         o+="\"messages\":"+jnum((long long)unseenMessageCount(g_session.user.username))+",";
-        o+="\"insurances\":"+crmInsurancesJson()+",";
-        o+="\"supp\":"+crmSuppInsurancesJson()+"";
+        o+="\"insurances\":"+crmInsListJson()+",";
+        o+="\"supp\":"+crmSuppListJson()+",";
+        // v1.74 — full insurance definition registries for the «تعریف بیمه» page
+        {
+            auto id=loadInsDefs(); auto sd=loadSuppDefs();
+            std::string idb="[";
+            for(size_t i=0;i<id.size();++i){ if(i)idb+=","; idb+=crmInsDefJson(id[i]); }
+            idb+="]";
+            std::string sdb="[";
+            for(size_t i=0;i<sd.size();++i){ if(i)sdb+=","; sdb+=crmSuppDefJson(sd[i]); }
+            sdb+="]";
+            o+="\"insDefs\":"+idb+",";
+            o+="\"suppDefs\":"+sdb+"";
+        }
         o+="}";
         return o;
     }
@@ -253,8 +362,9 @@ static std::string crmApi(const std::string& verb, const std::string& body){
         o+="]}"; return o;
     }
     if(verb=="crm.sections.save"){
-        Section s;                       // default ctor: id=0, is_active=1
+        Section s;                       // default ctor: id=0, is_active=1, parent_id=0
         double id=0; jsonGetNumber(body,"id",id); s.id=(int)id;
+        double pid=0; jsonGetNumber(body,"parentId",pid); s.parent_id=(int)pid; // v1.74 زیربخش
         std::string t;
         if(jsonGetString(body,"code",t))    s.code=u82w(t);
         if(jsonGetString(body,"name",t))    s.name_fa=u82w(t);
@@ -276,17 +386,21 @@ static std::string crmApi(const std::string& verb, const std::string& body){
     // ===================================================== SERVICES (خدمات) ===
     if(verb=="crm.services.list"){
         std::string qU; jsonGetString(body,"q",qU);
-        wstring q=u82w(qU);
+        std::string deptU; jsonGetString(body,"dept",deptU);
+        std::string insU;  jsonGetString(body,"insName",insU);
+        wstring q=u82w(qU), dept=u82w(deptU), ins=u82w(insU);
         auto svcs=loadServices();
         std::string o="{\"rows\":[";
         int n=0;
         for(const auto& s:svcs){
             bool hit=q.empty()||wcontains(s.name,q)||wcontains(s.code,q)||
-                    wcontains(s.category,q);
+                    wcontains(s.category,q)||wcontains(s.insName,q);
             if(!hit) continue;
+            if(!dept.empty() && s.dept!=dept) continue;          // section filter
+            if(!ins.empty()  && s.insName!=ins) continue;         // insurance filter
             if(n++) o+=",";
             o+=crmServiceJson(s);
-            if(n>=200) break;
+            if(n>=500) break;
         }
         o+="]}"; return o;
     }
@@ -300,6 +414,15 @@ static std::string crmApi(const std::string& verb, const std::string& body){
         if(jsonGetNumber(body,"price",n))    s.price=(long long)llround(n);
         if(jsonGetString(body,"insType",t))  s.insType=u82w(t);
         if(jsonGetString(body,"desc",t))     s.desc=u82w(t);
+        // v1.74 professional tariffs
+        if(jsonGetString(body,"insName",t))     s.insName=u82w(t);
+        if(jsonGetString(body,"multiplier",t))  s.multiplier=u82w(t);
+        if(jsonGetNumber(body,"priceFree",n))    s.priceFree=(long long)llround(n);
+        if(jsonGetNumber(body,"priceFreeNew",n)) s.priceFreeNew=(long long)llround(n);
+        if(jsonGetNumber(body,"priceGov",n))     s.priceGov=(long long)llround(n);
+        if(jsonGetNumber(body,"priceGovNew",n))  s.priceGovNew=(long long)llround(n);
+        if(jsonGetNumber(body,"priceIns",n))     s.priceIns=(long long)llround(n);
+        if(jsonGetNumber(body,"priceInsNew",n))  s.priceInsNew=(long long)llround(n);
         s.status=jsonGetBool(body,"active",true)?1:0;
         std::string orig; jsonGetString(body,"originalCode",orig);
         std::wstring oc=u82w(orig);
@@ -309,7 +432,8 @@ static std::string crmApi(const std::string& verb, const std::string& body){
             // brand-new service
             ok=addService(s,err);
         } else if(s.code==oc){
-            // edit in place (code unchanged) -> updateService matches by code
+            // edit in place (code unchanged) -> updateService matches by code.
+            // Preserve any §H extra columns the form does not resend.
             ok=updateService(s,err);
         } else {
             // rename: capture the original, remove the old row, add the new one.
@@ -337,6 +461,133 @@ static std::string crmApi(const std::string& verb, const std::string& body){
         if(code.empty()) return "{\"ok\":false,\"err\":\"کد خدمت خالی است.\"}";
         return removeService(code) ? "{\"ok\":true}"
                                    : "{\"ok\":false,\"err\":\"حذف ناموفق بود.\"}";
+    }
+    // v1.74 — professional price round / increase / decrease. Applies a single
+    // operation across every matching service and rewrites services.dat once.
+    //   mode:   percent | numeric | multiplier
+    //   dir:    inc | dec
+    //   amount: the percent / Rial / factor (parsed from the payload string)
+    //   round:  0 (off) or one of 5,50,500,5000,50000
+    //   target: which tariff pair to write — free | gov | ins  (the "new" price
+    //           is computed from the matching current price)
+    //   dept/insName: optional section + insurance filters
+    if(verb=="crm.services.adjust"){
+        std::string modeS; jsonGetString(body,"mode",modeS);
+        std::string dirS;  jsonGetString(body,"dir",dirS);
+        std::string amtS;  jsonGetString(body,"amount",amtS);
+        std::string tgtS;  jsonGetString(body,"target",tgtS);
+        std::string deptU; jsonGetString(body,"dept",deptU);
+        std::string insU;  jsonGetString(body,"insName",insU);
+        double roundN=0; jsonGetNumber(body,"round",roundN);
+        long long round=(long long)llround(roundN);
+        wstring dept=u82w(deptU), ins=u82w(insU);
+        double amount=_wtof(u82w(amtS).c_str());
+        auto svcs=loadServices();
+        int changed=0;
+        for(auto& s:svcs){
+            if(!dept.empty() && s.dept!=dept) continue;
+            if(!ins.empty()  && s.insName!=ins) continue;
+            long long base=0, *dst=NULL;
+            if(tgtS=="gov"){ base=s.priceGov;    dst=&s.priceGovNew; }
+            else if(tgtS=="ins"){ base=s.priceIns;  dst=&s.priceInsNew; }
+            else { base=s.priceFree; dst=&s.priceFreeNew; }
+            if(base<=0) continue;                 // nothing to scale yet
+            double v=(double)base;
+            if(modeS=="percent"){
+                v = (dirS=="dec") ? v*(100.0-amount)/100.0 : v*(100.0+amount)/100.0;
+            } else if(modeS=="multiplier"){
+                v = v*amount;
+            } else { // numeric
+                v = (dirS=="dec") ? v-amount : v+amount;
+            }
+            long long r=(long long)llround(v);
+            if(round>0){                          // round up to the next multiple
+                long long m=r%round;
+                if(m!=0) r += (round-m);
+            }
+            if(r<0) r=0;
+            *dst=r; ++changed;
+        }
+        saveAllServices(svcs);
+        return std::string("{\"ok\":true,\"changed\":")+jnum(changed)+"}";
+    }
+
+    // ============================================ INSURANCE DEFINITIONS (بیمه) ==
+    // base insurance registry (تعریف بیمه پایه)
+    if(verb=="crm.insurance.list"){
+        auto defs=loadInsDefs();
+        std::string o="{\"rows\":[";
+        for(size_t i=0;i<defs.size();++i){ if(i)o+=","; o+=crmInsDefJson(defs[i]); }
+        o+="]}"; return o;
+    }
+    if(verb=="crm.insurance.save"){
+        InsDef d;
+        std::string t; double n=0;
+        double idx=-1; jsonGetNumber(body,"idx",idx); d.idx=(int)idx;
+        if(jsonGetString(body,"sectionCode",t)) d.sectionCode=u82w(t);
+        if(jsonGetString(body,"insCode",t))     d.insCode=u82w(t);
+        double os=-1; jsonGetNumber(body,"orgShare",os); d.orgShare=(int)os;
+        if(jsonGetString(body,"groupName",t))   d.groupName=u82w(t);
+        if(jsonGetString(body,"flipName",t))    d.flipName=u82w(t);
+        if(jsonGetString(body,"contractCode",t))d.contractCode=u82w(t);
+        if(jsonGetString(body,"insType",t))     d.insType=u82w(t);
+        if(jsonGetNumber(body,"tech",n)) d.tech=(long long)llround(n);
+        if(jsonGetNumber(body,"prof",n)) d.prof=(long long)llround(n);
+        if(jsonGetNumber(body,"cons",n)) d.cons=(long long)llround(n);
+        d.active=jsonGetBool(body,"active",true)?1:0;
+        if(!upsertInsDef(d)) return "{\"ok\":false,\"err\":\"ذخیره بیمه ناموفق بود.\"}";
+        return "{\"ok\":true,\"idx\":"+jnum(d.idx)+"}";
+    }
+    if(verb=="crm.insurance.delete"){
+        double idx=-1; jsonGetNumber(body,"idx",idx);
+        if(idx<0) return "{\"ok\":false,\"err\":\"شناسه نامعتبر است.\"}";
+        return deleteInsDef((int)idx) ? "{\"ok\":true}"
+                                      : "{\"ok\":false,\"err\":\"حذف ناموفق بود.\"}";
+    }
+    // supplementary insurance registry (تعریف بیمه تکمیلی)
+    if(verb=="crm.supp.list"){
+        auto defs=loadSuppDefs();
+        std::string o="{\"rows\":[";
+        for(size_t i=0;i<defs.size();++i){ if(i)o+=","; o+=crmSuppDefJson(defs[i]); }
+        o+="]}"; return o;
+    }
+    if(verb=="crm.supp.save"){
+        SuppDef d;
+        std::string t; double n=0;
+        double idx=-1; jsonGetNumber(body,"idx",idx); d.idx=(int)idx;
+        if(jsonGetString(body,"sectionCode",t))  d.sectionCode=u82w(t);
+        if(jsonGetString(body,"insSpec",t))      d.insSpec=u82w(t);
+        if(jsonGetString(body,"name",t))         d.name=u82w(t);
+        if(jsonGetString(body,"tariffType",t))   d.tariffType=u82w(t);
+        if(jsonGetString(body,"franchise",t))    d.franchise=u82w(t);
+        double fd=1; jsonGetNumber(body,"franchiseDefault",fd); d.franchiseDefault=(int)fd;
+        double bl=0; jsonGetNumber(body,"byLaw",bl); d.byLaw=(int)bl;
+        if(jsonGetNumber(body,"ceiling",n)) d.ceiling=(long long)llround(n);
+        if(jsonGetString(body,"insTypeCode",t))  d.insTypeCode=u82w(t);
+        if(jsonGetString(body,"contractCode",t)) d.contractCode=u82w(t);
+        if(jsonGetNumber(body,"tech",n)) d.tech=(long long)llround(n);
+        if(jsonGetNumber(body,"prof",n)) d.prof=(long long)llround(n);
+        if(jsonGetNumber(body,"cons",n)) d.cons=(long long)llround(n);
+        double fp=0; jsonGetNumber(body,"franchiseOrgPct",fp); d.franchiseOrgPct=(int)fp;
+        double df=0; jsonGetNumber(body,"defaultOff",df); d.defaultOff=(int)df;
+        if(jsonGetString(body,"priceCalcType",t)) d.priceCalcType=u82w(t);
+        double di=0; jsonGetNumber(body,"difference",di); d.difference=(int)di;
+        if(jsonGetString(body,"color",t))        d.color=u82w(t);
+        if(jsonGetString(body,"validityDate",t)) d.validityDate=u82w(t);
+        if(jsonGetString(body,"username",t))     d.username=u82w(t);
+        if(jsonGetString(body,"nationalId",t))   d.nationalId=u82w(t);
+        double bk=0; jsonGetNumber(body,"booklet",bk); d.booklet=(int)bk;
+        if(jsonGetString(body,"fileName",t))     d.fileName=u82w(t);
+        d.active=jsonGetBool(body,"active",true)?1:0;
+        if(d.name.empty()) return "{\"ok\":false,\"err\":\"نام بیمه تکمیلی الزامی است.\"}";
+        if(!upsertSuppDef(d)) return "{\"ok\":false,\"err\":\"ذخیره بیمه تکمیلی ناموفق بود.\"}";
+        return "{\"ok\":true,\"idx\":"+jnum(d.idx)+"}";
+    }
+    if(verb=="crm.supp.delete"){
+        double idx=-1; jsonGetNumber(body,"idx",idx);
+        if(idx<0) return "{\"ok\":false,\"err\":\"شناسه نامعتبر است.\"}";
+        return deleteSuppDef((int)idx) ? "{\"ok\":true}"
+                                       : "{\"ok\":false,\"err\":\"حذف ناموفق بود.\"}";
     }
 
     // ===================================================== DOCTORS (پزشک/پرستار)

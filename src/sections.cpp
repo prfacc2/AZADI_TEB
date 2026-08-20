@@ -52,6 +52,9 @@ static std::vector<Section> sec_readAll(){
         // §7 (1.14.0): optional 8th field = net_meta. Older files have only 7
         // fields and load unchanged (net_meta stays empty).
         if(f.size() >= 8) s.net_meta = f[7];
+        // v1.74: optional 9th field = parent_id (subsection). Older files have
+        // only 7-8 fields and load unchanged (parent_id stays 0 = top-level).
+        if(f.size() >= 9) s.parent_id = _wtoi(f[8].c_str());
         v.push_back(s);
     }
     return v;
@@ -62,6 +65,7 @@ static bool sec_writeAll(const std::vector<Section>& v){
     for(const auto& s : v){
         wchar_t idb[16]; swprintf(idb,16,L"%d",s.id);
         wchar_t act[8];  swprintf(act,8,L"%d",s.is_active);
+        wchar_t pid[16]; swprintf(pid,16,L"%d",s.parent_id);   // v1.74 subsection
         out += idb; out += L'|';
         out += sec_esc(s.code);    out += L'|';
         out += sec_esc(s.name_fa); out += L'|';
@@ -69,7 +73,8 @@ static bool sec_writeAll(const std::vector<Section>& v){
         out += act;                out += L'|';
         out += sec_esc(s.created_at);out += L'|';
         out += sec_esc(s.updated_at);out += L'|';
-        out += sec_esc(s.net_meta); out += L"\r\n";
+        out += sec_esc(s.net_meta); out += L'|';
+        out += pid; out += L"\r\n";
     }
     return writeFileUtf8(sec_path(), out, false);
 }

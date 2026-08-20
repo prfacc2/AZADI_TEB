@@ -77,9 +77,10 @@
           var b = Crm.el('span');
           b.innerHTML = '<button class="crm-row-btn danger" data-act="del">حذف</button>';
           b.childNodes[0].onclick = function () {
-            if (!confirm('حذف بخش «' + r.name + '»؟')) return;
-            Crm.call('crm.depts.delete', { id: r.id }).then(function () { Crm.toast('بخش حذف شد.', 'ok'); load(host); },
-              function () { Crm.toast('حذف ناموفق بود.', 'err'); });
+            Crm.confirm('حذف بخش «' + r.name + '»؟', function () {
+              Crm.call('crm.depts.delete', { id: r.id }).then(function () { Crm.toast('بخش حذف شد.', 'ok'); load(host); },
+                function () { Crm.toast('حذف ناموفق بود.', 'err'); });
+            }, { danger: true });
           };
           return b;
         } }
@@ -136,10 +137,11 @@
   }
 
   function del(host, u) {
-    if (!confirm('حذف کاربر «' + u.username + '»؟')) return;
-    Crm.call('crm.employees.delete', { username: u.username }).then(function () {
-      Crm.toast('کاربر حذف شد.', 'ok'); load(host);
-    }, function () { Crm.toast('حذف ناموفق بود.', 'err'); });
+    Crm.confirm('حذف کاربر «' + u.username + '»؟', function () {
+      Crm.call('crm.employees.delete', { username: u.username }).then(function () {
+        Crm.toast('کاربر حذف شد.', 'ok'); load(host);
+      }, function () { Crm.toast('حذف ناموفق بود.', 'err'); });
+    }, { danger: true });
   }
 
   Crm.pages.employees = {

@@ -108,9 +108,10 @@
         function () { Crm.toast('عملیات ناموفق بود.', 'err'); });
     };
     acts.childNodes[1].onclick = function () {
-      if (!confirm('حذف این پیام؟')) return;
-      Crm.call('crm.messages.delete', { idx: m.idx }).then(function () { Crm.toast('پیام حذف شد.', 'ok'); load(host); },
-        function () { Crm.toast('حذف ناموفق بود.', 'err'); });
+      Crm.confirm('حذف این پیام؟', function () {
+        Crm.call('crm.messages.delete', { idx: m.idx }).then(function () { Crm.toast('پیام حذف شد.', 'ok'); load(host); },
+          function () { Crm.toast('حذف ناموفق بود.', 'err'); });
+      }, { danger: true });
     };
     row.appendChild(acts);
     return row;
