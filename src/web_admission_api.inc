@@ -500,8 +500,8 @@ static std::string admissionApi(const std::string& verb, const std::string& body
                            getSetting(L"reception.mode",L"simple"));
         if(mode!=L"full") mode=L"simple";
         int zoom=_wtoi(getSetting(L"reception.zoom"+suffix,
-                       getSetting(L"reception.zoom",L"100")).c_str());
-        if(zoom<80||zoom>130) zoom=100;
+                       getSetting(L"reception.zoom",L"80")).c_str());
+        if(zoom<80||zoom>200) zoom=80;
         o+="\"date\":"+jstr(adTodayJalali())+",";
         o+="\"time\":"+jstr(adNowTime())+",";
         o+="\"shift\":"+jstr(shiftName(g_session.shift))+",";
@@ -639,6 +639,17 @@ static std::string admissionApi(const std::string& verb, const std::string& body
     if(verb=="doctor.stats"){
         std::string nameU; jsonGetString(body,"name",nameU);
         return adDoctorStatsJson(u82w(nameU));
+    }
+
+    // ---- reception.zoom.save: persist user's Ctrl+scroll zoom choice --------
+    if(verb=="reception.zoom.save"){
+        std::string zU; jsonGetString(body,"zoom",zU);
+        int z=atoi(zU.c_str());
+        if(z<80) z=80; if(z>200) z=200;
+        std::wstring user=g_session.user.username;
+        std::wstring suffix=user.empty()?L"":L"."+user;
+        setSetting(L"reception.zoom"+suffix,std::to_wstring(z));
+        return "{\"ok\":true}";
     }
 
     // ---- bill.compute: server-authoritative recompute (optional) -----------

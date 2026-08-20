@@ -847,16 +847,9 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
         }
 
-        // ===== bottom status bar: shift indicator (left) =====
-        SetTextColor(dc,g_theme.textDim);
-        SelectObject(dc,g_fSmall);
-        int shiftLeft=(loggedIn && s_curScreen==SC_RECEPTION)?S(520):S(16);
-        RECT shf={shiftLeft,rc.bottom-botBarH(),S(820),rc.bottom};
-        std::wstring sf = L"شیفت جاری: " + shiftName(detectShift());
-        if(loggedIn && s_curScreen==SC_RECEPTION)
-            sf += L"   |   شیفت ورود: " + shiftName(g_session.shift);
-        DrawTextW(dc,sf.c_str(),-1,&shf,
-            DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
+        // ===== bottom status bar =====
+        // v1.70.0: shift labels removed per user request. Only the product tag
+        // (name + version) remains on the right side.
         // bottom-right: small product tag
         SetTextColor(dc,g_theme.textDim);
         RECT pr={rc.right-S(360),rc.bottom-botBarH(),rc.right-S(16),rc.bottom};
