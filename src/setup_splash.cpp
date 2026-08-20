@@ -115,28 +115,25 @@ static bool ssConfigureBrowserFeatures(){
 static DWORD WINAPI ssWorker(LPVOID p){
     SetupState* s = (SetupState*)p;
 
-    // ensure data/ and logs/ exist & are writable (root cause of save errors)
+    ssSet(s, 6,  L"بررسی پوشه‌های برنامه…");
     dataDir();   // auto-creates <exe>\data (or override)
     logsDir();   // auto-creates <exe>\logs
 
-    // detect hardware profile
+    ssSet(s, 24, L"شناسایی سخت‌افزار سیستم…");
     {
         MEMORYSTATUSEX ms; ms.dwLength=sizeof(ms);
         unsigned long long ramMB=0;
         if(GlobalMemoryStatusEx(&ms)) ramMB=(unsigned long long)(ms.ullTotalPhys/(1024*1024));
         SYSTEM_INFO si; GetSystemInfo(&si);
-        // persist the detected profile
         setSetting(L"sys_low_spec", s->lowSpec?L"1":L"0");
         (void)ramMB; (void)si;
     }
 
-    // Always add the embedded face to this process. installVazirFont checks
-    // whether a persistent per-user copy already exists, so repeat launches do
-    // the cheap AddFontMemResourceEx step without reinstalling any files/keys.
+    ssSet(s, 46, s->firstRun ? L"نصب فونت فارسی (Vazirmatn)…"
+                             : L"بارگذاری فونت فارسی…");
     installVazirFont();
 
-    // GDI+ probe — confirm the library is resolvable so a broken GDI+ is
-    // reported deterministically rather than crashing later.
+    ssSet(s, 66, L"آماده‌سازی موتور گرافیکی (GDI+)…");
     {
         ULONG_PTR tok=0; Gdiplus::GdiplusStartupInput in;
         Gdiplus::Status gs=Gdiplus::GdiplusStartup(&tok,&in,NULL);
@@ -144,13 +141,16 @@ static DWORD WINAPI ssWorker(LPVOID p){
         else logLine(L"setup: GDI+ probe failed (will fall back to plain GDI)");
     }
 
-    // Register ALL custom control window classes up-front.
+    ssSet(s, 82, L"ثبت اجزای رابط و موتور نمایش…");
     uikit::Az_RegisterControls();
     s->webOk = ssConfigureBrowserFeatures();
     setSetting(L"sys_mshtml_configured",s->webOk?L"1":L"0");
 
+    ssSet(s, 94, L"تکمیل پیکربندی برای این سیستم…");
     if(s->firstRun) setSetting(L"setup_done_version", APP_VERSION_W);
 
+    ssSet(s, 100, L"آماده است");
+    Sleep(s->firstRun ? 300 : 0);   // brief hold on first run only
     InterlockedExchange(&s->done, 1);
     return 0;
 }
@@ -278,17 +278,53 @@ static LRESULT CALLBACK ssProc(HWND h, UINT m, WPARAM w, LPARAM l){
 // ----------------------------------------------------------------------------
 //  Public entry.
 // ----------------------------------------------------------------------------
-// v1.69.0: SILENT instant boot — no splash window, no progress bar, no message
-// pump. All preparation runs synchronously (<50ms) and the app starts instantly.
-// The user explicitly requested: "انیمیشن loader رو حذف کن، برای وارد شدن
-// نیازی به انیمیشن نیست".
+// v1.70.0: first-run shows a brief "optimization" window that installs all
+// prerequisites (fonts, folders, GDI+, browser config, control registration)
+// before the app opens. Repeat launches are SILENT and instant (<50ms).
+// The user requested: "یک صفحه ای باز میشه برای اولین بار... هرچیزی که برنامه
+// احتیاج داره رو نصب کن... تمام پیش نیاز ها... و بعد که کامل شد برنامه رو باز کن".
 bool RunSetupSplash(HINSTANCE hInst){
     SetupState st; g_ss=&st;
     st.firstRun = ssFirstRunForBuild();
     st.lowSpec  = ssDetectLowSpec();
 
-    // Run all preparation work synchronously — no window, no thread, no delays.
-    ssWorker(&st);
+    if(st.firstRun){
+        // Show a visible optimization window on first run only.
+        WNDCLASSW wc={0};
+        wc.lpfnWndProc   = ssProc;
+        wc.hInstance     = hInst;
+        wc.hCursor       = LoadCursorW(NULL, IDC_ARROW);
+        wc.lpszClassName = SS_CLASS;
+        wc.hbrBackground = (HBRUSH)(COLOR_WINDOW+1);
+        RegisterClassW(&wc);
+
+        int sw=GetSystemMetrics(SM_CXSCREEN), sh=GetSystemMetrics(SM_CYSCREEN);
+        int W=420, H=260;
+        int x=(sw-W)/2, y=(sh-H)/2;
+        HWND h=CreateWindowExW(WS_EX_TOPMOST|WS_EX_DLGMODALFRAME,
+            SS_CLASS, APP_NAME_W, WS_POPUP|WS_BORDER,
+            x,y,W,H, NULL,NULL,hInst,NULL);
+        if(h){
+            ssSet(&st, 0, L"در حال بهینه‌سازی و نصب پیش‌نیازها…");
+            ShowWindow(h, SW_SHOW);
+            UpdateWindow(h);
+            SetTimer(h, 1, 33, NULL);
+            // Run the work on a thread so the window can paint.
+            HANDLE th=CreateThread(NULL,0,ssWorker,&st,0,NULL);
+            MSG msg;
+            while(GetMessageW(&msg,NULL,0,0)){
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+            if(th){ WaitForSingleObject(th, 5000); CloseHandle(th); }
+            UnregisterClassW(SS_CLASS, hInst);
+        } else {
+            ssWorker(&st);
+        }
+    } else {
+        // Repeat launch: silent and instant.
+        ssWorker(&st);
+    }
 
     g_ss=nullptr;
     (void)hInst;

@@ -248,11 +248,11 @@
     setText($('tcVal'), money(b.pat));
   }
   function scheduleBillSync() {
-    if (!state.ready || _billSyncTimer) return;
-    _billSyncTimer = setTimeout(function () {
-      _billSyncTimer = null;
-      Bridge.call('bill.compute', authoritativeBillPayload()).then(applyAuthoritativeBill);
-    }, 100);
+    if (!state.ready) return;
+    // v1.70.0: sync immediately (was 100ms delay which caused a brief flash of
+    // wrong values). The authoritative C++ recompute is fast enough to run
+    // synchronously without freezing the UI.
+    Bridge.call('bill.compute', authoritativeBillPayload()).then(applyAuthoritativeBill);
   }
 
   function recompute() {
