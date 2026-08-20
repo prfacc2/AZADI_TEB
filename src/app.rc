@@ -87,6 +87,7 @@
 808 RCDATA "../assets/crm/employees.js"
 809 RCDATA "../assets/crm/messages.js"
 810 RCDATA "../assets/crm/settings.js"
+811 RCDATA "../assets/crm/insurance.js"
 
 // v1.68.0: the redistributable WebView2 loader (x86). Extracted to a per-user
 // writable folder at first use so the embedded Patient-Admission surface can

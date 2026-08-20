@@ -1,7 +1,7 @@
 // ============================================================================
 //  reception.cpp — reception workspace:
 //   • info bar (current user, access type, live Iran date/time, calculator)
-//   • browser-style tab strip: open/close/detach tabs (پذیرش <بخش>)
+//   • browser-style tab strip: open/close tabs (پذیرش <بخش>)
 //   • reception form (Enter = next field) + live billing (Iranian insurances)
 //   • print: رسید بیمه / چاپ نسخه / چاپ آخرین قبض (F8) — real printer output
 // ============================================================================
@@ -21,12 +21,11 @@
 
 #define RC_CLASS   L"AzReception"
 #define TABPG_CLASS L"AzRecTab"
-#define DET_CLASS  L"AzDetached"
 
 // info-bar buttons
 #define ID_RC_CALC    501
 #define ID_RC_NEWTAB  502
-#define ID_RC_NEWPAT  503   // "پذیرش جدید" — clears the ACTIVE tab's form
+#define ID_RC_NEWPAT  503   // "پذیرش بیمار" — clears the ACTIVE tab's form
 //  v1.60.0: «نوبت‌دهی» (appointment scheduling, formerly ID_RC_APPT=504 /
 //  TK_APPOINTMENT) has been REMOVED from the reception account completely —
 //  page, option, routing and code path.
@@ -67,7 +66,7 @@
 #define ID_F_DOCNAME     664
 #define ID_F_DOCSEARCH   665
 #define ID_F_RESET       666   // v1.4.0 (§6): پاک کردن فرم (Ctrl+R)
-#define ID_F_NEW         667   // v1.18.0: «پذیرش جدید» — فرم تازه (ردیف دکمه‌های پایین)
+#define ID_F_NEW         667   // v1.18.0: «پذیرش بیمار» — فرم تازه (ردیف دکمه‌های پایین)
 #define ID_F_SVC_ADD     668   // v1.18.0: «افزودن خدمت» به جدول خدمات
 #define ID_F_SVC_SEARCH  669   // v1.18.0: جستجوی خدمت
 // ---- v1.25.0: center Treating-doctor / Performer / Appointment cards ----
@@ -124,7 +123,7 @@ enum TabKind {
     // v1.60.0: TK_APPOINTMENT (3) removed — نوبت‌دهی no longer exists.
 };
 struct TabPage {
-    HWND page;                // container window (child of reception OR detached)
+    HWND page;                // container window (child of reception)
     int  kind;                // TabKind
     std::wstring title;
     // form controls
@@ -133,7 +132,7 @@ struct TabPage {
     HWND ePrice,eDiscount;
     HWND bSubmit,bPrtIns,bPrtRx,bPrtLast,bClose,bInquiry;
     HWND bReset;   // v1.4.0 (§6) reset/clear form
-    HWND bNew;     // v1.18.0: «پذیرش جدید» (ردیف دکمه‌های پایین فرم)
+    HWND bNew;     // v1.18.0: «پذیرش بیمار» (ردیف دکمه‌های پایین فرم)
     HWND bSvcAdd;  // v1.18.0: «افزودن خدمت» بالای جدول خدمات
     HWND eSvcSearch;// v1.18.0: جستجوی خدمت
     // ---- v1.25.0: center Treating-doctor / Performer / Appointment cards ----
@@ -226,7 +225,7 @@ struct RecData {
     HWND bCalc, bNewTab, bNewPat;
     std::vector<TabPage*> tabs;
     int active;
-    int hotTab, hotClose, hotDetach;     // hover indices
+    int hotTab, hotClose;     // hover indices
     int lastUnseen;                      // cartable poll state
     // v1.7.0: drag-and-drop tab reordering -----------------------------------
     bool  dragArmed;     // mouse down on a tab body, may become a drag
@@ -235,7 +234,7 @@ struct RecData {
     POINT dragStart;     // where the press began (to apply a small threshold)
     int   dragX;         // current mouse x (for the floating ghost)
     int   dropIdx;       // computed insertion index (drop target)
-    RecData():active(-1),hotTab(-1),hotClose(-1),hotDetach(-1),lastUnseen(0),
+    RecData():active(-1),hotTab(-1),hotClose(-1),lastUnseen(0),
         dragArmed(false),dragging(false),dragIdx(-1),dragX(0),dropIdx(-1){
         dragStart.x=dragStart.y=0; }
 };
@@ -543,6 +542,13 @@ static int infoBarH(){ return S(6); }
 static int tabBarH(){ return S(38); }
 static int tabW()    { return S(206); }
 static int tabGap()  { return S(8);  }
+// v1.75.0: each tab kind carries a distinct vector glyph so the strip reads as
+// a set of labelled, iconified tabs rather than a row of plain text buttons.
+static int tabIconFor(int kind){
+    if(kind==TK_PORTAL) return ICO_BELL;    // کارتابل — message board / inbox
+    if(kind==TK_EMPTY)  return ICO_TAB;     // تب جدید — fresh blank tab
+    return ICO_USER;                        // پذیرش بیمار — patient admission
+}
 
 // ---------------------------------------------------------------- billing --
 //  The program computes the bill ITSELF: if the secretary leaves the service
@@ -1213,7 +1219,12 @@ static void tabPageLayout(HWND h, TabPage* t){
         ShowWindow(t->chkNoPay,SW_HIDE);
     }
 
-    // ===== bottom action bar: پاک کردن + انصراف (LEFT) … ثبت (RIGHT) =====
+    // ===== bottom action bar: پاک کردن + انصراف + پذیرش بیمار (LEFT) … ثبت (RIGHT) =====
+    //  v1.75.0: «پذیرش بیمار» is shown in the row again as a modern iconified
+    //  button (clears the ACTIVE tab's form for a new patient). It only appears
+    //  when the row is wide enough to hold it without crowding the primary ثبت
+    //  button; on a narrow/stacked frame it stays hidden so the row never
+    //  overflows. The primary «ثبت پذیرش و صدور قبض» stays flush-right.
     {
         int gap=S(8), small=S(112);
         int wideW=S(300);
@@ -1222,7 +1233,13 @@ static void tabPageLayout(HWND h, TabPage* t){
         MoveWindow(t->bClose,  m.billL+small+gap,   Y(v.btnY), small, v.btnH, TRUE);
         ShowWindow(t->bSubmit,SW_SHOW); ShowWindow(t->bReset,SW_SHOW);
         ShowWindow(t->bClose,SW_SHOW);
-        ShowWindow(t->bNew,SW_HIDE);
+        int newLeft = m.billL + 2*(small+gap);
+        if(newLeft + small + gap < m.cardR - wideW){
+            MoveWindow(t->bNew, newLeft, Y(v.btnY), small, v.btnH, TRUE);
+            ShowWindow(t->bNew,SW_SHOW);
+        } else {
+            ShowWindow(t->bNew,SW_HIDE);
+        }
     }
 
     // billing panel print buttons (bottom of LEFT billing card). Positioned by
@@ -2225,7 +2242,7 @@ static void drawTabPlaceholder(HDC dc, const RECT& rc, int kind, TabPage* t){
     SelectObject(dc,g_fUI);
     SetTextColor(dc,g_theme.textDim);
     RECT br1={card.left+S(28), tr.bottom+S(8), card.right-S(28), tr.bottom+S(8)+S(28)};
-    DrawTextW(dc,L"برای پذیرش بیمار، روی «پذیرش جدید» کلیک کنید.",-1,&br1,
+    DrawTextW(dc,L"برای پذیرش بیمار، روی «پذیرش بیمار» کلیک کنید.",-1,&br1,
         DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
 
     SelectObject(dc,g_fSmall);
@@ -2546,12 +2563,12 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         SendMessageW(t->cSupp,CB_SETCURSEL,0,0);
 
         // bottom action row (matches reference): ثبت (primary) | پاک کردن |
-        // پذیرش جدید | انصراف
+        // پذیرش بیمار | انصراف
         t->bSubmit =createFlatButton(h,ID_F_SUBMIT,L"ثبت پذیرش و صدور قبض",ICO_SAVE,BS_PRIMARY,0,0,10,10);
         // §1.18.1: «پاک کردن» is the destructive/clear action → danger (red) style,
         // matching the reference image (red trash icon + red text).
         t->bReset  =createFlatButton(h,ID_F_RESET,L"پاک کردن",ICO_TRASH,BS_DANGER,0,0,10,10);
-        t->bNew    =createFlatButton(h,ID_F_NEW,L"پذیرش جدید",ICO_CHEVRON,BS_OUTLINE,0,0,10,10);
+        t->bNew    =createFlatButton(h,ID_F_NEW,L"پذیرش بیمار",ICO_PLUS,BS_OUTLINE,0,0,10,10);
         t->bClose  =createFlatButton(h,ID_F_CLOSE,L"انصراف",ICO_X,BS_OUTLINE,0,0,10,10);
         // services table toolbar
         t->bSvcAdd =createFlatButton(h,ID_F_SVC_ADD,L"افزودن خدمت",ICO_PLUS,BS_PRIMARY,0,0,10,10);
@@ -3005,9 +3022,9 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             t->lastMsg=L"فرم پاک شد."; t->msgCol=g_theme.textDim;
             InvalidateRect(h,NULL,FALSE);
         }
-        else if(id==ID_F_NEW){                          // پذیرش جدید
+        else if(id==ID_F_NEW){                          // پذیرش بیمار
             resetForm(t);
-            t->lastMsg=L"پذیرش جدید — اطلاعات بیمار را وارد کنید.";
+            t->lastMsg=L"پذیرش بیمار — اطلاعات بیمار را وارد کنید.";
             t->msgCol=g_theme.accent;
             SetFocus(t->eFirst);
             InvalidateRect(h,NULL,FALSE);
@@ -4289,8 +4306,15 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             SelectObject(dc,g_fSection); SetTextColor(dc,g_theme.sectionInk);
             int icoW=S(18);
             RECT pi={br-icoW,prTop,br,prTop+S(18)};
+            // v1.75.0: a compact accent medallion behind the print glyph matches
+            // the other section headers (صورتحساب / بیمه / پزشک) so the «چاپ»
+            // group reads as a designed section, not a bare label.
+            RECT pm=pi; InflateRect(&pm,S(3),S(3));
+            int pmr=(pm.bottom-pm.top)/2;
+            gpFillAlpha(dc,pm,pmr,blendColor(g_theme.accent,g_theme.surface,50),g_dark?80:46);
+            gpRoundRect(dc,pm,pmr,CLR_INVALID,blendColor(g_theme.border,g_theme.accent,45));
             drawIcon(dc,ICO_PRINT,pi,g_theme.accent,S(2));
-            RECT pt={bl,prTop,br-icoW-S(6),prTop+S(18)};
+            RECT pt={bl,prTop,br-icoW-S(8),prTop+S(18)};
             DrawTextW(dc,L"چاپ",-1,&pt,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
         }
         #undef Y
@@ -4308,79 +4332,13 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
     return DefWindowProcW(h,m,w,l);
 }
 
-// =========================================================== DETACHED WIN ==
-static LRESULT CALLBACK detachedProc(HWND h, UINT m, WPARAM w, LPARAM l){
-    switch(m){
-    case WM_SIZE: {
-        HWND page=(HWND)GetWindowLongPtrW(h,GWLP_USERDATA);
-        if(page) MoveWindow(page,0,0,LOWORD(l),HIWORD(l),TRUE);
-        return 0; }
-    case WM_CLOSE: {
-        // re-attach page back into the tab strip (if reception still exists)
-        HWND page=(HWND)GetWindowLongPtrW(h,GWLP_USERDATA);
-        TabPage* t = page?(TabPage*)GetWindowLongPtrW(page,GWLP_USERDATA):NULL;
-        HWND rec = FindWindowExW(g_hFrame,NULL,RC_CLASS,NULL);
-        if(t && s_rd && rec && IsWindow(rec)){
-            t->detached=false;
-            SetWindowLongPtrW(h,GWLP_USERDATA,0);   // detach link BEFORE reparent
-            SetParent(page, rec);
-            RECT rc; GetClientRect(rec,&rc);
-            MoveWindow(page,0,infoBarH()+tabBarH(),
-                rc.right,rc.bottom-infoBarH()-tabBarH(),TRUE);
-            for(size_t i=0;i<s_rd->tabs.size();i++)
-                if(s_rd->tabs[i]==t) s_rd->active=(int)i;
-            for(auto* tp : s_rd->tabs)
-                ShowWindow(tp->page,
-                    (tp->detached || tp==t) ? SW_SHOW : SW_HIDE);
-            InvalidateRect(rec,NULL,TRUE);
-        } else if(t && s_rd){
-            // reception screen gone — remove tab entirely (page dies with us)
-            SetWindowLongPtrW(h,GWLP_USERDATA,0);
-            for(size_t i=0;i<s_rd->tabs.size();i++)
-                if(s_rd->tabs[i]==t){
-                    s_rd->tabs.erase(s_rd->tabs.begin()+i);
-                    delete t;
-                    if(s_rd->active>=(int)s_rd->tabs.size())
-                        s_rd->active=(int)s_rd->tabs.size()-1;
-                    break;
-                }
-        }
-        DestroyWindow(h);
-        return 0; }
-    }
-    return DefWindowProcW(h,m,w,l);
-}
-static void detachTab(TabPage* t){
-    static bool reg=false;
-    if(!reg){
-        WNDCLASSW wc={0};
-        wc.lpfnWndProc=detachedProc; wc.hInstance=g_hInst;
-        wc.hCursor=LoadCursor(NULL,IDC_ARROW);
-        wc.hbrBackground=NULL;
-        wc.lpszClassName=DET_CLASS;
-        RegisterClassW(&wc); reg=true;
-    }
-    int W=S(1040),H=S(700);
-    RECT scr; SystemParametersInfoW(SPI_GETWORKAREA,0,&scr,0);
-    HWND win=CreateWindowExW(0,DET_CLASS,
-        (t->title+L" — "+APP_NAME_W).c_str(),
-        WS_OVERLAPPEDWINDOW|WS_VISIBLE,
-        (scr.right-W)/2,(scr.bottom-H)/2,W,H,NULL,NULL,g_hInst,NULL);
-    SetWindowLongPtrW(win,GWLP_USERDATA,(LONG_PTR)t->page);
-    t->detached=true;
-    SetParent(t->page,win);
-    RECT rc; GetClientRect(win,&rc);
-    MoveWindow(t->page,0,0,rc.right,rc.bottom,TRUE);
-    ShowWindow(t->page,SW_SHOW);
-}
-
 // ============================================================== TAB STRIP ==
 static HWND recWnd(){ return s_rd?FindWindowExW(g_hFrame,NULL,RC_CLASS,NULL):NULL; }
 
 // v1.7.0: persist the user's preferred tab order. We store the sequence of the
 // permanent tab KINDS (پذیرش / کارتابل) as a CSV in the settings
 // file so a drag-reorder survives between runs. Reception (form) tabs the user
-// opened ad-hoc and detached tabs are not persisted (only the fixed kinds).
+// opened ad-hoc tabs are not persisted (only the fixed kinds).
 //  v1.60.0: the appointment kind (3) is gone — never persisted anymore.
 static void saveTabOrder(){
     if(!s_rd) return;
@@ -4489,16 +4447,14 @@ static RECT tabRect(HWND h, int i){
     return r;
 }
 static int hitTab(HWND h, POINT pt, int* part){
-    // part: 0=body 1=close 2=detach
+    // part: 0=body 1=close
     if(!s_rd) return -1;
     int vis=0;
     for(size_t i=0;i<s_rd->tabs.size();i++){
         RECT r=tabRect(h,(int)i);
         if(PtInRect(&r,pt)){
-            RECT cl={r.left+S(6),r.top+S(7),r.left+S(26),r.bottom-S(7)};
-            RECT dt={r.left+S(28),r.top+S(7),r.left+S(48),r.bottom-S(7)};
+            RECT cl={r.left+S(8),r.top+S(6),r.left+S(30),r.bottom-S(6)};
             if(PtInRect(&cl,pt)) *part=1;
-            else if(PtInRect(&dt,pt)) *part=2;
             else *part=0;
             return (int)i;
         }
@@ -4528,7 +4484,7 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
     switch(m){
     case WM_CREATE:
         s_rd = new RecData();
-        // v1.60.0: «پذیرش جدید» / «تب جدید» live in the FRAME action bar
+        // v1.60.0: «پذیرش بیمار» / «تب جدید» live in the FRAME action bar
         // HEADER (main.cpp). The reception info-bar no longer owns any action
         // buttons, so the tab strip is clean and uncluttered.
         s_rd->bNewPat = NULL;
@@ -4580,7 +4536,7 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
         if(id==ID_RC_CALC) openCalculator(g_hFrame);
         else if(id==ID_RC_NEWTAB) addTabKind(h, TK_EMPTY);   // new-tab → empty
         else if(id==ID_RC_NEWPAT){
-            // "پذیرش جدید" (پذیرش جدید/New Admission) — always open a FRESH
+            // "پذیرش بیمار" (پذیرش بیمار/New Admission) — always open a FRESH
             // reception tab so a new patient never overwrites the form the
             // operator is currently filling. If the active tab is an EMPTY
             // placeholder, reuse it; otherwise add a new reception tab.
@@ -4611,9 +4567,9 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
             }
         }
         int part=0, hit=hitTab(h,pt,&part);
-        int hc = (part==1)?hit:-1, hd=(part==2)?hit:-1;
-        if(hit!=s_rd->hotTab || hc!=s_rd->hotClose || hd!=s_rd->hotDetach){
-            s_rd->hotTab=hit; s_rd->hotClose=hc; s_rd->hotDetach=hd;
+        int hc = (part==1)?hit:-1;
+        if(hit!=s_rd->hotTab || hc!=s_rd->hotClose){
+            s_rd->hotTab=hit; s_rd->hotClose=hc;
             RECT bar={0,infoBarH(),S(2000),infoBarH()+tabBarH()};
             InvalidateRect(h,&bar,FALSE);
         }
@@ -4622,7 +4578,7 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
     case WM_MOUSELEAVE:
         // don't clear hover while a drag (with capture) is active
         if(s_rd && !s_rd->dragging && s_rd->hotTab!=-1){
-            s_rd->hotTab=s_rd->hotClose=s_rd->hotDetach=-1;
+            s_rd->hotTab=s_rd->hotClose=-1;
             RECT bar={0,infoBarH(),S(2000),infoBarH()+tabBarH()};
             InvalidateRect(h,&bar,FALSE);
         }
@@ -4648,8 +4604,7 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 recLayoutTabs(h); InvalidateRect(h,NULL,FALSE);
             }
             else if(part==1) closeTab(t);
-            else if(part==2 && !t->detached && t->kind!=TK_PORTAL) detachTab(t);
-            else if(!t->detached){
+            else {
                 s_rd->active=hit; recLayoutTabs(h);
                 if(t->kind==TK_PORTAL){
                     markMessagesSeen(g_session.user.username);
@@ -4664,10 +4619,6 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 s_rd->dragIdx=hit; s_rd->dragStart=pt; s_rd->dragX=pt.x;
                 s_rd->dropIdx=hit;
                 SetCapture(h);
-            } else {
-                // focus the detached window
-                HWND det=GetParent(t->page);
-                if(det) SetForegroundWindow(det);
             }
         }
         return 0; }
@@ -4738,21 +4689,21 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
             for(size_t i=0;i<s_rd->tabs.size();i++){
                 TabPage* t=s_rd->tabs[i];
                 RECT r=tabRect(h,(int)i);
-                bool act = ((int)i==s_rd->active) && !t->detached;
+                bool act = ((int)i==s_rd->active);
                 bool hov = ((int)i==s_rd->hotTab);
                 // ------------------------------------------------------
-                //  v1.63.0 TAB REDESIGN. Previously every tab was the same
-                //  flat rounded rect and the only cue for "active" was the
-                //  border colour — on a busy screen it was genuinely hard
-                //  to tell which tab you were on. Now:
-                //    * the ACTIVE tab is a raised page-coloured card that
-                //      merges into the body below (its bottom edge is
-                //      overdrawn with the body colour so it reads as one
-                //      continuous surface, the browser-tab idiom), topped
-                //      by a 3 px accent indicator,
-                //    * HOVER lifts an inactive tab with a soft shadow and
-                //      an accent-warmed hairline,
-                //    * a DETACHED tab is drawn as a dashed-feel ghost.
+                //  v1.75.0 TAB REDESIGN. The strip used to be plain text with a
+                //  close + detach glyph; tabs were hard to tell apart and looked
+                //  basic. Each tab now carries a distinct vector icon in a
+                //  rounded medallion at the leading (right/RTL) edge — a solid
+                //  accent medallion marks the ACTIVE tab, a quiet tint marks the
+                //  rest — so the strip reads as a set of labelled, iconified
+                //  tabs. The detach control is gone; tabs always stay in-app.
+                //    * ACTIVE  — raised page card merging into the body below
+                //      (browser-tab idiom) + a 3 px accent indicator on top,
+                //    * HOVER   — lifts an inactive tab with a soft shadow and an
+                //      accent-warmed hairline,
+                //    * cartable keeps its glowing unread counter.
                 // ------------------------------------------------------
                 int trad = S(10);
                 if(act){
@@ -4777,23 +4728,43 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 } else {
                     gpGradRoundRect(dc,r,trad,
                         blendColor(g_theme.surfaceTop,g_theme.surface,55),
-                        g_theme.surface,
-                        t->detached? blendColor(g_theme.border,g_theme.bg,45)
-                                   : g_theme.border);
+                        g_theme.surface, g_theme.border);
                 }
-                // title
-                SetTextColor(dc, t->detached?g_theme.textDim:
-                                 act?g_theme.text:g_theme.textDim);
+                // icon medallion at the leading (right/RTL) edge — solid accent
+                // on the active tab, a quiet accent tint on the others.
+                int ico = tabIconFor(t->kind);
+                RECT ic={r.right-S(36),r.top+S(4),r.right-S(12),r.top+S(28)};
+                int mrad=S(7);
+                if(act){
+                    gpGradRoundRect(dc,ic,mrad,g_theme.accent,g_theme.accent2,CLR_INVALID);
+                } else if(hov){
+                    gpGradRoundRect(dc,ic,mrad,
+                        blendColor(g_theme.surface,g_theme.accent,30),
+                        blendColor(g_theme.surface,g_theme.accent,46),
+                        blendColor(g_theme.border,g_theme.accent,42));
+                } else {
+                    gpGradRoundRect(dc,ic,mrad,
+                        blendColor(g_theme.surfaceTop,g_theme.surface,50),
+                        g_theme.surface,
+                        blendColor(g_theme.border,g_theme.accent,26));
+                }
+                RECT ici={ic.left+S(5),ic.top+S(5),ic.right-S(5),ic.bottom-S(5)};
+                drawIcon(dc,ico,ici,
+                    act?g_theme.accentText
+                       : (hov?g_theme.accent:blendColor(g_theme.accent,g_theme.textDim,45)),
+                    S(2));
+                // title (right-aligned, RTL) fills the space between the close
+                // slot and the icon medallion.
+                SetTextColor(dc, act?g_theme.text:g_theme.textDim);
                 SelectObject(dc, act?g_fUIB:g_fUI);
-                RECT tr2={r.left+S(52),r.top,r.right-S(10),r.bottom};
-                std::wstring shown=t->title + (t->detached?L" (جدا شده)":L"");
-                DrawTextW(dc,shown.c_str(),-1,&tr2,
+                RECT tr2={r.left+S(38),r.top,r.right-S(42),r.bottom};
+                DrawTextW(dc,t->title.c_str(),-1,&tr2,
                     DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX|DT_END_ELLIPSIS);
-                // unseen badge on the cartable tab
+                // unseen badge on the cartable tab (sits in the close slot)
                 if(t->kind==TK_PORTAL){
                     int n=unseenMessageCount(g_session.user.username);
                     if(n>0){
-                        RECT bd={r.left+S(6),r.top+S(8),r.left+S(28),r.bottom-S(8)};
+                        RECT bd={r.left+S(8),r.top+S(7),r.left+S(30),r.bottom-S(7)};
                         // v1.63.0: the counter pill now glows and carries a
                         // gradient so an unread cartable actually draws the eye.
                         gpShadowColor(dc,bd,S(9),S(6),110,g_theme.danger);
@@ -4805,11 +4776,11 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
                         DrawTextW(dc,toFaDigits(nb).c_str(),-1,&bd,
                             DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX);
                     }
-                    continue;   // cartable: no close/detach controls
+                    continue;   // cartable: permanent tab, no close control
                 }
                 // close ×  (v1.63.0: hover raises a soft glowing danger pill
                 // instead of a flat red square)
-                RECT cl={r.left+S(6),r.top+S(7),r.left+S(26),r.bottom-S(7)};
+                RECT cl={r.left+S(8),r.top+S(6),r.left+S(30),r.bottom-S(6)};
                 bool hcl=((int)i==s_rd->hotClose);
                 if(hcl){
                     gpShadowColor(dc,cl,S(7),S(5),90,g_theme.danger);
@@ -4820,19 +4791,6 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 RECT cli={cl.left+S(5),cl.top+S(5),cl.right-S(5),cl.bottom-S(5)};
                 drawIcon(dc,ICO_X,cli,
                     hcl?RGB(255,255,255):g_theme.textDim,S(2));
-                // detach ⧉  (same treatment in the accent colour)
-                if(!t->detached){
-                    RECT dt={r.left+S(28),r.top+S(7),r.left+S(48),r.bottom-S(7)};
-                    bool hdt=((int)i==s_rd->hotDetach);
-                    if(hdt){
-                        gpShadowColor(dc,dt,S(7),S(5),90,g_theme.accent);
-                        gpGradRoundRect(dc,dt,S(7),
-                            g_theme.accentHover,g_theme.accent,CLR_INVALID);
-                    }
-                    RECT dti={dt.left+S(4),dt.top+S(4),dt.right-S(4),dt.bottom-S(4)};
-                    drawIcon(dc,ICO_DETACH,dti,
-                        hdt?RGB(255,255,255):g_theme.textDim,S(2));
-                }
             }
             // v1.7.0: drag-reorder drop indicator — a bright accent bar at the
             // boundary where the tab will be inserted, plus a subtle highlight
@@ -4890,7 +4848,7 @@ static LRESULT CALLBACK recProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 SetTextColor(dc,g_theme.textDim);
                 RECT sr2={S(20),hr.bottom+S(6),rc.right-S(20),hr.bottom+S(6)+sl};
                 DrawTextW(dc,
-                    L"برای شروع، «پذیرش جدید» را از نوار بالا انتخاب کنید",
+                    L"برای شروع، «پذیرش بیمار» را از نوار بالا انتخاب کنید",
                     -1,&sr2,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
             }
         }
@@ -4908,7 +4866,7 @@ HWND receptionWindow(){
 void receptionAction(RecAction a){
     HWND rec=receptionWindow();
     if(!rec || !IsWindow(rec)) return;
-    //  v1.60.0: RA_APPOINTMENT no longer exists — only پذیرش جدید / تب جدید.
+    //  v1.60.0: RA_APPOINTMENT no longer exists — only پذیرش بیمار / تب جدید.
     int id = a==RA_NEWTAB ? ID_RC_NEWTAB
            :                ID_RC_NEWPAT;
     SendMessageW(rec, WM_COMMAND, MAKEWPARAM(id,0), 0);

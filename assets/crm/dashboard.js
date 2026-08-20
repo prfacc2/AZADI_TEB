@@ -23,7 +23,7 @@
       { page: 'doctors', label: 'پزشکان و پرستاران', sub: 'نیروی درمانی و قراردادها', color: 'green',
         ic: 'M19 3h-4.5v3H12V3H7a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2zm-6 14h-2v-2h2v2zm0-4h-2V8h2v5z' },
       { page: 'services', label: 'خدمات و تعرفه‌ها', sub: 'تعریف خدمات و قیمت‌ها', color: 'amber',
-        ic: 'M7 4V2h10v2h5v3H2V4h5zm-3 5h16l-1 11a2 2 0 01-2 2H7a2 2 0 01-2-2L4 9zm5 2v7h2v-7H9zm4 0v7h2v-7h-2z' }
+        ic: 'M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2zm2 5v2h10V8H7zm0 4v2h10v-2H7zm0 4v2h6v-2H7z' }
     ] },
     { title: 'سیستم', dot: '#475569', tiles: [
       { page: 'employees', label: 'کاربران', sub: 'کاربران و بخش‌های سازمانی', color: 'rose',
@@ -34,6 +34,9 @@
         ic: 'M19.4 13a7.8 7.8 0 000-2l2-1.6-2-3.4-2.5 1a7.8 7.8 0 00-1.7-1l-.4-2.6H9.2l-.4 2.6a7.8 7.8 0 00-1.7 1l-2.5-1-2 3.4L4.6 11a7.8 7.8 0 000 2l-2 1.6 2 3.4 2.5-1c.5.4 1.1.7 1.7 1l.4 2.6h4.4l.4-2.6c.6-.3 1.2-.6 1.7-1l2.5 1 2-3.4-2-1.6zM12 15.5A3.5 3.5 0 1112 8.5a3.5 3.5 0 010 7z' }
     ] }
   ];
+
+  /* publish the categorized nav so crm.js can build the hamburger drawer */
+  Crm.categories = CATEGORIES;
 
   function kpi(label, value, foot, kind) {
     var card = Crm.el('div', 'crm-kpi' + (kind ? ' ' + kind : ''));
@@ -108,20 +111,6 @@
         kpis.appendChild(kpi('پذیرش امروز', d.today || 0, 'تعداد پذیرش روز جاری', ''));
         kpis.appendChild(kpi('پیام‌های جدید', d.messages || 0, 'کارتابل خوانده‌نشده', 'k-green'));
         kpis.appendChild(kpi('درخواست‌های در انتظار', d.pendingReqs || 0, 'تنظیمات و پروفایل', 'k-amber'));
-
-        var card = Crm.el('div', 'crm-card');
-        card.innerHTML =
-          '<div class="crm-card-title"><span class="dot"></span>وضعیت امروز</div>' +
-          '<div class="crm-banner info">' +
-          'تاریخ: ' + Crm.faDigits(d.date || '----/--/--') + ' &nbsp;•&nbsp; ' +
-          'ساعت: ' + Crm.faDigits(d.time || '--:--:--') +
-          '</div>' +
-          '<div style="font-size:13px;color:#475569;line-height:2">' +
-          'از کارت‌های دسترسی سریع زیر برای مدیریت بخش‌ها، زیربخش‌ها، بیماران، ' +
-          'پزشکان، خدمات، بیمه‌ها، کاربران، کارتابل پیام‌ها و تنظیمات سیستم ' +
-          'استفاده کنید. تغییرات بلافاصله ذخیره و در صفحه پذیرش اعمال می‌شود.' +
-          '</div>';
-        host.appendChild(card);
 
         renderTiles(host, q);
       }, function () {

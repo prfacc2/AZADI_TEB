@@ -202,7 +202,9 @@
 
         <!-- v1.70.1: P/S counters + turn preview -- compact strip above the services list.
              v1.73.0: status shown as COLOURED BADGES (background tint) instead of plain
-             text labels — P=green, S=amber, ثبت‌شده=light green, در انتظار=light amber. -->
+             text labels — P=green, S=amber, ثبت‌شده=light green, در انتظار=light amber.
+             v1.75.0: a thin divider splits the P/S group (right) from the turn-preview
+             group (left) with breathing room between them. -->
         <div class="counter-strip" id="counterStrip" title="آمار امروز">
           <span class="cs-item cs-p">
             <span class="cs-key cs-key-p">P</span>
@@ -212,6 +214,7 @@
             <span class="cs-key cs-key-s">S</span>
             <span class="cs-val" id="psSVal">۰</span>
           </span>
+          <span class="cs-sep" aria-hidden="true"></span>
           <span class="cs-item cs-reg">
             <span class="cs-cap">ثبت‌شده</span>
             <span class="cs-val" id="tpReg">۰</span>
@@ -289,19 +292,19 @@
             صورت حساب</span><button type="button" class="btn btn-icon" id="invoiceToggle" title="باز/بسته صورتحساب">⌄</button></div>
           <div class="card-body invoice-body">
             <div class="inv-group">
-              <div class="inv-gtitle">بیمه اصلی</div>
+              <div class="inv-gtitle" id="invGMain">بیمه اصلی</div>
               <div class="inv-line"><span>جمع کل</span><b id="invMainTotal">۰</b></div>
               <div class="inv-line"><span>سهم بیمار</span><b id="invMainPat">۰</b></div>
               <div class="inv-line"><span>سهم سازمان</span><b id="invMainOrg">۰</b></div>
             </div>
             <div class="inv-group">
-              <div class="inv-gtitle">بیمه مکمل</div>
+              <div class="inv-gtitle" id="invGSupp">بیمه مکمل</div>
               <div class="inv-line"><span>جمع کل</span><b id="invSuppTotal">۰</b></div>
               <div class="inv-line"><span>سهم بیمه تکمیلی</span><b id="invSuppShare">۰</b></div>
               <div class="inv-line"><span>سهم بیمار</span><b id="invSuppPat">۰</b></div>
             </div>
             <div class="inv-group">
-              <div class="inv-gtitle">مبلغ نهایی</div>
+              <div class="inv-gtitle" id="invGFin">مبلغ نهایی</div>
               <div class="inv-line"><span>جمع کل</span><b id="invFinTotal">۰</b></div>
               <div class="inv-line"><span>تخفیف</span><b id="invFinDisc">۰</b></div>
               <div class="inv-line"><span>پرداختی</span><b id="invFinPaid">۰</b></div>
@@ -349,8 +352,11 @@
   <section class="queue-overlay" id="queuePanel" aria-hidden="true">
     <div class="queue-overlay-head">
       <div class="qov-title">
-        <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h10v2H4v-2z"/></svg>
-        <span>صندوق نرفته‌ها و صف پذیرش</span>
+        <svg viewBox="0 0 24 24" width="24" height="24"><path fill="currentColor" d="M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h10v2H4v-2z"/></svg>
+        <span class="qov-title-stack">
+          <span class="qov-title-main">صندوق نرفته‌ها و صف پذیرش</span>
+          <span class="qov-subtitle" id="qovSubtitle">پذیرش‌های ثبت‌شده‌ای که هنوز به صندوق نرفته‌اند</span>
+        </span>
       </div>
       <div class="tabs" id="queueTabs">
         <button class="tab active" id="tabQueue">صندوق نرفته‌ها</button>
@@ -370,11 +376,15 @@
       </div>
     </div>
     <div class="queue-overlay-body">
+      <div class="qov-summary" id="qovSummary">
+        <div class="qov-sum-card qov-sum-total"><span class="qov-sum-num" id="qCountSum">۰</span><span class="qov-sum-lbl" id="qovSumLbl">مورد در صندوق</span></div>
+        <div class="qov-sum-hint" id="qovHint">برای بازخوانی یا حذف هر ردیف از دکمه‌های سمت چپ استفاده کنید</div>
+      </div>
       <div class="tbl-wrap" id="queueWrap">
         <table class="tbl q-tbl">
           <thead><tr>
-            <th class="c-row">ردیف</th><th>نام بیمار</th><th>بارکد / کد پرونده</th>
-            <th>تاریخ</th><th>زمان</th><th>دقیقه پیش</th><th class="c-act">عملیات</th>
+            <th class="c-row">ردیف</th><th class="c-pname">بیمار</th><th class="c-file">کد پرونده</th>
+            <th class="c-date">تاریخ</th><th class="c-time">زمان</th><th class="c-wait">مدت انتظار</th><th class="c-act">عملیات</th>
           </tr></thead>
           <tbody id="queueBody"><tr><td colspan="7" class="empty">موردی در صندوق نیست</td></tr></tbody>
         </table>

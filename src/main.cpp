@@ -31,7 +31,7 @@ HFONT g_fCode=0;   // §G: fixed-pitch code font (Consolas → Courier New)
 //  settings button (left). Theme-toggle and check-for-update were removed from
 //  the header and moved INTO the settings panel per the redesign brief.
 static HWND s_bExit=0, s_bSettings=0, s_bCalc=0;
-//  v1.7.0: the «پذیرش جدید» / «تب جدید» actions were moved out of
+//  v1.7.0: the «پذیرش بیمار» / «تب جدید» actions were moved out of
 //  the reception tab strip and INTO this header so the navigation is clean and
 //  professional. They are shown only while the reception screen is active and
 //  are routed to it via receptionAction().
@@ -133,7 +133,7 @@ HFONT fitFont(int px, int weight, double f){
 //  fit comfortably; thinner bottom status bar (clock moved up to the header).
 //  v1.8.0 — the header now has TWO layers: LAYER 1 (identity + clock + gear /
 //  calculator / exit) and a thinner LAYER 2 "action bar" that, on the reception
-//  screen, hosts the blue navigation buttons (پذیرش جدید / تب جدید)
+//  screen, hosts the blue navigation buttons (پذیرش بیمار / تب جدید)
 //  RIGHT-aligned. The action bar is only present where it is needed so other
 //  screens keep the original clean single-layer header.
 // §2.B (1.12.0): the LAYER-1 header was slightly reduced from S(64) to S(56)
@@ -541,7 +541,7 @@ static void updateHeaderButtons(HWND h){
     // LAYER 2 (action bar) sits directly under LAYER 1.
     int y = mainBarH() + (actionBarH()-bh)/2;
     // RIGHT-aligned cluster (v1.60.0 — «نوبت‌دهی» removed; right → left):
-    //     پذیرش جدید  |  تب جدید
+    //     پذیرش بیمار  |  تب جدید
     int wNew=S(134), wTab=S(112);
     int x = rc.right - pad - wNew;             // پذیرش (right-most)
     MoveWindow(s_bNewPat, x,                          y, wNew,  bh, TRUE);
@@ -587,7 +587,7 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         setFlatButtonImage(s_bCalc,     IMG_IC_CALC);
         // header action buttons (reception only) — created hidden, shown by
         // updateHeaderButtons() when the reception screen becomes active.
-        s_bNewPat   = createFlatButton(h, ID_FR_NEWPAT, L"پذیرش جدید", ICO_PLUS, BS_PRIMARY,0,0,10,10,
+        s_bNewPat   = createFlatButton(h, ID_FR_NEWPAT, L"پذیرش بیمار", ICO_PLUS, BS_PRIMARY,0,0,10,10,
                           L"ثبت پذیرش بیمار جدید");
         // v1.60.0: «نوبت‌دهی» removed completely; the new-tab button stays blue
         // (BS_PRIMARY) for a consistent header action style.
