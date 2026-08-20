@@ -51,7 +51,7 @@ svg{display:inline-block;vertical-align:middle;}
 .app{
   display:-ms-flexbox;display:flex;
   -ms-flex-direction:column;flex-direction:column;
-  height:100vh;overflow:hidden;
+  width:100%;height:100vh;overflow:hidden;
 }
 
 /* ---------------------------------------------------------------- TOPBAR --- */
@@ -111,10 +111,16 @@ svg{display:inline-block;vertical-align:middle;}
 
 /* ------------------------------------------------------------------ BODY --- */
 .body{
-  -ms-flex:1 1 auto;flex:1 1 auto;
+  /* v1.72.0: the workspace is the element that ZOOM scales (see applyZoom in
+     admission.js). It stays a flex row for the three columns, but uses
+     flex:0 0 auto + explicit 100% sizing so the JS enlargement (width/height
+     = 1/scale) is honoured exactly instead of being grown/shrunk by the column
+     flex algorithm. The outer .app shell (100vw x 100vh, overflow:hidden) is
+     the fixed clip boundary, so the page can never spill outside the web view. */
+  -ms-flex:0 0 auto;flex:0 0 auto;
   display:-ms-flexbox;display:flex;
   -ms-flex-direction:row;flex-direction:row;
-  min-height:0;
+  width:100%;height:100%;min-height:0;
   padding:12px;
   overflow:hidden;
 }
@@ -125,11 +131,15 @@ svg{display:inline-block;vertical-align:middle;}
   overflow-y:auto;overflow-x:hidden;
 }
 /* v1.58 REDESIGN — action rail on the RIGHT (col-action), profile beneath it;
-   centre workspace flexes; invoice/extra-insurance on the LEFT. */
-.col-action{ -ms-flex:0 0 264px;flex:0 0 264px;width:264px; }
-.col-right { -ms-flex:0 0 264px;flex:0 0 264px;width:264px; }
-.col-center{ -ms-flex:1 1 auto; flex:1 1 auto; margin:0 12px; }
-.col-left  { -ms-flex:0 0 256px;flex:0 0 256px;width:256px; }
+   centre workspace flexes; invoice/extra-insurance on the LEFT.
+   v1.72.0: the rails use PERCENTAGE flex-basis (not fixed px) so they scale with
+   the workspace width at every zoom level — the fixed-px bases overflowed and
+   pushed the right rail off-screen when the pre-zoom box narrowed. min/max-width
+   guards keep them usable; the centre absorbs the slack (min-width:0). */
+.col-action{ -ms-flex:0 0 20%;flex:0 0 20%;width:20%;min-width:220px;max-width:300px; }
+.col-right { -ms-flex:0 0 20%;flex:0 0 20%;width:20%;min-width:220px;max-width:300px; }
+.col-center{ -ms-flex:1 1 auto; flex:1 1 auto; margin:0 12px;min-width:0; }
+.col-left  { -ms-flex:0 0 19%;flex:0 0 19%;width:19%;min-width:210px;max-width:290px; }
 
 /* ── ALL scrollbars HIDDEN on the Patient-Admission page (scroll still works) ──
    · Chromium/WebView2 → ::-webkit-scrollbar{display:none;width:0;height:0}
@@ -223,17 +233,17 @@ html{
 .fld > span{
   display:block;font-size:12.5px;color:#33465f;font-weight:700;
   margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-  letter-spacing:.1px;
+  letter-spacing:.1px;text-align:right;
 }
 .req{color:#e11d48;font-style:normal;font-weight:800;}
 
 .inp{
   display:block;width:100%;height:38px;
   padding:0 11px;
-  /* Darker, thicker border + faint inner fill so the box is obviously a field
-     and its text is high-contrast against the surface. */
-  border:1.5px solid #b7c6da;border-radius:8px;
-  background:#f9fbfe;color:#0f1b2d;
+  /* v1.72.0: clear but subtle border + a soft blue-gray tint (not stark white)
+     so each field reads as a distinct, calm input. */
+  border:1px solid #c4d2e6;border-radius:8px;
+  background:#f3f7fd;color:#0f1b2d;
   font-family:inherit;font-size:14px;font-weight:600;text-align:right;
   -webkit-transition:border-color .15s, box-shadow .15s, background .15s;
   transition:border-color .15s, box-shadow .15s, background .15s;
@@ -246,7 +256,7 @@ html{
 .inp:focus{border-color:#1f5fd6;box-shadow:0 0 0 3px rgba(31,95,214,.18);background:#fff;}
 .inp-sm{height:33px;font-size:13px;}
 .inp-mini{width:130px;}
-select.inp{cursor:pointer;background:#f9fbfe;}
+select.inp{cursor:pointer;background:#f3f7fd;}
 /* doctor (#doc2name) & performer (#perfname) selects: internal scroll enabled,
    scrollbar completely hidden (Chromium + Firefox + IE). */
 select.inp#doc2name,select.inp#perfname{
@@ -469,7 +479,13 @@ select.inp#perfname::-webkit-scrollbar{display:none;width:0 !important;height:0 
 /* ============================================================================
    CENTER — patient info grid + middle 3-card row
    ============================================================================ */
-.pt-grid > .fld{margin-bottom:0;}
+/* v1.72.0: patient details are a 3-column grid (نام/نام‌خانوادگی/کد ملی →
+   تاریخ تولد/جنسیت/موبایل → نام پدر/تلفن/آدرس). The grid is centred within the
+   card (max-width + margin:auto) with generous cell padding so fields are no
+   longer crammed together; labels sit above each field, right-aligned (RTL). */
+.pt-grid{max-width:760px;margin:-8px auto;}
+.pt-grid > .fld{width:33.3333%;padding:8px;margin-bottom:0;}
+.pt-grid > .fld.fld-wide{width:100%;}
 .row-3{
   display:-ms-flexbox;display:flex;
   -ms-flex-direction:row;flex-direction:row;
@@ -480,6 +496,14 @@ select.inp#perfname::-webkit-scrollbar{display:none;width:0 !important;height:0 
   -ms-flex:1 1 0;flex:1 1 0;width:33.3333%;
   margin:0 5px;
 }
+/* v1.72.0: the row-3 cards stretch to the tallest sibling's height, so the
+   shorter insurance / performer cards left their content crammed at the top
+   with dead space below. Make each card a column, let its body grow, and centre
+   the body content vertically for even breathing room top and bottom. */
+.row-3 > .card{display:-ms-flexbox;display:flex;-ms-flex-direction:column;flex-direction:column;}
+.row-3 > .card > .card-body{-ms-flex:1 1 auto;flex:1 1 auto;}
+.row-3 .doc-body{display:-ms-flexbox;display:flex;-ms-flex-direction:column;flex-direction:column;-ms-flex-pack:center;justify-content:center;}
+.row-3 .grid-2{-ms-flex-align:start;align-items:flex-start;-ms-flex-line-pack:center;align-content:center;}
 
 /* ============================================================================
    SERVICES + QUEUE TABLES
@@ -504,6 +528,11 @@ select.inp#perfname::-webkit-scrollbar{display:none;width:0 !important;height:0 
 .svc-card > .card-head,.queue-card > .card-head{
   -webkit-box-shadow:inset 0 3px 0 #1f5fd6;box-shadow:inset 0 3px 0 #1f5fd6;
 }
+/* v1.72.0: services list body — a soft blue-gray tint instead of stark white,
+   so the working table reads as its own calm region (subtle, never bold). The
+   theme-dark override further down keeps the dark palette; the white-theme rule
+   near the end of the sheet tunes it for the default theme. */
+.svc-card .tbl-wrap{background:#edf2fa;}
 
 .tbl-wrap{
   overflow:auto;max-height:150px;
@@ -2409,7 +2438,7 @@ body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .pt-sep{border-top-color
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card .tbl-wrap,
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card .tbl-wrap.expanded,
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card .tbl-wrap.collapsed{
-  background:#f4f8fd;border-color:#c4d5e8;
+  background:#e9f0f8;border-color:#c4d5e8;
 }
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card .tbl tbody tr:nth-child(even){background:#e9f1fb;}
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card .tbl tbody tr:hover{background:#dfeaff;}
@@ -2552,12 +2581,16 @@ body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payable-value span{font
 }
 .queue-action-btns .btn{height:42px;font-size:12.5px;font-weight:800;margin-bottom:10px;}
 .queue-action-btns .btn:last-child{margin-bottom:0;}
-.btn-queue-add{background:#f59e0b;border:1px solid #d97706;color:#fff;}
-.btn-queue-add:hover{background:#d97706;}
-.btn-queue-add2{background:#2563eb;border:1px solid #1d4ed8;color:#fff;}
-.btn-queue-add2:hover{background:#1d4ed8;}
-.theme-dark .btn-queue-add{background:#b9720a;border-color:#8a5406;color:#fff;}
-.theme-dark .btn-queue-add2{background:#1d4ed8;border-color:#1746b0;color:#fff;}
+/* v1.72.0: the two queue buttons were solid bold amber/blue with white text —
+   hard to read and too aggressive. Now soft, readable fills: a light amber
+   (صندوق نرفته‌ها) and a light blue (صف پذیرش), each with a themed border and a
+   dark, high-contrast caption. */
+.btn-queue-add{background:#fffbeb;border:1px solid #e6c068;color:#8a5a1c;}
+.btn-queue-add:hover{background:#fdf3d3;border-color:#d9a93a;}
+.btn-queue-add2{background:#eef4ff;border:1px solid #9db8e6;color:#1d4ed8;}
+.btn-queue-add2:hover{background:#e2ecfd;border-color:#7c9fd6;}
+.theme-dark .btn-queue-add{background:#2a2310;border-color:#6b531c;color:#f1d28a;}
+.theme-dark .btn-queue-add2{background:#16243a;border-color:#3a5a86;color:#bcd6ff;}
 
 /* doctor live-search listbox (kept compact inside the narrow row-3 card) */
 .doc-results{max-height:118px;margin-top:6px;}

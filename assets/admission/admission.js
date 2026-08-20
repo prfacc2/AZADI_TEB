@@ -553,7 +553,9 @@
     var box = $('docResults');
     if (!box) return;
     state.doctors = rows || [];
-    if (!rows || !rows.length) { box.innerHTML = '<div class="empty">نتیجه‌ای نیست</div>'; return; }
+    /* v1.72.0: the list starts EMPTY and only shows matches while the operator
+       is typing — no «نتیجه‌ای نیست» placeholder. */
+    if (!rows || !rows.length) { box.innerHTML = ''; return; }
     var html = '', i, doc, lim = Math.min(rows.length, 25);
     /* v1.71.0: each suggestion shows name + specialty + medical-council ID,
        so the operator can confirm the match before clicking. */
@@ -875,25 +877,29 @@
     var dates = document.querySelectorAll('[data-date]'), di;
     for (di = 0; di < dates.length; di++) wireDateField(dates[di]);
 
-    /* doctor search — v1.71.0: the «جستجو» button is removed; search is LIVE
-       (docLiveSearch below fires on every keystroke). Enter still re-runs it. */
-    on($('docSearch'), 'keydown', function (e) { e = e || window.event; if ((e.keyCode || e.which) === 13) { if (e.preventDefault) e.preventDefault(); doDocSearch(); } });
-    on($('docCode'), 'keydown', function (e) { e = e || window.event; if ((e.keyCode || e.which) === 13) { if (e.preventDefault) e.preventDefault(); doDocByCode(); } });
+    /* v1.72.0: doctor search — the separate «جستجوی پزشک» (#docSearch) box is
+       gone; the «کد نظام پزشکی» field (#doc2code) is now the single top search
+       field and accepts BOTH a doctor name (text) and a medical-council code
+       (numeric). Search is LIVE as the operator types (debounced): a numeric
+       value queries by medical ID (code), anything else queries by name. Enter
+       re-runs it. Picking a suggestion auto-fills #doc2code (medical ID) and
+       #doc2name (display name) via selectDoctor(). */
+    on($('doc2code'), 'keydown', function (e) { e = e || window.event; if ((e.keyCode || e.which) === 13) { if (e.preventDefault) e.preventDefault(); doDocSearch(); } });
 
-    /* v1.70.1: doctor LIVE search -- results refresh as the operator types
-       (debounced), mirroring the service live-search UX. Enter and the search
-       button still fire doDocSearch() via the handlers above. */
     var docTimer = null;
     function docLiveSearch() {
       if (docTimer) clearTimeout(docTimer);
-      var q = $('docSearch') ? trimStr($('docSearch').value) : '';
+      var q = $('doc2code') ? trimStr($('doc2code').value) : '';
       if (!q) { renderDocResults([]); return; }
+      var en = toEn(q).replace(/\s+/g, '');
+      var byCode = /^[0-9]+$/.test(en);          /* numeric → medical ID search */
       docTimer = setTimeout(function () {
-        Bridge.call('doctor.search', { q: q }).then(function (r) { renderDocResults(r.rows || r.doctors || []); });
+        var params = byCode ? { q: en, code: en } : { q: q };
+        Bridge.call('doctor.search', params).then(function (r) { renderDocResults(r.rows || r.doctors || []); });
       }, 180);
     }
-    on($('docSearch'), 'input', docLiveSearch);
-    on($('docSearch'), 'keyup', docLiveSearch);
+    on($('doc2code'), 'input', docLiveSearch);
+    on($('doc2code'), 'keyup', docLiveSearch);
 
     /* service live search */
     var svcTimer = null;
@@ -1269,22 +1275,24 @@
     });
   }
 
-  /* v1.70.0: applyZoom scales the page via the IE/Chromium `zoom` property.
-     v1.71.0: a bare `zoom` shrinks the .app layout box, so the page no longer
-     fills the web view — an empty band appears at the bottom (and side), and
-     zooming out makes it worse. Fix: enlarge the .app shell by 1/scale BEFORE
-     zooming, so the rendered size stays 100vh x 100% at every level and only
-     the content shrinks. Zooming OUT (the default 80%) now shrinks items with
-     no gap and no layout shift; zooming IN scales up the same full-height box.
-     Default 80%, Ctrl+scroll persists per-user (unchanged). */
+  /* v1.72.0: ZOOM rework — content never overflows the web view at any zoom.
+     The .app shell is a FIXED clip boundary (100vw x 100vh, overflow:hidden in
+     admission.css) whose dimensions JS never touches, so the page can never
+     spill outside the user's screen. Zoom is applied to the inner workspace
+     (#appBody = .body) ONLY: it is enlarged by 1/scale and then zoomed back, so
+     the rendered workspace always fills the shell exactly (no empty gap when
+     zooming out, no overflow when zooming in) while only the content scales.
+     The columns use percentage flex-basis, so they scale with the workspace and
+     nothing is pushed off-screen at any level (80-200%). Default 80%, Ctrl+scroll
+     persists per-user (unchanged). */
   function applyZoom(z) {
     state.zoom = z;
-    var app = $('app');
-    if (!app) return;
-    var c = 10000 / z;              /* 1/scale as a percent (125 at 80%) */
-    app.style.zoom = z + '%';
-    app.style.height = c + 'vh';    /* enlarged, then zoomed back to 100vh */
-    app.style.width = c + '%';      /* enlarged, then zoomed back to 100%  */
+    var host = $('appBody');            /* the inner workspace (.body) */
+    if (!host) return;
+    var c = 10000 / z;                  /* 1/scale as a percent (125 at 80%) */
+    host.style.zoom = z + '%';
+    host.style.height = c + '%';        /* enlarged, then zoomed back to 100% */
+    host.style.width = c + '%';         /* enlarged, then zoomed back to 100% */
   }
   function applyMode(mode) {
     state.mode = mode === 'full' ? 'full' : 'simple';
@@ -1363,16 +1371,14 @@
     Bridge.call('patient.search', { q: q }).then(function (r) { renderPatientResults(r.rows || r.patients || []); });
   }
   function doDocSearch() {
-    var q = $('docSearch') ? trimStr($('docSearch').value) : '';
-    Bridge.call('doctor.search', { q: q }).then(function (r) { renderDocResults(r.rows || r.doctors || []); });
-  }
-  function doDocByCode() {
-    var code = toEn($('docCode') ? $('docCode').value : '').replace(/\s+/g, '');
-    Bridge.call('doctor.search', { q: code, code: code }).then(function (r) {
-      var rows = r.rows || r.doctors || [];
-      renderDocResults(rows);
-      if (rows.length) selectDoctor(rows[0], 0);
-    });
+    /* v1.72.0: reads the unified #doc2code field; numeric → medical ID search,
+       otherwise → name search (same rule as the live search). */
+    var q = $('doc2code') ? trimStr($('doc2code').value) : '';
+    if (!q) { renderDocResults([]); return; }
+    var en = toEn(q).replace(/\s+/g, '');
+    var byCode = /^[0-9]+$/.test(en);
+    var params = byCode ? { q: en, code: en } : { q: q };
+    Bridge.call('doctor.search', params).then(function (r) { renderDocResults(r.rows || r.doctors || []); });
   }
 
   /* --- add current admission to queue (صندوق نرفته‌ها) --- */
@@ -1458,9 +1464,11 @@
   }
 
   function clearForm() {
+    /* v1.72.0: #docSearch / #docCode are retired (the #doc2code field is now the
+       single doctor search field), so they are no longer cleared here. */
     var ids = ['nid', 'first', 'last', 'father', 'birth', 'mobile', 'phone', 'addr',
       'doc2code', 'perfcode', 'perfname', 'insBooklet', 'insValid', 'rxDate', 'apptDate',
-      'svcSearch', 'qsNid', 'qsFile', 'docCode', 'docSearch'];
+      'svcSearch', 'qsNid', 'qsFile'];
     var i;
     for (i = 0; i < ids.length; i++) { if ($(ids[i])) $(ids[i]).value = ''; }
     if ($('doc2name')) $('doc2name').value = '';
@@ -1474,7 +1482,7 @@
     setText($('pfFile'), '----');
     setText($('profileStateText'), 'برای شروع، مشخصات بیمار را وارد کنید');
     if ($('patResults')) $('patResults').innerHTML = '<div class="empty">نتیجه‌ای نیست</div>';
-    if ($('docResults')) $('docResults').innerHTML = '<div class="empty">نتیجه‌ای نیست</div>';
+    if ($('docResults')) $('docResults').innerHTML = '';
     renderSvcSuggest([]);
     renderServices(); recompute();
     if ($('first')) $('first').focus();
