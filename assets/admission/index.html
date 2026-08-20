@@ -31,7 +31,7 @@
            col-center  (MIDDLE) → patient info · doctor/insurance · services
            col-left    (LEFT)   → invoice breakdown, final payable total and queue hub
          The side rails are deliberately calmer than the focused middle workspace. -->
-    <div class="body">
+    <div class="body" id="appBody">
 
       <!-- ======================= RIGHT: ACTION RAIL ======================= -->
       <aside class="col col-action" id="colRight">
@@ -129,8 +129,6 @@
             <label class="fld"><span>نام <i class="req">*</i></span><input type="text" id="first" class="inp" data-nav /></label>
             <label class="fld"><span>نام خانوادگی <i class="req">*</i></span><input type="text" id="last" class="inp" data-nav /></label>
             <label class="fld"><span>کد ملی <i class="req">*</i></span><input type="text" id="nid" class="inp" data-nav inputmode="numeric" placeholder="۱۰ رقم — Enter استعلام" /></label>
-            <label class="fld advanced-field"><span>نام پدر</span><input type="text" id="father" class="inp" data-nav /></label>
-            <div class="pt-sep" aria-hidden="true"></div>
 
             <label class="fld"><span>تاریخ تولد</span>
               <div class="with-ico">
@@ -142,9 +140,10 @@
               <select id="gender" class="inp" data-nav><option>مرد</option><option>زن</option></select>
             </label>
             <label class="fld"><span>شماره موبایل <i class="req">*</i></span><input type="text" id="mobile" class="inp" data-nav inputmode="numeric" /></label>
-            <label class="fld advanced-field"><span>تلفن ثابت</span><input type="text" id="phone" class="inp" data-nav inputmode="numeric" /></label>
 
-            <label class="fld fld-wide advanced-field"><span>آدرس</span><input type="text" id="addr" class="inp" data-nav /></label>
+            <label class="fld advanced-field"><span>نام پدر</span><input type="text" id="father" class="inp" data-nav /></label>
+            <label class="fld advanced-field"><span>تلفن ثابت</span><input type="text" id="phone" class="inp" data-nav inputmode="numeric" /></label>
+            <label class="fld advanced-field"><span>آدرس</span><input type="text" id="addr" class="inp" data-nav /></label>
           </div>
         </section>
 
@@ -170,16 +169,13 @@
               <svg class="ct-ico" viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M12 12a5 5 0 100-10 5 5 0 000 10zm0 2c-4 0-9 2-9 6v2h18v-2c0-4-5-6-9-6z"/></svg>
               پزشک معالج</span></div>
             <div class="card-body doc-body">
-              <label class="fld"><span>جستجوی پزشک</span>
-                <input type="text" id="docSearch" class="inp" data-nav placeholder="نام یا کد پزشک…" autocomplete="off" />
-              </label>
-              <div class="mini-list doc-results" id="docResults"><div class="empty">نتیجه‌ای نیست</div></div>
-              <label class="fld"><span>شماره نظام پزشکی</span>
+              <label class="fld"><span>کد نظام پزشکی</span>
                 <div class="with-ico">
-                  <input type="text" id="doc2code" class="inp" data-nav inputmode="numeric" />
+                  <input type="text" id="doc2code" class="inp" data-nav autocomplete="off" placeholder="نام یا کد نظام پزشکی…" />
                   <span class="in-ico"><svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M10 2a8 8 0 105 14.3l5.3 5.4 1.4-1.4-5.4-5.3A8 8 0 0010 2z"/></svg></span>
                 </div>
               </label>
+              <div class="mini-list doc-results" id="docResults"></div>
               <label class="fld"><span>نام پزشک</span>
                 <input type="text" id="doc2name" class="inp doc-name-display" data-nav readonly placeholder="از لیست جستجو انتخاب کنید" />
               </label>
