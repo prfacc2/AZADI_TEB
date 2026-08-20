@@ -167,9 +167,10 @@
 
   /* ---- init / boot ------------------------------------------------------ */
   function applyInit(d) {
-    if (d.user) $('crmUser').innerHTML = esc(d.user);
-    if (d.date) $('crmDate').innerHTML = faDigits(d.date);
-    if (d.time) $('crmTime').innerHTML = faDigits(d.time);
+    /* The CRM top bar (clock, user label, theme button) was removed — date/time
+       and appearance are owned by the C++ shell settings, so showing them here
+       was redundant. We still honour the persisted theme C++ sends on crm.init
+       so the page matches the operator's chosen appearance. */
     if (typeof d.theme === 'string') {
       Crm._dark = d.theme === 'dark';
       if (global.AzBoot) global.AzBoot.applyTheme(Crm._dark);
@@ -209,21 +210,6 @@
     });
   }
 
-  /* ---- clock: tick locally, refresh Jalali date periodically ------------- */
-  function tickClock() {
-    var t = new Date();
-    function pad(n) { return (n < 10 ? '0' : '') + n; }
-    var tm = pad(t.getHours()) + ':' + pad(t.getMinutes()) + ':' + pad(t.getSeconds());
-    var elT = $('crmTime');
-    if (elT) elT.innerHTML = faDigits(tm);
-  }
-  function refreshDate() {
-    Crm.call('crm.clock', {}).then(function (d) {
-      if (d && d.date) $('crmDate').innerHTML = faDigits(d.date);
-      if (d && d.time) $('crmTime').innerHTML = faDigits(d.time);
-    });
-  }
-
   /* ---- wire static controls --------------------------------------------- */
   function wireNav() {
     var items = document.querySelectorAll('.crm-nav-item[data-page]');
@@ -236,12 +222,6 @@
     if (backup) backup.onclick = function () {
       Crm.toast('در حال باز کردن پشتیبان‌گیری…', 'info');
       Crm.call('crm.backup', {}).then(function () {}, function () { Crm.toast('پشتیبان‌گیری ناموفق بود.', 'err'); });
-    };
-    var theme = $('btnTheme');
-    if (theme) theme.onclick = function () {
-      Crm._dark = !Crm._dark;
-      if (global.AzBoot) global.AzBoot.applyTheme(Crm._dark);
-      Crm.call('crm.settings.save', { theme: Crm._dark ? 'dark' : 'light' });
     };
   }
 
@@ -261,9 +241,6 @@
     global.AzBoot.ready(function () {
       wireNav();
       boot();
-      tickClock();
-      setInterval(tickClock, 1000);
-      setInterval(refreshDate, 30000);
     });
   } else {
     /* standalone dev harness (no native bridge) — still render the shell */
