@@ -556,16 +556,20 @@ static std::string admissionApi(const std::string& verb, const std::string& body
         std::wstring mode=getSetting(L"reception.mode"+suffix,
                            getSetting(L"reception.mode",L"simple"));
         if(mode!=L"full") mode=L"simple";
+        // v1.77.0: default zoom lowered 90% → 80%; unzoom floor lowered 80 → 50
+        // so the user can zoom OUT to see all items (the JS side adds a small
+        // font bump below 80% so text stays readable — see applyZoom).
         int zoom=_wtoi(getSetting(L"reception.zoom"+suffix,
-                       getSetting(L"reception.zoom",L"90")).c_str());
-        if(zoom<80||zoom>200) zoom=90;
+                       getSetting(L"reception.zoom",L"80")).c_str());
+        if(zoom<50||zoom>200) zoom=80;
         o+="\"date\":"+jstr(adTodayJalali())+",";
         o+="\"time\":"+jstr(adNowTime())+",";
         o+="\"shift\":"+jstr(shiftName(g_session.shift))+",";
         o+="\"mode\":"+jstr(mode)+",";
         o+="\"zoom\":"+jnum(zoom)+",";
         o+="\"theme\":"+jstr(getSetting(L"theme",L"light"))+",";
-        o+="\"palette\":"+jstr(getSetting(L"theme.palette",L"blue"))+",";
+        // v1.77: calm/warm palettes retired — the admission surface is always the
+        // standard light (blue) palette or dark, so no "palette" field is sent.
         o+="\"ps\":{\"P\":0,\"S\":0}";
         o+="}";
         return o;
@@ -707,7 +711,7 @@ static std::string admissionApi(const std::string& verb, const std::string& body
     if(verb=="reception.zoom.save"){
         std::string zU; jsonGetString(body,"zoom",zU);
         int z=atoi(zU.c_str());
-        if(z<80) z=80; if(z>200) z=200;
+        if(z<50) z=50; if(z>200) z=200;
         std::wstring user=g_session.user.username;
         std::wstring suffix=user.empty()?L"":L"."+user;
         setSetting(L"reception.zoom"+suffix,std::to_wstring(z));

@@ -17,7 +17,8 @@
 //    crm   : 800 index.html · 801 crm.css · 802 crm.js · 803 dashboard.js
 //            804 sections.js · 805 patients.js · 806 doctors.js
 //            807 services.js · 808 employees.js · 809 messages.js
-//            810 settings.js
+//            810 settings.js · 811 insurance.js
+//            812 crm_menu.js · 813 crm_dialogs.js  (v1.77 modules split from crm.js)
 // ============================================================================
 namespace {
 
@@ -90,10 +91,11 @@ static bool crmReplaceRequired(std::string& hay, const std::string& needle,
 
 // Build the single fully-inlined CRM page:
 //   index.html (800) with common.css (500) + crm.css (801) inlined into
-//   <style> blocks, and common.js (501) + crm.js (802) + dashboard.js (803) +
-//   sections.js (804) + patients.js (805) + doctors.js (806) + services.js
-//   (807) + employees.js (808) + messages.js (809) + settings.js (810)
-//   inlined into <script> blocks.
+//   <style> blocks, and common.js (501) + crm.js (802) + crm_menu.js (812) +
+//   crm_dialogs.js (813) + dashboard.js (803) + sections.js (804) +
+//   patients.js (805) + doctors.js (806) + services.js (807) + employees.js
+//   (808) + messages.js (809) + settings.js (810) + insurance.js (811)
+//   inlined into <script> blocks (in the same order as index.html).
 //
 //  Font strategy (withFontFace):
 //    * WebView2 (true)  — runs OUT of process; embed vazir.ttf (502) as a
@@ -101,12 +103,14 @@ static bool crmReplaceRequired(std::string& hay, const std::string& needle,
 //    * MSHTML (false)   — in-process Trident sees the memory font, so the
 //      Trident page gets NO @font-face (a failing src would drop the family).
 static std::string CrmBuildInlinePage(bool withFontFace){
-    std::string html,commonCss,crmCss,commonJs,crmJs,dashJs,secJs,patJs,docJs,svcJs,empJs,msgJs,setJs;
+    std::string html,commonCss,crmCss,commonJs,crmJs,menuJs,dlgJs,dashJs,secJs,patJs,docJs,svcJs,empJs,msgJs,setJs;
     if(!crmLoadRes(800,html)      || html.empty()      ||
        !crmLoadRes(500,commonCss) || commonCss.empty() ||
        !crmLoadRes(801,crmCss)    || crmCss.empty()    ||
        !crmLoadRes(501,commonJs)  || commonJs.empty()  ||
        !crmLoadRes(802,crmJs)     || crmJs.empty()     ||
+       !crmLoadRes(812,menuJs)    || menuJs.empty()    ||
+       !crmLoadRes(813,dlgJs)     || dlgJs.empty()     ||
        !crmLoadRes(803,dashJs)    || dashJs.empty()    ||
        !crmLoadRes(804,secJs)     || secJs.empty()     ||
        !crmLoadRes(805,patJs)     || patJs.empty()     ||
@@ -140,6 +144,10 @@ static std::string CrmBuildInlinePage(bool withFontFace){
                           "<script>\n"+commonJs+"\n</script>") ||
        !crmReplaceRequired(html,"<script src=\"crm.js\"></script>",
                           "<script>\n"+crmJs+"\n</script>") ||
+       !crmReplaceRequired(html,"<script src=\"crm_menu.js\"></script>",
+                          "<script>\n"+menuJs+"\n</script>") ||
+       !crmReplaceRequired(html,"<script src=\"crm_dialogs.js\"></script>",
+                          "<script>\n"+dlgJs+"\n</script>") ||
        !crmReplaceRequired(html,"<script src=\"dashboard.js\"></script>",
                           "<script>\n"+dashJs+"\n</script>") ||
        !crmReplaceRequired(html,"<script src=\"sections.js\"></script>",

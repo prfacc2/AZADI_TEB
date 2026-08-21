@@ -61,7 +61,10 @@ svg{display:inline-block;vertical-align:middle;}
   display:-ms-flexbox;display:flex;
   -ms-flex-align:center;align-items:center;
   -ms-flex-pack:justify;justify-content:space-between;
+  /* v1.77.0: subtle top-lit gradient instead of a flat white bar. */
   background:#ffffff;
+  background:-webkit-linear-gradient(top,#ffffff 0%,#eef3fb 100%);
+  background:linear-gradient(180deg,#ffffff 0%,#eef3fb 100%);
   border-bottom:1px solid #e2e8f0;
   padding:0 16px;
   box-shadow:0 1px 3px rgba(16,24,40,.06);
@@ -244,10 +247,13 @@ html{
 .inp{
   display:block;width:100%;height:38px;
   padding:0 11px;
-  /* v1.72.0: clear but subtle border + a soft blue-gray tint (not stark white)
-     so each field reads as a distinct, calm input. */
-  border:1px solid #c4d2e6;border-radius:8px;
-  background:#f3f7fd;color:#0f1b2d;
+  /* v1.77.0: subtle top-lit field gradient + a touch more radius so each input
+     reads as a clean, professional well (was a flat #f3f7fd slab). */
+  border:1px solid #c4d2e6;border-radius:9px;
+  background:#f6faff;
+  background:-webkit-linear-gradient(top,#fbfdff 0%,#eef4fc 100%);
+  background:linear-gradient(180deg,#fbfdff 0%,#eef4fc 100%);
+  color:#0f1b2d;
   font-family:inherit;font-size:14px;font-weight:600;text-align:right;
   -webkit-transition:border-color .15s, box-shadow .15s, background .15s;
   transition:border-color .15s, box-shadow .15s, background .15s;
@@ -260,7 +266,13 @@ html{
 .inp:focus{border-color:#1f5fd6;box-shadow:0 0 0 3px rgba(31,95,214,.18);background:#fff;}
 .inp-sm{height:33px;font-size:13px;}
 .inp-mini{width:130px;}
-select.inp{cursor:pointer;background:#f3f7fd;}
+/* v1.77.0: selects share the field gradient (Trident falls back to the flat
+   first background line; Chromium/FF render the gradient). */
+select.inp{cursor:pointer;
+  background:#f6faff;
+  background:-webkit-linear-gradient(top,#fbfdff 0%,#eef4fc 100%);
+  background:linear-gradient(180deg,#fbfdff 0%,#eef4fc 100%);
+}
 /* doctor (#doc2name) & performer (#perfname) selects: internal scroll enabled,
    scrollbar completely hidden (Chromium + Firefox + IE). */
 select.inp#doc2name,select.inp#perfname{
@@ -2149,7 +2161,8 @@ body.theme-dark,.theme-dark body{
    own restrained accent so the eye is no longer locked onto a single blue.
    The mapping is semantic (coordinated, never random):
      · PROFILE card + insurance ......... TEAL     (patient identity + coverage)
-     · PATIENT form + performer ......... VIOLET   (clinical intake)
+     · PATIENT form ..................... VIOLET   (clinical intake — the ONLY purple)
+     · PERFORMER (انجام دهنده) .......... ROSE     (clinical intake, distinct from violet)
      · DOCTOR + SERVICES + queue ........ BLUE     (the working surface)
      · INVOICE (صورت حساب) ............. AMBER    (billing breakdown)
      · PAYABLE (مبلغ نهایی) + payment ... EMERALD  (the final amount — the hero)
@@ -2203,13 +2216,17 @@ body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .card-head{
 }
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .ct-ico{color:#64748b;}
 
-/* PATIENT form + performer → VIOLET (clinical intake) */
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .card-head,
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(3) .card-head{
+/* PATIENT form → VIOLET (clinical intake) — the ONLY purple on the page. */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .card-head{
   -webkit-box-shadow:inset -3px 0 0 #7c3aed;box-shadow:inset -3px 0 0 #7c3aed;
 }
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .ct-ico,
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(3) .ct-ico{color:#7c3aed;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .ct-ico{color:#7c3aed;}
+/* PERFORMER → ROSE (v1.77.0: was violet/indigo — purple is now reserved for the
+   patient-details section only, so the performer reads as its own distinct hue). */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(3) .card-head{
+  -webkit-box-shadow:inset -3px 0 0 #be185d;box-shadow:inset -3px 0 0 #be185d;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(3) .ct-ico{color:#be185d;}
 
 /* INSURANCE → TEAL (coverage, ties to the profile identity) */
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(1) .card-head{
@@ -2455,15 +2472,26 @@ body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .pt-sep{border-top-color
 
 /* ----------------------------------------------- 5. CENTER: services list tint ---
    No longer stark white: a soft blue-tinted surface with slightly more visible
-   zebra rows so the list reads as its own calm region. */
+   zebra rows so the list reads as its own calm region. v1.77.0: the surface and
+   the header row are GRADIENTS (not flat) for a more professional, office-grade
+   feel; the header gets a crisp blue top-stripe. */
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card .tbl-wrap,
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card .tbl-wrap.expanded,
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card .tbl-wrap.collapsed{
-  background:#e9f0f8;border-color:#c4d5e8;
+  background:#eef3fa;
+  background:-webkit-linear-gradient(top,#f2f7fd 0%,#e6eef8 100%);
+  background:linear-gradient(180deg,#f2f7fd 0%,#e6eef8 100%);
+  border-color:#c4d5e8;
 }
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card .tbl tbody tr:nth-child(even){background:#e9f1fb;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card .tbl tbody tr:nth-child(even){background:#eaf2fc;}
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card .tbl tbody tr:hover{background:#dfeaff;}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card .tbl thead th{background:#dbe7f6;color:#123f70;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card .tbl thead th{
+  color:#123f70;
+  background:#dce8f7;
+  background:-webkit-linear-gradient(top,#e6f0fc 0%,#cdddf2 100%);
+  background:linear-gradient(180deg,#e6f0fc 0%,#cdddf2 100%);
+  border-bottom:2px solid #9fbce0;
+}
 
 /* ------------------------------------------ 6. LEFT: invoice fonts more legible ---
    Slightly larger, heavier invoice figures and group titles so the breakdown
@@ -2872,11 +2900,12 @@ body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child
   background:-webkit-linear-gradient(top,#f6fbff 0%,#e9f3fc 100%);
   background:linear-gradient(180deg,#f6fbff 0%,#e9f3fc 100%);
 }
-/* performer (انجام دهنده) → soft lilac */
+/* performer (انجام دهنده) → soft rose (v1.77.0: was lilac — purple reserved for
+   patient details only) */
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(3) .card-body{
-  background:#f6f4fc;
-  background:-webkit-linear-gradient(top,#fbfaff 0%,#f1edf8 100%);
-  background:linear-gradient(180deg,#fbfaff 0%,#f1edf8 100%);
+  background:#fdf2f6;
+  background:-webkit-linear-gradient(top,#fef5f8 0%,#fae6ee 100%);
+  background:linear-gradient(180deg,#fef5f8 0%,#fae6ee 100%);
 }
 /* services list → soft blue working surface */
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card .card-body{
@@ -3270,15 +3299,15 @@ body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child
 }
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(2) .card-title{color:#1e40af;}
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(2) .ct-ico{color:#2563eb;}
-/* PERFORMER → INDIGO */
+/* PERFORMER → ROSE (v1.77.0: purple/lavender reserved for patient details only) */
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(3) .card-head{
-  background:#e6e4f4;background:-webkit-linear-gradient(top,#efeefb 0%,#dcd9f0 100%);
-  background:linear-gradient(180deg,#efeefb 0%,#dcd9f0 100%);
-  border-bottom:1px solid #d6d3f0;
-  -webkit-box-shadow:inset -3px 0 0 #4f46e5;box-shadow:inset -3px 0 0 #4f46e5;
+  background:#f7e6ed;background:-webkit-linear-gradient(top,#fceaf0 0%,#f1d4de 100%);
+  background:linear-gradient(180deg,#fceaf0 0%,#f1d4de 100%);
+  border-bottom:1px solid #efcfdb;
+  -webkit-box-shadow:inset -3px 0 0 #be185d;box-shadow:inset -3px 0 0 #be185d;
 }
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(3) .card-title{color:#3730a3;}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(3) .ct-ico{color:#4f46e5;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(3) .card-title{color:#9d174d;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(3) .ct-ico{color:#be185d;}
 /* SERVICES → BLUE working surface */
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card > .card-head{
   background:#e1ebf8;background:-webkit-linear-gradient(top,#ecf3fc 0%,#d4e2f4 100%);
@@ -3535,3 +3564,25 @@ body.theme-dark,.theme-dark body{
 .theme-dark .payable-caption{color:#ecfdf5;}
 .theme-dark .payable-value b{color:#ffffff;}
 .theme-dark .payable-value span{color:#bbf7d0;}
+
+/* ============================================================================
+   v1.77.0 — UNZOOM READABILITY nudge.
+   When the user zooms OUT below the 80% default (Ctrl+scroll down) to fit all
+   items on screen, the CSS `zoom` shrinks text along with everything else. To
+   keep it legible, applyZoom() (admission.js) tags #appBody with `.az-unzoom`
+   and nudges the workspace base font up 1-3px; these companion rules bump the
+   explicit-size text elements (fields, labels, buttons, table, titles, invoice
+   lines) by ~1px so they shrink less than the layout. At >=80% the class is
+   absent, so zoom-in / the default are unchanged. Scoped to #appBody, so the
+   full-screen queue overlay (a sibling) is never affected.
+   Trident-safe: literal px sizes only — no custom properties / grid / gap.
+   ============================================================================ */
+.az-unzoom .inp{font-size:15px;}
+.az-unzoom .fld > span{font-size:13.5px;}
+.az-unzoom .btn{font-size:14.5px;}
+.az-unzoom .tbl{font-size:14px;}
+.az-unzoom .tbl thead th{font-size:13px;}
+.az-unzoom .card-title{font-size:15px;}
+.az-unzoom .inv-line{font-size:13.5px;}
+.az-unzoom .inv-line b{font-size:14.5px;}
+.az-unzoom .inv-gtitle{font-size:13px;}

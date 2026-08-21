@@ -545,7 +545,7 @@ static int tabGap()  { return S(8);  }
 // v1.75.0: each tab kind carries a distinct vector glyph so the strip reads as
 // a set of labelled, iconified tabs rather than a row of plain text buttons.
 static int tabIconFor(int kind){
-    if(kind==TK_PORTAL) return ICO_BELL;    // کارتابل — message board / inbox
+    if(kind==TK_PORTAL) return ICO_LETTER;   // کارتابل — پاکت نامه (management inbox)
     if(kind==TK_EMPTY)  return ICO_TAB;     // تب جدید — fresh blank tab
     return ICO_USER;                        // پذیرش بیمار — patient admission
 }
@@ -1877,8 +1877,11 @@ static std::vector<CartTile> s_cartTiles;    // hit-test map, rebuilt each paint
 static std::vector<KMsg>     s_cartMsgs;      // the list shown (sorted)
 static std::vector<int>      s_cartNF;        // display-pos → plain newest-first idx
 // v1.7.0 detail-view buttons (rebuilt each paint of the details screen)
+//  v1.77.0: پاسخ (reply) · پیوست/ارسال فایل (upload) · چاپ (print) added so the
+//  cartable is a full message workspace, not just a read-only viewer.
 enum { CART_BTN_NONE=0, CART_BTN_MARK=1, CART_BTN_TOGGLEREAD=2,
-       CART_BTN_DELETE=3, CART_BTN_BACK=4, CART_BTN_SAVE=5 };
+       CART_BTN_DELETE=3, CART_BTN_BACK=4, CART_BTN_SAVE=5,
+       CART_BTN_REPLY=6, CART_BTN_UPLOAD=7, CART_BTN_PRINT=8 };
 struct CartBtn { RECT r; int id; };
 static std::vector<CartBtn> s_cartBtns;      // detail-view button hit map
 // v1.8.0: the archive toggle hotspot in the cartable header (top-LEFT corner).
@@ -1918,10 +1921,37 @@ static void splitMsgTime(const std::wstring& s, std::wstring& date, std::wstring
     if(sp==std::wstring::npos){ date=s; time=L""; }
     else { date=s.substr(0,sp); time=s.substr(sp+1); }
 }
+// v1.77.0: minimal HTML text escaper for the cartable print output — escapes the
+// four characters that break out of text content; Persian/Arabic passes through.
+static std::wstring cartHtmlEsc(const std::wstring& s){
+    std::wstring o; o.reserve(s.size());
+    for(size_t i=0;i<s.size();i++){
+        wchar_t c=s[i];
+        if(c==L'&') o+=L"&amp;";
+        else if(c==L'<') o+=L"&lt;";
+        else if(c==L'>') o+=L"&gt;";
+        else if(c==L'"') o+=L"&quot;";
+        else o+=c;
+    }
+    return o;
+}
+// v1.77.0: resolve the cartable detail selection → display index (used by the
+// reply / upload / print actions). Returns -1 when the selection is stale.
+static int cartSelIndex(TabPage* t){
+    int sel=-1;
+    for(int i=0;i<(int)s_cartNF.size();i++)
+        if(s_cartNF[i]==t->cartSelNF){ sel=i; break; }
+    if(sel<0 && t->cartSelDisp>=0 && t->cartSelDisp<(int)s_cartMsgs.size())
+        sel=t->cartSelDisp;
+    if(sel<0 || sel>=(int)s_cartMsgs.size()) return -1;
+    return sel;
+}
 
 // ----- the FULL message DETAILS view (sender, priority, date, time, body) ---
 static void drawCartDetail(HDC dc, const RECT& rc, TabPage* t){
-    { HBRUSH bg=CreateSolidBrush(g_theme.bg); FillRect(dc,(RECT*)&rc,bg); DeleteObject(bg); }
+    // v1.77.0: soft vertical page gradient (bg → bg2) instead of a flat fill so
+    // the cartable reads as a layered, professional surface (was "too white").
+    gpGradRoundRect(dc,(RECT&)rc,0,g_theme.bg,g_theme.bg2,CLR_INVALID);
     SetBkMode(dc,TRANSPARENT);
     s_cartBtns.clear();
     cartReload();
@@ -1944,7 +1974,11 @@ static void drawCartDetail(HDC dc, const RECT& rc, TabPage* t){
     // v1.8.0: draw the panel as a real rounded rect (corners patched with the
     // page background) instead of a square FillRect that left surface-coloured
     // square corners poking out beyond the rounded border.
-    gpRoundRectBg(dc,panel,S(16),g_theme.surface,g_theme.border,g_theme.bg,255);
+    // v1.77.0: panel is a faint top-lit gradient (a whisper of the accent into
+    // the card white) so it is no longer a stark flat-white slab.
+    gpGradRoundRectBg(dc,panel,S(16),
+        blendColor(g_theme.surface,g_theme.accent2,g_dark?5:9),
+        g_theme.surface,g_theme.border,g_theme.bg);
 
     // header bar (priority-coloured so status reads at a glance)
     RECT hdr={panel.left,panel.top,panel.right,panel.top+S(52)};
@@ -1952,7 +1986,7 @@ static void drawCartDetail(HDC dc, const RECT& rc, TabPage* t){
     RECT hdrB={panel.left,panel.top+S(28),panel.right,panel.top+S(52)};
     gpGradRoundRect(dc,hdrB,0,sev,sev,CLR_INVALID);
     RECT bi={panel.right-S(44),panel.top+S(12),panel.right-S(18),panel.top+S(38)};
-    drawIcon(dc,ICO_BELL,bi,RGB(255,255,255),S(2));
+    drawIcon(dc,ICO_LETTER,bi,RGB(255,255,255),S(2));
     SelectObject(dc,g_fTitle); SetTextColor(dc,RGB(255,255,255));
     RECT tr={panel.left+S(20),panel.top+S(8),panel.right-S(52),panel.top+S(44)};
     DrawTextW(dc,L"جزئیات پیام مدیریت",-1,&tr,
@@ -1993,41 +2027,60 @@ static void drawCartDetail(HDC dc, const RECT& rc, TabPage* t){
     { HPEN pn=CreatePen(PS_SOLID,1,g_theme.border); HGDIOBJ op=SelectObject(dc,pn);
       MoveToEx(dc,x0,y+S(4),0); LineTo(dc,x1,y+S(4)); SelectObject(dc,op); DeleteObject(pn); }
     y+=S(16);
+
+    // v1.77.0: build the action-button set up front so we can measure whether it
+    // fits ONE row (and reserve body height accordingly). New actions join the
+    // existing بازگشت/حذف/ذخیره/خوانده:
+    //   پاسخ (CART_BTN_REPLY)   — quick text reply to the sender (management)
+    //   پیوست فایل (CART_BTN_UPLOAD) — pick a file and send it up to management
+    //   چاپ پیام (CART_BTN_PRINT) — print / save this message to paper or file
+    struct Btn{int id; const wchar_t* lbl; COLORREF fill; COLORREF txt;};
+    std::vector<Btn> defs={
+        {CART_BTN_BACK,       L"بازگشت",            g_theme.surface2, g_theme.text},
+        {CART_BTN_REPLY,      L"پاسخ",              g_theme.accent2,  RGB(255,255,255)},
+        {CART_BTN_UPLOAD,     L"پیوست فایل",        g_theme.accent,   g_theme.accentText},
+        {CART_BTN_PRINT,      L"چاپ پیام",          g_theme.surface2, g_theme.text},
+        {CART_BTN_TOGGLEREAD, mm.seen?L"خوانده":L"علامت خوانده‌شده",
+                              g_theme.surface2, g_theme.text},
+        {CART_BTN_MARK,       L"خواندن",            g_theme.surface2, g_theme.text},
+        {CART_BTN_DELETE,     L"حذف",               g_theme.danger,   RGB(255,255,255)},
+    };
+    // v1.9.5: SAVE archives this message into the saved-messages store
+    // (data\saved_msgs.dat) — only when «پیام‌های ذخیره‌شده» is enabled.
+    if(savedMsgsEnabled() && !(t && t->cartShowArchive)){
+        defs.push_back({CART_BTN_SAVE, L"ذخیره", g_theme.success, RGB(255,255,255)});
+    }
+    // measure → 1 row if it fits, else wrap to a 2nd row; reserve body height.
+    int bh=S(36), padBtn=S(26), gapBtn=S(10);
+    int availW=(panel.right-S(24))-(panel.left+S(24));
+    int totalW=0; SelectObject(dc,g_fUIB);
+    for(auto& d : defs){ SIZE sz; GetTextExtentPoint32W(dc,d.lbl,(int)wcslen(d.lbl),&sz); totalW += sz.cx+padBtn+gapBtn; }
+    int btnRows = (defs.empty() || totalW-gapBtn <= availW) ? 1 : 2;
+    int byTop = panel.bottom - S(54) - (btnRows==2 ? (bh+gapBtn) : 0);
+
     // description / body ------------------------------------------------------
     SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.accent);
     RECT dl={x0,y,x1,y+S(20)};
     DrawTextW(dc,L"متن پیام",-1,&dl,DT_RIGHT|DT_SINGLELINE|DT_RTLREADING|DT_NOPREFIX);
     y+=S(24);
     SelectObject(dc,g_fUI); SetTextColor(dc,g_theme.text);
-    RECT body={x0,y,x1,panel.bottom-S(70)};
+    RECT body={x0,y,x1,byTop-S(14)};
     DrawTextW(dc,mm.text.c_str(),-1,&body,
         DT_RIGHT|DT_WORDBREAK|DT_RTLREADING|DT_NOPREFIX|DT_EDITCONTROL);
 
-    // action buttons (bottom strip): بازگشت | حذف | علامت خوانده‌شده | باز/نخوانده
-    int by=panel.bottom-S(54), bh=S(38);
-    int bx=panel.left+S(24);            // RTL: lay out from LEFT going right
-    struct Btn{int id; const wchar_t* lbl; COLORREF fill; COLORREF txt;};
-    std::vector<Btn> defs={
-        {CART_BTN_BACK,       L"بازگشت",            g_theme.surface2, g_theme.text},
-        {CART_BTN_DELETE,     L"حذف پیام",          g_theme.danger,   RGB(255,255,255)},
-        {CART_BTN_TOGGLEREAD, mm.seen?L"خوانده":L"علامت خوانده‌شده",
-                              g_theme.surface2, g_theme.text},
-        {CART_BTN_MARK,       L"خواندن",            g_theme.accent,   g_theme.accentText},
-    };
-    // v1.9.5: when «پیام‌های ذخیره‌شده» is enabled, the message viewer offers a
-    // SAVE button that archives this exact message into the saved-messages store
-    // (data\saved_msgs.dat). Hidden in the archive view itself (already saved).
-    if(savedMsgsEnabled() && !(t && t->cartShowArchive)){
-        defs.push_back({CART_BTN_SAVE, L"ذخیره در پیام‌ها", g_theme.success, RGB(255,255,255)});
-    }
+    // action buttons (bottom strip) — laid out left→right, wrapping to a 2nd row
+    // when the panel is narrow. v1.63.0: raised gradient pills; hover lifts them
+    // with an accent glow instead of only swapping two colours.
+    int bx=panel.left+S(24), by=byTop;
     for(auto& d : defs){
         SelectObject(dc,g_fUIB);
         SIZE sz; GetTextExtentPoint32W(dc,d.lbl,(int)wcslen(d.lbl),&sz);
-        int bw=sz.cx+S(34);
+        int bw=sz.cx+padBtn;
+        if(bx+bw > panel.right-S(24)){        // wrap to next row
+            bx=panel.left+S(24); by+=bh+gapBtn;
+        }
         RECT r={bx,by,bx+bw,by+bh};
         bool hov=(t->cartHotBtn==d.id);
-        // v1.63.0: cartable action buttons are raised gradient pills; hover
-        // lifts them with an accent glow instead of only swapping two colours.
         if(hov){
             gpShadowColor(dc,r,S(10),S(6),90,g_theme.accent);
             gpGradRoundRect(dc,r,S(10),g_theme.accentHover,g_theme.accent,
@@ -2041,22 +2094,21 @@ static void drawCartDetail(HDC dc, const RECT& rc, TabPage* t){
         SetTextColor(dc, hov?g_theme.accentText:d.txt);
         DrawTextW(dc,d.lbl,-1,&r,DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
         s_cartBtns.push_back({r,d.id});
-        bx+=bw+S(10);
+        bx+=bw+gapBtn;
     }
-    SelectObject(dc,g_fSmall); SetTextColor(dc,g_theme.textDim);
-    RECT hint={bx+S(8),by,panel.right-S(20),by+bh};
-    DrawTextW(dc,L"برای بازگشت کلید Esc را بزنید",-1,&hint,
-        DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
 }
 
 static void drawCartList(HDC dc, const RECT& rc, TabPage* t){
-    // solid dark background — no gradient bleed
-    { HBRUSH bg=CreateSolidBrush(g_theme.bg); FillRect(dc,(RECT*)&rc,bg); DeleteObject(bg); }
+    // v1.77.0: soft vertical page gradient (bg → bg2) instead of a flat fill.
+    gpGradRoundRect(dc,(RECT&)rc,0,g_theme.bg,g_theme.bg2,CLR_INVALID);
     SetBkMode(dc,TRANSPARENT);
     int pad=S(20);
     RECT panel={rc.left+pad, rc.top+pad, rc.right-pad, rc.bottom-pad};
     // v1.8.0: rounded panel with corners patched to the page background.
-    gpRoundRectBg(dc,panel,S(16),g_theme.surface,g_theme.border,g_theme.bg,255);
+    // v1.77.0: faint top-lit gradient so the inbox panel is not stark white.
+    gpGradRoundRectBg(dc,panel,S(16),
+        blendColor(g_theme.surface,g_theme.accent2,g_dark?5:9),
+        g_theme.surface,g_theme.border,g_theme.bg);
 
     bool savedOn = savedMsgsEnabled();
     bool archive = savedOn && t && t->cartShowArchive;
@@ -2067,7 +2119,7 @@ static void drawCartList(HDC dc, const RECT& rc, TabPage* t){
     RECT hdrB={panel.left,panel.top+S(28),panel.right,panel.top+S(52)};
     gpGradRoundRect(dc,hdrB,0,g_theme.accent2,g_theme.accent,CLR_INVALID);
     RECT bi={panel.right-S(44),panel.top+S(12),panel.right-S(18),panel.top+S(38)};
-    drawIcon(dc,archive?ICO_SAVE:ICO_BELL,bi,RGB(255,255,255),S(2));
+    drawIcon(dc,archive?ICO_SAVE:ICO_LETTER,bi,RGB(255,255,255),S(2));
     SelectObject(dc,g_fTitle); SetTextColor(dc,RGB(255,255,255));
     RECT tr={panel.left+S(56),panel.top+S(8),panel.right-S(52),panel.top+S(44)};
     DrawTextW(dc, archive?L"پیام‌های ذخیره‌شده":L"کارتابل — پیام‌های مدیریت درمانگاه",-1,&tr,
@@ -2083,10 +2135,17 @@ static void drawCartList(HDC dc, const RECT& rc, TabPage* t){
         if(archive) gpRoundRect(dc,ab,S(8),RGB(255,255,255),CLR_INVALID,60);
         RECT ai={ab.left+S(4),ab.top+S(4),ab.right-S(4),ab.bottom-S(4)};
         // dim the icon a touch when the feature is disabled (still clickable).
-        drawIcon(dc, archive?ICO_BELL:ICO_SAVE, ai,
+        drawIcon(dc, archive?ICO_LETTER:ICO_SAVE, ai,
                  savedOn?RGB(255,255,255):RGB(210,224,242), S(2));
         s_cartArchiveRect = ab;
     }
+
+    // v1.77.0: a crisp hairline under the header band separates it from the
+    // message list (was only a colour edge) — a small professional touch.
+    { HPEN pn=CreatePen(PS_SOLID,1,g_theme.border); HGDIOBJ op=SelectObject(dc,pn);
+      int dy=panel.top+S(52);
+      MoveToEx(dc,panel.left+S(16),dy,0); LineTo(dc,panel.right-S(16),dy);
+      SelectObject(dc,op); DeleteObject(pn); }
 
     s_cartTiles.clear();
     int topY=panel.top+S(64);
@@ -2154,16 +2213,22 @@ static void drawCartList(HDC dc, const RECT& rc, TabPage* t){
 
         COLORREF sevCol = sevColor(mm.type);
         const wchar_t* sevLbl = sevLabel(mm.type);
-        // tile body: surface2 when unseen, surface when seen — each tile is a
-        // distinct card clearly separated from the panel background.
-        // v1.8.0: *Bg variant patches the rounded-corner gaps with the panel
-        // surface colour so corners never show a wrong/black artefact.
-        gpRoundRectBg(dc,card,S(10),
-            mm.seen?g_theme.surface2:g_theme.surface,
-            mm.seen?g_theme.border:sevCol, g_theme.surface, 255);
-        // severity stripe down the RIGHT (RTL leading) edge
-        RECT stripe={card.right-S(6),card.top+S(4),card.right-S(2),card.bottom-S(4)};
-        gpRoundRect(dc,stripe,S(2),sevCol,CLR_INVALID,255);
+        // v1.77.0: IMPORTANT messages (بحرانی/فوری) are distinguished from SIMPLE
+        // (عادی) ones at a glance: they get a faint severity-tinted gradient card,
+        // a coloured border and a WIDER gradient severity stripe. Simple messages
+        // stay calm and neutral. The seen/unseen cue is preserved on both.
+        bool important = (mm.type==KMSG_CRITICAL || mm.type==KMSG_URGENT);
+        COLORREF cardTop = blendColor(g_theme.surface, sevCol, important?(g_dark?14:18):4);
+        COLORREF cardBord = important ? (mm.seen?blendColor(sevCol,g_theme.border,58):sevCol)
+                                      : (mm.seen?g_theme.border:blendColor(g_theme.border,g_theme.accent,22));
+        gpGradRoundRectBg(dc,card,S(10),cardTop,g_theme.surface,cardBord,g_theme.surface);
+        // severity stripe down the RIGHT (RTL leading) edge — wider + gradient for important
+        int sw = important?S(7):S(4);
+        RECT stripe={card.right-sw-S(2),card.top+S(4),card.right-S(2),card.bottom-S(4)};
+        if(important)
+            gpGradRoundRect(dc,stripe,S(2),sevCol,blendColor(sevCol,RGB(0,0,0),28),CLR_INVALID);
+        else
+            gpRoundRect(dc,stripe,S(2),sevCol,CLR_INVALID,255);
         // v1.7.0: PIN icon at the TOP-RIGHT corner (just left of the stripe)
         // when the message is pinned.
         if(mm.pinned){
@@ -3456,6 +3521,108 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
                     } else {
                         MessageBoxW(h,L"بایگانی پیام‌ها در تنظیمات غیرفعال است.",
                             L"غیرفعال",MB_OK|MB_ICONWARNING);
+                    }
+                    InvalidateRect(h,NULL,FALSE);
+                } else if(bid==CART_BTN_REPLY){
+                    // v1.77.0: پاسخ — quick text reply to the sender (management).
+                    // Delivered as a new inbox message addressed to the original
+                    // sender; a copy is also kept in «پیام‌های ذخیره‌شده».
+                    int sel=cartSelIndex(t);
+                    if(sel>=0){
+                        KMsg& mm=s_cartMsgs[sel];
+                        std::wstring to=mm.from.empty()?std::wstring(L"مدیریت درمانگاه"):mm.from;
+                        std::wstring reply;
+                        if(upEditName(h,L"پاسخ به مدیریت",reply)){
+                            std::wstring r=trim(reply);
+                            if(!r.empty()){
+                                std::wstring me=g_session.user.fullname.empty()?
+                                    g_session.user.username:g_session.user.fullname;
+                                std::wstring body=L"\u21A9 \u067E\u0627\u0633\u062E: "+r; // ↩ پاسخ:
+                                pushMessage(me,to,body);
+                                if(savedMsgsEnabled())
+                                    pushSavedMsg(me,to,body,mm.type,L"");
+                                t->lastMsg=L"\u067E\u0627\u0633\u062E \u0634\u0645\u0627 \u0628\u0647 \u0645\u062F\u06CC\u0631\u06CC\u062A \u0627\u0631\u0633\u0627\u0644 \u0634\u062F."; // پاسخ شما به مدیریت ارسال شد.
+                                t->msgCol=g_theme.success;
+                            }
+                        }
+                    }
+                    InvalidateRect(h,NULL,FALSE);
+                } else if(bid==CART_BTN_UPLOAD){
+                    // v1.77.0: پیوست فایل — pick a file and send it up to management
+                    // as a message carrying the attachment (a local copy is kept so
+                    // the stored path stays valid), mirroring the management sender.
+                    int sel=cartSelIndex(t);
+                    if(sel>=0){
+                        wchar_t buf[MAX_PATH]; buf[0]=0;
+                        OPENFILENAMEW ofn={sizeof(ofn)}; ofn.hwndOwner=h;
+                        ofn.lpstrFile=buf; ofn.nMaxFile=MAX_PATH;
+                        ofn.lpstrFilter=L"\u0647\u0645\u0647 \u0641\u0627\u06CC\u0644\u200C\u0647\u0627\0*.*\0"
+                                       L"\u062A\u0635\u0627\u0648\u06CC\u0631\0*.png;*.jpg;*.jpeg;*.bmp;*.gif\0"
+                                       L"PDF\0*.pdf\0\0";
+                        ofn.nFilterIndex=1;
+                        ofn.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST|OFN_EXPLORER;
+                        if(GetOpenFileNameW(&ofn) && buf[0]){
+                            std::wstring file=buf;
+                            std::wstring stored=copyAttachmentLocal(file);
+                            std::wstring base=file;
+                            size_t slash=base.find_last_of(L"\\/");
+                            base=(slash==std::wstring::npos)?base:base.substr(slash+1);
+                            std::wstring me=g_session.user.fullname.empty()?
+                                g_session.user.username:g_session.user.fullname;
+                            std::wstring body=L"\U0001F4CE \u067E\u06CC\u0648\u0633\u062A: "+base+
+                                L"\n["+stored+L"]"; // 📎 پیوست:
+                            pushMessage(me,L"\u0645\u062F\u06CC\u0631\u06CC\u062A \u062F\u0631\u0645\u0627\u0646\u06AF\u0627\u0647",body);
+                            if(savedMsgsEnabled())
+                                pushSavedMsg(me,L"\u0645\u062F\u06CC\u0631\u06CC\u062A \u062F\u0631\u0645\u0627\u0646\u06AF\u0627\u0647",
+                                             body,KMSG_NORMAL,stored);
+                            t->lastMsg=L"\u0641\u0627\u06CC\u0644 \u0628\u0647 \u0645\u062F\u06CC\u0631\u06CC\u062A \u0627\u0631\u0633\u0627\u0644 \u0634\u062F."; // فایل به مدیریت ارسال شد.
+                            t->msgCol=g_theme.success;
+                        }
+                    }
+                    InvalidateRect(h,NULL,FALSE);
+                } else if(bid==CART_BTN_PRINT){
+                    // v1.77.0: چاپ پیام — render this message to a temp RTL .htm
+                    // document and hand it to the shell "print" verb so the user
+                    // can print it or save it to PDF (save/print in one action).
+                    int sel=cartSelIndex(t);
+                    if(sel>=0){
+                        KMsg& mm=s_cartMsgs[sel];
+                        std::wstring date,time; splitMsgTime(mm.time,date,time);
+                        std::wstring sender=mm.from.empty()?std::wstring(L"\u0645\u062F\u06CC\u0631\u06CC\u062A \u062F\u0631\u0645\u0627\u0646\u06AF\u0627\u0647"):mm.from;
+                        std::wstring recip=(mm.to==L"*")?std::wstring(L"\u0647\u0645\u0647 \u06A9\u0627\u0631\u0628\u0631\u0627\u0646"):mm.to;
+                        std::wstring html=L"<!doctype html><html dir='rtl' lang='fa'><head>"
+                            L"<meta charset='utf-8'><title>\u067E\u06CC\u0627\u0645 \u0645\u062F\u06CC\u0631\u06CC\u062A</title>"
+                            L"<style>body{font-family:Tahoma,Arial,sans-serif;direction:rtl;"
+                            L"padding:34px;color:#233042;line-height:1.75;max-width:680px;margin:0 auto}"
+                            L"h2{color:#1f5fd6;border-bottom:2px solid #e2e8f0;padding-bottom:8px;margin-top:0}"
+                            L".m{margin:6px 0;font-size:15px}.k{color:#64748b;font-weight:bold}"
+                            L".b{margin-top:18px;padding:16px 18px;background:#f7f9fc;"
+                            L"border:1px solid #e2e8f0;border-radius:10px;font-size:16px;white-space:pre-wrap}</style></head><body>"
+                            L"<h2>\u067E\u06CC\u0627\u0645 \u0645\u062F\u06CC\u0631\u06CC\u062A \u062F\u0631\u0645\u0627\u0646\u06AF\u0627\u0647</h2>"
+                            L"<div class='m'><span class='k'>\u0641\u0631\u0633\u062A\u0646\u062F\u0647: </span>"+cartHtmlEsc(sender)+L"</div>"
+                            L"<div class='m'><span class='k'>\u06AF\u06CC\u0631\u0646\u062F\u0647: </span>"+cartHtmlEsc(recip)+L"</div>"
+                            L"<div class='m'><span class='k'>\u0627\u0648\u0644\u0648\u06CC\u062A: </span>"+std::wstring(sevLabel(mm.type))+L"</div>"
+                            L"<div class='m'><span class='k'>\u062A\u0627\u0631\u06CC\u062E: </span>"+toFaDigits(date)+
+                            L" &nbsp; <span class='k'>\u0633\u0627\u0639\u062A: </span>"+toFaDigits(time)+L"</div>"
+                            L"<div class='b'>"+cartHtmlEsc(mm.text)+L"</div>"
+                            L"</body></html>";
+                        // wstring → UTF-8 (no BOM; meta charset declares utf-8)
+                        std::string u8;
+                        int n=WideCharToMultiByte(CP_UTF8,0,html.c_str(),(int)html.size(),NULL,0,NULL,NULL);
+                        if(n>0){ u8.resize(n); WideCharToMultiByte(CP_UTF8,0,html.c_str(),(int)html.size(),&u8[0],n,NULL,NULL); }
+                        wchar_t tmpDir[MAX_PATH]; GetTempPathW(MAX_PATH,tmpDir);
+                        std::wstring path=std::wstring(tmpDir)+L"az_cart_msg.htm";
+                        FILE* fp=_wfopen(path.c_str(),L"wb");
+                        if(fp && !u8.empty()){
+                            fwrite(u8.data(),1,u8.size(),fp); fclose(fp);
+                            ShellExecuteW(h,L"print",path.c_str(),NULL,NULL,SW_SHOWNORMAL);
+                            t->lastMsg=L"\u067E\u06CC\u0627\u0645 \u0628\u0631\u0627\u06CC \u0686\u0627\u067E \u0627\u0631\u0633\u0627\u0644 \u0634\u062F."; // پیام برای چاپ ارسال شد.
+                            t->msgCol=g_theme.accent;
+                        } else {
+                            if(fp) fclose(fp);
+                            t->lastMsg=L"\u0686\u0627\u067E \u067E\u06CC\u0627\u0645 \u0646\u0627\u0645\u0648\u0641\u0642 \u0628\u0648\u062F."; // چاپ پیام ناموفق بود.
+                            t->msgCol=g_theme.danger;
+                        }
                     }
                     InvalidateRect(h,NULL,FALSE);
                 }

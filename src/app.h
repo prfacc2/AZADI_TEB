@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.76.0"
+#define APP_VERSION_W   L"1.77.0"
 
 // ----------------------------------------------------------- logging policy -
 //  RELEASE 1.2.0 (Section A): all general user-behavior logging is gated behind
@@ -127,7 +127,10 @@ enum IconId {
     // v1.11.0 §A: people / contact / palette glyphs for messenger-style rows.
     ICO_PALETTE, ICO_INFO, ICO_PEOPLE,
     // v1.19.0: wallet glyph for the «مبلغ نهایی» (final-amount) summary card.
-    ICO_WALLET
+    ICO_WALLET,
+    // v1.77.0: پاکت نامه — closed envelope / letter glyph for the کارتابل
+    // (management inbox) tab, replacing the old bell/message look.
+    ICO_LETTER
 };
 // §F: spec name alias — the work order references this symbol explicitly.
 #define IC_SAVED_MSG ICO_SAVED_MSG
@@ -148,6 +151,10 @@ void  setFlatButtonIcon(HWND btn, int icon);   // in-place icon swap (v1.1.0)
 //  corners in dark mode" bug on header/bar buttons). Pass CLR_INVALID to let
 //  the button ask its parent (default behaviour).
 void  setFlatButtonBg(HWND btn, COLORREF bg);
+//  v1.77: blend a header button's rounded corners with the header GRADIENT
+//  (its vertical midpoint) instead of the flat headerTop colour — fixes the
+//  "white square behind the header gear/calculator icons" on the light theme.
+void  setFlatButtonHeaderMid(HWND btn);
 //  v1.4.1: give a flat button a real raster icon (RCDATA id; 0 = vector icon).
 void  setFlatButtonImage(HWND btn, int resId);
 void  drawIcon(HDC dc, int icon, RECT rc, COLORREF col, int thick);

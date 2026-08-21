@@ -1,15 +1,15 @@
 /* ============================================================================
-   crm.css — CRM Management panel styles (v1.76)
+   crm.css — CRM Management panel styles (v1.77)
    IMPORTANT: Trident-safe (MSHTML/IE11). NO CSS custom properties, NO grid,
    NO flex `gap`, and every modern flex declaration is paired with its -ms-
    fallback in the same rule. RTL is handled with direction:rtl (set on <html>)
    — no layout flipping primitives. Keeps in lock-step with common.css.
 
-   v1.76 theme: a calmer, office-grade palette — desaturated slate-blue accent
-   on a soft neutral paper background, refined hairline borders, gentle shadows
-   and clearer section separation, so long sessions read easy and professional
-   instead of bold/tiring. Services items, tables, cards and the message picker
-   were refined for the same calm, legible feel.
+   v1.77 theme: a richer, professional office-grade light surface — soft cool
+   gradient backgrounds (no flat fills), subtle vertical sheen on cards/tiles/
+   KPIs for depth, and vibrant iPhone-style icon badges (saturated gradients
+   with a top highlight) so the quick-access tiles read crisp and modern. The
+   calm slate-blue accent stays for text/lines so long sessions still read easy.
    ============================================================================ */
 
 /* --------------------------------------------------------------- base ------ */
@@ -17,7 +17,8 @@
 html, body {
   margin: 0; padding: 0; height: 100%;
   font-family: 'Vazirmatn', 'Segoe UI', Tahoma, sans-serif;
-  background: #eaedf2; color: #2b3442;
+  background: linear-gradient(165deg, #e8eef6 0%, #e2e8f1 50%, #dfe5ef 100%);
+  color: #2b3442;
   -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
 }
 body { font-size: 14px; line-height: 1.65; overflow: hidden; }
@@ -61,7 +62,7 @@ body { font-size: 14px; line-height: 1.65; overflow: hidden; }
 .crm-topbar {
   -ms-flex: 0 0 auto; flex: 0 0 auto;
   height: 62px; padding: 0 18px;
-  background: linear-gradient(180deg, #ffffff 0%, #f6f8fb 100%);
+  background: linear-gradient(180deg, #ffffff 0%, #f1f5fb 100%);
   border-bottom: 1px solid #dde3ec;
   display: -ms-flexbox; display: flex;
   -ms-flex-direction: row; flex-direction: row;
@@ -72,15 +73,17 @@ body { font-size: 14px; line-height: 1.65; overflow: hidden; }
 .crm-topbar-burger {
   -ms-flex: 0 0 auto; flex: 0 0 auto;
   width: 40px; height: 40px; margin-left: 14px;
-  border: 1px solid #e2e8f0; background: #f3f6fa; color: #565f6e;
+  border: 1px solid #e2e8f0;
+  background: linear-gradient(180deg, #ffffff 0%, #eef3fa 100%); color: #4267a3;
   border-radius: 11px; cursor: pointer; font-family: inherit;
   display: -ms-inline-flexbox; display: inline-flex;
   -ms-flex-align: center; align-items: center;
   -ms-flex-pack: center; justify-content: center;
+  box-shadow: 0 1px 2px rgba(30,40,58,.05), inset 0 1px 0 rgba(255,255,255,.6);
   -ms-transition: background .15s ease, color .15s ease, border-color .15s ease, box-shadow .15s ease;
   transition: background .15s ease, color .15s ease, border-color .15s ease, box-shadow .15s ease;
 }
-.crm-topbar-burger:hover { background: #eef3fa; color: #365188; border-color: #c8d6ea; box-shadow: 0 3px 10px rgba(66,103,163,.14); }
+.crm-topbar-burger:hover { background: linear-gradient(180deg, #eef3fa 0%, #e1eaf6 100%); color: #1c7ed6; border-color: #b9d2ef; box-shadow: 0 3px 10px rgba(28,126,214,.18); }
 .crm-topbar-brand {
   display: -ms-flexbox; display: flex;
   -ms-flex-direction: row; flex-direction: row;
@@ -88,30 +91,26 @@ body { font-size: 14px; line-height: 1.65; overflow: hidden; }
   border: 0; background: transparent; cursor: pointer; color: #2b3442;
   font-family: inherit; font-size: 16px; font-weight: 700;
   -ms-flex: 0 0 auto; flex: 0 0 auto;
+  padding: 5px 10px; border-radius: 12px;
+  -ms-transition: background .15s ease; transition: background .15s ease;
 }
-.crm-topbar-logo {
-  width: 38px; height: 38px; margin-left: 10px; border-radius: 11px;
-  background: linear-gradient(160deg, #5a82bf, #4267a3); color: #fff;
-  display: -ms-inline-flexbox; display: inline-flex;
-  -ms-flex-align: center; align-items: center;
-  -ms-flex-pack: center; justify-content: center;
-  box-shadow: 0 3px 9px rgba(66,103,163,.24), inset 0 1px 0 rgba(255,255,255,.26);
-}
-/* v1.76: identity chip — the logged-in management user's name (not a static
-   clinic title). A subtle person glyph makes it read as "signed in as". */
+.crm-topbar-brand:hover { background: rgba(66,103,163,.06); }
+/* v1.77: identity chip — the logged-in management user's NAME + ACCESS LEVEL
+   as one combined element (not three loose parts). The level is a vibrant
+   pill so the operator's role reads at a glance. */
 .crm-topbar-who {
   display: -ms-inline-flexbox; display: inline-flex;
   -ms-flex-direction: row; flex-direction: row;
   -ms-flex-align: center; align-items: center;
 }
-.crm-topbar-who-ic {
-  width: 26px; height: 26px; margin-left: 9px; border-radius: 8px;
-  background: #eef3fa; color: #4267a3;
-  display: -ms-inline-flexbox; display: inline-flex;
-  -ms-flex-align: center; align-items: center;
-  -ms-flex-pack: center; justify-content: center;
-}
 .crm-topbar-name { white-space: nowrap; }
+.crm-topbar-role {
+  white-space: nowrap; margin-right: 10px;
+  font-size: 11px; font-weight: 700; line-height: 1;
+  padding: 5px 10px; border-radius: 999px; color: #fff;
+  background: linear-gradient(160deg, #4dabf7 0%, #1c7ed6 100%);
+  box-shadow: 0 2px 6px rgba(28,126,214,.28), inset 0 1px 0 rgba(255,255,255,.28);
+}
 .crm-topbar-search {
   -ms-flex: 1 1 auto; flex: 1 1 auto; max-width: 420px; margin: 0 18px;
   position: relative;
@@ -125,21 +124,23 @@ body { font-size: 14px; line-height: 1.65; overflow: hidden; }
 .crm-topbar-btn {
   display: -ms-inline-flexbox; display: inline-flex;
   -ms-flex-direction: row; flex-direction: row; -ms-flex-align: center; align-items: center;
-  border: 1px solid #e2e8f0; background: #f3f6fa; color: #565f6e;
+  border: 1px solid #e2e8f0;
+  background: linear-gradient(180deg, #ffffff 0%, #eef3fa 100%); color: #4267a3;
   border-radius: 10px; padding: 8px 13px; cursor: pointer; font-family: inherit;
   font-size: 12.5px; font-weight: 700;
+  box-shadow: 0 1px 2px rgba(30,40,58,.05), inset 0 1px 0 rgba(255,255,255,.6);
   -ms-transition: background .15s ease, color .15s ease, border-color .15s ease, box-shadow .15s ease;
   transition: background .15s ease, color .15s ease, border-color .15s ease, box-shadow .15s ease;
 }
-.crm-topbar-btn:hover { background: #eef3fa; color: #365188; border-color: #c8d6ea; box-shadow: 0 2px 8px rgba(66,103,163,.12); }
+.crm-topbar-btn:hover { background: linear-gradient(180deg, #eef3fa 0%, #e1eaf6 100%); color: #1c7ed6; border-color: #b9d2ef; box-shadow: 0 2px 8px rgba(28,126,214,.16); }
 .crm-topbar-btn svg { margin-left: 7px; }
 .crm-topbar-badge {
   min-width: 22px; height: 22px; padding: 0 7px; border-radius: 11px; margin-right: 10px;
-  background: #c25a5a; color: #fff; font-size: 11px; font-weight: 700;
+  background: linear-gradient(160deg, #ff8787 0%, #e03131 100%); color: #fff; font-size: 11px; font-weight: 700;
   display: -ms-inline-flexbox; display: inline-flex;
   -ms-flex-align: center; align-items: center;
   -ms-flex-pack: center; justify-content: center;
-  box-shadow: 0 2px 6px rgba(194,90,90,.28);
+  box-shadow: 0 2px 6px rgba(224,49,49,.32), inset 0 1px 0 rgba(255,255,255,.25);
 }
 
 /* sidebar (retired in v1.74 but kept for legacy markup) */
@@ -186,7 +187,7 @@ body { font-size: 14px; line-height: 1.65; overflow: hidden; }
 .crm-main {
   -ms-flex: 1 1 auto; flex: 1 1 auto;
   height: 100%; overflow-y: auto;
-  background: linear-gradient(170deg, #f2f5f9 0%, #eceff4 55%, #e7eaf0 100%);
+  background: linear-gradient(170deg, #eef3fa 0%, #e6ecf5 45%, #e0e7f1 100%);
   padding: 24px 28px;
 }
 .crm-page { max-width: 1180px; margin: 0 auto; }
@@ -223,17 +224,18 @@ body { font-size: 14px; line-height: 1.65; overflow: hidden; }
 .crm-back-ic {
   -ms-flex: 0 0 auto; flex: 0 0 auto; margin-left: 10px;
   width: 30px; height: 30px; border-radius: 9px;
-  background: linear-gradient(160deg, #5a82bf, #4267a3); color: #fff;
+  background: linear-gradient(160deg, #4dabf7 0%, #1c7ed6 100%); color: #fff;
   display: -ms-inline-flexbox; display: inline-flex;
   -ms-flex-align: center; align-items: center;
   -ms-flex-pack: center; justify-content: center;
-  box-shadow: 0 2px 6px rgba(66,103,163,.28), inset 0 1px 0 rgba(255,255,255,.22);
+  box-shadow: 0 2px 6px rgba(28,126,214,.30), inset 0 1px 0 rgba(255,255,255,.28);
 }
 .crm-back-lbl { white-space: nowrap; }
 
 /* --------------------------------------------------------------- cards ----- */
 .crm-card {
-  background: #ffffff; border: 1px solid rgba(30,40,58,.07); border-radius: 16px;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
+  border: 1px solid rgba(30,40,58,.07); border-radius: 16px;
   padding: 22px; margin-bottom: 18px;
   box-shadow: 0 1px 2px rgba(30,40,58,.04), 0 12px 28px -20px rgba(30,40,58,.14);
 }
@@ -256,21 +258,22 @@ body { font-size: 14px; line-height: 1.65; overflow: hidden; }
 .crm-kpi {
   -ms-flex: 1 1 200px; flex: 1 1 200px;
   min-width: 190px; margin-left: 14px; margin-bottom: 14px;
-  background: #ffffff; border: 1px solid rgba(30,40,58,.07); border-radius: 16px;
+  background: linear-gradient(180deg, #ffffff 0%, #f9fbfd 100%);
+  border: 1px solid rgba(30,40,58,.07); border-radius: 16px;
   padding: 18px 18px 16px; position: relative; overflow: hidden;
   box-shadow: 0 1px 2px rgba(30,40,58,.04), 0 12px 28px -20px rgba(30,40,58,.16);
   -ms-transition: box-shadow .2s ease, border-color .2s ease, -ms-transform .2s ease;
   transition: box-shadow .2s ease, border-color .2s ease, transform .2s ease;
 }
-.crm-kpi:hover { border-color: #c8d6ea; box-shadow: 0 6px 18px rgba(30,40,58,.08), 0 14px 32px -20px rgba(66,103,163,.18); -ms-transform: translateY(-2px); transform: translateY(-2px); }
+.crm-kpi:hover { border-color: #b9d2ef; box-shadow: 0 6px 18px rgba(30,40,58,.08), 0 14px 32px -20px rgba(28,126,214,.20); -ms-transform: translateY(-2px); transform: translateY(-2px); }
 .crm-kpi::before {
   content: ""; position: absolute; top: 0; right: 0; width: 5px; height: 100%;
-  background: linear-gradient(180deg, #5a82bf, #4267a3);
+  background: linear-gradient(180deg, #4dabf7 0%, #1c7ed6 100%);
 }
-.crm-kpi.k-green::before { background: linear-gradient(180deg, #46b07e, #2f8a5c); }
-.crm-kpi.k-amber::before { background: linear-gradient(180deg, #dba046, #b27a2c); }
-.crm-kpi.k-violet::before { background: linear-gradient(180deg, #9085c4, #6a5d9e); }
-.crm-kpi.k-rose::before { background: linear-gradient(180deg, #d67b8d, #b25a6c); }
+.crm-kpi.k-green::before { background: linear-gradient(180deg, #51cf8e 0%, #2f9e44 100%); }
+.crm-kpi.k-amber::before { background: linear-gradient(180deg, #ffa94d 0%, #f59f00 100%); }
+.crm-kpi.k-violet::before { background: linear-gradient(180deg, #b197fc 0%, #7048e8 100%); }
+.crm-kpi.k-rose::before { background: linear-gradient(180deg, #faa2c1 0%, #e64980 100%); }
 .crm-kpi-label { font-size: 12px; color: #697384; margin-bottom: 7px; font-weight: 600; }
 .crm-kpi-value { font-size: 30px; font-weight: 700; color: #2b3442; line-height: 1.1; letter-spacing: -.5px; }
 .crm-kpi-foot { font-size: 11px; color: #97a0b0; margin-top: 7px; }
@@ -345,12 +348,12 @@ table.crm-tbl .empty { text-align: center; color: #97a0b0; padding: 26px; }
   -ms-transition: background .15s ease, box-shadow .15s ease, -ms-transform .15s ease;
   transition: background .15s ease, box-shadow .15s ease, transform .15s ease;
 }
-.crm-btn.primary { background: linear-gradient(180deg, #5a82bf, #4267a3); color: #fff; box-shadow: 0 2px 8px rgba(66,103,163,.22), inset 0 1px 0 rgba(255,255,255,.18); }
-.crm-btn.primary:hover { background: linear-gradient(180deg, #4f78b3, #365188); box-shadow: 0 4px 12px rgba(66,103,163,.28), inset 0 1px 0 rgba(255,255,255,.2); -ms-transform: translateY(-1px); transform: translateY(-1px); }
-.crm-btn.success { background: linear-gradient(180deg, #46b07e, #2f8a5c); color: #fff; box-shadow: 0 2px 8px rgba(47,138,92,.2), inset 0 1px 0 rgba(255,255,255,.18); }
-.crm-btn.success:hover { background: linear-gradient(180deg, #3fa072, #267a4f); box-shadow: 0 4px 12px rgba(47,138,92,.26), inset 0 1px 0 rgba(255,255,255,.2); -ms-transform: translateY(-1px); transform: translateY(-1px); }
-.crm-btn.danger { background: linear-gradient(180deg, #d26a6a, #b14949); color: #fff; box-shadow: 0 2px 8px rgba(177,73,73,.18), inset 0 1px 0 rgba(255,255,255,.16); }
-.crm-btn.danger:hover { background: linear-gradient(180deg, #c75c5c, #a13d3d); }
+.crm-btn.primary { background: linear-gradient(180deg, #4dabf7 0%, #1c7ed6 100%); color: #fff; box-shadow: 0 2px 8px rgba(28,126,214,.28), inset 0 1px 0 rgba(255,255,255,.24); }
+.crm-btn.primary:hover { background: linear-gradient(180deg, #4c9ef0 0%, #1973c9 100%); box-shadow: 0 4px 12px rgba(28,126,214,.34), inset 0 1px 0 rgba(255,255,255,.26); -ms-transform: translateY(-1px); transform: translateY(-1px); }
+.crm-btn.success { background: linear-gradient(180deg, #51cf8e 0%, #2f9e44 100%); color: #fff; box-shadow: 0 2px 8px rgba(47,158,68,.26), inset 0 1px 0 rgba(255,255,255,.24); }
+.crm-btn.success:hover { background: linear-gradient(180deg, #4cc385 0%, #2b8f3d 100%); box-shadow: 0 4px 12px rgba(47,158,68,.32), inset 0 1px 0 rgba(255,255,255,.26); -ms-transform: translateY(-1px); transform: translateY(-1px); }
+.crm-btn.danger { background: linear-gradient(180deg, #ff8787 0%, #e03131 100%); color: #fff; box-shadow: 0 2px 8px rgba(224,49,49,.24), inset 0 1px 0 rgba(255,255,255,.22); }
+.crm-btn.danger:hover { background: linear-gradient(180deg, #fa7777 0%, #d12b2b 100%); }
 .crm-btn.ghost { background: #f1f4f8; color: #565f6e; border: 1px solid #e0e6ee; }
 .crm-btn.ghost:hover { background: #e9edf3; border-color: #cfd6e0; }
 .crm-btn.outline { background: #fff; color: #4267a3; border: 1px solid #c8d6ea; }
@@ -432,7 +435,8 @@ table.crm-tbl .empty { text-align: center; color: #97a0b0; padding: 26px; }
 }
 .crm-tile {
   -ms-flex: 1 1 210px; flex: 1 1 210px; min-width: 190px; margin-left: 14px; margin-bottom: 14px;
-  background: #ffffff; border: 1px solid rgba(30,40,58,.07); border-radius: 16px; padding: 18px 16px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  border: 1px solid rgba(30,40,58,.07); border-radius: 16px; padding: 18px 16px;
   cursor: pointer; text-align: right; color: #2b3442; font-family: inherit;
   display: -ms-flexbox; display: flex; -ms-flex-direction: column; flex-direction: column;
   -ms-flex-align: start; align-items: flex-start;
@@ -440,22 +444,22 @@ table.crm-tbl .empty { text-align: center; color: #97a0b0; padding: 26px; }
   -ms-transition: box-shadow .2s ease, border-color .2s ease, -ms-transform .2s ease;
   transition: box-shadow .2s ease, border-color .2s ease, transform .2s ease;
 }
-.crm-tile:hover { border-color: #c2cee0; box-shadow: 0 8px 22px rgba(66,103,163,.12), 0 16px 36px -22px rgba(66,103,163,.2); -ms-transform: translateY(-3px); transform: translateY(-3px); }
-.crm-tile.active { border-color: #4267a3; box-shadow: inset 4px 0 0 #4267a3, 0 6px 16px rgba(66,103,163,.1); }
+.crm-tile:hover { border-color: #b9d2ef; box-shadow: 0 8px 22px rgba(28,126,214,.16), 0 16px 36px -22px rgba(28,126,214,.24); -ms-transform: translateY(-3px); transform: translateY(-3px); }
+.crm-tile.active { border-color: #1c7ed6; box-shadow: inset 4px 0 0 #1c7ed6, 0 6px 16px rgba(28,126,214,.14); }
 .crm-tile-ic {
   width: 46px; height: 46px; border-radius: 13px; margin-bottom: 13px; color: #fff;
   display: -ms-inline-flexbox; display: inline-flex;
   -ms-flex-align: center; align-items: center;
   -ms-flex-pack: center; justify-content: center;
-  background: linear-gradient(160deg, #5a82bf, #4267a3);
-  box-shadow: 0 4px 10px rgba(66,103,163,.2), inset 0 1px 0 rgba(255,255,255,.22);
+  background: linear-gradient(160deg, #4dabf7 0%, #1c7ed6 100%);
+  box-shadow: 0 4px 10px rgba(28,126,214,.28), inset 0 1px 0 rgba(255,255,255,.30);
 }
-.crm-tile-ic.green  { background: linear-gradient(160deg, #46b07e, #2f8a5c); box-shadow: 0 4px 10px rgba(47,138,92,.18), inset 0 1px 0 rgba(255,255,255,.22); }
-.crm-tile-ic.amber  { background: linear-gradient(160deg, #dba046, #b27a2c); box-shadow: 0 4px 10px rgba(178,122,44,.18), inset 0 1px 0 rgba(255,255,255,.22); }
-.crm-tile-ic.violet { background: linear-gradient(160deg, #9085c4, #6a5d9e); box-shadow: 0 4px 10px rgba(106,93,158,.18), inset 0 1px 0 rgba(255,255,255,.22); }
-.crm-tile-ic.rose   { background: linear-gradient(160deg, #d67b8d, #b25a6c); box-shadow: 0 4px 10px rgba(178,90,108,.16), inset 0 1px 0 rgba(255,255,255,.22); }
-.crm-tile-ic.teal   { background: linear-gradient(160deg, #46aea4, #2c8a82); box-shadow: 0 4px 10px rgba(44,138,130,.18), inset 0 1px 0 rgba(255,255,255,.22); }
-.crm-tile-ic.slate  { background: linear-gradient(160deg, #7b8595, #565f6e); box-shadow: 0 4px 10px rgba(86,95,110,.18), inset 0 1px 0 rgba(255,255,255,.22); }
+.crm-tile-ic.green  { background: linear-gradient(160deg, #51cf8e 0%, #2f9e44 100%); box-shadow: 0 4px 10px rgba(47,158,68,.26), inset 0 1px 0 rgba(255,255,255,.30); }
+.crm-tile-ic.amber  { background: linear-gradient(160deg, #ffa94d 0%, #f59f00 100%); box-shadow: 0 4px 10px rgba(245,159,0,.26), inset 0 1px 0 rgba(255,255,255,.30); }
+.crm-tile-ic.violet { background: linear-gradient(160deg, #b197fc 0%, #7048e8 100%); box-shadow: 0 4px 10px rgba(112,72,232,.26), inset 0 1px 0 rgba(255,255,255,.30); }
+.crm-tile-ic.rose   { background: linear-gradient(160deg, #faa2c1 0%, #e64980 100%); box-shadow: 0 4px 10px rgba(230,73,128,.24), inset 0 1px 0 rgba(255,255,255,.30); }
+.crm-tile-ic.teal   { background: linear-gradient(160deg, #66d9e8 0%, #0ca678 100%); box-shadow: 0 4px 10px rgba(12,166,120,.26), inset 0 1px 0 rgba(255,255,255,.30); }
+.crm-tile-ic.slate  { background: linear-gradient(160deg, #adb5bd 0%, #495057 100%); box-shadow: 0 4px 10px rgba(73,80,87,.26), inset 0 1px 0 rgba(255,255,255,.28); }
 .crm-tile-lbl { font-size: 15px; font-weight: 700; margin-bottom: 3px; color: #2b3442; }
 .crm-tile-sub { font-size: 11.5px; color: #8a94a4; }
 
@@ -526,16 +530,16 @@ table.crm-tbl .empty { text-align: center; color: #97a0b0; padding: 26px; }
   display: -ms-inline-flexbox; display: inline-flex;
   -ms-flex-align: center; align-items: center;
   -ms-flex-pack: center; justify-content: center;
-  background: linear-gradient(160deg, #5a82bf, #4267a3);
-  box-shadow: 0 2px 6px rgba(66,103,163,.18), inset 0 1px 0 rgba(255,255,255,.22);
+  background: linear-gradient(160deg, #4dabf7 0%, #1c7ed6 100%);
+  box-shadow: 0 2px 6px rgba(28,126,214,.26), inset 0 1px 0 rgba(255,255,255,.30);
 }
-.crm-menu-ic.green  { background: linear-gradient(160deg, #46b07e, #2f8a5c); box-shadow: 0 2px 6px rgba(47,138,92,.16), inset 0 1px 0 rgba(255,255,255,.22); }
-.crm-menu-ic.amber  { background: linear-gradient(160deg, #dba046, #b27a2c); box-shadow: 0 2px 6px rgba(178,122,44,.16), inset 0 1px 0 rgba(255,255,255,.22); }
-.crm-menu-ic.violet { background: linear-gradient(160deg, #9085c4, #6a5d9e); box-shadow: 0 2px 6px rgba(106,93,158,.16), inset 0 1px 0 rgba(255,255,255,.22); }
-.crm-menu-ic.rose   { background: linear-gradient(160deg, #d67b8d, #b25a6c); box-shadow: 0 2px 6px rgba(178,90,108,.14), inset 0 1px 0 rgba(255,255,255,.22); }
-.crm-menu-ic.teal   { background: linear-gradient(160deg, #46aea4, #2c8a82); box-shadow: 0 2px 6px rgba(44,138,130,.16), inset 0 1px 0 rgba(255,255,255,.22); }
-.crm-menu-ic.slate  { background: linear-gradient(160deg, #7b8595, #565f6e); box-shadow: 0 2px 6px rgba(86,95,110,.16), inset 0 1px 0 rgba(255,255,255,.22); }
-.crm-menu-ic.home   { background: linear-gradient(160deg, #6a93c4, #4f78b3); box-shadow: 0 2px 6px rgba(66,103,163,.18), inset 0 1px 0 rgba(255,255,255,.22); }
+.crm-menu-ic.green  { background: linear-gradient(160deg, #51cf8e 0%, #2f9e44 100%); box-shadow: 0 2px 6px rgba(47,158,68,.24), inset 0 1px 0 rgba(255,255,255,.30); }
+.crm-menu-ic.amber  { background: linear-gradient(160deg, #ffa94d 0%, #f59f00 100%); box-shadow: 0 2px 6px rgba(245,159,0,.24), inset 0 1px 0 rgba(255,255,255,.30); }
+.crm-menu-ic.violet { background: linear-gradient(160deg, #b197fc 0%, #7048e8 100%); box-shadow: 0 2px 6px rgba(112,72,232,.24), inset 0 1px 0 rgba(255,255,255,.30); }
+.crm-menu-ic.rose   { background: linear-gradient(160deg, #faa2c1 0%, #e64980 100%); box-shadow: 0 2px 6px rgba(230,73,128,.22), inset 0 1px 0 rgba(255,255,255,.30); }
+.crm-menu-ic.teal   { background: linear-gradient(160deg, #66d9e8 0%, #0ca678 100%); box-shadow: 0 2px 6px rgba(12,166,120,.24), inset 0 1px 0 rgba(255,255,255,.30); }
+.crm-menu-ic.slate  { background: linear-gradient(160deg, #adb5bd 0%, #495057 100%); box-shadow: 0 2px 6px rgba(73,80,87,.24), inset 0 1px 0 rgba(255,255,255,.28); }
+.crm-menu-ic.home   { background: linear-gradient(160deg, #74c0fc 0%, #1c7ed6 100%); box-shadow: 0 2px 6px rgba(28,126,214,.26), inset 0 1px 0 rgba(255,255,255,.30); }
 .crm-menu-lbl { -ms-flex: 1 1 auto; flex: 1 1 auto; white-space: nowrap; }
 
 /* definitions hub — two big buttons under "تعریف بخش" */
@@ -545,7 +549,8 @@ table.crm-tbl .empty { text-align: center; color: #97a0b0; padding: 26px; }
 }
 .crm-hub-btn {
   -ms-flex: 1 1 280px; flex: 1 1 280px; min-width: 240px; margin-left: 16px; margin-bottom: 16px;
-  background: #fff; border: 1px solid rgba(30,40,58,.07); border-radius: 18px; padding: 26px 22px;
+  background: linear-gradient(180deg, #ffffff 0%, #f7f9fc 100%);
+  border: 1px solid rgba(30,40,58,.07); border-radius: 18px; padding: 26px 22px;
   cursor: pointer; text-align: right; color: #2b3442; font-family: inherit;
   display: -ms-flexbox; display: flex; -ms-flex-direction: row; flex-direction: row;
   -ms-flex-align: center; align-items: center;
@@ -553,16 +558,16 @@ table.crm-tbl .empty { text-align: center; color: #97a0b0; padding: 26px; }
   -ms-transition: box-shadow .2s ease, border-color .2s ease, -ms-transform .2s ease;
   transition: box-shadow .2s ease, border-color .2s ease, transform .2s ease;
 }
-.crm-hub-btn:hover { border-color: #c2cee0; box-shadow: 0 10px 26px rgba(66,103,163,.12), 0 18px 40px -24px rgba(66,103,163,.2); -ms-transform: translateY(-3px); transform: translateY(-3px); }
+.crm-hub-btn:hover { border-color: #b9d2ef; box-shadow: 0 10px 26px rgba(28,126,214,.16), 0 18px 40px -24px rgba(28,126,214,.24); -ms-transform: translateY(-3px); transform: translateY(-3px); }
 .crm-hub-ic {
   width: 56px; height: 56px; border-radius: 16px; margin-left: 16px; color: #fff;
   display: -ms-inline-flexbox; display: inline-flex;
   -ms-flex-align: center; align-items: center;
   -ms-flex-pack: center; justify-content: center;
-  background: linear-gradient(160deg, #5a82bf, #4267a3);
-  box-shadow: 0 6px 14px rgba(66,103,163,.22), inset 0 1px 0 rgba(255,255,255,.22);
+  background: linear-gradient(160deg, #4dabf7 0%, #1c7ed6 100%);
+  box-shadow: 0 6px 14px rgba(28,126,214,.30), inset 0 1px 0 rgba(255,255,255,.30);
 }
-.crm-hub-ic.green { background: linear-gradient(160deg, #46b07e, #2f8a5c); box-shadow: 0 6px 14px rgba(47,138,92,.2), inset 0 1px 0 rgba(255,255,255,.22); }
+.crm-hub-ic.green { background: linear-gradient(160deg, #51cf8e 0%, #2f9e44 100%); box-shadow: 0 6px 14px rgba(47,158,68,.28), inset 0 1px 0 rgba(255,255,255,.30); }
 .crm-hub-txt-title { font-size: 17px; font-weight: 700; margin-bottom: 4px; }
 .crm-hub-txt-sub { font-size: 12.5px; color: #8a94a4; }
 
@@ -696,7 +701,7 @@ table.crm-tbl .empty { text-align: center; color: #97a0b0; padding: 26px; }
 .theme-dark .crm-page-head { border-bottom-color: #1f2a3d; }
 .theme-dark .crm-back { background: #1a2433; color: #a9c4ee; border-color: #2c3a50; box-shadow: none; }
 .theme-dark .crm-back:hover { background: #1d3358; color: #cfe0f7; border-color: #34507f; box-shadow: 0 5px 14px rgba(0,0,0,.4); }
-.theme-dark .crm-back-ic { background: linear-gradient(160deg, #6a93c4, #3f6196); box-shadow: 0 2px 6px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.18); }
+.theme-dark .crm-back-ic { background: linear-gradient(160deg, #74c0fc 0%, #228be6 100%); box-shadow: 0 2px 6px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.22); }
 
 .theme-dark .crm-card { background: #141d2c; border-color: #233047; box-shadow: none; }
 .theme-dark .crm-card-title { color: #d6e0ee; border-bottom-color: #1f2a3d; }
@@ -760,8 +765,8 @@ table.crm-tbl .empty { text-align: center; color: #97a0b0; padding: 26px; }
 .theme-dark .crm-topbar-burger:hover { background: #1d3358; color: #7ab0ff; border-color: #2f4773; }
 .theme-dark .crm-topbar-btn { background: #1a2433; color: #aab6cc; border-color: #2c3a50; }
 .theme-dark .crm-topbar-btn:hover { background: #1d3358; color: #7ab0ff; border-color: #2f4773; }
-.theme-dark .crm-topbar-who-ic { background: #1d3358; color: #7ab0ff; }
-.theme-dark .crm-topbar-badge { background: #d26a6a; box-shadow: 0 2px 6px rgba(210,106,106,.28); }
+.theme-dark .crm-topbar-role { background: linear-gradient(160deg, #74c0fc 0%, #228be6 100%); box-shadow: 0 2px 6px rgba(34,139,230,.32), inset 0 1px 0 rgba(255,255,255,.28); }
+.theme-dark .crm-topbar-badge { background: linear-gradient(160deg, #ff8787 0%, #e03131 100%); box-shadow: 0 2px 6px rgba(224,49,49,.34), inset 0 1px 0 rgba(255,255,255,.25); }
 
 .theme-dark .crm-cat-title { color: #8190a8; }
 .theme-dark .crm-tile { background: #141d2c; border-color: #233047; box-shadow: none; color: #e6edf6; }

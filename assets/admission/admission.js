@@ -40,7 +40,7 @@
     doctors: [],
     ps: { P: 0, S: 0 },
     mode: 'simple',
-    zoom: 90,
+    zoom: 80,
     overrideBlock: false,
     ready: false
   };
@@ -1327,15 +1327,17 @@
     });
 
     /* v1.70.0: Ctrl+scroll = zoom in/out. Persists the chosen zoom per-user
-       so it survives app restarts. Default is 90% (v1.73.0: was 80%). */
+       so it survives app restarts. v1.77.0: default lowered 90% → 80%, and the
+       unzoom floor lowered 80 → 50 so the user can zoom OUT to fit all items;
+       applyZoom() adds a small font bump below 80% so text stays readable. */
     on(document, 'wheel', function (e) {
       e = e || window.event;
       if (!e.ctrlKey) return;
       if (e.preventDefault) e.preventDefault(); else e.returnValue = false;
       var delta = e.wheelDelta || (e.detail ? -e.detail : 0);
-      var z = state.zoom || 90;
+      var z = state.zoom || 80;
       z += (delta > 0) ? 5 : -5;
-      if (z < 80) z = 80; if (z > 200) z = 200;
+      if (z < 50) z = 50; if (z > 200) z = 200;
       applyZoom(z);
       Bridge.call('reception.zoom.save', { zoom: z });
     });
@@ -1353,8 +1355,11 @@
      the workspace and never push each other off-screen. If a browser ignores
      `zoom` (some MSHTML builds), fall back to transform:scale() anchored at the
      centre so the content stays centred and the .app overflow:hidden still clips
-     the overflow. We never apply both — that would double-scale. Default 90%;
-     Ctrl+scroll persists per-user (unchanged). */
+     the overflow. We never apply both — that would double-scale.
+     v1.77.0: default lowered 90% → 80%; unzoom floor lowered 80 → 50. When the
+     user zooms OUT below the 80% default (to fit all items), text would shrink
+     too far to read, so a small font bump is applied — see the .az-unzoom block
+     in admission.css. Zoom-IN (>=80%) is unchanged (font stays normal). */
   function applyZoom(z) {
     state.zoom = z;
     var host = $('appBody');            /* the inner workspace (.body) */
@@ -1381,6 +1386,22 @@
       host.style.webkitTransform = 'scale(' + f + ')';
       host.style.msTransform = 'scale(' + f + ')';
       host.style.transform = 'scale(' + f + ')';
+    }
+    /* v1.77.0: UNZOOM READABILITY — only when zoomed OUT below the 80% default.
+       Nudge the workspace base font up a little (1-3px, graduated) so text stays
+       legible even when shrunk to fit all items, and tag the workspace with the
+       `az-unzoom` class so admission.css can bump the explicit-size fields,
+       buttons, table cells and titles by ~1px as well. At >=80% (zoom-in / the
+       default) the class and inline font are cleared so behaviour is unchanged. */
+    if (z < 80) {
+      var fsBump = z < 60 ? 3 : (z < 70 ? 2 : 1);
+      host.style.fontSize = (14 + fsBump) + 'px';
+      if ((' ' + host.className + ' ').indexOf(' az-unzoom ') < 0) {
+        host.className = String(host.className || '') + ' az-unzoom';
+      }
+    } else {
+      host.style.fontSize = '';
+      host.className = String(host.className || '').replace(/\s*az-unzoom\b/g, '');
     }
   }
   function applyMode(mode) {
@@ -1613,8 +1634,8 @@
     Bridge.on('reception.settings', function (d) {
       var root = document.documentElement;
       var mode = d && d.mode === 'full' ? 'full' : 'simple';
-      var zoom = Number(d && d.zoom) || 90;
-      if (zoom < 80 || zoom > 200) zoom = 90;
+      var zoom = Number(d && d.zoom) || 80;
+      if (zoom < 50 || zoom > 200) zoom = 80;
       state.mode = mode; state.zoom = zoom;
       if (root) root.className = root.className.replace(/\bmode-(simple|full)\b/g, '') + ' mode-' + mode;
       if (document.body) {
@@ -1718,7 +1739,7 @@
       }
       if (r.ps) updatePS(r.ps);
       applyMode(r.mode || 'simple');
-      applyZoom(r.zoom || 90);
+      applyZoom(r.zoom || 80);
       document.body.className = String(document.body.className || '')
         .replace(/\btheme-(dark|calm|warm)\b/g, '').replace(/\s+/g, ' ');
       if (r.theme === 'dark') document.body.className += ' theme-dark';

@@ -840,7 +840,8 @@ static std::string crmApi(const std::string& verb, const std::string& body){
     if(verb=="crm.settings.get"){
         std::string o="{";
         o+="\"theme\":"+jstr(getSetting(L"theme",L"light"))+",";
-        o+="\"palette\":"+jstr(getSetting(L"theme.palette",L"blue"))+",";
+        // v1.77: calm/warm palettes retired — only light/dark remain, so the
+        // management settings no longer expose a "palette" to pick/change.
         o+="\"clinicName\":"+jstr(getSetting(L"clinic.name",L"درمان پلاس"))+",";
         o+="\"receptionMode\":"+jstr(getSetting(L"reception.mode",L"simple"))+",";
         o+="\"printCopies\":"+jstr(getSetting(L"print.copies",L"1"))+",";
@@ -851,7 +852,8 @@ static std::string crmApi(const std::string& verb, const std::string& body){
     if(verb=="crm.settings.save"){
         std::string t;
         if(jsonGetString(body,"theme",t) && !t.empty())       setSetting(L"theme",u82w(t));
-        if(jsonGetString(body,"palette",t) && !t.empty())     setSetting(L"theme.palette",u82w(t));
+        // v1.77: "palette" is no longer accepted — calm/warm were retired and the
+        // management settings can only toggle light/dark (theme).
         if(jsonGetString(body,"clinicName",t))                setSetting(L"clinic.name",u82w(t));
         if(jsonGetString(body,"receptionMode",t) && !t.empty())setSetting(L"reception.mode",u82w(t));
         if(jsonGetString(body,"printCopies",t))               setSetting(L"print.copies",u82w(t));
