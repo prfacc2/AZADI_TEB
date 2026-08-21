@@ -284,22 +284,42 @@ static HomeGeom homeGeom(int W, int H){
     return g;
 }
 
+// v1.77: the welcome hero panel's gradient colours, shared by WM_PAINT and the
+// card corner-blend (WM_CREATE / WM_APP_THEME) so the cards' rounded corners
+// always match the panel surface they sit on — never a white/coloured square.
+// The light panel is a soft blue-white gradient (less stark than pure white);
+// the dark panel keeps its deep slate gradient. The cards live in the lower
+// band of the panel, so homePanelBot() is the colour behind them.
+static COLORREF homePanelTop(){
+    return g_dark ? RGB(24,29,38)
+                  : blendColor(g_theme.surface, g_theme.accent, 5);
+}
+static COLORREF homePanelBot(){
+    return g_dark ? RGB(14,18,25)
+                  : blendColor(g_theme.surface, g_theme.surface2, 70);
+}
+
 static LRESULT CALLBACK homeProc(HWND h, UINT m, WPARAM w, LPARAM l){
     switch(m){
     case WM_CREATE: {
-        HWND r=createFlatButton(h, ID_HM_RECEPTION, L"پذیرش درمانگاه", ICO_CROSS_MED,
-            BS_CARD, 0,0,10,10, L"ثبت بیمار، خدمات و صدور قبض");
-        HWND mg=createFlatButton(h, ID_HM_MANAGE, L"مدیریت درمانگاه", ICO_SHIELD,
-            BS_CARD, 0,0,10,10, L"خدمات، گزارش‌ها و طراحی چاپ");
-        // the cards now sit ON the hero panel, so their antialiased corners must
-        // blend into the panel surface — not the page background (the old bug
-        // that made the corners look chipped on the light theme).
-        setFlatButtonBg(r,  g_theme.surface);
-        setFlatButtonBg(mg, g_theme.surface);
+        // v1.77: the two entry accounts are renamed («حساب پذیرش» / «حساب مدیریت»)
+        // and given professional line-art glyphs — a person for admission, a
+        // two-person group for management — instead of the primitive filled
+        // medical cross / shield. Subtitles describe each account's scope.
+        HWND r=createFlatButton(h, ID_HM_RECEPTION, L"حساب پذیرش", ICO_USER,
+            BS_CARD, 0,0,10,10, L"پذیرش بیمار، خدمات و صدور قبض");
+        HWND mg=createFlatButton(h, ID_HM_MANAGE, L"حساب مدیریت", ICO_PEOPLE,
+            BS_CARD, 0,0,10,10, L"گزارش‌ها و خدمات و مدیریت");
+        // the cards sit ON the hero panel, so their antialiased corners must
+        // blend into the panel surface (its lower band == homePanelBot()) — not
+        // the page background. This is the definitive fix for the chipped/white
+        // card corners on both themes.
+        setFlatButtonBg(r,  homePanelBot());
+        setFlatButtonBg(mg, homePanelBot());
         return 0; }
     case WM_APP_THEME:
-        setFlatButtonBg(GetDlgItem(h,ID_HM_RECEPTION), g_theme.surface);
-        setFlatButtonBg(GetDlgItem(h,ID_HM_MANAGE),    g_theme.surface);
+        setFlatButtonBg(GetDlgItem(h,ID_HM_RECEPTION), homePanelBot());
+        setFlatButtonBg(GetDlgItem(h,ID_HM_MANAGE),    homePanelBot());
         InvalidateRect(h,NULL,TRUE);
         return 0;
     case WM_SIZE: {
@@ -355,7 +375,9 @@ static LRESULT CALLBACK homeProc(HWND h, UINT m, WPARAM w, LPARAM l){
         // v1.62.0: the light artwork is a soft clinical illustration, so it only
         // needs a whisper of scrim (the panel below carries the contrast). The
         // dark artwork is deeper, so it gets a stronger wash.
-        if(!gpDrawBackground(dc, rc, g_dark, g_theme.bg, g_dark?96:26)){
+        // v1.77: the light scrim was nudged up so the page reads as a calm tinted
+        // surface (less flat-white) while the illustration still shows through.
+        if(!gpDrawBackground(dc, rc, g_dark, g_theme.bg, g_dark?96:42)){
             RECT full={0,0,rc.right,rc.bottom};
             gpGradRoundRect(dc,full,0,g_theme.bg,g_theme.bg2,CLR_INVALID);
         }
@@ -369,11 +391,11 @@ static LRESULT CALLBACK homeProc(HWND h, UINT m, WPARAM w, LPARAM l){
         // designed instead of washed out.
         gpShadow(dc, g.panel, g.radius, S(30), g_dark?110:52);
         gpShadow(dc, g.panel, g.radius, S(10), g_dark?120:64);
-        COLORREF pTop = g_dark ? RGB(24,29,38) : RGB(255,255,255);
-        COLORREF pBot = g_dark ? RGB(14,18,25) : blendColor(RGB(255,255,255), g_theme.surface2, 62);
+        COLORREF pTop = homePanelTop();
+        COLORREF pBot = homePanelBot();
         gpGradRoundRect(dc, g.panel, g.radius, pTop, pBot,
                         g_dark ? blendColor(g_theme.border,g_theme.accent,18)
-                               : blendColor(g_theme.border,g_theme.accent,26));
+                               : blendColor(g_theme.border,g_theme.accent,30));
         // Accent ribbon hugging the panel's top edge. It is inset by the corner
         // radius so it never spills outside the rounded silhouette (drawing it
         // full-width would leave two hard accent squares in the corners).
@@ -416,7 +438,7 @@ static LRESULT CALLBACK homeProc(HWND h, UINT m, WPARAM w, LPARAM l){
             SelectObject(dc, fitFont(30, FW_BOLD, th/(double)S(50)));
             SetTextColor(dc, g_dark?RGB(240,246,252):g_theme.sectionInk);
             RECT tr=g.title;
-            DrawTextW(dc, L"سامانه پذیرش و مدیریت درمانگاه", -1, &tr,
+            DrawTextW(dc, L"سامانه پذیرش و مدیریت درمانگاه و بیمارستان", -1, &tr,
                 DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
             // a short accent rule under the title — the "designed" signature
             int uw = S(84), ux = rc.right/2 - uw/2, uy = g.title.bottom - S(2);
@@ -428,19 +450,19 @@ static LRESULT CALLBACK homeProc(HWND h, UINT m, WPARAM w, LPARAM l){
             SelectObject(dc, g_fUI);
             SetTextColor(dc, g_dark?RGB(168,180,197):g_theme.textDim);
             RECT sr=g.sub;
-            DrawTextW(dc, L"درمانگاه شبانه‌روزی درمان پلاس  ·  حساب کاربری خود را انتخاب کنید",
+            DrawTextW(dc, L"حساب کاربری خود را انتخاب کنید",
                 -1, &sr, DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
         }
 
         // ---- 5. capability chips -------------------------------------------
-        // Three tinted pills that tell a first-time user what the app DOES —
-        // synced with the artwork's clinical theme.
+        // v1.77: professional, descriptive capability highlights (replacing the
+        // old terse tags «پذیرش و صدور قبض / خدمات و تعرفه / چاپ حرفه‌ای»).
         {
             struct Chip { const wchar_t* t; int ico; };
             static const Chip CH[3]={
-                { L"پذیرش و صدور قبض", ICO_RECEIPT },
-                { L"خدمات و تعرفه",     ICO_WALLET  },
-                { L"چاپ حرفه‌ای",       ICO_PRINT   },
+                { L"ثبت‌نام و پذیرش بیمار",   ICO_USER    },
+                { L"صورت‌حساب و قبض مالی",    ICO_RECEIPT },
+                { L"مدیریت کارکنان و بخش‌ها", ICO_PEOPLE  },
             };
             SelectObject(dc, g_fSmall);
             int ch = g.chipH, pad=S(14), icoD=S(15), gapI=S(7), gapC=S(12);
@@ -561,10 +583,12 @@ static void frameLayout(HWND h){
     //     handy in the header but out of the way of the tabs / actions.
     MoveWindow(s_bSettings, pad, y, bh, bh, TRUE);
     MoveWindow(s_bCalc, pad+bh+S(8), y, bh, bh, TRUE);
-    // keep the header buttons' rounded corners blended into the header gradient
-    setFlatButtonBg(s_bExit,     g_theme.headerTop);
-    setFlatButtonBg(s_bSettings, g_theme.headerTop);
-    setFlatButtonBg(s_bCalc,     g_theme.headerTop);
+    // v1.77: the header ghost buttons sit on the header GRADIENT, so their
+    // rounded corners must blend with the gradient's vertical midpoint — not
+    // the flat headerTop colour (which left a white square behind each icon).
+    setFlatButtonHeaderMid(s_bExit);
+    setFlatButtonHeaderMid(s_bSettings);
+    setFlatButtonHeaderMid(s_bCalc);
     updateHeaderButtons(h);
     if(s_screen){
         RECT cr=frameContentRect();
@@ -597,22 +621,25 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         // owns «چاپ آخرین قبض / چاپ نسخه / رسید بیمه» in its bottom-right card.
         ShowWindow(s_bNewPat,SW_HIDE);
         ShowWindow(s_bNewTab,SW_HIDE);
-        setFlatButtonBg(s_bExit,     g_theme.headerTop);
-        setFlatButtonBg(s_bSettings, g_theme.headerTop);
-        setFlatButtonBg(s_bCalc,     g_theme.headerTop);
-        setFlatButtonBg(s_bNewPat,   g_theme.headerTop);
-        setFlatButtonBg(s_bNewTab,   g_theme.headerTop);
+        // v1.77: LAYER-1 header buttons blend with the header gradient midpoint;
+        // the LAYER-2 reception action buttons sit on the flat surface2 action
+        // bar, so they keep the surface2 corner-blend.
+        setFlatButtonHeaderMid(s_bExit);
+        setFlatButtonHeaderMid(s_bSettings);
+        setFlatButtonHeaderMid(s_bCalc);
+        setFlatButtonBg(s_bNewPat, g_theme.surface2);
+        setFlatButtonBg(s_bNewTab, g_theme.surface2);
         SetTimer(h, TIMER_CLOCK, g_lowSpec?1000:500, NULL);
         return 0;
     case WM_SIZE: frameLayout(h); return 0;
     case WM_APP_THEME:
         // theme may have been switched from inside the settings panel — refresh
         // the header buttons' corner-blend colour and repaint the whole frame.
-        setFlatButtonBg(s_bExit,     g_theme.headerTop);
-        setFlatButtonBg(s_bSettings, g_theme.headerTop);
-        setFlatButtonBg(s_bCalc,     g_theme.headerTop);
-        setFlatButtonBg(s_bNewPat,   g_theme.headerTop);
-        setFlatButtonBg(s_bNewTab,   g_theme.headerTop);
+        setFlatButtonHeaderMid(s_bExit);
+        setFlatButtonHeaderMid(s_bSettings);
+        setFlatButtonHeaderMid(s_bCalc);
+        setFlatButtonBg(s_bNewPat, g_theme.surface2);
+        setFlatButtonBg(s_bNewTab, g_theme.surface2);
         InvalidateRect(h,NULL,TRUE);
         return 0;
     case WM_APP_UI_TASK:
@@ -739,6 +766,12 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         // surface (not a flat strip).
         RECT tb={0,0,rc.right,mainBarH()};
         gpGradRoundRect(dc,tb,0,g_theme.headerTop,g_theme.headerBot,CLR_INVALID);
+        // v1.77: a thin branded accent ribbon along the header's top edge — the
+        // same "designed" signature the welcome panel carries, on both themes —
+        // so the header reads as a polished, branded surface, not a flat strip.
+        RECT hrib={0,0,rc.right,S(3)};
+        gpGradRoundRectBgH(dc, hrib, 0, g_theme.accent, g_theme.accent2,
+                           CLR_INVALID, CLR_INVALID);
         // ===================== LAYER 2 — action sub-bar =====================
         if(headerHasActionBar()){
             RECT ab={0,mainBarH(),rc.right,mainBarH()+actionBarH()};
@@ -782,20 +815,22 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
         int idRight = logoCx-logoR-S(12);
         bool loggedIn = !g_session.user.username.empty();
         if(loggedIn){
-            // two stacked lines: app name (top) + person/role (bottom).
+            // v1.77: the identity now shows the logged-in person's NAME (top,
+            // bold) and their ACCESS LEVEL (bottom) — two pieces, not the old
+            // three (fullname • role • dept). The brand mark is carried by the
+            // logo badge, so the app name is no longer repeated here.
             // §2.B: offsets tuned for the compact S(56) header.
             SelectObject(dc,g_fUIB);
             SetTextColor(dc,g_theme.text);
             RECT nr={S(160),S(5),idRight,S(5)+S(24)};
-            DrawTextW(dc,APP_NAME_W,-1,&nr,
+            DrawTextW(dc,g_session.user.fullname.c_str(),-1,&nr,
                 DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
             SelectObject(dc,g_fSmall);
             SetTextColor(dc,g_theme.textDim);
             const wchar_t* role =
                 g_session.user.role==2 ? L"مدیر سامانه" :
-                g_session.user.role==1 ? L"مدیریت درمانگاه" : L"پذیرش درمانگاه";
-            std::wstring sub = g_session.user.fullname + L"  •  " + role +
-                (g_session.user.dept.empty()?L"":(L"  •  "+g_session.user.dept));
+                g_session.user.role==1 ? L"مدیریت" : L"پذیرش";
+            std::wstring sub = std::wstring(L"سطح دسترسی: ") + role;
             RECT sr={S(160),S(5)+S(26),idRight,mainBarH()-S(4)};
             DrawTextW(dc,sub.c_str(),-1,&sr,
                 DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);

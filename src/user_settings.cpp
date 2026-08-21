@@ -178,7 +178,7 @@ static std::vector<RowDef> homeRows(int mode){
           L"\u0646\u0627\u0645\u060c \u062a\u0644\u0641\u0646\u060c \u0639\u06a9\u0633\u060c \u0631\u0645\u0632" },   // نام، تلفن، عکس، رمز
         { ROW_THEME,     PAGE_THEME,     ICO_PALETTE,
           L"\u062a\u063a\u06cc\u06cc\u0631 \u067e\u0648\u0633\u062a\u0647",                            // تغییر پوسته
-          L"\u0631\u0648\u0634\u0646 \u06cc\u0627 \u062a\u06cc\u0631\u0647" },                          // روشن یا تیره
+          L"\u0631\u0648\u0634\u0646 \u06cc\u0627 \u0645\u0634\u06a9\u06cc" },                          // روشن یا مشکی
         { ROW_RECEPTION, PAGE_RECEPTION, ICO_GEAR,
           L"\u062a\u0646\u0638\u06cc\u0645\u0627\u062a \u067e\u0630\u06cc\u0631\u0634",
           L"\u062d\u0627\u0644\u062a \u0646\u0645\u0627\u06cc\u0634 \u0648 \u0628\u0632\u0631\u06af\u200c\u0646\u0645\u0627\u06cc\u06cc \u0641\u0631\u0645 \u067e\u0630\u06cc\u0631\u0634" },
@@ -328,18 +328,13 @@ static void buildProfilePage(SettingsWin* sw){
 static void buildThemePage(SettingsWin* sw){
     RECT c=contentRect(sw);
     int x=c.left+S(20), y=subTop(sw), w=c.right-c.left-S(40), gap=S(10), half=(w-gap)/2;
-    // v1.59: four legible, restrained palettes. The two additional light
-    // palettes preserve clinical contrast while reducing eye fatigue.
+    // v1.77: exactly two themes — light (روشن) and dark (مشکی). The calm/warm
+    // eye-comfort palettes were retired, so this page now offers only these two.
     HWND bLight=createFlatButton(sw->hwnd,IDC_PANEL_BASE+10,
-        L"\u0633\u0641\u06cc\u062f \u067e\u0632\u0634\u06a9\u06cc",ICO_SUN,BS_OUTLINE,x+half+gap,y,half,S(52));
+        L"\u0631\u0648\u0634\u0646",ICO_SUN,BS_OUTLINE,x+half+gap,y,half,S(52));
     HWND bDark=createFlatButton(sw->hwnd,IDC_PANEL_BASE+11,
-        L"\u062a\u06cc\u0631\u0647 \u062d\u0631\u0641\u0647\u200c\u0627\u06cc",ICO_MOON,BS_OUTLINE,x,y,half,S(52));
-    HWND bCalm=createFlatButton(sw->hwnd,IDC_PANEL_BASE+12,
-        L"\u0622\u0631\u0627\u0645 \u0641\u06cc\u0631\u0648\u0632\u0647\u200c\u0627\u06cc",ICO_PALETTE,BS_OUTLINE,x+half+gap,y+S(64),half,S(52));
-    HWND bWarm=createFlatButton(sw->hwnd,IDC_PANEL_BASE+13,
-        L"\u06af\u0631\u0645 \u0635\u062f\u0641\u06cc",ICO_PALETTE,BS_OUTLINE,x,y+S(64),half,S(52));
+        L"\u0645\u0634\u06a9\u06cc",ICO_MOON,BS_OUTLINE,x,y,half,S(52));
     sw->ctrls.push_back(bLight); sw->ctrls.push_back(bDark);
-    sw->ctrls.push_back(bCalm); sw->ctrls.push_back(bWarm);
 }
 
 static HWND addSettingsLabel(SettingsWin* sw,const wchar_t* text,int x,int y,int w){
@@ -918,16 +913,11 @@ static int homeRowHit(SettingsWin* sw, int mx, int my){
 
 static void applyThemeByName(SettingsWin* sw, bool dark){
     setSetting(L"theme", dark?L"dark":L"light");
-    if(dark) setSetting(L"theme.palette",L"blue");
+    // v1.77: only two themes exist now; always normalise the (now-unused)
+    // palette setting to "blue" so a stale calm/warm value from an older
+    // version cannot linger in the settings store.
+    setSetting(L"theme.palette",L"blue");
     applyTheme(dark);
-    broadcastThemeChange();
-    if(g_hFrame) PostMessageW(g_hFrame,WM_APP_THEME_CHANGED,1,0);
-    RedrawWindow(sw->hwnd,NULL,NULL,RDW_INVALIDATE|RDW_UPDATENOW|RDW_ALLCHILDREN|RDW_ERASE);
-}
-static void applyLightPalette(SettingsWin* sw,const wchar_t* palette){
-    setSetting(L"theme",L"light");
-    setSetting(L"theme.palette",palette);
-    applyTheme(false);
     broadcastThemeChange();
     if(g_hFrame) PostMessageW(g_hFrame,WM_APP_THEME_CHANGED,1,0);
     RedrawWindow(sw->hwnd,NULL,NULL,RDW_INVALIDATE|RDW_UPDATENOW|RDW_ALLCHILDREN|RDW_ERASE);
@@ -1059,10 +1049,8 @@ static LRESULT CALLBACK SettingsProc(HWND h,UINT m,WPARAM w,LPARAM l){
             lookupBlacklistPatient(sw,true);
         }
         switch(id){
-        case IDC_PANEL_BASE+10: applyLightPalette(sw,L"blue"); return 0; // medical white
-        case IDC_PANEL_BASE+11: applyThemeByName(sw,true); return 0;      // dark
-        case IDC_PANEL_BASE+12: applyLightPalette(sw,L"calm"); return 0; // teal calm
-        case IDC_PANEL_BASE+13: applyLightPalette(sw,L"warm"); return 0; // pearl warm
+        case IDC_PANEL_BASE+10: applyThemeByName(sw,false); return 0; // روشن (light)
+        case IDC_PANEL_BASE+11: applyThemeByName(sw,true); return 0;  // مشکی (dark)
         case IDC_PANEL_BASE+83: {
             std::wstring suffix=sw->user.username.empty()?L"":L"."+sw->user.username;
             bool full=SendMessageW(GetDlgItem(h,IDC_PANEL_BASE+81),BM_GETCHECK,0,0)==BST_CHECKED;

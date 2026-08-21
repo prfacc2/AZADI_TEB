@@ -33,12 +33,8 @@
       '<div class="crm-field"><label class="crm-label">حالت پذیرش</label>' +
         '<select class="crm-select" id="sMode"><option value="simple"' + (s.receptionMode !== 'full' ? ' selected' : '') + '>ساده</option>' +
         '<option value="full"' + (s.receptionMode === 'full' ? ' selected' : '') + '>کامل</option></select></div>' +
-      '<div class="crm-field"><label class="crm-label">پالت رنگی</label>' +
-        '<select class="crm-select" id="sPalette">' +
-        '<option value="blue"' + (s.palette === 'blue' ? ' selected' : '') + '>آبی</option>' +
-        '<option value="calm"' + (s.palette === 'calm' ? ' selected' : '') + '>ملایم</option>' +
-        '<option value="warm"' + (s.palette === 'warm' ? ' selected' : '') + '>گرم</option></select></div>' +
-      '<div class="crm-field"><label class="crm-label">تعداد کپی چاپ</label>' +
+        /* v1.77: the «پالت رنگی» (calm/warm) picker was removed — only light/dark remain. */
+        '<div class="crm-field"><label class="crm-label">تعداد کپی چاپ</label>' +
         '<input class="crm-input" id="sCopies" value="' + Crm.esc(s.printCopies || '1') + '" /></div>' +
       '<div class="crm-field full"><label class="crm-check"><input type="checkbox" id="sSavedMsgs" ' + (s.savedMsgs === '1' ? 'checked' : '') + ' />ذخیرهٔ پیام‌های آرشیوشده</label></div>';
     gc.appendChild(form);
@@ -51,7 +47,6 @@
       var payload = {
         clinicName: Crm.$('sClinic').value,
         receptionMode: Crm.$('sMode').value,
-        palette: Crm.$('sPalette').value,
         printCopies: Crm.$('sCopies').value,
         savedMsgs: Crm.$('sSavedMsgs').checked ? '1' : '0',
         theme: Crm._dark ? 'dark' : 'light'
