@@ -65,10 +65,14 @@
     var fq = (q || '').toLowerCase();
     for (var c = 0; c < CATEGORIES.length; c++) {
       var cat = CATEGORIES[c];
+      /* match the category NAME itself — when the query hits a category title,
+         every tile under it is shown so the whole group surfaces. */
+      var catHit = !fq || ('' + cat.title).toLowerCase().indexOf(fq) >= 0;
       var matched = [];
       for (var i = 0; i < cat.tiles.length; i++) {
         var t = cat.tiles[i];
-        if (!fq || ('' + t.label).toLowerCase().indexOf(fq) >= 0 ||
+        if (!fq || catHit ||
+            ('' + t.label).toLowerCase().indexOf(fq) >= 0 ||
             ('' + t.sub).toLowerCase().indexOf(fq) >= 0 ||
             ('' + t.page).toLowerCase().indexOf(fq) >= 0) matched.push(t);
       }
@@ -93,6 +97,16 @@
       var q = '';
       var s = Crm.$('navSearch');
       if (s) q = s.value;
+      var fq = (q || '').toLowerCase();
+      /* SEARCH MODE — while a query is typed, the dashboard KPIs and the full
+         tile grid are HIDDEN; only categories / pages whose NAME or DESCRIPTION
+         match the query are shown as search results. Clearing the box restores
+         the normal KPI + tile dashboard. */
+      if (fq) {
+        Crm.head(host, 'نتایج جستجو', 'دسترسی‌ها و دسته‌های مطابق «' + q + '»');
+        renderTiles(host, q);
+        return;
+      }
       Crm.head(host, 'داشبورد مدیریت', 'نمای کلی و دسترسی سریع');
       var kpis = Crm.el('div', 'crm-kpis');
       host.appendChild(kpis);

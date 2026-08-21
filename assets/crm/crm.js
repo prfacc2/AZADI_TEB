@@ -318,6 +318,15 @@
       Crm._dark = d.theme === 'dark';
       if (global.AzBoot) global.AzBoot.applyTheme(Crm._dark);
     }
+    /* v1.76: the brand label next to the hamburger shows the logged-in
+       management account's display name (first + last name, else username) —
+       the account they signed in with — instead of a static clinic title. */
+    var who = $('navUserName');
+    if (who) {
+      var nm = (typeof d.user === 'string' && d.user) ? d.user
+             : (typeof d.username === 'string' ? d.username : '');
+      who.innerHTML = esc(nm || 'مدیریت درمانگاه');
+    }
     var badge = $('navMsgBadge');
     if (badge) {
       var n = +d.messages || 0;

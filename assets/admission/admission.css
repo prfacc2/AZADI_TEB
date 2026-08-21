@@ -3151,3 +3151,387 @@ body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inv-remain b{
 .theme-dark .queue-overlay-body .tbl tbody td.q-empty{color:#93a6bd;}
 .theme-dark .q-count{color:#aec3d7;}
 .theme-dark .q-count b{color:#7fb3f7;}
+
+/* ============================================================================
+   v1.76.0 — ADMISSION FINAL POLISH (درمان پلاس)
+   ----------------------------------------------------------------------------
+   Additive cascade block (appended last → wins). Final visual polish pass:
+     · PAYABLE hero (مبلغ نهایی قابل پرداخت): the final total had collapsed to
+       white-on-white — the v1.75 .card surface (same specificity, later source
+       order) overrode its emerald background while its white caption/figure
+       stayed. Rebuilt as a distinct, high-contrast emerald panel with a clear
+       border, a large tabular figure and a soft breathing glow so it can never
+       blend into its neighbours again.
+     · QUEUE action buttons (افزودن به صندوق نرفته‌ها / صف پذیرش): promoted
+       from faint near-white fills to clear, professional amber + blue buttons
+       with strong borders and high-contrast captions.
+     · ZOOM legibility: the smallest labels/cells were ~10px (~8px at 80% zoom);
+       raised to a readable floor and slightly taller rows so everything stays
+       clear at every zoom level (zoom logic itself is unchanged).
+     · BACKGROUNDS: flat solid trays replaced with elegant, office-grade surfaces
+       — layered gradients + a faint paper texture + real depth (inset highlight
+       + soft cast shadow). Calm and professional, never bold/aggressive.
+     · TEXTBOXES: refined tinted surface + clear border + soft inset depth so
+       entered text reads as a distinct, legible field (not flat white).
+     · SECTION DESIGN: clearer borders, refined tinted headers with a per-zone
+       accent rule, visible dividers and breathing room — شیک و اداری.
+     · PASTELS removed: washed-out pastel card bodies replaced with proper,
+       saturated-enough professional tints (visible, not loud).
+   Trident-safe: literal colours, no custom properties / grid / gap / logical
+   props; every modern flex prop carries its -ms- pair. Accent overrides are
+   guarded with chained :not() so calm/warm/dark keep their own palettes.
+   ============================================================================ */
+
+/* ----------------------------------------------------- 0. ELEGANT BACKDROP ---
+   Page + three trays: layered slate-blue gradient with a faint diagonal paper
+   texture and real depth (inset top highlight + soft cast shadow). Office-
+   grade, calm, never bold. Themes override via their own body/.col rules. */
+body{
+  background-color:#e7edf4;
+  background-image:
+    -webkit-repeating-linear-gradient(135deg, rgba(30,58,95,.018) 0 2px, rgba(255,255,255,0) 2px 8px),
+    -webkit-linear-gradient(top,#eef3f8 0%,#dde6f1 100%);
+  background-image:
+    repeating-linear-gradient(135deg, rgba(30,58,95,.018) 0 2px, rgba(255,255,255,0) 2px 8px),
+    linear-gradient(180deg,#eef3f8 0%,#dde6f1 100%);
+  color:#15233a;
+}
+.col-action,.col-left{
+  background-color:#eaedf2;
+  background-image:
+    -webkit-repeating-linear-gradient(135deg, rgba(30,58,95,.020) 0 2px, rgba(255,255,255,0) 2px 9px),
+    -webkit-linear-gradient(top,#f2f5f9 0%,#e4e9f0 100%);
+  background-image:
+    repeating-linear-gradient(135deg, rgba(30,58,95,.020) 0 2px, rgba(255,255,255,0) 2px 9px),
+    linear-gradient(180deg,#f2f5f9 0%,#e4e9f0 100%);
+  border:1px solid #c4cdda;border-radius:16px;
+  -webkit-box-shadow:0 10px 26px rgba(25,58,98,.10),inset 0 1px 0 #ffffff;
+  box-shadow:0 10px 26px rgba(25,58,98,.10),inset 0 1px 0 #ffffff;
+}
+.col-center{
+  background-color:#eef2f7;
+  background-image:
+    -webkit-repeating-linear-gradient(135deg, rgba(30,58,95,.016) 0 2px, rgba(255,255,255,0) 2px 9px),
+    -webkit-linear-gradient(top,#f8fafd 0%,#e9eff7 100%);
+  background-image:
+    repeating-linear-gradient(135deg, rgba(30,58,95,.016) 0 2px, rgba(255,255,255,0) 2px 9px),
+    linear-gradient(180deg,#f8fafd 0%,#e9eff7 100%);
+  border:1px solid #c4cdda;border-radius:16px;
+  -webkit-box-shadow:0 10px 26px rgba(25,58,98,.10),inset 0 1px 0 #ffffff;
+  box-shadow:0 10px 26px rgba(25,58,98,.10),inset 0 1px 0 #ffffff;
+}
+
+/* ----------------------------------------- 1. CARDS — chic panels, with depth ---
+   Refined near-white surface, clearer border, layered shadow + a faint top
+   sheen so every section reads as its own panel. Default theme only. */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .card{
+  background-color:#fbfcfe;
+  background-image:-webkit-linear-gradient(top,#ffffff 0%,#f5f8fc 100%);
+  background-image:linear-gradient(180deg,#ffffff 0%,#f5f8fc 100%);
+  border:1px solid #c6d2e0;border-radius:13px;
+  -webkit-box-shadow:0 1px 2px rgba(20,45,80,.05),0 6px 16px rgba(20,45,80,.08);
+  box-shadow:0 1px 2px rgba(20,45,80,.05),0 6px 16px rgba(20,45,80,.08);
+}
+/* clearer section divider: a stronger head/base rule (default slate accent;
+   per-zone heads below override the accent + tint). */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .card-head{
+  border-bottom:1px solid #d4dee9;
+  -webkit-box-shadow:inset -3px 0 0 #64748b;box-shadow:inset -3px 0 0 #64748b;
+}
+
+/* ----------------------------------- 2. SECTION HEADERS — coordinated tints ---
+   Each clinical zone carries a clearly tinted header gradient + a saturated
+   accent rule + a strong title colour, so every section reads as its own
+   chic, office-grade panel (no washed-out pastel). Default theme only. */
+/* PATIENT form → VIOLET (clinical intake) */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .card-head{
+  background:#ece6f6;background:-webkit-linear-gradient(top,#f2ecfa 0%,#e4dbf2 100%);
+  background:linear-gradient(180deg,#f2ecfa 0%,#e4dbf2 100%);
+  border-bottom:1px solid #d8ccf0;
+  -webkit-box-shadow:inset -3px 0 0 #7c3aed;box-shadow:inset -3px 0 0 #7c3aed;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .card-title{color:#5b21b6;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .ct-ico{color:#7c3aed;}
+/* INSURANCE → TEAL (coverage) */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(1) .card-head{
+  background:#e2f1ea;background:-webkit-linear-gradient(top,#ebf6f0 0%,#d8ece4 100%);
+  background:linear-gradient(180deg,#ebf6f0 0%,#d8ece4 100%);
+  border-bottom:1px solid #cfe6dc;
+  -webkit-box-shadow:inset -3px 0 0 #0d9488;box-shadow:inset -3px 0 0 #0d9488;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(1) .card-title{color:#115e59;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(1) .ct-ico{color:#0d9488;}
+/* DOCTOR → BLUE (working surface) */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(2) .card-head{
+  background:#e1ebf8;background:-webkit-linear-gradient(top,#ebf2fc 0%,#d5e3f4 100%);
+  background:linear-gradient(180deg,#ebf2fc 0%,#d5e3f4 100%);
+  border-bottom:1px solid #cee0f4;
+  -webkit-box-shadow:inset -3px 0 0 #2563eb;box-shadow:inset -3px 0 0 #2563eb;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(2) .card-title{color:#1e40af;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(2) .ct-ico{color:#2563eb;}
+/* PERFORMER → INDIGO */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(3) .card-head{
+  background:#e6e4f4;background:-webkit-linear-gradient(top,#efeefb 0%,#dcd9f0 100%);
+  background:linear-gradient(180deg,#efeefb 0%,#dcd9f0 100%);
+  border-bottom:1px solid #d6d3f0;
+  -webkit-box-shadow:inset -3px 0 0 #4f46e5;box-shadow:inset -3px 0 0 #4f46e5;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(3) .card-title{color:#3730a3;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(3) .ct-ico{color:#4f46e5;}
+/* SERVICES → BLUE working surface */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card > .card-head{
+  background:#e1ebf8;background:-webkit-linear-gradient(top,#ecf3fc 0%,#d4e2f4 100%);
+  background:linear-gradient(180deg,#ecf3fc 0%,#d4e2f4 100%);
+  border-bottom:1px solid #cee0f4;
+  -webkit-box-shadow:inset -3px 0 0 #2563eb;box-shadow:inset -3px 0 0 #2563eb;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card > .card-head .card-title{color:#1e3a8a;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card > .card-head .ct-ico{color:#2563eb;}
+/* PAYMENT → EMERALD (ties to the final amount) */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payment-card .card-head{
+  background:#e3f3ea;background:-webkit-linear-gradient(top,#ebf6f0 0%,#d7ecdf 100%);
+  background:linear-gradient(180deg,#ebf6f0 0%,#d7ecdf 100%);
+  border-bottom:1px solid #cfe6da;
+  -webkit-box-shadow:inset -3px 0 0 #059669;box-shadow:inset -3px 0 0 #059669;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payment-card .card-title{color:#065f46;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payment-card .ct-ico{color:#059669;}
+/* INVOICE keeps its prominent AMBER header — just re-assert its gold border so
+   the clearer generic .card border above does not flatten it. */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .invoice-card{border:1px solid #e6cb8c;}
+/* date/shift + print metadata → SLATE (quiet, clearly separated) */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .datetime-card .card-head,
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .print-card .card-head{
+  background:#eef1f5;background:-webkit-linear-gradient(top,#f4f6f9 0%,#e6ebf1 100%);
+  background:linear-gradient(180deg,#f4f6f9 0%,#e6ebf1 100%);
+  -webkit-box-shadow:inset -3px 0 0 #475569;box-shadow:inset -3px 0 0 #475569;
+}
+
+/* ------------------------------- 3. CARD BODIES — proper, visible section tints ---
+   The washed-out pastels are replaced with clearly-coloured but calm surfaces
+   that give each zone a visible identity without going bold. Default theme. */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .card-body{
+  background:#efe9f8;background:-webkit-linear-gradient(top,#f4eefb 0%,#e9e2f6 100%);
+  background:linear-gradient(180deg,#f4eefb 0%,#e9e2f6 100%);
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(1) .card-body{
+  background:#e3f3ec;background:-webkit-linear-gradient(top,#ebf6f0 0%,#dbefe6 100%);
+  background:linear-gradient(180deg,#ebf6f0 0%,#dbefe6 100%);
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(2) .card-body{
+  background:#e3ecf9;background:-webkit-linear-gradient(top,#ebf2fc 0%,#d9e6f6 100%);
+  background:linear-gradient(180deg,#ebf2fc 0%,#d9e6f6 100%);
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(3) .card-body{
+  background:#e8e6f4;background:-webkit-linear-gradient(top,#f0eefb 0%,#e1ddf2 100%);
+  background:linear-gradient(180deg,#f0eefb 0%,#e1ddf2 100%);
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card .card-body{background:#e6eef8;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payment-card{
+  border:1px solid #bfe3d6;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payment-card .card-body{
+  background:#e7f4ee;background:-webkit-linear-gradient(top,#edf7f1 0%,#e0f0e8 100%);
+  background:linear-gradient(180deg,#edf7f1 0%,#e0f0e8 100%);
+}
+/* action + print rails: a clear frosted panel (not flat, not pastel) */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .action-card,
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .print-card{
+  background-color:rgba(244,247,251,.82);
+  background-image:-webkit-linear-gradient(top,rgba(255,255,255,.86) 0%,rgba(238,243,250,.78) 100%);
+  background-image:linear-gradient(180deg,rgba(255,255,255,.86) 0%,rgba(238,243,250,.78) 100%);
+  border:1px solid #c9d4e0;
+  -webkit-box-shadow:0 4px 14px rgba(31,95,214,.08);box-shadow:0 4px 14px rgba(31,95,214,.08);
+}
+
+/* ------------------------------------------------ 4. PROFILE CARD — refined teal ---
+   A soft teal-tinted identity card (clear, not pastel-washed, not bold) with
+   dark, legible text. Default theme only. */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card{
+  color:#0c4a42;border:1px solid #bfe3da;
+  background-color:#e4f4ee;
+  background-image:-webkit-linear-gradient(top,#eef8f3 0%,#dcf0e7 100%);
+  background-image:linear-gradient(180deg,#eef8f3 0%,#dcf0e7 100%);
+  -webkit-box-shadow:0 6px 18px rgba(13,148,136,.16);box-shadow:0 6px 18px rgba(13,148,136,.16);
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .avatar{
+  border:3px solid #cde9e0;background:#ffffff;color:#0d9488;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-kicker{color:#0d9488;font-size:11px;font-weight:800;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .pf-name{color:#0b3b35;font-size:15px;font-weight:900;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .pf-file,
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .pf-file b{color:#3f6b62;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .profile-state{
+  background:#d7efe7;border:1px solid #bfe3da;color:#0c4a42;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .profile-state .dot{background:#10b981;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .btn-erx{
+  background:#d3efe7;border:1px solid #aedacf;color:#0c534c;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .btn-erx:hover{
+  background:#c2e7dc;border-color:#0d9488;color:#0a463f;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .rx-box{
+  background:#dcf0e8;border:1px solid #c3e6db;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .rx-lbl{color:#0d9488;font-size:11px;font-weight:800;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .rx-val{color:#0b3b35;font-size:16px;font-weight:900;}
+
+/* ----------------------------------------- 5. PAYABLE HERO — distinct + prominent ---
+   The single most important number: a high-contrast emerald panel with a clear
+   border, a large tabular figure and a soft breathing glow. Wins over the
+   v1.75 .card surface by source order at equal specificity. Default theme. */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payable-card{
+  margin-top:0;margin-bottom:10px;padding:14px 15px;text-align:right;color:#ffffff;
+  border:1px solid #047857;border-radius:13px;
+  background:#059669;
+  background:-webkit-linear-gradient(top,#10b981 0%,#047857 100%);
+  background:linear-gradient(180deg,#10b981 0%,#047857 100%);
+  -webkit-box-shadow:0 8px 22px rgba(5,150,105,.32),inset 0 1px 0 rgba(255,255,255,.22);
+  box-shadow:0 8px 22px rgba(5,150,105,.32),inset 0 1px 0 rgba(255,255,255,.22);
+  -webkit-animation:azGlow 3.6s ease-in-out infinite;animation:azGlow 3.6s ease-in-out infinite;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payable-caption{
+  display:block;margin-bottom:4px;color:#ecfdf5;font-size:13px;font-weight:800;letter-spacing:.2px;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payable-value{
+  display:block;margin:4px 0 0;line-height:1.2;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payable-value b{
+  color:#ffffff;font-size:28px;font-weight:900;line-height:1.2;letter-spacing:.3px;font-variant-numeric:tabular-nums;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payable-value span{
+  margin-right:7px;padding-bottom:3px;color:#d1fae5;font-size:12px;font-weight:800;
+}
+
+/* --------------------------- 6. QUEUE ACTION BUTTONS — clear + findable (amber/blue) ---
+   The two admission buttons (افزودن به صندوق نرفته‌ها / صف پذیرش) promoted from
+   faint near-white fills to clear, professional amber + blue action buttons
+   with strong borders and high-contrast captions. */
+.queue-action-btns .btn-queue-add{
+  color:#5b3a0a;border:1px solid #d9a93a;border-radius:11px;
+  background:#f6c95b;background:-webkit-linear-gradient(top,#fad27a 0%,#efb53c 100%);
+  background:linear-gradient(180deg,#fad27a 0%,#efb53c 100%);
+  -webkit-box-shadow:0 4px 12px rgba(180,130,30,.20);box-shadow:0 4px 12px rgba(180,130,30,.20);
+}
+.queue-action-btns .btn-queue-add:hover{
+  background:-webkit-linear-gradient(top,#fcdc93 0%,#f3c24f 100%);
+  background:linear-gradient(180deg,#fcdc93 0%,#f3c24f 100%);border-color:#c8901f;
+}
+.queue-action-btns .btn-queue-add2{
+  color:#ffffff;border:1px solid #1d4ed8;border-radius:11px;
+  background:#2563eb;background:-webkit-linear-gradient(top,#3b82f6 0%,#1e40af 100%);
+  background:linear-gradient(180deg,#3b82f6 0%,#1e40af 100%);
+  -webkit-box-shadow:0 4px 12px rgba(37,99,235,.26);box-shadow:0 4px 12px rgba(37,99,235,.26);
+}
+.queue-action-btns .btn-queue-add2:hover{
+  background:-webkit-linear-gradient(top,#4f8ef7 0%,#1d4ed8 100%);
+  background:linear-gradient(180deg,#4f8ef7 0%,#1d4ed8 100%);
+}
+.theme-dark .queue-action-btns .btn-queue-add{
+  color:#ffe9bf;border-color:#a9791a;background:#6b531c;
+  background:-webkit-linear-gradient(top,#7d6422 0%,#5a4616 100%);
+  background:linear-gradient(180deg,#7d6422 0%,#5a4616 100%);
+}
+.theme-dark .queue-action-btns .btn-queue-add2{
+  color:#ffffff;border-color:#3a5a86;background:#1d4ed8;
+  background:-webkit-linear-gradient(top,#2563eb 0%,#1740bd 100%);
+  background:linear-gradient(180deg,#2563eb 0%,#1740bd 100%);
+}
+/* the right-rail navigation buttons + queue hub get a clearer, clickable surface */
+.queue-nav-row .btn-nav{
+  height:34px;border:1px solid #aecbe6;border-radius:10px;
+  background:#e8f1fb;color:#154ea5;font-size:12px;font-weight:800;
+}
+.queue-nav-row .btn-nav:hover{background:#d4e6fa;border-color:#2563eb;color:#1e40af;}
+.queue-hub-btn{
+  border:1px solid #a9c4e6;border-radius:11px;
+  background:#eaf3ff;color:#123a72;font-weight:900;
+}
+.queue-hub-btn:hover{background:#d8e9fb;border-color:#2563eb;color:#1d55bd;}
+
+/* --------------------------------------------- 7. TEXTBOXES — clear, elegant fields ---
+   Entered text reads as a distinct, legible field: a refined tinted surface
+   (not flat white), a clear border and soft inset depth; focus gets a crisp
+   ring. Default theme only (dark keeps its own input surface). */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inp,select.inp{
+  border:1px solid #98a9c0;border-radius:10px;
+  background-color:#eef3fa;
+  background-image:-webkit-linear-gradient(top,#f4f7fc 0%,#e9eff7 100%);
+  background-image:linear-gradient(180deg,#f4f7fc 0%,#e9eff7 100%);
+  color:#16263d;font-weight:700;
+  -webkit-box-shadow:inset 0 1px 2px rgba(30,58,95,.07);box-shadow:inset 0 1px 2px rgba(30,58,95,.07);
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inp:hover,select.inp:hover{
+  border-color:#7993b6;background-color:#ffffff;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inp:focus,select.inp:focus{
+  border-color:#2563eb;background-color:#ffffff;color:#0c1a2e;font-weight:800;
+  -webkit-box-shadow:0 0 0 3px rgba(37,99,235,.18),inset 0 1px 2px rgba(30,58,95,.06);
+  box-shadow:0 0 0 3px rgba(37,99,235,.18),inset 0 1px 2px rgba(30,58,95,.06);
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inp[readonly]{
+  background-color:#e7edf5;background-image:-webkit-linear-gradient(top,#eef2f8 0%,#e2e8f1 100%);
+  background-image:linear-gradient(180deg,#eef2f8 0%,#e2e8f1 100%);color:#3a4d66;border-color:#b9c6d6;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inp[disabled]{
+  background-color:#eef2f7;color:#6b7c92;border-color:#c5d0dd;
+}
+/* doctor name display field stays a calm, readable slate (placed after the
+   [readonly] rule so it wins at equal specificity). */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inp.doc-name-display{
+  background-color:#eaeef6;background-image:-webkit-linear-gradient(top,#f0f3f9 0%,#e3e9f2 100%);
+  background-image:linear-gradient(180deg,#f0f3f9 0%,#e3e9f2 100%);color:#0f2238;border:1px solid #a9b8cd;font-weight:800;cursor:default;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inp.doc-name-display:focus{
+  border-color:#a9b8cd;-webkit-box-shadow:none;box-shadow:none;
+}
+
+/* --------------------------------------------- 8. ZOOM LEGIBILITY — readable floor ---
+   The smallest labels/cells were ~10px (~8px at 80% zoom); raised to a clear
+   floor and slightly taller rows so everything stays legible at every zoom.
+   Zoom logic itself (default 90%, Ctrl+scroll, 80–200 clamp) is unchanged. */
+.svc-tbl thead th{height:34px;padding:6px 7px;font-size:11.5px;}
+.svc-tbl tbody td{height:34px;padding:6px 7px;font-size:12px;}
+.svc-foot .sf-cell span{font-size:11.5px;}
+.svc-foot .sf-cell b{font-size:14px;}
+.svc-count{font-size:11px;font-weight:800;}
+.row-3 .fld > span{font-size:12px;}
+.col-action .datetime-card .dt-fld > span{font-size:11px;}
+.cs-cap{font-size:11.5px;}
+.cs-val{font-size:16px;}
+.payment-shortcut{font-size:11.5px;}
+.sync-badge{font-size:11.5px;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inv-gtitle{font-size:13px;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inv-line{font-size:13px;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inv-line b{font-size:14px;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inv-remain{font-size:13.5px;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inv-remain b{font-size:15.5px;}
+
+/* --------------------------------------------- 9. DARK-THEME parity for new surfaces --- */
+body.theme-dark,.theme-dark body{
+  background-color:#0c1622;
+  background-image:
+    -webkit-repeating-linear-gradient(135deg, rgba(120,160,220,.03) 0 2px, rgba(0,0,0,0) 2px 9px),
+    -webkit-linear-gradient(top,#101b2b 0%,#0a1320 100%);
+  background-image:
+    repeating-linear-gradient(135deg, rgba(120,160,220,.03) 0 2px, rgba(0,0,0,0) 2px 9px),
+    linear-gradient(180deg,#101b2b 0%,#0a1320 100%);
+}
+.theme-dark .col-action,.theme-dark .col-left,.theme-dark .col-center{
+  border:1px solid #2e4864;
+  -webkit-box-shadow:0 10px 26px rgba(0,0,0,.32),inset 0 1px 0 rgba(255,255,255,.04);
+  box-shadow:0 10px 26px rgba(0,0,0,.32),inset 0 1px 0 rgba(255,255,255,.04);
+}
+.theme-dark .payable-card{
+  margin-top:0;color:#ffffff;border:1px solid #047857;border-radius:13px;
+  background:#0e7a4e;background:-webkit-linear-gradient(top,#10b981 0%,#0a5c3a 100%);
+  background:linear-gradient(180deg,#10b981 0%,#0a5c3a 100%);
+  -webkit-box-shadow:0 8px 22px rgba(5,150,105,.34),inset 0 1px 0 rgba(255,255,255,.10);
+  box-shadow:0 8px 22px rgba(5,150,105,.34),inset 0 1px 0 rgba(255,255,255,.10);
+  -webkit-animation:azGlow 3.6s ease-in-out infinite;animation:azGlow 3.6s ease-in-out infinite;
+}
+.theme-dark .payable-caption{color:#ecfdf5;}
+.theme-dark .payable-value b{color:#ffffff;}
+.theme-dark .payable-value span{color:#bbf7d0;}
