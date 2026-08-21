@@ -141,129 +141,16 @@
   };
 
   /* ---- hamburger nav drawer -------------------------------------------- */
-  /* The categorized navigation lives in a slide-out drawer (Crm.categories is
-     published by dashboard.js, which owns the CATEGORIES table + icons). The
-     drawer body is rebuilt on every open so the active item stays in sync. */
-  function menuIcon(t, size) {
-    return '<svg viewBox="0 0 24 24" width="' + size + '" height="' + size + '">' +
-           '<path fill="currentColor" d="' + t.ic + '"/></svg>';
-  }
-  function menuItem(t) {
-    var b = el('button', 'crm-menu-item');
-    b.setAttribute('data-page', t.page);
-    if (Crm.state.page === t.page) b.className += ' active';
-    b.innerHTML =
-      '<span class="crm-menu-ic ' + esc(t.color || '') + '">' + menuIcon(t, 20) + '</span>' +
-      '<span class="crm-menu-lbl">' + esc(t.label) + '</span>';
-    b.onclick = function () { Crm.nav(t.page); Crm.closeMenu(); };
-    return b;
-  }
-  function buildMenu() {
-    var body = $('crmMenuBody');
-    if (!body) return;
-    var cats = Crm.categories;
-    if (!cats || !cats.length) return;
-    body.innerHTML = '';
-    /* dashboard / home entry first */
-    var home = el('button', 'crm-menu-item');
-    home.setAttribute('data-page', 'dashboard');
-    if (Crm.state.page === 'dashboard') home.className += ' active';
-    home.innerHTML =
-      '<span class="crm-menu-ic home"><svg viewBox="0 0 24 24" width="20" height="20">' +
-      '<path fill="currentColor" d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg></span>' +
-      '<span class="crm-menu-lbl">داشبورد</span>';
-    home.onclick = function () { Crm.nav('dashboard'); Crm.closeMenu(); };
-    body.appendChild(home);
-    /* then every category and its tiles, grouped under a heading */
-    for (var c = 0; c < cats.length; c++) {
-      var cat = cats[c];
-      var head = el('div', 'crm-menu-cat');
-      head.innerHTML = '<span class="crm-menu-dot" style="background:' + cat.dot + '"></span>' +
-                       '<span>' + esc(cat.title) + '</span>';
-      body.appendChild(head);
-      for (var i = 0; i < cat.tiles.length; i++) body.appendChild(menuItem(cat.tiles[i]));
-    }
-  }
-  Crm.openMenu = function () {
-    buildMenu();
-    var m = $('crmMenu'), b = $('crmMenuBackdrop');
-    if (m) { m.className = 'crm-menu open'; m.setAttribute('aria-hidden', 'false'); }
-    if (b) b.className = 'crm-menu-backdrop open';
-  };
-  Crm.closeMenu = function () {
-    var m = $('crmMenu'), b = $('crmMenuBackdrop');
-    if (m) { m.className = 'crm-menu'; m.setAttribute('aria-hidden', 'true'); }
-    if (b) b.className = 'crm-menu-backdrop';
-  };
-  Crm.toggleMenu = function () {
-    var m = $('crmMenu');
-    if (m && (' ' + m.className + ' ').indexOf(' open ') >= 0) Crm.closeMenu();
-    else Crm.openMenu();
-  };
+  /* v1.77: the categorized slide-out drawer builder + open/close/toggle live
+     in crm_menu.js (a focused module). They attach Crm.openMenu / Crm.closeMenu /
+     Crm.toggleMenu here, on this same Crm object, at load time — before the
+     AzBoot.ready boot callback ever fires — so wireNav() finds them in place. */
 
   /* ---- simple modal helper (returns the card + a close fn) -------------- */
-  Crm.modal = function (title, bodyHtml) {
-    var bg = el('div', 'crm-modal-bg');
-    var card = el('div', 'crm-modal');
-    var head = el('div', 'crm-modal-head');
-    head.appendChild(el('div', 'crm-modal-title', esc(title)));
-    var closeBtn = el('button', 'crm-modal-close', '×');
-    head.appendChild(closeBtn);
-    card.appendChild(head);
-    var body = el('div', 'crm-modal-body');
-    if (bodyHtml != null) body.innerHTML = bodyHtml;
-    card.appendChild(body);
-    bg.appendChild(card);
-    document.body.appendChild(bg);
-    function close() { if (bg.parentNode) bg.parentNode.removeChild(bg); }
-    closeBtn.onclick = close;
-    bg.onclick = function (ev) { if (ev.target === bg) close(); };
-    Crm._lastModalBody = body;
-    return { card: card, body: body, close: close };
-  };
-
-  /* ---- themed confirm/alert dialogs (replace browser confirm()/alert()) --
-     The MSHTML/WebView shell blocks native dialogs in some configs and they
-     never match the panel theme, so every delete/confirm flow routes through
-     these. confirm(msg, onYes, opts) calls onYes() only when the operator
-     picks «بله»; alert(msg, opts) is a single-button notice. Both return the
-     modal handle (with .close) so callers can dismiss programmatically. */
-  Crm.confirm = function (msg, onYes, opts) {
-    opts = opts || {};
-    var m = Crm.modal(opts.title || 'تأیید عملیات', null);
-    var body = m.body;
-    var ic = opts.danger
-      ? '<svg viewBox="0 0 24 24" width="34" height="34"><path fill="#dc2626" d="M12 2L1 21h22L12 2zm0 6l6.5 11h-13L12 8zm-1 4v4h2v-4h-2zm0 5v2h2v-2h-2z"/></svg>'
-      : '<svg viewBox="0 0 24 24" width="34" height="34"><path fill="#2f6fe4" d="M12 2a10 10 0 100 20 10 10 0 000-20zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>';
-    body.innerHTML =
-      '<div class="crm-confirm">' +
-        '<div class="crm-confirm-ic">' + ic + '</div>' +
-        '<div class="crm-confirm-msg">' + esc(msg) + '</div>' +
-      '</div>';
-    var foot = el('div', 'crm-modal-foot');
-    var noBtn = el('button', 'crm-btn ghost', opts.noLabel || 'خیر');
-    var yesBtn = el('button', 'crm-btn ' + (opts.danger ? 'danger' : 'primary'), opts.yesLabel || 'بله، تأیید می‌کنم');
-    foot.appendChild(noBtn);
-    foot.appendChild(yesBtn);
-    m.card.appendChild(foot);
-    function done(ok) { m.close(); if (ok && typeof onYes === 'function') { try { onYes(); } catch (e) { if (global.console) console.error(e); } } }
-    noBtn.onclick = function () { done(false); };
-    yesBtn.onclick = function () { done(true); };
-    return m;
-  };
-
-  Crm.alert = function (msg, opts) {
-    opts = opts || {};
-    var m = Crm.modal(opts.title || 'اعلان', null);
-    var body = m.body;
-    body.innerHTML = '<div class="crm-confirm"><div class="crm-confirm-msg">' + esc(msg) + '</div></div>';
-    var foot = el('div', 'crm-modal-foot');
-    var okBtn = el('button', 'crm-btn primary', opts.okLabel || 'تأیید');
-    foot.appendChild(okBtn);
-    m.card.appendChild(foot);
-    okBtn.onclick = m.close;
-    return m;
-  };
+  /* v1.77: Crm.modal / Crm.confirm / Crm.alert live in crm_dialogs.js (a
+     focused module). They attach onto this same Crm object at load time, before
+     any page renders, so every page module that calls Crm.modal / Crm.confirm
+     keeps working unchanged. */
 
   /* ---- table helper ----------------------------------------------------- */
   Crm.table = function (columns, rows) {
@@ -320,12 +207,19 @@
     }
     /* v1.76: the brand label next to the hamburger shows the logged-in
        management account's display name (first + last name, else username) —
-       the account they signed in with — instead of a static clinic title. */
+       the account they signed in with — instead of a static clinic title.
+       v1.77: the identity chip now also shows the access LEVEL (نقش) beside the
+       name — 'مدیریت' for role 1, 'پذیرش' otherwise — so the header reads as one
+       clean "user name + access level" element instead of loose parts. */
     var who = $('navUserName');
     if (who) {
       var nm = (typeof d.user === 'string' && d.user) ? d.user
              : (typeof d.username === 'string' ? d.username : '');
       who.innerHTML = esc(nm || 'مدیریت درمانگاه');
+    }
+    var roleEl = $('navUserRole');
+    if (roleEl) {
+      roleEl.innerHTML = esc(d.role === 1 ? 'مدیریت' : 'پذیرش');
     }
     var badge = $('navMsgBadge');
     if (badge) {

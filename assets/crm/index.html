@@ -28,18 +28,20 @@
          categorized quick-access tile grid rendered on the Dashboard (home) page
          plus a top bar with a global search, backup button and message badge.
          Static element IDs the JS depends on (navMsgBadge, navBackup) are kept. -->
-    <!-- ======================= TOP BAR ======================= -->
+    <!-- ======================= TOP BAR =======================
+         v1.77: clean header — hamburger + identity chip (user name + access
+         level, one combined element, not three separate items) + global search.
+         The decorative brand-logo badge that used to sit next to the hamburger is
+         removed. Static element IDs the JS depends on (navHome, navUserName,
+         navUserRole, navSearch, navBackup, navMsgBadge) are all preserved. -->
     <header class="crm-topbar">
       <button class="crm-topbar-burger" id="navMenu" title="منو" aria-label="منو">
         <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z"/></svg>
       </button>
       <button class="crm-topbar-brand" id="navHome" title="خانه">
-        <span class="crm-topbar-logo">
-          <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M19 8h-2V6a4 4 0 00-8 0H7a2 2 0 00-2 2v12a2 2 0 002 2h12a2 2 0 002-2V8a2 2 0 00-2-2zm-8-2a2 2 0 014 0v2h-4V6zm5 9h-2v2h-2v-2H8v-2h2v-2h2v2h2v2z"/></svg>
-        </span>
         <span class="crm-topbar-who">
-          <span class="crm-topbar-who-ic"><svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M12 12a5 5 0 100-10 5 5 0 000 10zm0 2c-4 0-9 2-9 6v2h18v-2c0-4-5-6-9-6z"/></svg></span>
           <span class="crm-topbar-name" id="navUserName">مدیریت درمانگاه</span>
+          <span class="crm-topbar-role" id="navUserRole">—</span>
         </span>
       </button>
       <div class="crm-topbar-search">
@@ -57,7 +59,7 @@
 
     <!-- ======================= HAMBURGER NAV DRAWER =======================
          v1.75: the categorized navigation now lives in a slide-out drawer
-         (populated from Crm.categories by crm.js). The body (#crmMenuBody) is
+         (populated from Crm.categories by crm_menu.js). The body (#crmMenuBody) is
          rebuilt on each open so the active page stays highlighted. -->
     <div class="crm-menu-backdrop" id="crmMenuBackdrop"></div>
     <aside class="crm-menu" id="crmMenu" aria-hidden="true">
@@ -87,6 +89,8 @@
        crm.js. ES5-only so it parses on MSHTML/Trident as well as WebView2. -->
   <script src="common.js"></script>
   <script src="crm.js"></script>
+  <script src="crm_menu.js"></script>
+  <script src="crm_dialogs.js"></script>
   <script src="dashboard.js"></script>
   <script src="sections.js"></script>
   <script src="patients.js"></script>

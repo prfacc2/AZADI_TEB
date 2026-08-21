@@ -88,6 +88,12 @@
 809 RCDATA "../assets/crm/messages.js"
 810 RCDATA "../assets/crm/settings.js"
 811 RCDATA "../assets/crm/insurance.js"
+// v1.77.0: crm.js was split into focused modules for maintainability — the
+// hamburger nav drawer (crm_menu.js) and the themed modal/confirm/alert dialogs
+// (crm_dialogs.js) are now separate RCDATA blobs, inlined into the page by
+// web_crm_embed.inc in the same <script> order as index.html. Ids 812..813.
+812 RCDATA "../assets/crm/crm_menu.js"
+813 RCDATA "../assets/crm/crm_dialogs.js"
 
 // v1.68.0: the redistributable WebView2 loader (x86). Extracted to a per-user
 // writable folder at first use so the embedded Patient-Admission surface can
