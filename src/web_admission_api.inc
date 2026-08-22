@@ -667,9 +667,14 @@ static std::string admissionApi(const std::string& verb, const std::string& body
     }
 
     // ---- doctor.search (also serves doctor-by-code: index+1 acts as code) --
-    if(verb=="doctor.search"){
+    //  v1.78.0: optional role filter. «پزشک معالج» (ارجاع‌دهنده) جستجو در همهٔ
+    //  پزشکان است؛ «انجام دهنده» (کسی که بیمار پیش او می‌رود) فقط پزشکانی که در
+    //  مدیریت تیک «تعریف به عنوان انجام دهنده» دارند (role=performer).
+    if(verb=="doctor.search"||verb=="doctor.performers"){
         std::string qU; jsonGetString(body,"q",qU);
         std::string codeU; jsonGetString(body,"code",codeU);
+        std::string roleU; jsonGetString(body,"role",roleU);
+        bool onlyPerformers = (verb=="doctor.performers") || roleU=="performer";
         std::wstring q=u82w(qU);
         std::wstring code=normDigits(u82w(codeU));
         auto docs=loadDoctors();
@@ -677,6 +682,7 @@ static std::string admissionApi(const std::string& verb, const std::string& body
         int n=0;
         for(size_t i=0;i<docs.size();++i){
             const auto& d=docs[i];
+            if(onlyPerformers && !d.isPerformer) continue;
             wchar_t cb[16]; swprintf(cb,16,L"%d",(int)i+1);
             std::wstring dcode=cb;
             bool hit;
@@ -695,7 +701,9 @@ static std::string admissionApi(const std::string& verb, const std::string& body
             o+="{\"name\":"+jstr(d.name)+",\"specialty\":"+jstr(d.specialty)+
                ",\"code\":"+jstr(dcode)+
                // v1.69.0: return medicalId so the JS can display it
-               ",\"medicalId\":"+jstr(d.medicalId)+"}";
+               ",\"medicalId\":"+jstr(d.medicalId)+
+               // v1.78.0: let the JS badge performers in search results
+               ",\"isPerformer\":"+(d.isPerformer?std::string("true"):std::string("false"))+"}";
             if(n>=50) break;
         }
         o+="]}"; return o;

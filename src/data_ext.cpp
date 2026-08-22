@@ -509,6 +509,8 @@ static DoctorDef parseKvDoctor(const std::wstring& block){
         else if(k==L"contractType") d.contractType=_wtoi(v.c_str());
         else if(k==L"emergencyContract") d.emergencyContract=v;
         else if(k==L"accounting") d.accounting=v;
+        // v1.78.0: missing key (old files) keeps the ctor default → performer.
+        else if(k==L"isPerformer") d.isPerformer=(v!=L"0");
     }
     d.name=name; d.specialty=sp;
     if(!sv.empty()) for(auto&s:dx_split(sv,L';')) if(!trim(s).empty()) d.services.push_back(trim(s));
@@ -571,6 +573,7 @@ bool saveDoctors(const std::vector<DoctorDef>& doctors){
         out += L"contractType="+std::to_wstring(d.contractType)+L"\r\n";
         out += L"emergencyContract="+d.emergencyContract+L"\r\n";
         out += L"accounting="+d.accounting+L"\r\n";
+        out += L"isPerformer="+std::wstring(d.isPerformer?L"1":L"0")+L"\r\n";
         out += L"\r\n";
     }
     return writeFileUtf8(docsPath(),out,false);

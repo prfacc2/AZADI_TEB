@@ -9,8 +9,11 @@
 #include <wininet.h>
 #include <stdio.h>
 
+// v1.78.0: the updater now follows THIS repository (prfacc2/Darman_PLUST,
+// main branch) — it used to point at the legacy AZADI_TEB repo, so the in-app
+// updater kept fetching the stale build from there.
 static const wchar_t* DEFAULT_UPDATE_URL =
-    L"https://raw.githubusercontent.com/prfacc2/AZADI_TEB/genspark_ai_developer/update/version.txt";
+    L"https://raw.githubusercontent.com/prfacc2/Darman_PLUST/main/update/version.txt";
 
 static std::string httpGet(const std::wstring& url, bool* okOut){
     *okOut = false;

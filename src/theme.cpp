@@ -85,8 +85,10 @@ void applyTheme(bool dark){
         g_theme.inputBg     = RGB(0xF7, 0xFA, 0xFE); // tinted well (just above bg)
         g_theme.inputText   = RGB(0x23, 0x30, 0x42);
         g_theme.hover       = RGB(0xEA, 0xF4, 0xFF); // #EAF4FF soft accent wash on hover
-        g_theme.headerTop   = RGB(0xFF, 0xFF, 0xFF);
-        g_theme.headerBot   = RGB(0xEA, 0xF4, 0xFF); // header reads as its own layer
+        // v1.78.0: the header was pure white → nearly white (read as «سفید یک
+        // دست»). It is now a real soft-blue band with visible depth.
+        g_theme.headerTop   = RGB(0xF6, 0xF9, 0xFE);
+        g_theme.headerBot   = RGB(0xDA, 0xE7, 0xF7); // header reads as its own layer
         g_infoAccent  = RGB(0x7C, 0x56, 0xE4);    // violet (distinct, non-red)
         g_infoAccent2 = RGB(0x5E, 0x42, 0xD0);
         // v1.77: the calm/warm eye-comfort palettes were RETIRED — the app now
@@ -415,6 +417,10 @@ struct BtnData {
     COLORREF bg;     // literal colour (only used when bgToken==BBG_EXPLICIT)
     int      bgToken;// which live theme colour to paint behind the corners
     int imgIcon;     // RCDATA id of a raster icon (0 = use vector `icon`)
+    // v1.78.0: optional per-button accent (0 = theme accent). Lets twin cards
+    // on the welcome screen carry distinct brand hues (reception blue /
+    // management violet) instead of one shared accent.
+    COLORREF accentOv;
 };
 // resolve the live background colour for a button from its semantic token.
 static COLORREF btnBgColor(const BtnData* d){
@@ -442,10 +448,30 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
         d->bg    = CLR_INVALID;
         d->bgToken = BBG_PARENT;
         d->imgIcon = 0;
+        d->accentOv = 0;
         if(cs->lpszName) d->text = cs->lpszName;
         SetWindowLongPtrW(h, GWLP_USERDATA, (LONG_PTR)d);
         return TRUE; }
     case WM_NCDESTROY: delete d; break;
+    case WM_SIZE: {
+        // v1.78.0: GHOST bar buttons (header gear / calculator / exit) get a
+        // real ROUNDED WINDOW REGION. Until now their corners were faked by
+        // filling the square client rect with a static "header midpoint"
+        // colour — but the header is a vertical gradient, so a sharp-cornered
+        // patch stayed visible behind the rounded button. Clipping the window
+        // to the button's own silhouette makes the corners truly transparent:
+        // the parent's live gradient shows through at every Y, on every theme.
+        if(d && d->style==BS_GHOST){
+            int bw=LOWORD(l), bh2=HIWORD(l);
+            if(bw>0 && bh2>0){
+                int rad=bh2/3;
+                if(rad>S(14)) rad=S(14);
+                if(rad<S(6))  rad=S(6);
+                HRGN rgn=CreateRoundRectRgn(0,0,bw+1,bh2+1,rad*2+1,rad*2+1);
+                SetWindowRgn(h,rgn,TRUE);   // the system owns the region now
+            }
+        }
+        break; }
     case WM_SETTEXT:
         if(d){ d->text = (const wchar_t*)l; InvalidateRect(h,NULL,TRUE); }
         return TRUE;
@@ -548,10 +574,12 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
         case BS_OUTLINE:
             fill = hv ? g_theme.hover : g_theme.surface;
             txt  = readable(fill, g_theme.text); bord = g_theme.border; break;
-        case BS_CARD:
-            fill = hv ? g_theme.hover : g_theme.surface;
+        case BS_CARD: {
+            // v1.78.0: per-button accent override (0 → theme accent).
+            COLORREF cardAcc = (d && d->accentOv) ? d->accentOv : g_theme.accent;
+            fill = hv ? blendColor(g_theme.hover, cardAcc, 10) : g_theme.surface;
             txt  = readable(fill, g_theme.text);
-            bord = hv ? g_theme.accent : blendColor(g_theme.border, g_theme.accent, 22); break;
+            bord = hv ? cardAcc : blendColor(g_theme.border, cardAcc, 26); break; }
         default: // ghost
             fill = hv ? g_theme.hover : g_theme.surface2;
             txt  = readable(fill, hv ? g_theme.text : g_theme.textDim);
@@ -639,16 +667,20 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
             gpGradRoundRect(dc, rr, rad,
                 blendColor(g_theme.surfaceTop, f, 45), f, bd);
         } else if(st==BS_CARD){
-            // v1.60.0 modern card: soft elevation shadow, then a gentle
-            // surface gradient; hover lifts the card with an accent halo.
-            // v1.77: a touch more elevation + a soft top sheen so the welcome
-            // cards read as moulded, lit surfaces with a crisp branded edge
-            // (the resting border now carries a whisper of the accent).
-            gpShadow(dc, rr, rad, hv?S(13):S(8), hv?96:54);
+            // v1.78.0 CARD refresh — per-card brand accent (accentOv), tinted
+            // elevation and a livelier hover: the body warms toward the accent,
+            // the border saturates, and the icon badge flips to a solid brand
+            // medallion with a white glyph (see the content block below).
+            COLORREF cardAcc  = (d && d->accentOv) ? d->accentOv : g_theme.accent;
+            // elevation — tinted with the card's own hue so it reads as
+            // coloured light, not grey dirt.
+            gpShadowColor(dc, rr, rad, hv?S(14):S(8), hv?88:48, cardAcc);
             // v1.66.0: unconditional GDI base before GDI+ decoration
-            fillRoundRect(dc, rr, rad*2, hv?g_theme.hover:g_theme.surface, CLR_INVALID);
-            gpGradRoundRect(dc, rr, rad, g_theme.surfaceTop,
-                hv?g_theme.hover:g_theme.surface, bord);
+            fillRoundRect(dc, rr, rad*2,
+                hv?blendColor(g_theme.hover,cardAcc,10):g_theme.surface, CLR_INVALID);
+            gpGradRoundRect(dc, rr, rad,
+                hv?blendColor(g_theme.surfaceTop,cardAcc,10):g_theme.surfaceTop,
+                hv?blendColor(g_theme.hover,cardAcc,14):g_theme.surface, bord);
             // v1.77: soft top sheen — a white wash over the upper ~40% so the
             // card has a subtle highlight (lit edge on the dark theme, gentle
             // sheen on the light theme) instead of a flat sheet.
@@ -660,7 +692,7 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
             if(hv){
                 // accent glow ring just outside the border (drawn under text)
                 RECT halo=rr; InflateRect(&halo,S(1),S(1));
-                gpRoundRect(dc, halo, rad+S(1), CLR_INVALID, g_theme.accent);
+                gpRoundRect(dc, halo, rad+S(1), CLR_INVALID, cardAcc);
             }
         } else {
             // BS_GHOST — the borderless bar/toolbar button. At rest it is a
@@ -670,9 +702,12 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
             bool danger = (d && d->icon==ICO_X && hv);
             COLORREF acc = danger ? g_theme.danger : g_theme.accent;
             if(hv && !dn){
-                // v1.66.0: unconditional GDI base before GDI+ decoration
+                // v1.78.0: the soft tinted shadow was dropped — the ghost button
+                // now has a real rounded window region (see WM_SIZE), so any
+                // shadow ring would be hard-clipped at the silhouette. A clean
+                // top-lit pill + accent hairline reads better and never shows
+                // a clipped halo.
                 fillRoundRect(dc, rr, rad*2, fill, CLR_INVALID);
-                gpShadowColor(dc, rr, rad, S(5), 46, acc);
                 gpGradRoundRect(dc, rr, rad,
                     blendColor(fill, RGB(255,255,255), danger?0:16), fill,
                     blendColor(fill, acc, danger?0:34));
@@ -718,28 +753,38 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
             if(by < rr.top + S(10)) by = rr.top + S(10);
 
             if(d && d->icon){
+                COLORREF cardAcc  = d->accentOv ? d->accentOv : g_theme.accent;
+                COLORREF cardAccH = d->accentOv ? blendColor(d->accentOv, RGB(255,255,255), 24)
+                                                : g_theme.accentHover;
                 RECT br={cw/2-bd/2, by, cw/2+bd/2, by+bd};
-                COLORREF badgeBg = blendColor(g_theme.surface,
-                    hv?g_theme.accentHover:g_theme.accent, hv?34:18);
-                // hovering lifts the badge with a soft accent halo so the whole
-                // card feels interactive, not just the border.
                 if(hv){
+                    // hovering flips the badge to a SOLID brand medallion with a
+                    // white glyph + a soft halo — the card reads fully alive.
                     RECT halo=br; InflateRect(&halo,S(5),S(5));
                     gpFillAlpha(dc, halo, (bd+S(10))/2,
-                        blendColor(g_theme.accent, g_theme.surface, 40), 60);
+                        blendColor(cardAcc, g_theme.surface, 40), 70);
+                    fillRoundRect(dc, br, bd, cardAcc, CLR_INVALID);
+                    gpGradRoundRect(dc, br, bd/2, cardAccH, cardAcc, CLR_INVALID);
+                    int isz=(bd*52)/100;
+                    RECT ir={cw/2-isz/2, br.top+(bd-isz)/2,
+                             cw/2+isz/2, br.top+(bd-isz)/2+isz};
+                    drawIcon(dc, d->icon, ir, RGB(255,255,255), S(2)+1);
+                } else {
+                    COLORREF badgeBg = blendColor(g_theme.surface, cardAcc, 20);
+                    gpShadowColor(dc, br, bd/2, S(4), 34, cardAcc);
+                    fillRoundRect(dc, br, bd, badgeBg, CLR_INVALID);
+                    gpGradRoundRect(dc, br, bd/2,
+                        blendColor(g_theme.surfaceTop, badgeBg, 55), badgeBg,
+                        blendColor(g_theme.border,cardAcc,38));
+                    int isz=(bd*52)/100;
+                    RECT ir={cw/2-isz/2, br.top+(bd-isz)/2,
+                             cw/2+isz/2, br.top+(bd-isz)/2+isz};
+                    drawIcon(dc, d->icon, ir, cardAcc, S(2)+1);
                 }
-                gpGradRoundRect(dc, br, bd/2,
-                    blendColor(g_theme.surfaceTop, badgeBg, 55), badgeBg,
-                    hv?g_theme.accent:blendColor(g_theme.border,g_theme.accent,30));
-                int isz=(bd*52)/100;
-                RECT ir={cw/2-isz/2, br.top+(bd-isz)/2,
-                         cw/2+isz/2, br.top+(bd-isz)/2+isz};
-                drawIcon(dc, d->icon, ir,
-                    hv?g_theme.accentHover:g_theme.accent, S(2)+1);
             }
             int ty = by + bd + gap1;
             SelectObject(dc, g_fTitle);
-            SetTextColor(dc, hv?g_theme.accent:txt);
+            SetTextColor(dc, hv?((d && d->accentOv)?d->accentOv:g_theme.accent):txt);
             RECT tr = {S(8), ty, cw-S(8), ty+tH};
             DrawTextW(dc, d?d->text.c_str():L"", -1, &tr,
                 DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
@@ -754,7 +799,8 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
             if(hv){
                 int chv=S(11), cyv=rr.bottom-S(16);
                 RECT cr={cw/2-chv/2, cyv-chv/2, cw/2+chv/2, cyv+chv/2};
-                drawIcon(dc, ICO_CHEVRON, cr, g_theme.accent, S(2));
+                drawIcon(dc, ICO_CHEVRON, cr,
+                    (d && d->accentOv)?d->accentOv:g_theme.accent, S(2));
             }
         } else {
             bool hasText = d && !d->text.empty();
@@ -867,6 +913,14 @@ void setFlatButtonHeaderMid(HWND btn){
     if(!d) return;
     d->bgToken = BBG_HEADERMID;
     InvalidateRect(btn,NULL,TRUE);
+}
+//  v1.78.0: give a BS_CARD button its own brand accent (border, badge, halo,
+//  hover title). Pass 0 to fall back to the theme accent. Used by the welcome
+//  screen's twin entry cards (reception blue / management violet).
+void setFlatButtonAccent(HWND btn, COLORREF accent){
+    if(!btn || !IsWindow(btn)) return;
+    BtnData* d=(BtnData*)GetWindowLongPtrW(btn,GWLP_USERDATA);
+    if(d){ d->accentOv = accent; InvalidateRect(btn,NULL,TRUE); }
 }
 //  v1.4.1: give a flat button a real raster icon (RCDATA id). Pass 0 to clear
 //  and fall back to the vector icon.

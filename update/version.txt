@@ -1,2 +1,2 @@
-1.77.0
-https://github.com/prfacc2/AZADI_TEB/releases/download/v1.77.0/DarmanPlus.exe
+1.78.0
+https://github.com/prfacc2/Darman_PLUST/releases/download/v1.78.0/DarmanPlus.exe

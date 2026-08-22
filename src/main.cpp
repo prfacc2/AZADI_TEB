@@ -310,6 +310,11 @@ static LRESULT CALLBACK homeProc(HWND h, UINT m, WPARAM w, LPARAM l){
             BS_CARD, 0,0,10,10, L"پذیرش بیمار، خدمات و صدور قبض");
         HWND mg=createFlatButton(h, ID_HM_MANAGE, L"حساب مدیریت", ICO_PEOPLE,
             BS_CARD, 0,0,10,10, L"گزارش‌ها و خدمات و مدیریت");
+        // v1.78.0: distinct brand hues per account — reception carries the
+        // clinic blue, management a calm violet, so the two entry cards are
+        // recognisable at a glance (border / badge / halo / hover title).
+        setFlatButtonAccent(r,  RGB(0x19,0x76,0xF3));   // پذیرش — blue
+        setFlatButtonAccent(mg, RGB(0x7C,0x56,0xE4));   // مدیریت — violet
         // the cards sit ON the hero panel, so their antialiased corners must
         // blend into the panel surface (its lower band == homePanelBot()) — not
         // the page background. This is the definitive fix for the chipped/white
@@ -869,6 +874,19 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
             if(zL < bandL) zL = bandL;
             int zR = zL + zoneW;
             if(zR > bandR && bandR>bandL) { zR = bandR; }
+            // v1.78.0: the clock+date sit inside a frosted glass pill so the
+            // header's live metadata reads as a designed element, not floating
+            // text. The pill tone derives from the header gradient stops, so it
+            // blends on BOTH themes automatically.
+            {
+                RECT pl={zL+S(28), S(6), zR-S(28), mainBarH()-S(6)};
+                int prad=(pl.bottom-pl.top)/2;
+                COLORREF pTop = blendColor(g_theme.headerTop, RGB(255,255,255), g_dark?6:60);
+                COLORREF pBot = blendColor(g_theme.headerBot, RGB(255,255,255), g_dark?0:22);
+                gpShadowColor(dc, pl, prad, S(4), g_dark?60:26, g_theme.accent);
+                gpGradRoundRect(dc, pl, prad, pTop, pBot,
+                    blendColor(g_theme.border, g_theme.accent, 28));
+            }
             // clock (centred, bold) — band tuned for the compact S(56) header
             SetTextColor(dc,g_theme.accent);
             SelectObject(dc,g_fMono);

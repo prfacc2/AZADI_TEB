@@ -38,6 +38,7 @@
     queue: [],             /* active صندوق/پذیرش queue rows */
     queueKind: 'unpaid',   /* independent file-backed queue selected by tabs */
     doctors: [],
+    performers: [],        /* v1.78.0: cached «انجام دهنده» list (isPerformer doctors) */
     ps: { P: 0, S: 0 },
     mode: 'simple',
     zoom: 80,
@@ -444,7 +445,18 @@
     if (!body) return;
     setText($('svcCount'), toFa(state.services.length) + ' ردیف');
     if (!state.services.length) {
-      body.innerHTML = '<tr><td colspan="11" class="empty">خدمتی افزوده نشده است</td></tr>';
+      /* v1.78.0: designed empty state — a soft tinted panel with icon, title
+         and hint instead of one plain line on a white sheet. */
+      body.innerHTML =
+        '<tr class="svc-empty-row"><td colspan="11" class="empty svc-empty-cell">' +
+          '<div class="svc-empty">' +
+            '<span class="se-ico"><svg viewBox="0 0 24 24" width="30" height="30">' +
+              '<path fill="currentColor" d="M19 3h-4.2C14.4 1.8 13.3 1 12 1s-2.4.8-2.8 2H5a2 2 0 00-2 2v15a2 2 0 002 2h14a2 2 0 002-2V5a2 2 0 00-2-2zm-7 0a1 1 0 110 2 1 1 0 010-2zm-1.5 14.5l-3-3 1.4-1.4 1.6 1.6 4.6-4.6 1.4 1.4-6 6z"/>' +
+            '</svg></span>' +
+            '<b>هنوز خدمتی اضافه نشده است</b>' +
+            '<span class="se-sub">از «جستجوی خدمت» بالای جدول استفاده کنید یا روی «افزودن خدمت +» بزنید</span>' +
+          '</div>' +
+        '</td></tr>';
       return;
     }
     var html = '', i, s;
@@ -604,6 +616,84 @@
     Bridge.call('doctor.stats', { name: name }).then(function (r) {
       updatePS(r || { P: 0, S: 0 });
     });
+  }
+
+  /* ---------------------------------------------------------------------- *
+     v1.78.0 — «انجام دهنده» (performer) wiring.
+     داستان: بیمار از سمت «پزشک معالج» می‌آید (ارجاع — جستجو با کد نظام پزشکی
+     در میان همه پزشکان)، اما «انجام دهنده» کسی است که بیمار پیش او ویزیت
+     می‌شود. این فهرست فقط پزشکانی را نشان می‌دهد که در مدیریت تیک «تعریف به
+     عنوان انجام دهنده» دارند (پیش‌فرض برای همه فعال است).
+     قبل از این نسخه کمبوی #perfname هرگز پر نمی‌شد — از صفر وصل شده است.
+     ---------------------------------------------------------------------- */
+  function fillPerformers(keepSel) {
+    var sel = $('perfname'); if (!sel) return;
+    var prev = keepSel ? trimStr(sel.value) : '';
+    Bridge.call('doctor.performers', {}).then(function (r) {
+      var rows = (r && r.rows) || [];
+      state.performers = rows;
+      var h = '<option value="">— انتخاب —</option>', i;
+      for (i = 0; i < rows.length; i++) {
+        var nm = rows[i].name || '';
+        var label = nm + (rows[i].specialty ? ' — ' + rows[i].specialty : '');
+        h += '<option value="' + esc(nm) + '">' + esc(label) + '</option>';
+      }
+      sel.innerHTML = h;
+      /* keep the current selection if it is still a valid performer */
+      if (prev) {
+        for (i = 0; i < sel.options.length; i++) {
+          if (sel.options[i].value === prev) { sel.selectedIndex = i; break; }
+        }
+      }
+    });
+  }
+  /* picking a performer name → mirror its کد نظام پزشکی (یا کد فهرست) into the
+     numeric code box, exactly like the native form does. */
+  function mirrorPerfCode() {
+    var nm = $('perfname') ? trimStr($('perfname').value) : '';
+    var box = $('perfcode'); if (!box) return;
+    if (!nm) { box.value = ''; return; }
+    var rows = state.performers || [], i;
+    for (i = 0; i < rows.length; i++) {
+      if ((rows[i].name || '') === nm) {
+        box.value = toFa(rows[i].medicalId || rows[i].code || '');
+        return;
+      }
+    }
+  }
+  /* typing a code → resolve to the matching performer and select it.
+     While TYPING we only snap on an EXACT کد نظام پزشکی / code match (so
+     «142536» never jumps after the first digit); Enter may take the first
+     (best) partial row. */
+  var perfTimer = null;
+  function resolvePerfCode(immediate) {
+    var box = $('perfcode'); if (!box) return;
+    var q = toEn(trimStr(box.value)).replace(/\s+/g, '');
+    if (!q) return;
+    var run = function () {
+      Bridge.call('doctor.search', { q: q, code: q, role: 'performer' }).then(function (r) {
+        var rows = (r && r.rows) || [];
+        if (!rows.length) return;
+        var d = null, i;
+        if (immediate) d = rows[0];
+        else {
+          for (i = 0; i < rows.length; i++) {
+            if (toEn(rows[i].medicalId || '') === q || toEn(rows[i].code || '') === q) { d = rows[i]; break; }
+          }
+          if (!d) return;             /* no exact match yet — keep typing */
+        }
+        var sel = $('perfname');
+        if (sel) {
+          for (i = 0; i < sel.options.length; i++) {
+            if (sel.options[i].value === (d.name || '')) { sel.selectedIndex = i; break; }
+          }
+        }
+        box.value = toFa(d.medicalId || d.code || q);
+      });
+    };
+    if (immediate) { run(); return; }
+    if (perfTimer) clearTimeout(perfTimer);
+    perfTimer = setTimeout(run, 220);
   }
 
   function renderSvcSuggest(rows) {
@@ -966,6 +1056,16 @@
     }
     on($('doc2code'), 'input', docLiveSearch);
     on($('doc2code'), 'keyup', docLiveSearch);
+
+    /* v1.78.0: «انجام دهنده» — the combo lists ONLY performer-flagged doctors
+       (filled by fillPerformers at boot / after clear). Name→code mirroring on
+       selection; code→name resolution on Enter / typing (debounced). */
+    on($('perfname'), 'change', function () { mirrorPerfCode(); });
+    on($('perfcode'), 'keydown', function (e) {
+      e = e || window.event;
+      if ((e.keyCode || e.which) === 13) { if (e.preventDefault) e.preventDefault(); resolvePerfCode(true); }
+    });
+    on($('perfcode'), 'input', function () { resolvePerfCode(false); });
 
     /* service live search */
     var svcTimer = null;
@@ -1582,7 +1682,9 @@
     var i;
     for (i = 0; i < ids.length; i++) { if ($(ids[i])) $(ids[i]).value = ''; }
     if ($('doc2name')) $('doc2name').value = '';
-    if ($('perfname')) $('perfname').innerHTML = '<option value="">— انتخاب —</option>';
+    /* v1.78.0: refill the performer combo (it was previously left with only the
+       placeholder — after one clear it stayed empty for the whole session). */
+    fillPerformers(false);
     if ($('insSuppPct')) $('insSuppPct').value = '0';
     if ($('insMain')) $('insMain').selectedIndex = 0;
     if ($('hasIns')) $('hasIns').checked = false;
@@ -1749,6 +1851,8 @@
       if ($('apptShift') && r.shift) { var si; for(si=0;si<$('apptShift').options.length;si++) if($('apptShift').options[si].text===r.shift){$('apptShift').selectedIndex=si;break;} }
       /* invoice starts at ZERO until a service is added */
       renderServices(); recompute();
+      /* v1.78.0: load the «انجام دهنده» combo (performer-flagged doctors). */
+      fillPerformers(false);
       refreshQueue();
       setSync('ok', 'همگام با برنامه');
       state.ready = true;

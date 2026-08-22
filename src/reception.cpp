@@ -1439,6 +1439,9 @@ static void enableNidLookup(HWND e){
 
 // forward decls used by the service/doctor subclass procs
 static bool applyDocByCode(HWND eCode, HWND cList);
+// v1.78.0: performer-combo variants (filtered list, item-data backed)
+static bool applyPerfByCode(HWND eCode, HWND cList);
+static void mirrorPerfCodeFromList(HWND eCode, HWND cList);
 static void tabPageLayout(HWND h, TabPage* t);
 
 // ------------------------------------------------------------------
@@ -1563,7 +1566,12 @@ static LRESULT CALLBACK docCodeProc(HWND e, UINT m, WPARAM w, LPARAM l){
         if(t){
             HWND list=NULL, nxt=NULL;
             if(e==t->eDoc2Code){ list=t->cDoc2List; nxt=t->ePerfCode; }
-            else if(e==t->ePerfCode){ list=t->cPerfList; nxt=t->cIns; }
+            else if(e==t->ePerfCode){
+                // v1.78.0: filtered performer combo → resolve via item-data.
+                if(applyPerfByCode(e,t->cPerfList)) InvalidateRect(page,NULL,FALSE);
+                SetFocus(t->cIns);
+                return 0;
+            }
             if(list){ applyDocByCode(e,list); InvalidateRect(page,NULL,FALSE); }
             if(nxt) SetFocus(nxt);
         }
@@ -1859,6 +1867,39 @@ static void mirrorDocCodeFromList(HWND eCode, HWND cList){
     int sel=(int)SendMessageW(cList,CB_GETCURSEL,0,0);
     if(sel<0) return;
     wchar_t code[16]; swprintf(code,16,L"%d",sel+1);
+    SetWindowTextW(eCode,toFaDigits(code).c_str());
+}
+// v1.78.0: the performer combo lists ONLY doctors flagged isPerformer, so the
+// combo row no longer equals the doctors-list index. Each row carries the
+// source index as item-data; these variants resolve the numeric «کد انجام
+// دهنده» through it (the code keeps its 1-based meaning over the FULL list,
+// identical to what the embedded web admission returns for performers).
+static bool applyPerfByCode(HWND eCode, HWND cList){
+    if(!eCode || !cList) return false;
+    wchar_t cb[32]={0}; GetWindowTextW(eCode,cb,32);
+    std::wstring c; for(wchar_t ch:std::wstring(cb)){
+        if(ch>=L'۰'&&ch<=L'۹') c+=(wchar_t)(L'0'+(ch-L'۰'));
+        else if(ch>=L'0'&&ch<=L'9') c+=ch;
+    }
+    if(c.empty()) return false;
+    int want=_wtoi(c.c_str())-1;
+    int n=(int)SendMessageW(cList,CB_GETCOUNT,0,0);
+    for(int i=0;i<n;i++){
+        if((int)SendMessageW(cList,CB_GETITEMDATA,i,0)==want){
+            SendMessageW(cList,CB_SETCURSEL,i,0);
+            wchar_t code[16]; swprintf(code,16,L"%d",want+1);
+            SetWindowTextW(eCode,toFaDigits(code).c_str());
+            return true;
+        }
+    }
+    return false;
+}
+static void mirrorPerfCodeFromList(HWND eCode, HWND cList){
+    if(!eCode || !cList) return;
+    int sel=(int)SendMessageW(cList,CB_GETCURSEL,0,0);
+    if(sel<0) return;
+    int src=(int)SendMessageW(cList,CB_GETITEMDATA,sel,0);
+    wchar_t code[16]; swprintf(code,16,L"%d",src+1);
     SetWindowTextW(eCode,toFaDigits(code).c_str());
 }
 
@@ -2657,15 +2698,25 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
         // populate the doctor / performer list combos from the doctors store
         {
             auto docs=loadDoctors();
-            for(auto& d: docs){
+            int perfRows=0;
+            for(size_t di=0;di<docs.size();di++){
+                auto& d=docs[di];
                 std::wstring s=d.name+ (d.specialty.empty()?L"":(L" — "+d.specialty));
                 SendMessageW(t->cDoc2List,CB_ADDSTRING,0,(LPARAM)s.c_str());
-                SendMessageW(t->cPerfList,CB_ADDSTRING,0,(LPARAM)s.c_str());
+                // v1.78.0: «انجام دهنده» فقط پزشکان تیک‌دار «تعریف به عنوان
+                // انجام دهنده» را نشان می‌دهد (پیش‌فرض: همه). ردیف کمبو اندیس
+                // اصلی پزشک را در item-data نگه می‌دارد تا کد عددی همان معنای
+                // ۱-مبنای لیست کامل را داشته باشد.
+                if(d.isPerformer){
+                    int row=(int)SendMessageW(t->cPerfList,CB_ADDSTRING,0,(LPARAM)s.c_str());
+                    if(row>=0) SendMessageW(t->cPerfList,CB_SETITEMDATA,(WPARAM)row,(LPARAM)di);
+                    perfRows++;
+                }
             }
-            if(!docs.empty()){
+            if(!docs.empty())
                 SendMessageW(t->cDoc2List,CB_SETCURSEL,0,0);
+            if(perfRows)
                 SendMessageW(t->cPerfList,CB_SETCURSEL,0,0);
-            }
         }
         SendMessageW(t->cApptShift,CB_ADDSTRING,0,(LPARAM)L"صبح");
         SendMessageW(t->cApptShift,CB_ADDSTRING,0,(LPARAM)L"عصر");
@@ -3152,13 +3203,13 @@ static LRESULT CALLBACK tabPageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             if(applyDocByCode(t->eDoc2Code,t->cDoc2List)) InvalidateRect(h,NULL,FALSE);
         }
         else if((id==ID_F_PERF_CODE) && code==EN_KILLFOCUS){
-            if(applyDocByCode(t->ePerfCode,t->cPerfList)) InvalidateRect(h,NULL,FALSE);
+            if(applyPerfByCode(t->ePerfCode,t->cPerfList)) InvalidateRect(h,NULL,FALSE);
         }
         else if(id==ID_F_DOC2_LIST && code==CBN_SELCHANGE){
             mirrorDocCodeFromList(t->eDoc2Code,t->cDoc2List);
         }
         else if(id==ID_F_PERF_LIST && code==CBN_SELCHANGE){
-            mirrorDocCodeFromList(t->ePerfCode,t->cPerfList);
+            mirrorPerfCodeFromList(t->ePerfCode,t->cPerfList);
         }
         else if(id==ID_F_SUPP_PCT2 && code==EN_CHANGE){
             recalc(t); InvalidateRect(h,NULL,FALSE);

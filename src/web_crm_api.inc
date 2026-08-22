@@ -63,6 +63,8 @@ static std::string crmDoctorJson(const DoctorDef& d, int idx){
     o+="\"docType\":"+jnum(d.docType)+",";
     o+="\"docCode\":"+jstr(d.docCode)+",";
     o+="\"active\":"; o+=(d.active?"true":"false"); o+=",";
+    // v1.78.0: «تعریف به عنوان انجام دهنده» flag for the admission performer list
+    o+="\"isPerformer\":"; o+=(d.isPerformer?"true":"false"); o+=",";
     o+="\"medicalId\":"+jstr(d.medicalId)+",";
     o+="\"namePrefix\":"+jstr(d.namePrefix)+",";
     o+="\"firstName\":"+jstr(d.firstName)+",";
@@ -617,6 +619,8 @@ static std::string crmApi(const std::string& verb, const std::string& body){
         if(jsonGetNumber(body,"docType",n))          d.docType=(int)n;
         if(jsonGetString(body,"docCode",t))          d.docCode=u82w(t);
         d.active=jsonGetBool(body,"active",true);
+        // v1.78.0: default ON — a doctor is a performer unless explicitly unticked.
+        d.isPerformer=jsonGetBool(body,"isPerformer",true);
         if(jsonGetString(body,"medicalId",t))        d.medicalId=u82w(t);
         if(jsonGetString(body,"namePrefix",t))       d.namePrefix=u82w(t);
         if(jsonGetString(body,"firstName",t))        d.firstName=u82w(t);

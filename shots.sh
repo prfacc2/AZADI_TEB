@@ -17,19 +17,32 @@ fi
 mkdir -p obj shots
 echo "[build dbg] resources..."
 $RES -O coff -i src/app.rc -o obj/app.res
+# v1.78.0: resynced with build.sh — the embedded-web modules (web_admission,
+# web_crm, web_pages, web_thread_pool, web_ping_api, blacklist, insurance_defs,
+# ui_kit, sections, print_designer, ...) were missing, so the debug exe failed
+# to link against the WebAdmission_* / WebCrm_* entry points main.cpp calls.
 SRCS="src/main.cpp src/util.cpp src/handlers.cpp src/theme.cpp src/users.cpp \
       src/billing.cpp src/calculator.cpp src/dialogs.cpp src/update.cpp \
       src/admin.cpp src/reception.cpp src/gdiplus.cpp src/settings.cpp \
-      src/printer.cpp src/employees.cpp src/data_ext.cpp src/appointment.cpp \
-      src/backup.cpp"
+      src/printer.cpp src/employees.cpp src/data_ext.cpp \
+      src/backup.cpp src/ui_kit.cpp src/backup_analyzer.cpp \
+      src/backup_log.cpp src/sections.cpp src/print_designer.cpp \
+      src/user_settings.cpp src/net_sync.cpp src/profile_requests.cpp \
+      src/backup_log_viewer.cpp src/backup_mtf.cpp src/saved_messages.cpp \
+      src/setup_splash.cpp src/web_designer.cpp src/services.cpp \
+      src/blacklist.cpp src/web_admission.cpp \
+      src/web_pages.cpp src/web_thread_pool.cpp src/web_ping_api.cpp \
+      src/web_crm.cpp src/insurance_defs.cpp"
 echo "[build dbg] compiling..."
 $CXX -std=c++17 -O2 -municode -mwindows -DAZ_DEBUG_BUILD \
     -D_WIN32_IE=0x0700 -static -static-libgcc -static-libstdc++ \
     -Wall -Wno-unused-variable -Wno-misleading-indentation -Wno-unused-function \
     $SRCS obj/app.res \
     -o build/DarmanPlus_dbg.exe \
-    -lcomctl32 -lcomdlg32 -lgdi32 -lgdiplus -luser32 -lshlwapi -lwininet \
-    -ladvapi32 -lshell32 -lwinspool -lole32 -luuid >/tmp/dbgbuild.log 2>&1 || { tail -30 /tmp/dbgbuild.log; exit 1; }
+    -lcomctl32 -lcomdlg32 -lgdi32 -lgdiplus -lmsimg32 -ldwmapi -luxtheme \
+    -luser32 -lshlwapi -lwininet -ladvapi32 -lshell32 -lwinspool \
+    -lole32 -loleaut32 -luuid -lversion -lwinmm -ldbghelp \
+    -lwinhttp -lurlmon -lcrypt32 -lwintrust -lwtsapi32 -lpsapi -lws2_32 >/tmp/dbgbuild.log 2>&1 || { tail -30 /tmp/dbgbuild.log; exit 1; }
 i686-w64-mingw32-strip build/DarmanPlus_dbg.exe
 echo "[build dbg] OK"
 

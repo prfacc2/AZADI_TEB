@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.77.0"
+#define APP_VERSION_W   L"1.78.0"
 
 // ----------------------------------------------------------- logging policy -
 //  RELEASE 1.2.0 (Section A): all general user-behavior logging is gated behind
@@ -151,6 +151,8 @@ void  setFlatButtonIcon(HWND btn, int icon);   // in-place icon swap (v1.1.0)
 //  corners in dark mode" bug on header/bar buttons). Pass CLR_INVALID to let
 //  the button ask its parent (default behaviour).
 void  setFlatButtonBg(HWND btn, COLORREF bg);
+//  v1.78.0: per-button brand accent for BS_CARD (0 = theme accent)
+void  setFlatButtonAccent(HWND btn, COLORREF accent);
 //  v1.77: blend a header button's rounded corners with the header GRADIENT
 //  (its vertical midpoint) instead of the flat headerTop colour — fixes the
 //  "white square behind the header gear/calculator icons" on the light theme.
@@ -935,7 +937,12 @@ struct DoctorDef {
     int  contractType;          // نوع قرار داد (0=... custom text below)
     std::wstring emergencyContract; // قرار پزشک اورژانس
     std::wstring accounting;    // حسابداری (free text)
-    DoctorDef():docType(0),active(true),printOnReceipt(true),contractType(0){}
+    // v1.78.0: «تعریف به عنوان انجام دهنده» — وقتی فعال است (پیش‌فرض برای همه)،
+    // این نیرو در فهرست «انجام دهنده» فرم پذیرش می‌آید؛ با غیرفعال‌کردن، فقط به‌عنوان
+    // پزشک معالج (ارجاع‌دهنده) قابل جستجو می‌ماند. کلید isPerformer= در doctors.dat؛
+    // نبودنش در فایل‌های قدیمی یعنی true (سازگاری رو‌به‌عقب).
+    bool isPerformer;
+    DoctorDef():docType(0),active(true),printOnReceipt(true),contractType(0),isPerformer(true){}
 };
 std::vector<DoctorDef> loadDoctors();          // seeds defaults if empty
 std::vector<DoctorDef> todaysDoctors();        // doctors on shift today

@@ -47,6 +47,9 @@
       { key: 'specialty', label: 'تخصص', render: function (r) { return Crm.esc(r.specialty || '—'); } },
       { key: 'docType', label: 'نوع', render: function (r) { return Crm.esc(r.docType === 1 ? 'پرستار' : 'پزشک'); } },
       { key: 'medicalId', label: 'کد نظام پزشکی', cls: 'c-mono', render: function (r) { return Crm.faDigits(Crm.esc(r.medicalId || '—')); } },
+      // v1.78.0: «انجام دهنده» column — a doctor is on the admission performer
+      // list unless explicitly unticked in the edit form.
+      { key: 'isPerformer', label: 'انجام دهنده', render: function (r) { return Crm.pill(r.isPerformer !== false ? 'بله' : 'خیر', r.isPerformer !== false ? 'on' : 'off'); } },
       { key: 'active', label: 'وضعیت', render: function (r) { return Crm.pill(r.active ? 'فعال' : 'غیرفعال', r.active ? 'on' : 'off'); } },
       { key: 'ops', label: 'عملیات', render: function (r) {
           var b = Crm.el('span');
@@ -83,7 +86,9 @@
 
   function openModal(host, d) {
     var adding = !d;
-    if (!d) d = { docType: 0, active: true, printOnReceipt: true, contractType: 0, services: [] };
+    // v1.78.0: isPerformer defaults to TRUE for every new doctor — the clinic
+    // unticks it only for doctors who must NOT appear in «انجام دهنده».
+    if (!d) d = { docType: 0, active: true, printOnReceipt: true, contractType: 0, services: [], isPerformer: true };
     var m = Crm.modal(adding ? 'افزودن پزشک/پرستار' : 'ویرایش پزشک/پرستار', null);
     var body = m.body;
     var svc = (d.services || []).join('، ');
@@ -115,6 +120,10 @@
       field('dAddress', 'آدرس', d.address, '', true) +
       '<div class="crm-field"><label class="crm-check"><input type="checkbox" id="dActive" ' + (d.active ? 'checked' : '') + ' />فعال</label></div>' +
       '<div class="crm-field"><label class="crm-check"><input type="checkbox" id="dPrint" ' + (d.printOnReceipt ? 'checked' : '') + ' />چاپ در قبض</label></div>' +
+      // v1.78.0: the performer toggle. انجام‌دهنده = کسی که بیمار پیش او ویزیت/خدمت
+      // می‌شود؛ پزشک معالج = ارجاع‌دهنده (کد نظام پزشکی). جستجوی «پزشک معالج» همیشه
+      // همه پزشکان را می‌آورد؛ فهرست «انجام دهنده» فقط تیک‌دارها را.
+      '<div class="crm-field full"><label class="crm-check"><input type="checkbox" id="dIsPerf" ' + (d.isPerformer !== false ? 'checked' : '') + ' />تعریف به عنوان انجام دهنده <small style="color:#64748b">(در فهرست «انجام دهنده» پذیرش نمایش داده شود)</small></label></div>' +
       '</div>';
     var foot = Crm.el('div', 'crm-modal-foot');
     foot.innerHTML = '<button class="crm-btn ghost" id="mCancel">انصراف</button><button class="crm-btn primary" id="mSave">ذخیره</button>';
@@ -150,7 +159,8 @@
         address: Crm.$('dAddress').value,
         services: services,
         active: Crm.$('dActive').checked,
-        printOnReceipt: Crm.$('dPrint').checked
+        printOnReceipt: Crm.$('dPrint').checked,
+        isPerformer: Crm.$('dIsPerf').checked
       };
       if (!payload.name) { Crm.toast('نام نمایشی الزامی است.', 'err'); return; }
       Crm.call('crm.doctors.save', payload).then(function () {
