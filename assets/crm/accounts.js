@@ -75,11 +75,22 @@
 
   /* ---- page state ---------------------------------------------------------- */
   var st = { dept: '', q: '', picked: null,
-             fDept: '', fPerm: '', fQ: '' };
+             fDept: '', fPerm: '', fQ: '', users: [], depts: [] };
+
+  /* v1.79.0 review fix: filter changes re-render ONLY the accounts table —
+     the toolbar inputs keep their value AND focus (a full load() used to blank
+     the search box mid-typing and snap the selects back to «همه»). */
+  function renderAccountsTable(host) {
+    var box = Crm.$('accTableWrap');
+    if (!box) return;
+    box.innerHTML = '';
+    box.appendChild(buildAccountsTable(host));
+  }
 
   function load(host) {
     Crm.call('crm.employees.list', {}).then(function (d) {
-      render(host, d.rows || [], d.depts || []);
+      st.users = d.rows || []; st.depts = d.depts || [];
+      render(host, st.users, st.depts);
     }, function () {
       host.innerHTML = '';
       Crm.head(host, 'تعریف حساب کاربری', 'ساخت و مدیریت حساب‌های پرسنل');
@@ -108,15 +119,15 @@
       for (var i = 0; i < rows.length; i++) {
         var p = rows[i];
         var sel = st.picked && st.picked.code === p.code;
-        h += '<button type="button" class="crm-pick' + (sel ? ' sel' : '') + (p.username ? ' has-acc' : '') + '" data-code="' + Crm.esc(p.code) + '">' +
+        h += '<button type="button" class="crm-pickbtn' + (sel ? ' sel' : '') + (p.username ? ' has-acc' : '') + '" data-code="' + Crm.esc(p.code) + '">' +
           '<span class="crm-codechip">' + Crm.esc(p.code) + '</span>' +
-          '<span class="crm-pick-name"><b>' + Crm.esc((p.firstName || '') + ' ' + (p.lastName || '')) + '</b>' +
+          '<span class="crm-pickbtn-name"><b>' + Crm.esc((p.firstName || '') + ' ' + (p.lastName || '')) + '</b>' +
           '<small>' + Crm.esc(p.roleLabel || '') + (p.deptName ? ' — ' + Crm.esc(p.deptName) : ' — در حالت تعلیق') + '</small></span>' +
           (p.username ? '<span class="crm-pill on">' + Crm.esc(p.username) + '</span>' : '<span class="crm-pill off">بدون حساب</span>') +
         '</button>';
       }
       box.innerHTML = h;
-      var items = box.querySelectorAll('.crm-pick');
+      var items = box.querySelectorAll('.crm-pickbtn');
       for (var k = 0; k < items.length; k++) {
         (function (btn) {
           btn.onclick = function () {
@@ -143,6 +154,33 @@
     var dis = !st.picked || !!st.picked.username;
     var u = Crm.$('accUser'), ps = Crm.$('accPass'), sv = Crm.$('accSave');
     if (u) u.disabled = dis; if (ps) ps.disabled = dis; if (sv) sv.disabled = dis;
+  }
+
+  /* the accounts table — rebuilt ALONE on every filter change so the toolbar
+     inputs keep value + focus (see renderAccountsTable). */
+  function buildAccountsTable(host) {
+    return Crm.table([
+      { key: 'i', label: 'ردیف', render: function (r, i) { return Crm.faDigits('' + (i + 1)); } },
+      { key: 'username', label: 'نام کاربری', cls: 'c-mono', render: function (r) { return '<b class="crm-codechip">' + Crm.esc(r.username) + '</b>'; } },
+      { key: 'fullname', label: 'نام و نام خانوادگی', render: function (r) {
+          return '<button class="crm-link" data-person="' + Crm.esc(r.username) + '"><b>' + Crm.esc(r.fullname) + '</b></button>';
+        } },
+      { key: 'dept', label: 'بخش', render: function (r) { return Crm.esc(r.dept || '—'); } },
+      { key: 'position', label: 'مقام/سمت', render: function (r) { return Crm.esc(r.position || '—'); } },
+      { key: 'perms', label: 'دسترسی‌ها', render: function (r) {
+          var lbl = permsLabel(r.perms);
+          return Crm.pill(lbl, (!r.perms) ? 'on' : (r.perms === '-' ? 'off' : 'info'));
+        } },
+      { key: 'online', label: 'وضعیت', render: function (r) { return Crm.pill(r.online ? 'آنلاین' : '—', r.online ? 'on' : 'off'); } },
+      { key: 'ops', label: 'عملیات', render: function (r) {
+          var b = Crm.el('span');
+          b.innerHTML = '<button class="crm-row-btn" data-act="edit">دسترسی/رمز</button>' +
+                        '<button class="crm-row-btn danger" data-act="del">حذف</button>';
+          b.childNodes[0].onclick = function () { openPermsModal(host, r); };
+          b.childNodes[1].onclick = function () { del(host, r); };
+          return b;
+        } }
+    ], filterUsers(st.users, st.depts));
   }
 
   function render(host, users, depts) {
@@ -196,30 +234,9 @@
       '<span class="crm-search-ic"><svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M10 2a8 8 0 105.3 14L20 20.7 21.7 19l-4.7-4.7A8 8 0 0010 2zm0 2a6 6 0 110 12 6 6 0 010-12z"/></svg></span>';
     tb2.appendChild(fDept); tb2.appendChild(fPerm); tb2.appendChild(fQ);
     c2.appendChild(tb2);
-    c2.appendChild(Crm.table([
-      { key: 'i', label: 'ردیف', render: function (r, i) { return Crm.faDigits('' + (i + 1)); } },
-      { key: 'username', label: 'نام کاربری', cls: 'c-mono', render: function (r) { return '<b class="crm-codechip">' + Crm.esc(r.username) + '</b>'; } },
-      { key: 'fullname', label: 'نام و نام خانوادگی', render: function (r) {
-          return '<button class="crm-link" data-person="' + Crm.esc(r.username) + '"><b>' + Crm.esc(r.fullname) + '</b></button>';
-        } },
-      { key: 'dept', label: 'بخش', render: function (r) {
-          return Crm.esc(r.dept || '—');   /* deptId not on the user row; see sheet */
-        } },
-      { key: 'position', label: 'مقام/سمت', render: function (r) { return Crm.esc(r.position || '—'); } },
-      { key: 'perms', label: 'دسترسی‌ها', render: function (r) {
-          var lbl = permsLabel(r.perms);
-          return Crm.pill(lbl, (!r.perms) ? 'on' : (r.perms === '-' ? 'off' : 'info'));
-        } },
-      { key: 'online', label: 'وضعیت', render: function (r) { return Crm.pill(r.online ? 'آنلاین' : '—', r.online ? 'on' : 'off'); } },
-      { key: 'ops', label: 'عملیات', render: function (r) {
-          var b = Crm.el('span');
-          b.innerHTML = '<button class="crm-row-btn" data-act="edit">دسترسی/رمز</button>' +
-                        '<button class="crm-row-btn danger" data-act="del">حذف</button>';
-          b.childNodes[0].onclick = function () { openPermsModal(host, r); };
-          b.childNodes[1].onclick = function () { del(host, r); };
-          return b;
-        } }
-    ], filterUsers(users, depts)));
+    var tw = Crm.el('div'); tw.id = 'accTableWrap';
+    tw.appendChild(buildAccountsTable(host));
+    c2.appendChild(tw);
     host.appendChild(c2);
 
     /* ================= Card 3: بخش‌های سازمانی (kept from the old page) ===== */
@@ -264,9 +281,7 @@
     };
     Crm.$('accSave').onclick = function () { createAccount(host); };
     /* mode toggle: personnel-linked (default) vs direct management account */
-    var mgmtMode = false;
     function setMode(mgmt) {
-      mgmtMode = mgmt;
       st.picked = null;
       Crm.$('accModeP').className = 'crm-accmode-btn' + (mgmt ? '' : ' on');
       Crm.$('accModeM').className = 'crm-accmode-btn' + (mgmt ? ' on' : '');
@@ -281,12 +296,11 @@
     }
     Crm.$('accModeP').onclick = function () { setMode(false); };
     Crm.$('accModeM').onclick = function () { setMode(true); };
-    c1._setMgmt = function () { return mgmtMode; };
     /* wire card 2 filters */
-    Crm.$('afDept').onchange = function () { st.fDept = this.value; load(host); };
-    Crm.$('afPerm').onchange = function () { st.fPerm = this.value; load(host); };
+    Crm.$('afDept').onchange = function () { st.fDept = this.value; renderAccountsTable(host); };
+    Crm.$('afPerm').onchange = function () { st.fPerm = this.value; renderAccountsTable(host); };
     var fT = null;
-    Crm.$('afQ').oninput = function () { var v = this.value; if (fT) clearTimeout(fT); fT = setTimeout(function () { st.fQ = v; load(host); }, 240); };
+    Crm.$('afQ').oninput = function () { var v = this.value; if (fT) clearTimeout(fT); fT = setTimeout(function () { st.fQ = v; renderAccountsTable(host); }, 240); };
     /* wire card 3 */
     dAdd.onclick = function () {
       var nm = Crm.$('deptName').value;

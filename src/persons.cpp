@@ -128,28 +128,20 @@ std::vector<PersonDef> loadPersons(){
 
 static void savePersons(const std::vector<PersonDef>& v){
     std::wstring out;
+    auto kv=[&](const wchar_t* k, const std::wstring& v){ out+=k; out+=L"="; out+=v; out+=L"\r\n"; };
     for(auto& p:v){
-        out+=L"code="+p.code+L"\r\n";
-        out+=L"firstName="+p.firstName+L"\r\n";
-        out+=L"lastName="+p.lastName+L"\r\n";
-        out+=L"fatherName="+p.fatherName+L"\r\n";
-        out+=L"nationalId="+p.nationalId+L"\r\n";
-        out+=L"birthDate="+p.birthDate+L"\r\n";
-        out+=L"address="+p.address+L"\r\n";
-        out+=L"mobile="+p.mobile+L"\r\n";
-        out+=L"phone="+p.phone+L"\r\n";
-        out+=L"email="+p.email+L"\r\n";
-        out+=L"education="+p.education+L"\r\n";
-        out+=L"field="+p.field+L"\r\n";
-        out+=L"degree="+p.degree+L"\r\n";
+        kv(L"code",p.code);           kv(L"firstName",p.firstName);
+        kv(L"lastName",p.lastName);   kv(L"fatherName",p.fatherName);
+        kv(L"nationalId",p.nationalId); kv(L"birthDate",p.birthDate);
+        kv(L"address",p.address);     kv(L"mobile",p.mobile);
+        kv(L"phone",p.phone);         kv(L"email",p.email);
+        kv(L"education",p.education); kv(L"field",p.field);
+        kv(L"degree",p.degree);
         wchar_t rk[8]; swprintf(rk,8,L"%d",p.roleKind);
-        out+=L"roleKind="; out+=rk; out+=L"\r\n";
-        out+=L"roleCustom="+p.roleCustom+L"\r\n";
-        out+=L"position="+p.position+L"\r\n";
-        out+=L"deptId="+p.deptId+L"\r\n";
-        out+=L"photo="+p.photo+L"\r\n";
-        out+=L"username="+p.username+L"\r\n";
-        out+=L"created="+p.created+L"\r\n";
+        kv(L"roleKind",rk);           kv(L"roleCustom",p.roleCustom);
+        kv(L"position",p.position);   kv(L"deptId",p.deptId);
+        kv(L"photo",p.photo);         kv(L"username",p.username);
+        kv(L"created",p.created);
         out+=p.extraKv;                 // §H: keep unknown keys verbatim
         out+=L"\r\n";
     }
@@ -302,6 +294,8 @@ bool savePersonPhoto(const std::wstring& code, const std::string& bytes,
 bool loadPersonPhoto(const std::wstring& relPath, std::string& bytesOut,
                      std::wstring& mimeOut){
     if(relPath.empty()) return false;
+    // never let a hand-edited persons.dat escape the data dir
+    if(relPath.find(L"..")!=std::wstring::npos) return false;
     std::wstring full=dataDir()+L"\\"+relPath;
     HANDLE hf=CreateFileW(full.c_str(),GENERIC_READ,FILE_SHARE_READ,NULL,
                           OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);

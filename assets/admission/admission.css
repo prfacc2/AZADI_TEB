@@ -1299,32 +1299,7 @@ select.inp{background:#fbfdff;}
   -webkit-box-shadow:0 3px 10px rgba(18,58,114,.10);box-shadow:0 3px 10px rgba(18,58,114,.10);
 }
 .queue-hub-btn:hover{background:#eef5ff;border-color:#2f6fe4;color:#1d55bd;}
-/* v1.79.0: the launcher now lives on the RIGHT rail, centred between the
-   عملیات پذیرش and چاپ اسناد cards — a standalone element, part of neither.
-   It gets a soft brand-tinted pill so it reads as the page's queue hub. */
-.queue-hub-rail{
-  display:block;width:auto;min-width:86%;
-  margin:2px auto 10px;
-  border-radius:999px;height:44px;
-  background:#eaf2fd;
-  background:-webkit-linear-gradient(top,#f2f7fe 0%,#e2edfb 100%);
-  background:linear-gradient(180deg,#f2f7fe 0%,#e2edfb 100%);
-  border:1.5px solid #b8d0f0;color:#1d4ed8;font-weight:800;
-  -webkit-box-shadow:0 2px 8px rgba(31,95,214,.14),inset 0 1px 0 rgba(255,255,255,.8);
-  box-shadow:0 2px 8px rgba(31,95,214,.14),inset 0 1px 0 rgba(255,255,255,.8);
-  -ms-flex-pack:center;justify-content:center;
-}
-.queue-hub-rail:hover{
-  background:#dfebfb;
-  background:-webkit-linear-gradient(top,#e9f2fd 0%,#d3e4f8 100%);
-  background:linear-gradient(180deg,#e9f2fd 0%,#d3e4f8 100%);
-  border-color:#2f6fe4;color:#1e40af;
-  -webkit-box-shadow:0 4px 12px rgba(31,95,214,.22),inset 0 1px 0 rgba(255,255,255,.8);
-  box-shadow:0 4px 12px rgba(31,95,214,.22),inset 0 1px 0 rgba(255,255,255,.8);
-}
-.theme-dark .queue-hub-rail{background:#1d2c40;border-color:#3d5b80;color:#a8ccf5;
-  -webkit-box-shadow:none;box-shadow:none;}
-.theme-dark .queue-hub-rail:hover{background:#25364e;border-color:#5b83b8;color:#cfe4fb;}
+
 
 /* --------------------------------------------- 7. TABLES (high contrast) --- */
 .tbl-wrap{border:1px solid #d3dfee;border-top:none;}
@@ -1478,9 +1453,6 @@ body.theme-dark{background:#0e1622;background:linear-gradient(180deg,#131d2c 0%,
 .inp,select.inp{color:#1f2d3d;background:#f5f8fd;border:1px solid #d7e2f1;border-radius:9px;}
 .inp:focus{border-color:#1976f3;outline:none;box-shadow:0 0 0 3px rgba(25,118,243,.14);}
 
-/* v1.79.0: .queue-nav-row / .btn-nav retired with the duplicate nav buttons
-   (the consolidated launcher replaced them). */
-
 .action-card .btn-danger.btn-block{height:46px;font-size:15px;font-weight:700;
   display:-ms-inline-flexbox;display:inline-flex;-ms-flex-align:center;align-items:center;
   -ms-flex-pack:center;justify-content:center;}
@@ -1573,8 +1545,6 @@ body.theme-dark{background:#0e1622;background:linear-gradient(180deg,#131d2c 0%,
 .theme-dark .queue-overlay-body .tbl tbody tr:hover{background:#283a54;}
 .theme-dark .queue-overlay-body .tbl-wrap{border-color:#46586f;}
 .theme-dark .queue-overlay-head .head-tools .inp{background:rgba(20,30,48,.9);color:#e5edf7;}
-.theme-dark .btn-nav{background:#253246;border:1px solid #526a88;color:#cfe4ff;}
-.theme-dark .btn-nav:hover{background:#2c3c55;border-color:#7fb3f7;color:#eaf2ff;}
 .theme-dark #blockClose{background:#1e2a3c;border:1px solid #4a5c74;color:#e7eff9;}
 
 /* ============================================================================
@@ -1680,8 +1650,6 @@ body{
 }
 
 /* nav / queue buttons pick up the same blue family */
-.queue-nav-row .btn-nav{border-color:#d3e0f2;color:#1c5fd6;background:#f1f6fe;}
-.queue-nav-row .btn-nav:hover{background:#e3eefc;border-color:#1f6feb;color:#12448f;}
 .queue-hub-btn{border-color:#aac4ea;color:#12448f;}
 .queue-hub-btn:hover{border-color:#1f6feb;color:#1c5fd6;}
 
@@ -1726,7 +1694,6 @@ body{
 .theme-dark .queue-overlay-head{background:#1d3f7d;}
 .theme-dark .payable-card{background:#174c9f;border-color:#4a8de7;}
 .theme-dark .tc-strip{background:#1d3f7d;}
-.theme-dark .queue-nav-row .btn-nav{background:#253246;border-color:#526a88;color:#cfe4ff;}
 
 /* ============================================================================
    v1.67.0 — ADMISSION REFRESH
@@ -1873,9 +1840,6 @@ body{
   background:linear-gradient(180deg,#318bf3 0%,#1264cd 100%);
 }
 .action-card .btn-danger.btn-block{height:40px;margin-bottom:0;font-size:13px;background:#fff9fa;}
-.queue-nav-row{margin-top:8px;}
-.queue-nav-row .btn-nav{height:38px;padding:0 6px;border-color:#bad4f0;background:#edf6ff;color:#155aa7;font-size:11.5px;}
-.queue-nav-row .btn-nav + .btn-nav{margin-right:7px;}
 
 /* print actions stay at the bottom-right, with a dominant print-last action */
 .print-card{-ms-flex-order:4;order:4;margin-top:auto;margin-bottom:0;border-color:#bdd0e7;}
@@ -2076,7 +2040,6 @@ body.theme-dark,.theme-dark body{
 .theme-dark .btn{background:#1b3047;color:#dceaf8;border-color:#42617f;}
 .theme-dark .btn-primary,.theme-dark .btn-submit{background:#216bc0;border-color:#4a9cf0;color:#ffffff;}
 .theme-dark .btn-danger{color:#ff9aad;border-color:#774359;background:#342638;}
-.theme-dark .queue-nav-row .btn-nav{color:#bedfff;background:#17314c;border-color:#315e89;}
 .theme-dark .print-grid .btn-print{color:#d9ecff;background:#1a3959;border-color:#3f78ad;}
 .theme-dark .print-grid .btn-print-primary{color:#d9ecff;background:#1a3959;border-color:#4f87bd;}
 .theme-dark .status-card{background:#14283a;border-color:#34516b;}
@@ -2196,8 +2159,6 @@ body.theme-dark,.theme-dark body{
 @-webkit-keyframes azFade{from{opacity:0}to{opacity:1}}
 @keyframes azFade{from{opacity:0}to{opacity:1}}
 /* slow, soft breathing glow reserved for the final-payable hero total */
-@-webkit-keyframes azGlow{0%,100%{-webkit-box-shadow:0 8px 22px rgba(5,150,105,.30);}50%{-webkit-box-shadow:0 12px 30px rgba(5,150,105,.46);}}
-@keyframes azGlow{0%,100%{box-shadow:0 8px 22px rgba(5,150,105,.30);}50%{box-shadow:0 12px 30px rgba(5,150,105,.46);}}
 
 /* one gentle fade-in for the workspace cards (opacity only → never blocks the
    hover transform below; runs behind the loader so there is no flash). */
@@ -2265,23 +2226,17 @@ body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .rx-box,
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .ps-line{
   background:rgba(2,40,38,.22);border-color:rgba(255,255,255,.20);
 }
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .profile-state .dot{background:#6ee7a4;}
+
 
 /* ------------------------------------------------- INVOICE → AMBER (polished) */
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .invoice-card{border-color:#e3c58c;}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .invoice-card .card-head{
-  border-bottom:1px solid #b45309;
-  background:#f59e0b;
-  background:-webkit-linear-gradient(top,#fbbf24 0%,#b45309 100%);
-  background:linear-gradient(180deg,#fbbf24 0%,#b45309 100%);
-  -webkit-box-shadow:none;box-shadow:none;
-}
+
+
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .invoice-card .card-title,
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .invoice-card .ct-ico{color:#ffffff;}
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .invoice-card .btn-icon{
   border-color:rgba(255,255,255,.45);background:rgba(255,255,255,.16);color:#ffffff;
 }
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .invoice-body{background:#fffdf6;}
+
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inv-gtitle{
   color:#b45309;border-bottom:2px solid #f1d49a;
 }
@@ -2297,7 +2252,7 @@ body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inv-remain b{color:#b45
 
 /* ----------------------------- PAYABLE (مبلغ نهایی) → EMERALD HERO TOTAL ---
    The single most important number on the page: rebuilt as a distinct, high-
-   contrast emerald card with a large tabular figure and a soft breathing glow
+   contrast emerald card with a large tabular figure and a solid elevation shadow
    so it stands cleanly apart from the amber invoice above it. */
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payable-card{
   margin-top:0;margin-bottom:10px;padding:16px 15px;text-align:right;color:#ffffff;
@@ -2376,10 +2331,8 @@ body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card{
   -webkit-box-shadow:0 4px 14px rgba(13,148,136,.12);box-shadow:0 4px 14px rgba(13,148,136,.12);
 }
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .profile-top{padding:11px 12px 8px;}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .avatar{
-  width:44px;height:44px;border:3px solid #cfe9e2;background:#ffffff;color:#0d9488;
-}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-kicker{color:#0d9488;font-size:10px;}
+
+
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .pf-name{color:#0f3b37;font-size:14px;font-weight:900;}
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .pf-file,
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .pf-file b{color:#5b7a74;}
@@ -2387,16 +2340,16 @@ body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .profile-s
   margin:0 11px 9px;padding:6px 9px;border:1px solid #c9e6df;border-radius:9px;
   background:#e3f2ee;color:#15554c;font-size:11px;
 }
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .profile-state .dot{background:#2563eb;}
+
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .btn-erx{
   height:32px;margin:0 11px 8px;border-color:#bfe3da;background:#dbf0ea;color:#0f6b60;
 }
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .btn-erx:hover{background:#cde9e1;border-color:#0d9488;color:#0c534c;}
+
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .rx-row{padding:0 11px 9px;}
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .rx-box{
   padding:6px 6px;border:1px solid #cde7e0;border-radius:8px;background:#e6f3ef;
 }
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .rx-lbl{color:#0d9488;font-size:10px;}
+
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .rx-val{color:#0f3b37;font-size:15px;}
 
 /* turn preview (پیش‌نمایش نوبت) — two compact pastel pills inside the profile
@@ -2457,8 +2410,8 @@ body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .print-card .card-head{
    plus one faint sub-separator that divides the identity group from the contact
    group. width:100% forces a flex-wrap line break inside grid-4 (IE-safe). */
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .card-head{border-bottom:1px solid #e6def7;}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .card-title{color:#5b21b6;}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .ct-ico{color:#7c3aed;}
+
+
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .fld > span{color:#372853;}
 .pt-sep{
   width:100%;height:0;margin:4px 0;
@@ -2537,8 +2490,6 @@ body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .ps-card{border-color:#c
 .action-card{padding:10px;}
 .action-card .btn-submit.btn-block{height:42px;font-size:13.5px;margin-bottom:7px;border-radius:10px;}
 .action-card .btn-danger.btn-block{height:34px;font-size:12.5px;}
-.queue-nav-row{margin-top:7px;}
-.queue-nav-row .btn-nav{height:32px;padding:0 6px;font-size:11px;}
 .print-grid .btn-print{height:34px;font-size:11px;}
 .print-grid .btn-print-primary{height:38px;font-size:12px;margin-bottom:7px;}
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payable-card{padding:12px 13px;}
@@ -2940,19 +2891,9 @@ body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .print-card{
    are right-aligned tabular numbers; the insurance % (set in admission.js) sits
    inside the title so the calculation path is visible at a glance. The مبلغ
    نهایی group and the مانده قابل پرداخت remainder read as the climax. */
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .invoice-card{border-color:#e6cb8c;}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .invoice-card .card-head{
-  background:#f59e0b;
-  background:-webkit-linear-gradient(top,#fbbf24 0%,#b45309 100%);
-  background:linear-gradient(180deg,#fbbf24 0%,#b45309 100%);
-  border-bottom:1px solid #b45309;
-}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .invoice-body{
-  padding:11px 12px 12px;
-  background:#fffdf6;
-  background:-webkit-linear-gradient(top,#fffef9 0%,#fdf8ea 100%);
-  background:linear-gradient(180deg,#fffef9 0%,#fdf8ea 100%);
-}
+
+
+
 /* v1.78.0: these were UNSCOPED — they leaked the light cream gradient into the
    dark theme (washed-out invoice groups). Now light-theme only + dark parity
    rules added below. */
@@ -3185,7 +3126,7 @@ body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inv-remain b{
        white-on-white — the v1.75 .card surface (same specificity, later source
        order) overrode its emerald background while its white caption/figure
        stayed. Rebuilt as a distinct, high-contrast emerald panel with a clear
-       border, a large tabular figure and a soft breathing glow so it can never
+       border, a large tabular figure and a solid elevation shadow so it can never
        blend into its neighbours again.
      · QUEUE action buttons (افزودن به صندوق نرفته‌ها / صف پذیرش): promoted
        from faint near-white fills to clear, professional amber + blue buttons
@@ -3306,9 +3247,9 @@ body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .print-card .card-head{
   -webkit-box-shadow:inset -3px 0 0 #475569;box-shadow:inset -3px 0 0 #475569;
 }
 
-/* ------------------------------- 3. CARD BODIES — proper, visible section tints ---
-   The washed-out pastels are replaced with clearly-coloured but calm surfaces
-   that give each zone a visible identity without going bold. Default theme. */
+/* ------------------------------- 3. CARD BODIES — one neutral surface ---
+   v1.79.0: the per-zone pastel tints were unified into a single calm clinical
+   surface (the clinic asked for an administrative look, not a rainbow). */
 /* v1.79.0 — NEUTRAL BODIES: one calm clinical surface for every section
    (no per-zone tints). The services table keeps its slightly deeper blue-grey
    so the grid still reads as a worksheet. */
@@ -3336,8 +3277,8 @@ body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .print-card{
 }
 
 /* ------------------------------------------------ 4. PROFILE CARD — refined teal ---
-   A soft teal-tinted identity card (clear, not pastel-washed, not bold) with
-   dark, legible text. Default theme only. */
+   v1.79.0: slate-blue identity card (the teal read as part of the retired
+   rainbow) with dark, legible text. Default theme only. */
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card{
   color:#1e3a5f;border:1px solid #c3d3e6;
   background-color:#e9f0f9;
@@ -3345,32 +3286,40 @@ body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card{
   background-image:linear-gradient(180deg,#f1f6fc 0%,#dfe9f5 100%);
   -webkit-box-shadow:0 6px 18px rgba(37,99,235,.13);box-shadow:0 6px 18px rgba(37,99,235,.13);
 }
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .avatar{
-  border:3px solid #d3e1f2;background:#ffffff;color:#2563eb;
-}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-kicker{color:#2563eb;font-size:11px;font-weight:800;}
+
+
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .pf-name{color:#16324f;font-size:15px;font-weight:900;}
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .pf-file,
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .pf-file b{color:#45617f;}
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .profile-state{
   background:#e2ecf7;border:1px solid #c3d3e6;color:#1e3a5f;
 }
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .profile-state .dot{background:#2563eb;}
+
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .btn-erx{
   background:#dbe8f6;border:1px solid #b9cdea;color:#1d4ed8;
 }
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .btn-erx:hover{
-  background:#cbdcf0;border-color:#2563eb;color:#1e40af;
-}
+
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .rx-box{
   background:#e3edf8;border:1px solid #c8d8ec;
 }
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .rx-lbl{color:#2563eb;font-size:11px;font-weight:800;}
+
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .rx-val{color:#16324f;font-size:16px;font-weight:900;}
+/* v1.79.0: the slate sub-accents for the identity card (the oldest generation
+   below assumed a dark-blue card and painted near-white inks — invisible on
+   the administrative slate surface). */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .avatar{
+  border:3px solid #d3e1f2;background:#ffffff;color:#1c6add;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-kicker{color:#1c6add;font-size:11px;font-weight:800;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .profile-state .dot{background:#1c6add;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .btn-erx:hover{
+  background:#cbdcf0;border-color:#1c6add;color:#1e40af;
+}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .rx-lbl{color:#1c6add;font-size:11px;font-weight:800;}
 
 /* ----------------------------------------- 5. PAYABLE HERO — distinct + prominent ---
    The single most important number: a high-contrast emerald panel with a clear
-   border, a large tabular figure and a soft breathing glow. Wins over the
+   border, a large tabular figure and a solid elevation shadow. Wins over the
    v1.75 .card surface by source order at equal specificity. Default theme. */
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payable-card{
   margin-top:0;margin-bottom:10px;padding:14px 15px;text-align:right;color:#ffffff;
@@ -3720,16 +3669,43 @@ body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-foot{
    v1.78.0 fix there also repaired the dark-theme cream-leak regression.) */
 
 /* ---- queue hub button -------------------------------------------------------- */
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .queue-hub-btn{
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .queue-hub-btn:not(.queue-hub-rail){
   border:1px solid #c7d4e6;border-radius:12px;
   background:#f2f7fd;
   background:-webkit-linear-gradient(top,#f7faff 0%,#eaf1fa 100%);
   background:linear-gradient(180deg,#f7faff 0%,#eaf1fa 100%);
   color:#1c3050;
 }
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .queue-hub-btn:hover{
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .queue-hub-btn:not(.queue-hub-rail):hover{
   border-color:#2563eb;color:#1d4ed8;
   background:#e9f1fd;
   background:-webkit-linear-gradient(top,#eff5fe 0%,#e0ebfc 100%);
   background:linear-gradient(180deg,#eff5fe 0%,#e0ebfc 100%);
 }
+
+
+/* v1.79.0: the launcher now lives on the RIGHT rail, centred between the
+   عملیات پذیرش and چاپ اسناد cards — a standalone element, part of neither.
+   It gets a soft brand-tinted pill so it reads as the page's queue hub. */
+.col .queue-hub-rail{
+  display:block;width:auto;min-width:86%;
+  margin:2px auto 10px;
+  border-radius:999px;height:44px;
+  background:#eaf2fd;
+  background:-webkit-linear-gradient(top,#f2f7fe 0%,#e2edfb 100%);
+  background:linear-gradient(180deg,#f2f7fe 0%,#e2edfb 100%);
+  border:1.5px solid #b8d0f0;color:#1d4ed8;font-weight:800;
+  -webkit-box-shadow:0 2px 8px rgba(31,95,214,.14),inset 0 1px 0 rgba(255,255,255,.8);
+  box-shadow:0 2px 8px rgba(31,95,214,.14),inset 0 1px 0 rgba(255,255,255,.8);
+}
+.col .queue-hub-rail:hover{
+  background:#dfebfb;
+  background:-webkit-linear-gradient(top,#e9f2fd 0%,#d3e4f8 100%);
+  background:linear-gradient(180deg,#e9f2fd 0%,#d3e4f8 100%);
+  border-color:#2f6fe4;color:#1e40af;
+  -webkit-box-shadow:0 4px 12px rgba(31,95,214,.22),inset 0 1px 0 rgba(255,255,255,.8);
+  box-shadow:0 4px 12px rgba(31,95,214,.22),inset 0 1px 0 rgba(255,255,255,.8);
+}
+.theme-dark .col .queue-hub-rail{background:#1d2c40;border-color:#3d5b80;color:#a8ccf5;
+  -webkit-box-shadow:none;box-shadow:none;}
+.theme-dark .col .queue-hub-rail:hover{background:#25364e;border-color:#5b83b8;color:#cfe4fb;}

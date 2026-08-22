@@ -127,7 +127,9 @@ static std::string crmUserJson(const User& u){
 }
 
 // ---- v1.79.0: personnel registry JSON -------------------------------------
-static std::string crmPersonJson(const PersonDef& p){
+//  v1.79.0: depts are loaded ONCE per verb call and handed in — this JSON
+//  helper used to read depts.dat from disk per person row.
+static std::string crmPersonJson(const PersonDef& p, const std::vector<DeptCat>& ds){
     std::string o="{";
     o+="\"code\":"+jstr(p.code)+",";
     o+="\"firstName\":"+jstr(p.firstName)+",";
@@ -150,7 +152,6 @@ static std::string crmPersonJson(const PersonDef& p){
     // dept NAME for display (DeptCat is id-keyed; the page shows names)
     {
         std::wstring dn;
-        auto ds=loadDepts();
         for(auto& d:ds) if(d.id==p.deptId){ dn=d.name; break; }
         o+="\"deptName\":"+jstr(dn)+",";
     }
@@ -171,11 +172,12 @@ static int b64val(char c){
     return -1;
 }
 static std::string b64decode(const std::string& in){
-    std::string out; int val=0, bits=-8;
+    std::string out; unsigned int val=0; int bits=-8;
     for(char c:in){
-        int v=b64val(c); if(v<0) break;
-        val=(val<<6)+v; bits+=6;
-        if(bits>=0){ out+=(char)((val>>bits)&0xFF); bits-=8; }
+        if(c==' '||c=='\t'||c=='\r'||c=='\n') continue;   // tolerate wrapped input
+        int v=b64val(c); if(v<0) break;                    // '=' or end
+        val=(val<<6)+(unsigned)v; bits+=6;
+        if(bits>=0){ out+=(char)((val>>bits)&0xFFu); bits-=8; }
     }
     return out;
 }
@@ -853,6 +855,7 @@ static std::string crmApi(const std::string& verb, const std::string& body){
         std::wstring qLower=q; for(auto& c:qLower) c=towlower(c);
         std::string qEn=w2u8(normDigits(q));
         auto ps=loadPersons();
+        auto ds=loadDepts();
         std::string o="{\"rows\":[";
         int n=0;
         for(auto& p:ps){
@@ -870,10 +873,9 @@ static std::string crmApi(const std::string& verb, const std::string& body){
                 if(!hit) continue;
             }
             if(n++) o+=",";
-            o+=crmPersonJson(p);
+            o+=crmPersonJson(p,ds);
         }
         o+="],\"depts\":[";
-        auto ds=loadDepts();
         for(size_t i=0;i<ds.size();++i){ if(i)o+=","; o+=crmDeptJson(ds[i]); }
         o+="]}"; return o;
     }
@@ -884,6 +886,11 @@ static std::string crmApi(const std::string& verb, const std::string& body){
     if(verb=="crm.persons.save"){
         std::string t; double rk=0;
         PersonDef p; bool editing=false;
+        // v1.79.0 review fix: «origCode» (sent by the edit form) decides the
+        // update path — the free-text «code» box can never hijack another
+        // person's record or duplicate a person by clearing the code.
+        std::wstring origCode;
+        if(jsonGetString(body,"origCode",t))  origCode=trim(u82w(t));
         if(jsonGetString(body,"code",t))        { p.code=trim(u82w(t)); }
         if(jsonGetString(body,"firstName",t))   p.firstName=u82w(t);
         if(jsonGetString(body,"lastName",t))    p.lastName=u82w(t);
@@ -901,21 +908,33 @@ static std::string crmApi(const std::string& verb, const std::string& body){
         if(jsonGetString(body,"roleCustom",t))  p.roleCustom=u82w(t);
         if(jsonGetString(body,"position",t))    p.position=u82w(t);
         if(jsonGetString(body,"deptId",t))      p.deptId=u82w(t);
-        if(!p.code.empty()){
+        if(!origCode.empty()){
+            // edit path: the record is keyed by origCode; a stray/typed «code»
+            // is IGNORED so it can never duplicate or hijack another person.
+            PersonDef old;
+            if(!personByCode(origCode,old))
+                return "{\"ok\":false,\"err\":\"پرسنل مبدأ پیدا نشد.\"}";
+            editing=true;
+            p.code=origCode;
+            p.username=old.username; p.photo=old.photo; p.created=old.created;
+        } else if(!p.code.empty()){
             PersonDef old; editing=personByCode(p.code,old);
             if(editing){ p.username=old.username; p.photo=old.photo; p.created=old.created; }
-        }
-        // optional photo upload (data URL) — stored under data\persons\photos
-        std::string photoU;
-        if(jsonGetString(body,"photoData",photoU) && photoU.size()>32){
-            std::wstring ext; std::string bytes=b64decode(b64payload(photoU,ext));
-            std::wstring rel;
-            std::wstring photoCode = p.code.empty()?nextPersonCode(p.deptId):p.code;
-            if(!bytes.empty() && savePersonPhoto(photoCode,bytes,ext,rel)) p.photo=rel;
         }
         std::wstring err;
         bool ok = editing ? updatePerson(p,err) : addPerson(p,err);
         if(!ok) return std::string("{\"ok\":false,\"err\":")+jstr(err)+"}";
+        // optional photo upload (data URL) — AFTER a successful save so a
+        // rejected form never orphans a file; the photo keeps the FINAL code
+        // (addPerson may have auto-generated it).
+        std::string photoU;
+        if(jsonGetString(body,"photoData",photoU) && photoU.size()>32){
+            std::wstring ext; std::string bytes=b64decode(b64payload(photoU,ext));
+            std::wstring rel;
+            if(!bytes.empty() && savePersonPhoto(p.code,bytes,ext,rel)){
+                p.photo=rel; std::wstring e2; updatePerson(p,e2);
+            }
+        }
         return std::string("{\"ok\":true,\"code\":")+jstr(p.code)+"}";
     }
     if(verb=="crm.persons.delete"){
@@ -982,15 +1001,17 @@ static std::string crmApi(const std::string& verb, const std::string& body){
         if(jsonGetString(body,"perms",t))      { perms=u82w(t); hasPerms=true; }
         if(userName.empty()) return "{\"ok\":false,\"err\":\"نام کاربری خالی است.\"}";
         if(userName==L"prf") return "{\"ok\":false,\"err\":\"این حساب قابل ویرایش نیست.\"}";
-        auto us=loadUsers(); bool found=false;
-        for(auto& u:us) if(u.username==userName){ found=true; break; }
-        if(!found) return "{\"ok\":false,\"err\":\"حساب پیدا نشد.\"}";
-        // fullname/dept/role stay as-is — this verb only touches perms+password
-        for(auto& u:us) if(u.username==userName){
+        auto us=loadUsers();
+        const User* cur=nullptr;
+        for(auto& u:us) if(u.username==userName){ cur=&u; break; }
+        if(!cur) return "{\"ok\":false,\"err\":\"حساب پیدا نشد.\"}";
+        // fullname/dept/role stay as-is — this verb only touches perms, and a
+        // password when one was typed. Skipping the account write when the
+        // password is empty keeps the stored role untouched (v1.79 review).
+        if(!pass.empty()){
             std::wstring err;
-            if(!updateUserAccount(u.username,u.fullname,u.dept,u.role,pass,err))
+            if(!updateUserAccount(cur->username,cur->fullname,cur->dept,cur->role,pass,err))
                 return std::string("{\"ok\":false,\"err\":")+jstr(err)+"}";
-            break;
         }
         if(hasPerms){
             std::wstring err;
@@ -1011,7 +1032,7 @@ static std::string crmApi(const std::string& verb, const std::string& body){
         std::string o="{\"ok\":true,\"dept\":"+crmDeptJson(*dp)+",\"persons\":[";
         int n=0;
         auto ps=loadPersons();
-        for(auto& p:ps) if(p.deptId==id){ if(n++)o+=","; o+=crmPersonJson(p); }
+        for(auto& p:ps) if(p.deptId==id){ if(n++)o+=","; o+=crmPersonJson(p,ds); }
         o+="],\"users\":[";
         auto us=loadUsers(); int m=0;
         for(auto& u:us) if(u.dept==dp->name){

@@ -1363,8 +1363,6 @@
     });
     on($('queueLauncher'), 'click', function () { openQueuePanel('unpaid'); });
     on($('queueClose'),    'click', function () { closeQueuePanel(); });
-    /* v1.64.0 (درمان پلاس): dedicated navigation buttons in the action rail that
-       open the full-screen queue directly on the requested tab. */
     /* v1.79.0: the «صندوق نرفته‌ها» / «صف پذیرش» nav buttons were removed from
        the action card (they duplicated the launcher). The handlers stay out —
        the consolidated «queueLauncher» (now centred on the right rail) opens

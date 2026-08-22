@@ -93,11 +93,11 @@
 // (crm_dialogs.js) are now separate RCDATA blobs, inlined into the page by
 // web_crm_embed.inc in the same <script> order as index.html. Ids 812..813.
 812 RCDATA "../assets/crm/crm_menu.js"
+813 RCDATA "../assets/crm/crm_dialogs.js"
 // v1.79.0: «تعریف پرسنل» (personnel registry) page. The old employees.js page
 // was rebuilt as «تعریف حساب کاربری» (accounts.js, id 808 above) — personnel-
 // linked account creation + access ticks + filters; the departments card moved
 // into it so no capability was lost.
-813 RCDATA "../assets/crm/crm_dialogs.js"
 814 RCDATA "../assets/crm/persons.js"
 
 // v1.68.0: the redistributable WebView2 loader (x86). Extracted to a per-user

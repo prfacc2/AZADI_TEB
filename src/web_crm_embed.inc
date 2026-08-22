@@ -15,7 +15,9 @@
 //  RCDATA ids (MUST match app.rc):
 //    shell : 500 common.css · 501 common.js · 502 vazir.ttf
 //    crm   : 800 index.html · 801 crm.css · 802 crm.js · 803 dashboard.js
-//            804 sections.js · 805 patients.js · 806 doctors.js
+//            804 sections.js · 805 patients.js · 806 doctors.js (v1.79: 808 =
+//            accounts.js «تعریف حساب کاربری» — employees.js successor; 814 =
+//            persons.js «تعریف پرسنل»)
 //            807 services.js · 808 employees.js · 809 messages.js
 //            810 settings.js · 811 insurance.js
 //            812 crm_menu.js · 813 crm_dialogs.js  (v1.77 modules split from crm.js)

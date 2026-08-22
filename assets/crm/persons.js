@@ -15,11 +15,8 @@
   var ROLE_KINDS = ['پرسنل', 'پزشک', 'پرستار', 'کارآموز', 'سایر'];
 
   /* ---- shared bits -------------------------------------------------------- */
-  function deptOptions(depts, sel, withAll, withSuspended) {
-    var o = '';
-    if (withAll) o += '<option value="">همه بخش‌ها</option>';
-    if (withSuspended) o += '<option value="__none__">در حالت تعلیق (بدون بخش)</option>';
-    o += '<option value="">— بدون بخش (تعلیق) —</option>';
+  function deptOptions(depts, sel) {
+    var o = '<option value="">— بدون بخش (تعلیق) —</option>';
     for (var i = 0; i < depts.length; i++) {
       o += '<option value="' + Crm.esc(depts[i].id) + '"' + (depts[i].id === sel ? ' selected' : '') + '>' +
            Crm.esc(depts[i].name) + '</option>';
@@ -136,7 +133,7 @@
       }
     }, function () {});
   }
-  Crm.loadPersonPhoto = loadPhotoInto;   /* shared with accounts.js */
+
 
   /* ---- view sheet (click on a name) + print -------------------------------- */
   function viewPerson(code) {
@@ -166,7 +163,7 @@
         '</div><table class="crm-sheet-tbl">';
       for (i = 0; i < rows2.length; i++) {
         if (rows2[i][1] === '' || rows2[i][1] == null) continue;
-        h += '<tr><td>' + Crm.esc(rows2[i][0]) + '</td><td><b>' + rows2[i][1] + '</b></td></tr>';
+        h += '<tr><td>' + Crm.esc(rows2[i][0]) + '</td><td><b>' + Crm.esc(rows2[i][1]) + '</b></td></tr>';
       }
       h += '</table></div>';
       m.body.innerHTML = h;
@@ -224,7 +221,8 @@
       '<div class="crm-field"><label class="crm-label">مقام/سمت</label><input class="crm-input" id="ppPos" placeholder="مثلاً: سرپرستار شیفت" value="' + Crm.esc(p.position || '') + '" /></div>' +
       /* dept + code */
       '<div class="crm-field"><label class="crm-label">بخش (خالی = در حالت تعلیق)</label><select class="crm-select" id="ppDept">' + deptOptions(depts, p.deptId) + '</select></div>' +
-      '<div class="crm-field"><label class="crm-label">کد پرسنلی (خالی = خودکار)</label><input class="crm-input c-mono" id="ppCode" value="' + Crm.esc(p.code || '') + '" placeholder="AZ_0001" /></div>' +
+      '<div class="crm-field"><label class="crm-label">کد پرسنلی' + (adding ? ' (خالی = خودکار)' : ' — ثابت') + '</label>' +
+        '<input class="crm-input c-mono" id="ppCode" value="' + Crm.esc(p.code || '') + '" placeholder="AZ_0001"' + (adding ? '' : ' readonly') + ' /></div>' +
       '</div>';
 
     var photoData = '';
@@ -261,6 +259,7 @@
     Crm.$('mCancel').onclick = m.close;
     Crm.$('mSave').onclick = function () {
       var payload = {
+        origCode: adding ? '' : (p.code || ''),
         code: Crm.$('ppCode').value,
         firstName: Crm.$('ppFirst').value, lastName: Crm.$('ppLast').value,
         fatherName: Crm.$('ppFather').value, nationalId: Crm.$('ppNid').value,

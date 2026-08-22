@@ -1349,10 +1349,12 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
                                                g_session.title=resolveSessionTitle(u);
                                                switchScreen(SC_MANAGE); }
             else if(!wcscmp(dbg,L"admin")){    u.role=2; g_session.user=u;
+                                               g_session.title=resolveSessionTitle(u);
                                                switchScreen(SC_ADMIN); }
             else if(!wcscmp(dbg,L"settings")){ switchScreen(SC_RECEPTION);
                                                OpenSettings(f, g_session.user); }
             else if(!wcscmp(dbg,L"backup")){   u.role=1; g_session.user=u;
+                                               g_session.title=resolveSessionTitle(u);
                                                switchScreen(SC_MANAGE);
                                                openBackupManager(f); }
             else if(!wcscmp(dbg,L"shift")){    int sh=0; showShiftDialog(f,sh); }
