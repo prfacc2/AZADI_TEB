@@ -25,7 +25,7 @@ SRCS="src/main.cpp src/util.cpp src/handlers.cpp src/theme.cpp src/users.cpp \
       src/billing.cpp src/calculator.cpp src/dialogs.cpp src/update.cpp \
       src/admin.cpp src/reception.cpp src/gdiplus.cpp src/settings.cpp \
       src/printer.cpp src/employees.cpp src/data_ext.cpp \
-      src/backup.cpp src/ui_kit.cpp src/backup_analyzer.cpp \
+      src/backup.cpp src/persons.cpp src/ui_kit.cpp src/backup_analyzer.cpp \
       src/backup_log.cpp src/sections.cpp src/print_designer.cpp \
       src/user_settings.cpp src/net_sync.cpp src/profile_requests.cpp \
       src/backup_log_viewer.cpp src/backup_mtf.cpp src/saved_messages.cpp \

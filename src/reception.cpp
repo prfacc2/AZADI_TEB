@@ -5091,6 +5091,16 @@ HWND receptionWindow(){
 void receptionAction(RecAction a){
     HWND rec=receptionWindow();
     if(!rec || !IsWindow(rec)) return;
+    //  v1.79.0: permission gate — defence in depth on top of the hidden header
+    //  button, so no shortcut/path can open an admission tab without the
+    //  «پذیرش بیمار» access tick.
+    if(a==RA_NEWPAT && !userHasPerm(g_session.user, L"admission")){
+        MessageBoxW(g_hFrame,
+            L"این حساب کاربری دسترسی «پذیرش بیمار» ندارد.\n"
+            L"برای فعال‌سازی، در مدیریت ← تعریف حساب کاربری تیک دسترسی را بزنید.",
+            L"عدم دسترسی", MB_OK|MB_ICONWARNING|MB_TOPMOST|MB_SETFOREGROUND);
+        return;
+    }
     //  v1.60.0: RA_APPOINTMENT no longer exists — only پذیرش بیمار / تب جدید.
     int id = a==RA_NEWTAB ? ID_RC_NEWTAB
            :                ID_RC_NEWPAT;
@@ -5131,7 +5141,13 @@ HWND createReceptionScreen(HWND frame){
     //   is also the FIRST (right-most, index 0) tab so the user immediately sees
     //   any pending management messages. Reception / appointment tabs are opened
     //   on demand from the header action buttons.
-    addTabKind(h, TK_PORTAL);
+    // v1.79.0 — permission gating: the کارتابل tab opens by default only when
+    //   the account holds the «کارتابل» access tick; otherwise the screen lands
+    //   on a friendly empty tab (it never stays blank).
+    if(userHasPerm(g_session.user, L"worklist"))
+        addTabKind(h, TK_PORTAL);
+    else
+        addTabKind(h, TK_EMPTY);
     if(s_rd){
         s_rd->active = 0;            // focus the message board tab
         recLayoutTabs(h);

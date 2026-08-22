@@ -581,12 +581,19 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
             txt  = readable(fill, g_theme.text); bord = g_theme.border; break;
         case BS_CARD: {
             // v1.78.0: per-button accent override (0 → theme accent).
+            // v1.79.0: resting brand edge a touch stronger (26→34 blend) so the
+            // card reads as *branded* even before hover.
             COLORREF cardAcc = btnAccent(d);
             fill = hv ? blendColor(g_theme.hover, cardAcc, 10) : g_theme.surface;
             txt  = readable(fill, g_theme.text);
-            bord = hv ? cardAcc : blendColor(g_theme.border, cardAcc, 26); break; }
+            bord = hv ? cardAcc : blendColor(g_theme.border, cardAcc, 34); break; }
         default: // ghost
-            fill = hv ? g_theme.hover : g_theme.surface2;
+            // v1.79.0: header tool buttons rest as frosted translucent tiles
+            // (soft white plate + whisper hairline painted below) instead of
+            // blending invisibly into the band — they read as deliberate
+            // controls now, not smudges. Hover keeps the accent wash.
+            fill = hv ? g_theme.hover
+                      : blendColor(g_theme.surface, RGB(255,255,255), g_dark?0:62);
             txt  = readable(fill, hv ? g_theme.text : g_theme.textDim);
             if(d && d->icon==ICO_X && hv){ fill=g_theme.danger; txt=RGB(255,255,255); }
             break;
@@ -777,8 +784,10 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
                     gpGradRoundRect(dc, br, bd/2, cardAccH, cardAcc, CLR_INVALID);
                     drawIcon(dc, d->icon, ir, RGB(255,255,255), S(2)+1);
                 } else {
-                    COLORREF badgeBg = blendColor(g_theme.surface, cardAcc, 20);
-                    gpShadowColor(dc, br, bd/2, S(4), 34, cardAcc);
+                    // v1.79.0: a soft resting glow behind the badge (was 34 →
+                    // now 50 alpha) — the entry cards feel lit even at rest.
+                    COLORREF badgeBg = blendColor(g_theme.surface, cardAcc, 24);
+                    gpShadowColor(dc, br, bd/2, S(5), 50, cardAcc);
                     fillRoundRect(dc, br, bd, badgeBg, CLR_INVALID);
                     gpGradRoundRect(dc, br, bd/2,
                         blendColor(g_theme.surfaceTop, badgeBg, 55), badgeBg,

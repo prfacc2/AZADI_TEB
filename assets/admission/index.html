@@ -82,15 +82,17 @@
             <span class="i"><svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M6 7h12l-1 14H7L6 7zm3-3h6l1 2H8l1-2z"/></svg></span>
             پاک کردن
           </button>
-          <div class="queue-nav-row">
-            <button class="btn btn-nav" id="navUnpaid">
-              <span class="i"><svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h10v2H4v-2z"/></svg></span>
-              صندوق نرفته‌ها</button>
-            <button class="btn btn-nav" id="navAdmQ">
-              <span class="i"><svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M12 12a5 5 0 100-10 5 5 0 000 10zm0 2c-4 0-9 2-9 6v2h18v-2c0-4-5-6-9-6z"/></svg></span>
-              صف پذیرش</button>
-          </div>
+          <!-- v1.79.0: the «صندوق نرفته‌ها» / «صف پذیرش» nav buttons were removed
+               from this card — they duplicated the consolidated launcher below. -->
         </section>
+
+        <!-- v1.79.0: the consolidated «صندوق نرفته‌ها و صف پذیرش» launcher moved
+             from the bottom of the LEFT rail to HERE — a standalone, centred
+             element between عملیات پذیرش and چاپ اسناد, belonging to neither. -->
+        <button class="btn queue-hub-btn queue-hub-rail" id="queueLauncher">
+          <span class="i"><svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h10v2H4v-2z"/></svg></span>
+          صندوق نرفته‌ها و صف پذیرش
+        </button>
 
         <!-- v1.60.0: چاپ‌ها از نوار نیتیو پایین به داخل صفحه آمدند — خوش‌چین پایین ریل راست -->
         <section class="card print-card">
@@ -189,7 +191,7 @@
             <div class="card-body doc-body">
               <label class="fld"><span>کد انجام دهنده</span>
                 <div class="with-ico">
-                  <input type="text" id="perfcode" class="inp" data-nav inputmode="numeric" />
+                  <input type="text" id="perfcode" class="inp" data-nav inputmode="numeric" placeholder="کد فهرست انجام‌دهنده…" />
                   <span class="in-ico"><svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M10 2a8 8 0 105 14.3l5.3 5.4 1.4-1.4-5.4-5.3A8 8 0 0010 2z"/></svg></span>
                 </div>
               </label>
@@ -336,11 +338,9 @@
           </div>
         </section>
 
-        <!-- Queue and cashier are consolidated in one lower-left launcher. -->
-        <button class="btn queue-hub-btn" id="queueLauncher">
-          <span class="i"><svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h10v2H4v-2z"/></svg></span>
-          صندوق نرفته‌ها و صف پذیرش
-        </button>
+        <!-- v1.79.0: the consolidated queue/cashier launcher moved to the RIGHT
+             rail (between عملیات پذیرش and چاپ اسناد) — nothing lives here any
+             more, so the left column ends cleanly with the payment card. -->
       </aside>
     </div>
   </div>

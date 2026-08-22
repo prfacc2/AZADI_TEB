@@ -28,7 +28,10 @@ struct LoginData {
 
 static const wchar_t* roleTitle(int r){
     switch(r){
-        case 0: return L"ورود به پذیرش درمانگاه";
+        // v1.79.0: the reception entrance is now «حساب پرسنل» — one shared
+        // staff login (doctor / nurse / receptionist / intern), with per-account
+        // access ticks deciding what they can do afterwards.
+        case 0: return L"ورود به حساب پرسنل";
         case 1: return L"ورود به پنل مدیریت";
         default:return L"پنل مخفی ادمین";
     }

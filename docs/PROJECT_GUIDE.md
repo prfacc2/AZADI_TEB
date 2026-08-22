@@ -26,6 +26,13 @@
     جریان بالینی: **پزشک معالج** = ارجاع‌دهنده (جستجو با کد نظام پزشکی در میان *همه* پزشکان)،
     **انجام دهنده** = مقصد ویزیت (فقط پزشکان `isPerformer=1`؛ API: `doctor.performers` یا
     `doctor.search` با `role=performer` — در سمت CRM: چک‌باکس فرم پزشک + ستون «انجام دهنده»).
+  - `persons.dat` — **v1.79.0: رجیستری پرسنل** («تعریف پرسنل»، بلوک key=value). پرسنل مستقل
+    از حساب کاربری تعریف می‌شود؛ کلید `code` = کد پرسنلی (خودکار: دو حرف اول نام بخش به
+    لاتین + شماره — `AZ_0001`، بدون بخش = «در حالت تعلیق» با پیشوند `PER_`)، `deptId` خالی =
+    تعلیق، `username` = لینک به حساب. عکس‌ها در `data\persons\photos\`. API: `crm.persons.*`.
+  - `users.dat` — ستون ششم (**v1.79.0**) = `perms` (کلیدهای دسترسی با کاما: `admission`/
+    `worklist`/`cashier`/`settings`؛ خالی = دسترسی کامل؛ `-` = هیچ). `userHasPerm` در
+    `users.cpp`؛ اجرای UI در `main.cpp`/`reception.cpp`/`admission.js`.
 - **لاگ:** `logs/app.log` + `logs/crash_*.log`
 
 ## 2. فایل‌های سورس و مسئولیت هرکدام

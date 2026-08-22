@@ -306,8 +306,11 @@ static LRESULT CALLBACK homeProc(HWND h, UINT m, WPARAM w, LPARAM l){
         // and given professional line-art glyphs — a person for admission, a
         // two-person group for management — instead of the primitive filled
         // medical cross / shield. Subtitles describe each account's scope.
-        HWND r=createFlatButton(h, ID_HM_RECEPTION, L"حساب پذیرش", ICO_USER,
-            BS_CARD, 0,0,10,10, L"پذیرش بیمار، خدمات و صدور قبض");
+        // v1.79.0: «حساب پذیرش» → «حساب پرسنل» — the shared staff entrance:
+        // doctors, receptionists, nurses and interns all sign in here; what
+        // they can do afterwards is decided by their account's access ticks.
+        HWND r=createFlatButton(h, ID_HM_RECEPTION, L"حساب پرسنل", ICO_USER,
+            BS_CARD, 0,0,10,10, L"ورود دکتر، پرستار، پذیرشگر و کارآموز");
         HWND mg=createFlatButton(h, ID_HM_MANAGE, L"حساب مدیریت", ICO_PEOPLE,
             BS_CARD, 0,0,10,10, L"گزارش‌ها و خدمات و مدیریت");
         // v1.78.0: distinct brand hues per account — reception carries the
@@ -346,6 +349,7 @@ static LRESULT CALLBACK homeProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 int shift=detectShift();
                 if(showShiftDialog(g_hFrame, shift)){
                     g_session.user=u; g_session.shift=shift;
+                    g_session.title=resolveSessionTitle(u);
                     g_session.loginAt=iranNow();
                     setUserOnline(u.username,true);
                     s_busy=false;
@@ -359,6 +363,7 @@ static LRESULT CALLBACK homeProc(HWND h, UINT m, WPARAM w, LPARAM l){
             User u;
             if(showLoginDialog(g_hFrame, 1, u)){
                 g_session.user=u; g_session.shift=detectShift();
+                g_session.title=resolveSessionTitle(u);
                 g_session.loginAt=iranNow();
                 setUserOnline(u.username,true);
                 s_busy=false;
@@ -560,7 +565,17 @@ HWND createHomeScreen(HWND frame){
 //  is active (RTL: laid out left→right since they sit on the LEFT side).
 static void updateHeaderButtons(HWND h){
     bool show = headerHasActionBar();
-    ShowWindow(s_bNewPat,   show?SW_SHOW:SW_HIDE);
+    // v1.79.0: permission gating — an account without the «پذیرش بیمار»
+    // permission tick (مدیریت ← تعریف حساب کاربری) does not even SEE the
+    // admission button. Empty perms (legacy accounts) = full access.
+    bool canAdmit = userHasPerm(g_session.user, L"admission");
+    // v1.79.0: same for the settings gear — accounts without the «تنظیمات»
+    // tick lose the gear while logged in (the home screen, logged OUT, keeps
+    // it so the panel stays reachable before login as before).
+    ShowWindow(s_bSettings,
+        userHasPerm(g_session.user, L"settings") ? SW_SHOW : SW_HIDE);
+    bool showPat  = show && canAdmit;
+    ShowWindow(s_bNewPat,   showPat?SW_SHOW:SW_HIDE);
     ShowWindow(s_bNewTab,   show?SW_SHOW:SW_HIDE);
     if(!show) return;
     RECT rc; GetClientRect(h,&rc);
@@ -568,11 +583,15 @@ static void updateHeaderButtons(HWND h){
     // LAYER 2 (action bar) sits directly under LAYER 1.
     int y = mainBarH() + (actionBarH()-bh)/2;
     // RIGHT-aligned cluster (v1.60.0 — «نوبت‌دهی» removed; right → left):
-    //     پذیرش بیمار  |  تب جدید
+    //     پذیرش بیمار  |  تب جدید        (پذیرش hidden when not permitted)
     int wNew=S(134), wTab=S(112);
-    int x = rc.right - pad - wNew;             // پذیرش (right-most)
-    MoveWindow(s_bNewPat, x,                          y, wNew,  bh, TRUE);
-    MoveWindow(s_bNewTab, x-g-wTab,                   y, wTab,  bh, TRUE);
+    int x = rc.right - pad - (showPat?wNew:wTab);
+    if(showPat){
+        MoveWindow(s_bNewPat, x,                      y, wNew,  bh, TRUE);
+        MoveWindow(s_bNewTab, x-g-wTab,               y, wTab,  bh, TRUE);
+    } else {
+        MoveWindow(s_bNewTab, x,                      y, wTab,  bh, TRUE);
+    }
     // blend the buttons' rounded corners into the LAYER 2 surface colour.
     setFlatButtonBg(s_bNewPat, g_theme.surface2);
     setFlatButtonBg(s_bNewTab, g_theme.surface2);
@@ -720,6 +739,7 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
             s_dlgOpen = false;
             if(ok){
                 g_session.user=u; g_session.shift=detectShift();
+                g_session.title=resolveSessionTitle(u);
                 g_session.loginAt=iranNow();
                 setUserOnline(u.username,true);
                 switchScreen(SC_ADMIN);
@@ -832,12 +852,13 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
                 DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
             SelectObject(dc,g_fSmall);
             SetTextColor(dc,g_theme.textDim);
-            const wchar_t* role =
-                g_session.user.role==2 ? L"مدیر سامانه" :
-                g_session.user.role==1 ? L"مدیریت" : L"پذیرش";
-            std::wstring sub = std::wstring(L"سطح دسترسی: ") + role;
+            // v1.79.0: the second line shows the person's مقام/سمت (دکتر /
+            // پرستار / کارآموز / …) instead of the technical «سطح دسترسی»
+            // label. It is resolved ONCE at login (resolveSessionTitle) and
+            // cached in g_session.title — this paint path never touches disk
+            // (the clock timer repaints this band up to twice a second).
             RECT sr={S(160),S(5)+S(26),idRight,mainBarH()-S(4)};
-            DrawTextW(dc,sub.c_str(),-1,&sr,
+            DrawTextW(dc,g_session.title.c_str(),-1,&sr,
                 DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
         } else {
             SelectObject(dc,g_fTitle);
@@ -874,18 +895,16 @@ static LRESULT CALLBACK frameProc(HWND h, UINT m, WPARAM w, LPARAM l){
             if(zL < bandL) zL = bandL;
             int zR = zL + zoneW;
             if(zR > bandR && bandR>bandL) { zR = bandR; }
-            // v1.78.0: the clock+date sit inside a frosted glass pill so the
-            // header's live metadata reads as a designed element, not floating
-            // text. The pill tone derives from the header gradient stops, so it
-            // blends on BOTH themes automatically.
+            // v1.79.0: the frosted pill behind the clock was REMOVED on request
+            // (it read as a stray patch on the band). The clock+date now float
+            // as clean typography — accent-tinted time over a dim date, framed
+            // by two whisper-thin vertical hairlines so the zone still reads as
+            // one composed element on the gradient.
             {
-                RECT pl={zL+S(28), S(6), zR-S(28), mainBarH()-S(6)};
-                int prad=(pl.bottom-pl.top)/2;
-                COLORREF pTop = blendColor(g_theme.headerTop, RGB(255,255,255), g_dark?6:60);
-                COLORREF pBot = blendColor(g_theme.headerBot, RGB(255,255,255), g_dark?0:22);
-                gpShadowColor(dc, pl, prad, S(4), g_dark?60:26, g_theme.accent);
-                gpGradRoundRect(dc, pl, prad, pTop, pBot,
-                    blendColor(g_theme.border, g_theme.accent, 28));
+                int dl = zL+S(14), dr = zR-S(14);
+                COLORREF hc = blendColor(g_theme.border, g_theme.accent, 30);
+                gpLine(dc, dl, S(10), dl, mainBarH()-S(10), hc, 1.0f, 90);
+                gpLine(dc, dr, S(10), dr, mainBarH()-S(10), hc, 1.0f, 90);
             }
             // clock (centred, bold) — band tuned for the compact S(56) header
             SetTextColor(dc,g_theme.accent);
@@ -1319,6 +1338,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
             User u; u.username=L"reza"; u.fullname=L"رضا منشی";
             u.dept=L"پذیرش"; u.role=0;
             g_session.user=u; g_session.shift=detectShift();
+            g_session.title=resolveSessionTitle(u);
             g_session.loginAt=iranNow();
             if(!wcscmp(dbg,L"reception")){ switchScreen(SC_RECEPTION);
                                            // open a fresh reception form tab so
@@ -1326,6 +1346,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
                                            // not the default cartable/portal tab.
                                            receptionAction(RA_NEWPAT); }
             else if(!wcscmp(dbg,L"manage")){   u.role=1; g_session.user=u;
+                                               g_session.title=resolveSessionTitle(u);
                                                switchScreen(SC_MANAGE); }
             else if(!wcscmp(dbg,L"admin")){    u.role=2; g_session.user=u;
                                                switchScreen(SC_ADMIN); }

@@ -258,6 +258,16 @@ static void onSignal(int sig){
 static void onTerminate(){
     crashCore(0xE06D7363, NULL, NULL);  // unhandled C++ exception
 }
+//  v1.79.0: CRT runtime-failure hooks — invalid CRT parameter (e.g. a bad
+//  printf arg) and pure-virtual calls otherwise abort with NO dump. Route both
+//  through the same crash report so even these paths leave evidence.
+static void onInvalidParam(const wchar_t*, const wchar_t*, const wchar_t*,
+                           unsigned int, uintptr_t){
+    crashCore(0xE0BADBADu, NULL, NULL);   // synthetic code: invalid CRT param
+}
+static void onPureCall(){
+    crashCore(0xE0CAA11u, NULL, NULL);    // synthetic code: pure virtual call
+}
 void installCrashHandler(){
     SetUnhandledExceptionFilter(crashFilter);
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
@@ -266,6 +276,8 @@ void installCrashHandler(){
     signal(SIGILL,  onSignal);
     signal(SIGFPE,  onSignal);
     std::set_terminate(onTerminate);
+    _set_invalid_parameter_handler(onInvalidParam);
+    _set_purecall_handler(onPureCall);
 }
 
 // ============================================================== SPEED ======

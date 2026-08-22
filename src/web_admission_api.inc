@@ -570,7 +570,16 @@ static std::string admissionApi(const std::string& verb, const std::string& body
         o+="\"theme\":"+jstr(getSetting(L"theme",L"light"))+",";
         // v1.77: calm/warm palettes retired — the admission surface is always the
         // standard light (blue) palette or dark, so no "palette" field is sent.
-        o+="\"ps\":{\"P\":0,\"S\":0}";
+        o+="\"ps\":{\"P\":0,\"S\":0},";
+        // v1.79.0: per-account access ticks (مدیریت ← تعریف حساب کاربری). The
+        // page hides the elements the account has no access to (e.g. the
+        // صندوق/صف launcher without «گزارش و صندوق»). Management passes all.
+        o+="\"perms\":{";
+        o+="\"admission\":";  o+=(userHasPerm(g_session.user,L"admission")?"true":"false"); o+=",";
+        o+="\"worklist\":";   o+=(userHasPerm(g_session.user,L"worklist")?"true":"false");  o+=",";
+        o+="\"cashier\":";    o+=(userHasPerm(g_session.user,L"cashier")?"true":"false");   o+=",";
+        o+="\"settings\":";   o+=(userHasPerm(g_session.user,L"settings")?"true":"false");
+        o+="}";
         o+="}";
         return o;
     }

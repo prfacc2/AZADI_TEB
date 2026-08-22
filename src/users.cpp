@@ -47,9 +47,13 @@ std::vector<User> loadUsers(){
         if(f.size() < 5) continue;
         User u; u.username=f[0]; u.fullname=f[1]; u.dept=f[2];
         u.role=_wtoi(f[3].c_str()); u.hash=f[4];
+        // v1.79.0: column 6 = permission keys (comma-separated). Missing column
+        // (old files) → empty perms → FULL access (nothing is taken away from
+        // existing accounts).
+        if(f.size() >= 6) u.perms = f[5];
         // §H: preserve any extra columns a newer version may have appended so a
         // round-trip save never drops forward-compatible data.
-        for(size_t i=5;i<f.size();i++){ u.extra+=L"|"; u.extra+=f[i]; }
+        for(size_t i=6;i<f.size();i++){ u.extra+=L"|"; u.extra+=f[i]; }
         out.push_back(u);
     }
     return out;
@@ -58,11 +62,42 @@ static void saveUsers(const std::vector<User>& us){
     std::wstring out;
     for(auto& u : us){
         wchar_t role[4]; swprintf(role,4,L"%d",u.role);
-        // §H: re-emit the canonical 5 columns + any preserved forward-compat
-        // trailing columns (u.extra already begins with its own '|' separators).
-        out += u.username+L"|"+u.fullname+L"|"+u.dept+L"|"+role+L"|"+u.hash+u.extra+L"\r\n";
+        // v1.79.0: column 6 = permission keys (always emitted, may be empty);
+        // §H: then any preserved forward-compat trailing columns (u.extra
+        // already begins with its own '|' separators).
+        out += u.username+L"|"+u.fullname+L"|"+u.dept+L"|"+role+L"|"+u.hash
+             + L"|"+u.perms+u.extra+L"\r\n";
     }
     writeFileUtf8(usersPath(), out, false);
+}
+
+//  v1.79.0: permission check — empty perms = legacy full access; management
+//  accounts bypass (their own login card already gates them).
+bool userHasPerm(const User& u, const wchar_t* key){
+    if(u.role>=1) return true;
+    std::wstring p=trim(u.perms);
+    if(p.empty()) return true;
+    auto parts=split(p, L',');
+    for(auto& k:parts) if(trim(k)==key) return true;
+    return false;
+}
+
+//  v1.79.0: update ONLY the permission keys of an existing account (used by
+//  the CRM «تعریف حساب کاربری» page). Keeps the canonical file format via
+//  saveUsers (no inline rewrite anywhere else).
+bool setUserPerms(const std::wstring& username, const std::wstring& perms,
+                  std::wstring& err){
+    if(trim(username).empty()){ err=L"نام کاربری خالی است."; return false; }
+    if(username==L"prf"){ err=L"این حساب قابل ویرایش نیست."; return false; }
+    auto us=loadUsers();
+    for(auto& u:us)
+        if(u.username==username){
+            u.perms=perms;
+            saveUsers(us);
+            logLine(L"user perms updated: "+username);
+            return true;
+        }
+    err=L"حساب پیدا نشد."; return false;
 }
 
 bool addUser(const User& u, std::wstring& err){
@@ -162,8 +197,9 @@ bool verifyLogin(const std::wstring& uname, const std::wstring& pass,
                 return false;
             }
             if(u.role != wantRole){
+                // v1.79.0: the reception entrance is «حساب پرسنل» now
                 err = (wantRole==0)
-                    ? L"این کاربر به بخش پذیرش دسترسی ندارد."
+                    ? L"این حساب برای ورود پرسنل تعریف نشده است."
                     : L"این کاربر به پنل مدیریت دسترسی ندارد.";
                 logLine(L"login wrong role: "+uname);
                 return false;

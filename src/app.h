@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.78.0"
+#define APP_VERSION_W   L"1.79.0"
 
 // ----------------------------------------------------------- logging policy -
 //  RELEASE 1.2.0 (Section A): all general user-behavior logging is gated behind
@@ -300,14 +300,22 @@ bool RunSetupSplash(HINSTANCE hInst);
 #define ROLE_ADMIN     1
 struct User {
     std::wstring username, fullname, dept, hash;
-    int role;                 // 0 = پذیرش, 1 = مدیریت
+    int role;                 // 0 = پذیرش/پرسنل, 1 = مدیریت
     int id;                   // stable per-user id (index into users store)
+    // v1.79.0: comma-separated permission keys (column 6 of users.dat).
+    // EMPTY = full access (back-compat: accounts created before v1.79 keep
+    // everything). Known keys today: "admission" (پذیرش بیمار),
+    // "worklist" (کارتابل), "cashier" (گزارش و صندوق), "settings" (تنظیمات).
+    std::wstring perms;
     // §H forward-compat: any extra pipe-delimited columns written by a FUTURE
-    // version (fields 6,7,…) are captured verbatim here and written back
+    // version (fields 7,8,…) are captured verbatim here and written back
     // unchanged, so an older build never silently drops newer data.
     std::wstring extra;
     User():role(0),id(0){}
 };
+// v1.79.0: does this account hold the given permission key? Empty perms = yes
+// (legacy full access). Management accounts (role>=1) always pass.
+bool userHasPerm(const User& u, const wchar_t* key);
 std::vector<User> loadUsers();
 bool addUser(const User& u, std::wstring& err);
 bool removeUser(const std::wstring& username);
@@ -317,6 +325,9 @@ bool setUserFullName(const std::wstring& username, const std::wstring& fullname)
 bool updateUserAccount(const std::wstring& username, const std::wstring& fullname,
                        const std::wstring& dept, int role,
                        const std::wstring& newPassword, std::wstring& err);
+// v1.79.0: update ONLY the permission keys of an account (CRM accounts page)
+bool setUserPerms(const std::wstring& username, const std::wstring& perms,
+                  std::wstring& err);
 bool verifyLogin(const std::wstring& u, const std::wstring& p,
                  int wantRole, User& out, std::wstring& err);
 std::wstring hashPassword(const std::wstring& p);
@@ -507,7 +518,14 @@ struct Session {
     User user;
     int  shift;          // chosen at login, never auto-revoked
     SYSTEMTIME loginAt;
+    // v1.79.0: the header's second identity line (مقام/سمت) resolved ONCE at
+    // login — WM_PAINT must never hit persons.dat / emp_*.dat on every clock
+    // tick (the timer repaints the header band up to twice a second).
+    std::wstring title;
 };
+//  resolve the logged-in person's مقام/سمت once (personnel record → employee
+//  profile → access-level fallback); called at login, cached in session.title
+std::wstring resolveSessionTitle(const User& u);
 extern Session g_session;
 
 // ---------------------------------------------------------------- screens --
@@ -623,6 +641,51 @@ void       saveEmpProfile(const EmpProfile& p);
 bool       isUserOnline(const std::wstring& username);   // session presence (heartbeat <90s)
 void       setUserOnline(const std::wstring& username, bool on);
 void       heartbeatUser(const std::wstring& username);  // §G: refresh presence on a timer
+
+// --------------------------------------------------------------- persons ----
+//  v1.79.0: personnel registry («تعریف پرسنل»). A PERSON exists independently
+//  of any login account — the account is attached later in «تعریف حساب
+//  کاربری». Keyed by کد پرسنلی (personnel code), auto-generated from the
+//  owning department's name (first two letters, Persian→Latin) + a running
+//  number (آزمایشگاه → AZ_0001, تزریقات → TZ_…, پذیرش → PZ_…) or entered
+//  manually. A person with no department is «در حالت تعلیق» (suspended).
+struct PersonDef {
+    std::wstring code;        // کد پرسنلی (unique) e.g. AZ_0001 / PER_0001
+    std::wstring firstName, lastName, fatherName, nationalId;
+    std::wstring birthDate;   // تاریخ تولد (Jalali text, free-form)
+    std::wstring address, mobile, phone, email;
+    std::wstring education;   // مدرک تحصیلی
+    std::wstring field;       // شاخه/رشته تحصیلی
+    std::wstring degree;      // عنوان دقیق مدرک
+    int         roleKind;     // 0=پرسنل 1=پزشک 2=پرستار 3=کارآموز 4=سایر
+    std::wstring roleCustom;  // نقش آزاد وقتی roleKind==4
+    std::wstring position;    // مقام/سمت — توی هدر برنامه بعد از ورود نمایش داده می‌شود
+    std::wstring deptId;      // DeptCat id — empty = در حالت تعلیق
+    std::wstring photo;       // مسیر نسبی عکس (data\persons\photos\<code>.<ext>)
+    std::wstring username;    // حساب کاربری مرتبط (empty = هنوز حساب ندارد)
+    std::wstring created;     // تاریخ ایجاد (Jalali)
+    std::wstring extraKv;     // §H forward-compat: unknown key=value lines
+    PersonDef():roleKind(0){}
+};
+std::vector<PersonDef> loadPersons();
+bool addPerson(PersonDef& p, std::wstring& err);      // auto-fills p.code when empty
+bool updatePerson(const PersonDef& p, std::wstring& err);
+bool removePerson(const std::wstring& code);
+bool personByCode(const std::wstring& code, PersonDef& out);
+bool personByUsername(const std::wstring& username, PersonDef& out);
+//  پیشنهاد کد بعدی برای یک بخش (PREFIX_####) یا برای پرسنل بدون بخش (PER_####)
+std::wstring nextPersonCode(const std::wstring& deptId);
+//  پیشوند لاتین دوحرفی از روی نام بخش (فارسی هم پوشش داده می‌شود)
+std::wstring deptCodePrefix(const std::wstring& deptName);
+//  نقش متنی از روی roleKind/roleCustom
+std::wstring personRoleLabel(const PersonDef& p);
+//  عکس پرسنلی: ذخیره باینری زیر data\persons\photos\ و خواندن آن (برای نمایش
+//  در صفحه CRM به‌صورت data URL از طریق پل)
+std::wstring personPhotoDir();
+bool savePersonPhoto(const std::wstring& code, const std::string& bytes,
+                     const std::wstring& ext, std::wstring& relOut);
+bool loadPersonPhoto(const std::wstring& relPath, std::string& bytesOut,
+                     std::wstring& mimeOut);
 
 // ------------------------------------------------------------- services --
 //  Clinic services managed from the «مدیریت خدمات» (Service Management) page.

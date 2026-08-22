@@ -81,4 +81,33 @@
     okBtn.onclick = m.close;
     return m;
   };
+
+  /* ---- print helper (v1.79.0) ---------------------------------------------
+     printNode(id, title): clones the given element into a dedicated print
+     overlay (#crmPrintArea), marks <body> as .printing (the @media print rules
+     in crm.css hide the app chrome and show ONLY this overlay), then invokes
+     the system print dialog. Used for «چاپ مشخصات پرسنل» and «اطلاعات بخش». */
+  Crm.printNode = function (id, title) {
+    var src = document.getElementById(id);
+    if (!src) { Crm.toast('چیزی برای چاپ نیست.', 'err'); return; }
+    var area = document.getElementById('crmPrintArea');
+    if (!area) {
+      area = el('div'); area.id = 'crmPrintArea';
+      document.body.appendChild(area);
+    }
+    area.innerHTML =
+      '<div class="crm-print-doc">' +
+        '<div class="crm-print-brand">درمان پلاس — ' + esc(title || 'چاپ') + '</div>' +
+        '<div class="crm-print-body">' + src.innerHTML + '</div>' +
+        '<div class="crm-print-foot">چاپ از سامانه مدیریت درمانگاه — ' +
+          esc((Crm.state && Crm.state.data && Crm.state.data.date) || '') + '</div>' +
+      '</div>';
+    document.body.className += (document.body.className ? ' ' : '') + 'printing';
+    /* give the layout one tick before the dialog (images/fonts settle) */
+    setTimeout(function () {
+      try { window.print(); } catch (e) { if (global.console) console.error(e); }
+      document.body.className = document.body.className.replace(/\bprinting\b/g, '');
+      area.innerHTML = '';
+    }, 60);
+  };
 })(window);

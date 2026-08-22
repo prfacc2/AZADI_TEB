@@ -1365,8 +1365,10 @@
     on($('queueClose'),    'click', function () { closeQueuePanel(); });
     /* v1.64.0 (درمان پلاس): dedicated navigation buttons in the action rail that
        open the full-screen queue directly on the requested tab. */
-    on($('navUnpaid'), 'click', function () { openQueuePanel('unpaid'); });
-    on($('navAdmQ'),   'click', function () { openQueuePanel('admission'); });
+    /* v1.79.0: the «صندوق نرفته‌ها» / «صف پذیرش» nav buttons were removed from
+       the action card (they duplicated the launcher). The handlers stay out —
+       the consolidated «queueLauncher» (now centred on the right rail) opens
+       the same overlay. */
     /* clicking the dim backdrop dismisses the full-screen overlay, like a modal. */
     on($('queueBackdrop'),  'click', function () { closeQueuePanel(); });
     /* v1.65.0: the draggable mini-page (and its wireDrag/queueDrag plumbing)
@@ -1437,6 +1439,28 @@
       Bridge.call('reception.zoom.save', { zoom: z });
     });
   }
+
+  /* v1.79.0: TRIDENT SCROLL-REPAINT FIX. The clinic reported that after
+     scrolling a few times (and across app restarts — i.e. whenever the
+     persisted zoom != 100%), the page's items suddenly garble on scroll. That
+     is the classic MSHTML/Trident repaint bug for `zoom`ed containers: the
+     scrolled-in region paints stale pixels until a full reflow. WebView2 /
+     Chromium never shows it. Fix: on the MSHTML bridge only, after each scroll
+     burst settles, re-apply the zoom value — a cheap reflow that forces the
+     whole workspace to repaint correctly. */
+  (function () {
+    if (window.chrome && window.chrome.webview) return;   /* WebView2: fine */
+    var t = null;
+    function nudge() {
+      var host = $('appBody'); if (!host) return;
+      host.style.zoom = '';
+      host.style.zoom = (state.zoom || 80) + '%';
+    }
+    function onScroll() { if (t) clearTimeout(t); t = setTimeout(nudge, 150); }
+    on(window, 'scroll', onScroll);
+    on(document, 'scroll', onScroll);
+    var tw = $('svcTblWrap'); if (tw) on(tw, 'scroll', onScroll);
+  })();
 
   /* v1.73.0: ZOOM rework — content never overflows the web view at any zoom.
      The .app shell is a FIXED clip boundary (width:100%, height:100vh,
@@ -1848,6 +1872,11 @@
       renderServices(); recompute();
       /* v1.78.0: load the «انجام دهنده» combo (performer-flagged doctors). */
       fillPerformers();
+      /* v1.79.0: access ticks — hide the queue/cashier launcher entirely when
+         the account lacks «گزارش و صندوق» (مدیریت ← تعریف حساب کاربری). */
+      if (r.perms && r.perms.cashier === false) {
+        var ql = $('queueLauncher'); if (ql) ql.style.display = 'none';
+      }
       refreshQueue();
       setSync('ok', 'همگام با برنامه');
       state.ready = true;

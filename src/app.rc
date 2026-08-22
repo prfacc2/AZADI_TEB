@@ -84,7 +84,7 @@
 805 RCDATA "../assets/crm/patients.js"
 806 RCDATA "../assets/crm/doctors.js"
 807 RCDATA "../assets/crm/services.js"
-808 RCDATA "../assets/crm/employees.js"
+808 RCDATA "../assets/crm/accounts.js"
 809 RCDATA "../assets/crm/messages.js"
 810 RCDATA "../assets/crm/settings.js"
 811 RCDATA "../assets/crm/insurance.js"
@@ -93,7 +93,12 @@
 // (crm_dialogs.js) are now separate RCDATA blobs, inlined into the page by
 // web_crm_embed.inc in the same <script> order as index.html. Ids 812..813.
 812 RCDATA "../assets/crm/crm_menu.js"
+// v1.79.0: «تعریف پرسنل» (personnel registry) page. The old employees.js page
+// was rebuilt as «تعریف حساب کاربری» (accounts.js, id 808 above) — personnel-
+// linked account creation + access ticks + filters; the departments card moved
+// into it so no capability was lost.
 813 RCDATA "../assets/crm/crm_dialogs.js"
+814 RCDATA "../assets/crm/persons.js"
 
 // v1.68.0: the redistributable WebView2 loader (x86). Extracted to a per-user
 // writable folder at first use so the embedded Patient-Admission surface can
@@ -106,8 +111,8 @@
 1 24 "app.manifest"
 
 VS_VERSION_INFO VERSIONINFO
-  FILEVERSION 1,78,0,0
-  PRODUCTVERSION 1,78,0,0
+  FILEVERSION 1,79,0,0
+  PRODUCTVERSION 1,79,0,0
   FILEFLAGSMASK 0x3fL
   FILEFLAGS 0x0L
   FILEOS 0x40004L
@@ -120,11 +125,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "DarmanPlus"
             VALUE "FileDescription", "DarmanPlus Clinic Reception & Management System"
-            VALUE "FileVersion", "1.78.0.0"
+            VALUE "FileVersion", "1.79.0.0"
             VALUE "InternalName", "DarmanPlus"
             VALUE "OriginalFilename", "DarmanPlus.exe"
             VALUE "ProductName", "DarmanPlus"
-            VALUE "ProductVersion", "1.78.0"
+            VALUE "ProductVersion", "1.79.0"
         END
     END
     BLOCK "VarFileInfo"

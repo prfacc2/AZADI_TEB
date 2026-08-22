@@ -94,7 +94,8 @@ static bool crmReplaceRequired(std::string& hay, const std::string& needle,
 //   <style> blocks, and common.js (501) + crm.js (802) + crm_menu.js (812) +
 //   crm_dialogs.js (813) + dashboard.js (803) + sections.js (804) +
 //   patients.js (805) + doctors.js (806) + services.js (807) + employees.js
-//   (808) + messages.js (809) + settings.js (810) + insurance.js (811)
+//   (808 = accounts.js «تعریف حساب کاربری», v1.79) + messages.js (809) +
+//   settings.js (810) + insurance.js (811) + persons.js (814, «تعریف پرسنل»)
 //   inlined into <script> blocks (in the same order as index.html).
 //
 //  Font strategy (withFontFace):
@@ -104,6 +105,8 @@ static bool crmReplaceRequired(std::string& hay, const std::string& needle,
 //      Trident page gets NO @font-face (a failing src would drop the family).
 static std::string CrmBuildInlinePage(bool withFontFace){
     std::string html,commonCss,crmCss,commonJs,crmJs,menuJs,dlgJs,dashJs,secJs,patJs,docJs,svcJs,empJs,msgJs,setJs;
+    // v1.79.0: id 808 now hosts accounts.js («تعریف حساب کاربری») — the
+    // employees.js successor; the local var keeps its old name (empJs).
     if(!crmLoadRes(800,html)      || html.empty()      ||
        !crmLoadRes(500,commonCss) || commonCss.empty() ||
        !crmLoadRes(801,crmCss)    || crmCss.empty()    ||
@@ -158,7 +161,7 @@ static std::string CrmBuildInlinePage(bool withFontFace){
                           "<script>\n"+docJs+"\n</script>") ||
        !crmReplaceRequired(html,"<script src=\"services.js\"></script>",
                           "<script>\n"+svcJs+"\n</script>") ||
-       !crmReplaceRequired(html,"<script src=\"employees.js\"></script>",
+       !crmReplaceRequired(html,"<script src=\"accounts.js\"></script>",
                           "<script>\n"+empJs+"\n</script>") ||
        !crmReplaceRequired(html,"<script src=\"messages.js\"></script>",
                           "<script>\n"+msgJs+"\n</script>") ||
@@ -170,6 +173,13 @@ static std::string CrmBuildInlinePage(bool withFontFace){
       std::string insJs; if(!crmLoadRes(811,insJs) || insJs.empty()) return "";
       if(!crmReplaceRequired(html,"<script src=\"insurance.js\"></script>",
                           "<script>\n"+insJs+"\n</script>"))
+        return "";
+    }
+    // v1.79.0: persons.js (RCDATA 814) — the «تعریف پرسنل» registry page
+    {
+      std::string perJs; if(!crmLoadRes(814,perJs) || perJs.empty()) return "";
+      if(!crmReplaceRequired(html,"<script src=\"persons.js\"></script>",
+                          "<script>\n"+perJs+"\n</script>"))
         return "";
     }
     return html;

@@ -113,9 +113,81 @@ static std::string crmUserJson(const User& u){
     o+="\"fullname\":"+jstr(u.fullname)+",";
     o+="\"dept\":"+jstr(u.dept)+",";
     o+="\"role\":"+jnum(u.role)+",";
+    // v1.79.0: permission keys (empty = full access) + linked personnel info
+    o+="\"perms\":"+jstr(u.perms)+",";
+    PersonDef _pu;
+    if(personByUsername(u.username,_pu)){
+        o+="\"personCode\":"+jstr(_pu.code)+",";
+        o+="\"position\":"+jstr(_pu.position.empty()?personRoleLabel(_pu):_pu.position)+",";
+        o+="\"hasPhoto\":"; o+=(_pu.photo.empty()?"false":"true"); o+=",";
+    }
     o+="\"online\":"; o+=(isUserOnline(u.username)?"true":"false"); o+="";
     o+="}";
     return o;
+}
+
+// ---- v1.79.0: personnel registry JSON -------------------------------------
+static std::string crmPersonJson(const PersonDef& p){
+    std::string o="{";
+    o+="\"code\":"+jstr(p.code)+",";
+    o+="\"firstName\":"+jstr(p.firstName)+",";
+    o+="\"lastName\":"+jstr(p.lastName)+",";
+    o+="\"fatherName\":"+jstr(p.fatherName)+",";
+    o+="\"nationalId\":"+jstr(p.nationalId)+",";
+    o+="\"birthDate\":"+jstr(p.birthDate)+",";
+    o+="\"address\":"+jstr(p.address)+",";
+    o+="\"mobile\":"+jstr(p.mobile)+",";
+    o+="\"phone\":"+jstr(p.phone)+",";
+    o+="\"email\":"+jstr(p.email)+",";
+    o+="\"education\":"+jstr(p.education)+",";
+    o+="\"field\":"+jstr(p.field)+",";
+    o+="\"degree\":"+jstr(p.degree)+",";
+    o+="\"roleKind\":"+jnum(p.roleKind)+",";
+    o+="\"roleCustom\":"+jstr(p.roleCustom)+",";
+    o+="\"roleLabel\":"+jstr(personRoleLabel(p))+",";
+    o+="\"position\":"+jstr(p.position)+",";
+    o+="\"deptId\":"+jstr(p.deptId)+",";
+    // dept NAME for display (DeptCat is id-keyed; the page shows names)
+    {
+        std::wstring dn;
+        auto ds=loadDepts();
+        for(auto& d:ds) if(d.id==p.deptId){ dn=d.name; break; }
+        o+="\"deptName\":"+jstr(dn)+",";
+    }
+    o+="\"suspended\":"; o+=(p.deptId.empty()?"true":"false"); o+=",";
+    o+="\"username\":"+jstr(p.username)+",";
+    o+="\"hasPhoto\":"; o+=(p.photo.empty()?"false":"true"); o+=",";
+    o+="\"created\":"+jstr(p.created);
+    o+="}";
+    return o;
+}
+
+// ---- tiny base64 DECODE (photo upload) -------------------------------------
+static int b64val(char c){
+    if(c>='A'&&c<='Z') return c-'A';
+    if(c>='a'&&c<='z') return c-'a'+26;
+    if(c>='0'&&c<='9') return c-'0'+52;
+    if(c=='+') return 62; if(c=='/') return 63;
+    return -1;
+}
+static std::string b64decode(const std::string& in){
+    std::string out; int val=0, bits=-8;
+    for(char c:in){
+        int v=b64val(c); if(v<0) break;
+        val=(val<<6)+v; bits+=6;
+        if(bits>=0){ out+=(char)((val>>bits)&0xFF); bits-=8; }
+    }
+    return out;
+}
+//  strip a "data:image/png;base64," prefix if present
+static std::string b64payload(const std::string& dataUrl, std::wstring& ext){
+    ext=L".png";
+    size_t comma=dataUrl.find(',');
+    if(comma==std::string::npos) return dataUrl;
+    std::string head=dataUrl.substr(0,comma);
+    if(head.find("jpeg")!=std::string::npos||head.find("jpg")!=std::string::npos)
+        ext=L".jpg";
+    return dataUrl.substr(comma+1);
 }
 
 static std::string crmDeptJson(const DeptCat& c){
@@ -767,8 +839,188 @@ static std::string crmApi(const std::string& verb, const std::string& body){
         std::wstring username=u82w(uU);
         if(username.empty()||username==L"prf")
             return "{\"ok\":false,\"err\":\"این کاربر قابل حذف نیست.\"}";
+        // v1.79.0: unlink the personnel record too, so the person stays in the
+        // registry and can receive a fresh account later (never a dangling link)
+        { PersonDef p; if(personByUsername(username,p)){
+            p.username.clear(); std::wstring e2; updatePerson(p,e2); } }
         return removeUser(username) ? "{\"ok\":true}"
                                     : "{\"ok\":false,\"err\":\"حذف ناموفق بود.\"}";
+    }
+    // ================= v1.79.0: personnel registry («تعریف پرسنل») ==========
+    if(verb=="crm.persons.list"){
+        std::string deptU,qU; jsonGetString(body,"deptId",deptU); jsonGetString(body,"q",qU);
+        std::wstring deptId=u82w(deptU), q=u82w(qU);
+        std::wstring qLower=q; for(auto& c:qLower) c=towlower(c);
+        std::string qEn=w2u8(normDigits(q));
+        auto ps=loadPersons();
+        std::string o="{\"rows\":[";
+        int n=0;
+        for(auto& p:ps){
+            if(!deptId.empty() && p.deptId!=deptId) continue;
+            if(!q.empty()){
+                std::wstring hay=p.code+L" "+p.firstName+L" "+p.lastName+L" "+
+                                 p.nationalId+L" "+p.position+L" "+personRoleLabel(p);
+                for(auto& c:hay) c=towlower(c);
+                bool hit=hay.find(qLower)!=std::wstring::npos;
+                // numeric queries also match the digits form of code/nationalId
+                if(!hit && !qEn.empty()){
+                    std::wstring nd=normDigits(p.code)+L" "+normDigits(p.nationalId);
+                    hit=nd.find(u82w(qEn))!=std::wstring::npos;
+                }
+                if(!hit) continue;
+            }
+            if(n++) o+=",";
+            o+=crmPersonJson(p);
+        }
+        o+="],\"depts\":[";
+        auto ds=loadDepts();
+        for(size_t i=0;i<ds.size();++i){ if(i)o+=","; o+=crmDeptJson(ds[i]); }
+        o+="]}"; return o;
+    }
+    if(verb=="crm.persons.nextcode"){
+        std::string dU; jsonGetString(body,"deptId",dU);
+        return std::string("{\"code\":")+jstr(nextPersonCode(u82w(dU)))+"}";
+    }
+    if(verb=="crm.persons.save"){
+        std::string t; double rk=0;
+        PersonDef p; bool editing=false;
+        if(jsonGetString(body,"code",t))        { p.code=trim(u82w(t)); }
+        if(jsonGetString(body,"firstName",t))   p.firstName=u82w(t);
+        if(jsonGetString(body,"lastName",t))    p.lastName=u82w(t);
+        if(jsonGetString(body,"fatherName",t))  p.fatherName=u82w(t);
+        if(jsonGetString(body,"nationalId",t))  p.nationalId=normDigits(u82w(t));
+        if(jsonGetString(body,"birthDate",t))   p.birthDate=u82w(t);
+        if(jsonGetString(body,"address",t))     p.address=u82w(t);
+        if(jsonGetString(body,"mobile",t))      p.mobile=normDigits(u82w(t));
+        if(jsonGetString(body,"phone",t))       p.phone=normDigits(u82w(t));
+        if(jsonGetString(body,"email",t))       p.email=u82w(t);
+        if(jsonGetString(body,"education",t))   p.education=u82w(t);
+        if(jsonGetString(body,"field",t))       p.field=u82w(t);
+        if(jsonGetString(body,"degree",t))      p.degree=u82w(t);
+        if(jsonGetNumber(body,"roleKind",rk))   p.roleKind=(int)rk;
+        if(jsonGetString(body,"roleCustom",t))  p.roleCustom=u82w(t);
+        if(jsonGetString(body,"position",t))    p.position=u82w(t);
+        if(jsonGetString(body,"deptId",t))      p.deptId=u82w(t);
+        if(!p.code.empty()){
+            PersonDef old; editing=personByCode(p.code,old);
+            if(editing){ p.username=old.username; p.photo=old.photo; p.created=old.created; }
+        }
+        // optional photo upload (data URL) — stored under data\persons\photos
+        std::string photoU;
+        if(jsonGetString(body,"photoData",photoU) && photoU.size()>32){
+            std::wstring ext; std::string bytes=b64decode(b64payload(photoU,ext));
+            std::wstring rel;
+            std::wstring photoCode = p.code.empty()?nextPersonCode(p.deptId):p.code;
+            if(!bytes.empty() && savePersonPhoto(photoCode,bytes,ext,rel)) p.photo=rel;
+        }
+        std::wstring err;
+        bool ok = editing ? updatePerson(p,err) : addPerson(p,err);
+        if(!ok) return std::string("{\"ok\":false,\"err\":")+jstr(err)+"}";
+        return std::string("{\"ok\":true,\"code\":")+jstr(p.code)+"}";
+    }
+    if(verb=="crm.persons.delete"){
+        std::string cU; jsonGetString(body,"code",cU);
+        std::wstring code=u82w(cU);
+        if(code.empty()) return "{\"ok\":false,\"err\":\"کد پرسنلی خالی است.\"}";
+        // v1.79.0: deleting a person also CLOSES their login account — a
+        // removed person must not be able to sign in any more. (The UI
+        // confirms this explicitly before calling.)
+        PersonDef p; if(personByCode(code,p) && !p.username.empty()){
+            removeUser(p.username);
+        }
+        return removePerson(code) ? "{\"ok\":true}"
+                                  : "{\"ok\":false,\"err\":\"حذف ناموفق بود.\"}";
+    }
+    if(verb=="crm.persons.photo"){
+        std::string cU; jsonGetString(body,"code",cU);
+        PersonDef p;
+        if(!personByCode(u82w(cU),p) || p.photo.empty()) return "{\"ok\":false}";
+        std::string bytes; std::wstring mime;
+        if(!loadPersonPhoto(p.photo,bytes,mime)) return "{\"ok\":false}";
+        std::string b64; { static const char* T="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+            for(size_t i=0;i<bytes.size();i+=3){
+                unsigned v=(unsigned char)bytes[i]<<16;
+                if(i+1<bytes.size()) v|=(unsigned char)bytes[i+1]<<8;
+                if(i+2<bytes.size()) v|=(unsigned char)bytes[i+2];
+                b64+=T[(v>>18)&63]; b64+=T[(v>>12)&63];
+                b64+=(i+1<bytes.size())?T[(v>>6)&63]:'=';
+                b64+=(i+2<bytes.size())?T[v&63]:'=';
+            } }
+        return std::string("{\"ok\":true,\"data\":\"data:")+w2u8(mime)+";base64,"+b64+"\"}";
+    }
+    // ================= v1.79.0: «تعریف حساب کاربری» (personnel-linked) =======
+    //  create: a person + fresh username/password (+ permission ticks).
+    if(verb=="crm.accounts.create"){
+        std::string t; 
+        std::wstring personCode,userName,pass,perms;
+        if(jsonGetString(body,"personCode",t)) personCode=u82w(t);
+        if(jsonGetString(body,"username",t))   userName=trim(u82w(t));
+        if(jsonGetString(body,"password",t))   pass=u82w(t);
+        if(jsonGetString(body,"perms",t))      perms=u82w(t);
+        PersonDef p;
+        if(!personByCode(personCode,p))
+            return "{\"ok\":false,\"err\":\"پرسنل پیدا نشد.\"}";
+        if(!p.username.empty())
+            return "{\"ok\":false,\"err\":\"این پرسنل قبلاً حساب کاربری دارد.\"}";
+        if(userName.empty()||pass.empty())
+            return "{\"ok\":false,\"err\":\"نام کاربری و رمز عبور الزامی است.\"}";
+        User u; u.username=userName;
+        u.fullname=trim(p.firstName+L" "+p.lastName);
+        { auto ds=loadDepts(); for(auto& d:ds) if(d.id==p.deptId) u.dept=d.name; }
+        u.role=0; u.perms=perms; u.hash=hashPassword(pass);
+        std::wstring err;
+        if(!addUser(u,err)) return std::string("{\"ok\":false,\"err\":")+jstr(err)+"}";
+        p.username=userName; std::wstring e2; updatePerson(p,e2);
+        return "{\"ok\":true}";
+    }
+    //  update: permission ticks + optional password reset (username immutable)
+    if(verb=="crm.accounts.update"){
+        std::string t;
+        std::wstring userName,pass,perms; bool hasPerms=false;
+        if(jsonGetString(body,"username",t))   userName=trim(u82w(t));
+        if(jsonGetString(body,"password",t))   pass=u82w(t);
+        if(jsonGetString(body,"perms",t))      { perms=u82w(t); hasPerms=true; }
+        if(userName.empty()) return "{\"ok\":false,\"err\":\"نام کاربری خالی است.\"}";
+        if(userName==L"prf") return "{\"ok\":false,\"err\":\"این حساب قابل ویرایش نیست.\"}";
+        auto us=loadUsers(); bool found=false;
+        for(auto& u:us) if(u.username==userName){ found=true; break; }
+        if(!found) return "{\"ok\":false,\"err\":\"حساب پیدا نشد.\"}";
+        // fullname/dept/role stay as-is — this verb only touches perms+password
+        for(auto& u:us) if(u.username==userName){
+            std::wstring err;
+            if(!updateUserAccount(u.username,u.fullname,u.dept,u.role,pass,err))
+                return std::string("{\"ok\":false,\"err\":")+jstr(err)+"}";
+            break;
+        }
+        if(hasPerms){
+            std::wstring err;
+            if(!setUserPerms(userName,perms,err))
+                return std::string("{\"ok\":false,\"err\":")+jstr(err)+"}";
+        }
+        return "{\"ok\":true}";
+    }
+    //  dept info sheet: the dept + its personnel + its accounts (for the view
+    //  + print dialog)
+    if(verb=="crm.depts.info"){
+        std::string dU; jsonGetString(body,"id",dU);
+        std::wstring id=u82w(dU);
+        auto ds=loadDepts();
+        const DeptCat* dp=nullptr;
+        for(auto& d:ds) if(d.id==id){ dp=&d; break; }
+        if(!dp) return "{\"ok\":false,\"err\":\"بخش پیدا نشد.\"}";
+        std::string o="{\"ok\":true,\"dept\":"+crmDeptJson(*dp)+",\"persons\":[";
+        int n=0;
+        auto ps=loadPersons();
+        for(auto& p:ps) if(p.deptId==id){ if(n++)o+=","; o+=crmPersonJson(p); }
+        o+="],\"users\":[";
+        auto us=loadUsers(); int m=0;
+        for(auto& u:us) if(u.dept==dp->name){
+            if(m++)o+=",";
+            o+="{\"username\":"+jstr(u.username)+",\"fullname\":"+jstr(u.fullname)+
+               ",\"online\":"; o+=(isUserOnline(u.username)?"true":"false"); o+="}";
+        }
+        o+="]}";
+        return o;
     }
     if(verb=="crm.depts.save"){
         DeptCat c;

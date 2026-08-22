@@ -1299,6 +1299,32 @@ select.inp{background:#fbfdff;}
   -webkit-box-shadow:0 3px 10px rgba(18,58,114,.10);box-shadow:0 3px 10px rgba(18,58,114,.10);
 }
 .queue-hub-btn:hover{background:#eef5ff;border-color:#2f6fe4;color:#1d55bd;}
+/* v1.79.0: the launcher now lives on the RIGHT rail, centred between the
+   عملیات پذیرش and چاپ اسناد cards — a standalone element, part of neither.
+   It gets a soft brand-tinted pill so it reads as the page's queue hub. */
+.queue-hub-rail{
+  display:block;width:auto;min-width:86%;
+  margin:2px auto 10px;
+  border-radius:999px;height:44px;
+  background:#eaf2fd;
+  background:-webkit-linear-gradient(top,#f2f7fe 0%,#e2edfb 100%);
+  background:linear-gradient(180deg,#f2f7fe 0%,#e2edfb 100%);
+  border:1.5px solid #b8d0f0;color:#1d4ed8;font-weight:800;
+  -webkit-box-shadow:0 2px 8px rgba(31,95,214,.14),inset 0 1px 0 rgba(255,255,255,.8);
+  box-shadow:0 2px 8px rgba(31,95,214,.14),inset 0 1px 0 rgba(255,255,255,.8);
+  -ms-flex-pack:center;justify-content:center;
+}
+.queue-hub-rail:hover{
+  background:#dfebfb;
+  background:-webkit-linear-gradient(top,#e9f2fd 0%,#d3e4f8 100%);
+  background:linear-gradient(180deg,#e9f2fd 0%,#d3e4f8 100%);
+  border-color:#2f6fe4;color:#1e40af;
+  -webkit-box-shadow:0 4px 12px rgba(31,95,214,.22),inset 0 1px 0 rgba(255,255,255,.8);
+  box-shadow:0 4px 12px rgba(31,95,214,.22),inset 0 1px 0 rgba(255,255,255,.8);
+}
+.theme-dark .queue-hub-rail{background:#1d2c40;border-color:#3d5b80;color:#a8ccf5;
+  -webkit-box-shadow:none;box-shadow:none;}
+.theme-dark .queue-hub-rail:hover{background:#25364e;border-color:#5b83b8;color:#cfe4fb;}
 
 /* --------------------------------------------- 7. TABLES (high contrast) --- */
 .tbl-wrap{border:1px solid #d3dfee;border-top:none;}
@@ -1452,16 +1478,8 @@ body.theme-dark{background:#0e1622;background:linear-gradient(180deg,#131d2c 0%,
 .inp,select.inp{color:#1f2d3d;background:#f5f8fd;border:1px solid #d7e2f1;border-radius:9px;}
 .inp:focus{border-color:#1976f3;outline:none;box-shadow:0 0 0 3px rgba(25,118,243,.14);}
 
-/* ---- action rail: navigation row + nav buttons (replaces new/cancel) ---- */
-.queue-nav-row{display:-ms-flexbox;display:flex;-ms-flex-align:stretch;align-items:stretch;
-  margin-top:10px;}
-.queue-nav-row .btn-nav{display:-ms-inline-flexbox;display:inline-flex;
-  -ms-flex-align:center;align-items:center;-ms-flex-pack:center;justify-content:center;
-  -ms-flex:1 1 0;flex:1 1 0;height:42px;margin:0;font-size:13px;font-weight:700;
-  background:#eef4fd;border:1px solid #d7e2f1;color:#1976f3;border-radius:11px;cursor:pointer;}
-.queue-nav-row .btn-nav + .btn-nav{margin-right:8px;}
-.queue-nav-row .btn-nav:hover{background:#dbe8fc;border-color:#1976f3;color:#13489e;}
-.queue-nav-row .btn-nav .i{display:-ms-inline-flexbox;display:inline-flex;}
+/* v1.79.0: .queue-nav-row / .btn-nav retired with the duplicate nav buttons
+   (the consolidated launcher replaced them). */
 
 .action-card .btn-danger.btn-block{height:46px;font-size:15px;font-weight:700;
   display:-ms-inline-flexbox;display:inline-flex;-ms-flex-align:center;align-items:center;
@@ -1547,8 +1565,6 @@ body.theme-dark{background:#0e1622;background:linear-gradient(180deg,#131d2c 0%,
 @media (max-width:720px){
   .queue-overlay-head{-ms-flex-wrap:wrap;flex-wrap:wrap;padding:10px 12px;}
   .queue-overlay-head .head-tools{-ms-flex:1 1 100%;flex:1 1 100%;margin-right:0;}
-  .queue-nav-row{-ms-flex-direction:column;flex-direction:column;}
-  .queue-nav-row .btn-nav + .btn-nav{margin-right:0;margin-top:8px;}
 }
 
 .theme-dark .queue-overlay{background:#1d2735;color:#e5edf7;}
@@ -1974,7 +1990,7 @@ body{
 .payable-card{
   margin-top:0;margin-bottom:10px;padding:15px 13px;text-align:right;color:#ffffff;
   border:1px solid rgba(255,255,255,.25);border-color:#0d4d9c;
-  -webkit-backdrop-filter:blur(10px) saturate(1.1);backdrop-filter:blur(10px) saturate(1.1);
+  /* v1.79.0: backdrop-filter removed — expensive repaint on scroll, absent in MSHTML */
   background:rgba(29,93,169,.92);
   background:-webkit-linear-gradient(top,rgba(28,117,202,.92) 0%,rgba(16,75,144,.94) 100%);
   background:linear-gradient(180deg,rgba(28,117,202,.92) 0%,rgba(16,75,144,.94) 100%);
@@ -2223,85 +2239,11 @@ body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .card-head{
 }
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .ct-ico{color:#64748b;}
 
-/* PATIENT form → VIOLET (clinical intake) — the ONLY purple on the page. */
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .card-head{
-  -webkit-box-shadow:none;box-shadow:none;
-  border-bottom-color:#ddd0f7;
-  background:#f2ecfd;
-  background:-webkit-linear-gradient(top,#f7f2fe 0%,#ece1fc 100%);
-  background:linear-gradient(180deg,#f7f2fe 0%,#ece1fc 100%);
-}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .card-title{color:#6d28d9;}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .ct-ico{color:#7c3aed;}
-/* PERFORMER → SUNSET ORANGE (v1.78.0: was rose/red — per clinic request the
-   انجام دهنده section must NOT read as red; the warm orange keeps it clearly
-   distinct from the violet patient card and the amber invoice). */
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(3) .card-head{
-  -webkit-box-shadow:none;box-shadow:none;
-  border-bottom-color:#f3d3b3;
-  background:#fdf0e4;
-  background:-webkit-linear-gradient(top,#fef5ec 0%,#fce7d2 100%);
-  background:linear-gradient(180deg,#fef5ec 0%,#fce7d2 100%);
-}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(3) .card-title{color:#c2410c;}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(3) .ct-ico{color:#ea580c;}
-
-/* INSURANCE → TEAL (coverage, ties to the profile identity) */
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(1) .card-head{
-  -webkit-box-shadow:none;box-shadow:none;
-  border-bottom-color:#bfe6dc;
-  background:#e9f7f2;
-  background:-webkit-linear-gradient(top,#effaf6 0%,#dff1ea 100%);
-  background:linear-gradient(180deg,#effaf6 0%,#dff1ea 100%);
-}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(1) .card-title{color:#0f766e;}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(1) .ct-ico{color:#0d9488;}
-
-/* DOCTOR + SERVICES → BLUE (the working surface stays blue) */
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(2) .card-head,
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card > .card-head{
-  -webkit-box-shadow:none;box-shadow:none;
-  border-bottom-color:#c7d8f5;
-  background:#e9f0fd;
-  background:-webkit-linear-gradient(top,#eff4fe 0%,#e0eafb 100%);
-  background:linear-gradient(180deg,#eff4fe 0%,#e0eafb 100%);
-}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(2) .card-title,
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card .card-title{color:#1d4ed8;}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(2) .ct-ico,
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card > .card-head .ct-ico{color:#2563eb;}
-
-/* PAYMENT status → EMERALD (ties to the final amount) */
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payment-card .card-head{
-  -webkit-box-shadow:none;box-shadow:none;
-  border-bottom-color:#b9e6cd;
-  background:#e8f7ee;
-  background:-webkit-linear-gradient(top,#eefaf3 0%,#dcf1e4 100%);
-  background:linear-gradient(180deg,#eefaf3 0%,#dcf1e4 100%);
-}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payment-card .card-title{color:#047857;}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payment-card .ct-ico{color:#059669;}
-
-/* INVOICE → AMBER (billing breakdown) */
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .invoice-card .card-head{
-  -webkit-box-shadow:none;box-shadow:none;
-  border-bottom-color:#eed9ac;
-  background:#fdf4e2;
-  background:-webkit-linear-gradient(top,#fef8ec 0%,#fbeccb 100%);
-  background:linear-gradient(180deg,#fef8ec 0%,#fbeccb 100%);
-}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .invoice-card .card-title{color:#b45309;}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .invoice-card .ct-ico{color:#d97706;}
-
-/* PRINT card → SLATE (calm neutral tooling) */
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .print-card .card-head{
-  -webkit-box-shadow:none;box-shadow:none;
-  border-bottom-color:#d7dfe9;
-  background:#eef1f6;
-  background:-webkit-linear-gradient(top,#f4f6fa 0%,#e8edf4 100%);
-  background:linear-gradient(180deg,#f4f6fa 0%,#e8edf4 100%);
-}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .print-card .card-title{color:#475569;}
+/* v1.79.0: this per-section colour map (violet/teal/blue/orange headers) is
+   SUPERSEDED by the unified administrative scheme in section 2 below — every
+   section head shares one slate-blue gradient + one brand accent bar, and the
+   sections differentiate by ICON, not colour. Kept as a comment for history;
+   the rules that lived here were all overridden and are now removed. */
 
 /* date + shift metadata → SLATE (quiet, clearly separated) */
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .datetime-card .dt-ico{
@@ -2364,7 +2306,6 @@ body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payable-card{
   background:-webkit-linear-gradient(top,#10b981 0%,#047857 100%);
   background:linear-gradient(180deg,#10b981 0%,#047857 100%);
   -webkit-box-shadow:0 8px 22px rgba(5,150,105,.30);box-shadow:0 8px 22px rgba(5,150,105,.30);
-  -webkit-animation:azGlow 3.6s ease-in-out infinite;animation:azGlow 3.6s ease-in-out infinite;
 }
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payable-caption{
   color:#d1fae5;font-size:12px;font-weight:800;letter-spacing:.2px;
@@ -2446,7 +2387,7 @@ body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .profile-s
   margin:0 11px 9px;padding:6px 9px;border:1px solid #c9e6df;border-radius:9px;
   background:#e3f2ee;color:#15554c;font-size:11px;
 }
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .profile-state .dot{background:#10b981;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .profile-state .dot{background:#2563eb;}
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .btn-erx{
   height:32px;margin:0 11px 8px;border-color:#bfe3da;background:#dbf0ea;color:#0f6b60;
 }
@@ -2937,31 +2878,18 @@ body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .card{
   -webkit-box-shadow:0 2px 5px rgba(20,45,80,.06),0 7px 18px rgba(20,45,80,.07);
   box-shadow:0 2px 5px rgba(20,45,80,.06),0 7px 18px rgba(20,45,80,.07);
 }
-/* patient form (مشخصات بیمار) → soft lavender */
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .card-body{
-  background:#f7f5fe;
-  background:-webkit-linear-gradient(top,#fbfaff 0%,#f3f0fb 100%);
-  background:linear-gradient(180deg,#fbfaff 0%,#f3f0fb 100%);
-}
-/* insurance (بیمه و نوع پذیرش) → soft mint */
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(1) .card-body{
-  background:#f0faf4;
-  background:-webkit-linear-gradient(top,#f5fcf7 0%,#ebf7f0 100%);
-  background:linear-gradient(180deg,#f5fcf7 0%,#ebf7f0 100%);
-}
-/* doctor (پزشک معالج) → soft sky */
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(2) .card-body{
-  background:#f0f7ff;
-  background:-webkit-linear-gradient(top,#f6fbff 0%,#e9f3fc 100%);
-  background:linear-gradient(180deg,#f6fbff 0%,#e9f3fc 100%);
-}
-/* performer (انجام دهنده) → soft warm peach (v1.78.0: was soft rose — the
-   section must not read red; superseded by the later v1.77 body rule, kept
-   here consistent for any engine that stops at the first match) */
+/* v1.79.0 — these per-zone pastel tints (lavender patient / mint insurance /
+   sky doctor / peach performer) are UNIFIED into the single neutral clinical
+   surface defined in section 3 below. The rules stay here ONLY to win their
+   own specificity tier against any forgotten older tint, and now emit the
+   same neutral values. */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .card-body,
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(1) .card-body,
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(2) .card-body,
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(3) .card-body{
-  background:#fdf2e6;
-  background:-webkit-linear-gradient(top,#fef6ec 0%,#fae8d2 100%);
-  background:linear-gradient(180deg,#fef6ec 0%,#fae8d2 100%);
+  background:#f8fafd;
+  background:-webkit-linear-gradient(top,#fbfcfe 0%,#f2f6fb 100%);
+  background:linear-gradient(180deg,#fbfcfe 0%,#f2f6fb 100%);
 }
 /* services list → soft blue working surface */
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card .card-body{
@@ -3340,66 +3268,36 @@ body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .card-head{
    Each clinical zone carries a clearly tinted header gradient + a saturated
    accent rule + a strong title colour, so every section reads as its own
    chic, office-grade panel (no washed-out pastel). Default theme only. */
-/* PATIENT form → VIOLET (clinical intake) */
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .card-head{
-  background:#ece6f6;background:-webkit-linear-gradient(top,#f2ecfa 0%,#e4dbf2 100%);
-  background:linear-gradient(180deg,#f2ecfa 0%,#e4dbf2 100%);
-  border-bottom:1px solid #d8ccf0;
-  -webkit-box-shadow:inset -3px 0 0 #7c3aed;box-shadow:inset -3px 0 0 #7c3aed;
+/* v1.79.0 — UNIFIED ADMINISTRATIVE HEADERS. The per-zone rainbow tints
+   (violet patient / teal insurance / orange performer / emerald payment…) read
+   as a «carnival» to the clinic; every section head is now the SAME refined
+   slate-blue gradient with ONE brand accent bar, a slate title and a white
+   icon chip. Sections differentiate by their ICON, not by loud colours.
+   Nothing on this page is red/warm any more. */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .card-head,
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card .card-head,
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card > .card-head,
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payment-card .card-head,
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .invoice-card .card-head{
+  background:#eef2f8;background:-webkit-linear-gradient(top,#f7fafd 0%,#e7edf6 100%);
+  background:linear-gradient(180deg,#f7fafd 0%,#e7edf6 100%);
+  border-bottom:1px solid #d7e0ec;
+  -webkit-box-shadow:inset -3px 0 0 #2f6fe4;box-shadow:inset -3px 0 0 #2f6fe4;
 }
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .card-title{color:#5b21b6;}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .ct-ico{color:#7c3aed;}
-/* INSURANCE → TEAL (coverage) */
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(1) .card-head{
-  background:#e2f1ea;background:-webkit-linear-gradient(top,#ebf6f0 0%,#d8ece4 100%);
-  background:linear-gradient(180deg,#ebf6f0 0%,#d8ece4 100%);
-  border-bottom:1px solid #cfe6dc;
-  -webkit-box-shadow:inset -3px 0 0 #0d9488;box-shadow:inset -3px 0 0 #0d9488;
-}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(1) .card-title{color:#115e59;}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(1) .ct-ico{color:#0d9488;}
-/* DOCTOR → BLUE (working surface) */
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(2) .card-head{
-  background:#e1ebf8;background:-webkit-linear-gradient(top,#ebf2fc 0%,#d5e3f4 100%);
-  background:linear-gradient(180deg,#ebf2fc 0%,#d5e3f4 100%);
-  border-bottom:1px solid #cee0f4;
-  -webkit-box-shadow:inset -3px 0 0 #2563eb;box-shadow:inset -3px 0 0 #2563eb;
-}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(2) .card-title{color:#1e40af;}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(2) .ct-ico{color:#2563eb;}
-/* PERFORMER → SUNSET ORANGE (v1.78.0: was ROSE — the clinic asked that the
-   انجام دهنده section must NOT read as red; the warm orange stays clearly
-   distinct from the violet patient card, the blue doctor card and the amber
-   invoice). */
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(3) .card-head{
-  background:#fbe9d7;background:-webkit-linear-gradient(top,#fdf0e2 0%,#f9dfc3 100%);
-  background:linear-gradient(180deg,#fdf0e2 0%,#f9dfc3 100%);
-  border-bottom:1px solid #f0d2ac;
-  -webkit-box-shadow:inset -3px 0 0 #ea580c;box-shadow:inset -3px 0 0 #ea580c;
-}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(3) .card-title{color:#9a3412;}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(3) .ct-ico{color:#ea580c;}
-/* SERVICES → BLUE working surface */
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card > .card-head{
-  background:#e1ebf8;background:-webkit-linear-gradient(top,#ecf3fc 0%,#d4e2f4 100%);
-  background:linear-gradient(180deg,#ecf3fc 0%,#d4e2f4 100%);
-  border-bottom:1px solid #cee0f4;
-  -webkit-box-shadow:inset -3px 0 0 #2563eb;box-shadow:inset -3px 0 0 #2563eb;
-}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card > .card-head .card-title{color:#1e3a8a;}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card > .card-head .ct-ico{color:#2563eb;}
-/* PAYMENT → EMERALD (ties to the final amount) */
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payment-card .card-head{
-  background:#e3f3ea;background:-webkit-linear-gradient(top,#ebf6f0 0%,#d7ecdf 100%);
-  background:linear-gradient(180deg,#ebf6f0 0%,#d7ecdf 100%);
-  border-bottom:1px solid #cfe6da;
-  -webkit-box-shadow:inset -3px 0 0 #059669;box-shadow:inset -3px 0 0 #059669;
-}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payment-card .card-title{color:#065f46;}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payment-card .ct-ico{color:#059669;}
-/* INVOICE keeps its prominent AMBER header — just re-assert its gold border so
-   the clearer generic .card border above does not flatten it. */
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .invoice-card{border:1px solid #e6cb8c;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .card-title,
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card .card-title,
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card .card-title,
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payment-card .card-title,
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .invoice-card .card-title{color:#2c3e57;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .ct-ico,
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card .ct-ico,
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card > .card-head .ct-ico,
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payment-card .ct-ico,
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .invoice-card .ct-ico{color:#2563eb;}
+
+/* INVOICE — v1.79.0: the gold border was dropped with the rainbow palette;
+   the invoice card now shares the same administrative edge as every card. */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .invoice-card{border:1px solid #c6d2e0;}
 /* date/shift + print metadata → SLATE (quiet, clearly separated) */
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .datetime-card .card-head,
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .print-card .card-head{
@@ -3411,31 +3309,21 @@ body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .print-card .card-head{
 /* ------------------------------- 3. CARD BODIES — proper, visible section tints ---
    The washed-out pastels are replaced with clearly-coloured but calm surfaces
    that give each zone a visible identity without going bold. Default theme. */
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .card-body{
-  background:#efe9f8;background:-webkit-linear-gradient(top,#f4eefb 0%,#e9e2f6 100%);
-  background:linear-gradient(180deg,#f4eefb 0%,#e9e2f6 100%);
-}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(1) .card-body{
-  background:#e3f3ec;background:-webkit-linear-gradient(top,#ebf6f0 0%,#dbefe6 100%);
-  background:linear-gradient(180deg,#ebf6f0 0%,#dbefe6 100%);
-}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(2) .card-body{
-  background:#e3ecf9;background:-webkit-linear-gradient(top,#ebf2fc 0%,#d9e6f6 100%);
-  background:linear-gradient(180deg,#ebf2fc 0%,#d9e6f6 100%);
-}
-/* performer body → soft warm peach (v1.78.0: matches the new orange header;
-   was lavender, which clashed with the violet patient card) */
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card:nth-child(3) .card-body{
-  background:#fdf2e6;background:-webkit-linear-gradient(top,#fef6ec 0%,#fae8d2 100%);
-  background:linear-gradient(180deg,#fef6ec 0%,#fae8d2 100%);
+/* v1.79.0 — NEUTRAL BODIES: one calm clinical surface for every section
+   (no per-zone tints). The services table keeps its slightly deeper blue-grey
+   so the grid still reads as a worksheet. */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .card-body,
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .row-3 > .card .card-body{
+  background:#f8fafd;background:-webkit-linear-gradient(top,#fbfcfe 0%,#f2f6fb 100%);
+  background:linear-gradient(180deg,#fbfcfe 0%,#f2f6fb 100%);
 }
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-card .card-body{background:#e6eef8;}
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payment-card{
-  border:1px solid #bfe3d6;
+  border:1px solid #c4d2e4;
 }
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payment-card .card-body{
-  background:#e7f4ee;background:-webkit-linear-gradient(top,#edf7f1 0%,#e0f0e8 100%);
-  background:linear-gradient(180deg,#edf7f1 0%,#e0f0e8 100%);
+  background:#f4f8fc;background:-webkit-linear-gradient(top,#f8fbfe 0%,#eef3fa 100%);
+  background:linear-gradient(180deg,#f8fbfe 0%,#eef3fa 100%);
 }
 /* action + print rails: a clear frosted panel (not flat, not pastel) */
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .action-card,
@@ -3451,34 +3339,34 @@ body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .print-card{
    A soft teal-tinted identity card (clear, not pastel-washed, not bold) with
    dark, legible text. Default theme only. */
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card{
-  color:#0c4a42;border:1px solid #bfe3da;
-  background-color:#e4f4ee;
-  background-image:-webkit-linear-gradient(top,#eef8f3 0%,#dcf0e7 100%);
-  background-image:linear-gradient(180deg,#eef8f3 0%,#dcf0e7 100%);
-  -webkit-box-shadow:0 6px 18px rgba(13,148,136,.16);box-shadow:0 6px 18px rgba(13,148,136,.16);
+  color:#1e3a5f;border:1px solid #c3d3e6;
+  background-color:#e9f0f9;
+  background-image:-webkit-linear-gradient(top,#f1f6fc 0%,#dfe9f5 100%);
+  background-image:linear-gradient(180deg,#f1f6fc 0%,#dfe9f5 100%);
+  -webkit-box-shadow:0 6px 18px rgba(37,99,235,.13);box-shadow:0 6px 18px rgba(37,99,235,.13);
 }
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .avatar{
-  border:3px solid #cde9e0;background:#ffffff;color:#0d9488;
+  border:3px solid #d3e1f2;background:#ffffff;color:#2563eb;
 }
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-kicker{color:#0d9488;font-size:11px;font-weight:800;}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .pf-name{color:#0b3b35;font-size:15px;font-weight:900;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-kicker{color:#2563eb;font-size:11px;font-weight:800;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .pf-name{color:#16324f;font-size:15px;font-weight:900;}
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .pf-file,
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .pf-file b{color:#3f6b62;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .pf-file b{color:#45617f;}
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .profile-state{
-  background:#d7efe7;border:1px solid #bfe3da;color:#0c4a42;
+  background:#e2ecf7;border:1px solid #c3d3e6;color:#1e3a5f;
 }
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .profile-state .dot{background:#10b981;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .profile-state .dot{background:#2563eb;}
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .btn-erx{
-  background:#d3efe7;border:1px solid #aedacf;color:#0c534c;
+  background:#dbe8f6;border:1px solid #b9cdea;color:#1d4ed8;
 }
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .btn-erx:hover{
-  background:#c2e7dc;border-color:#0d9488;color:#0a463f;
+  background:#cbdcf0;border-color:#2563eb;color:#1e40af;
 }
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .rx-box{
-  background:#dcf0e8;border:1px solid #c3e6db;
+  background:#e3edf8;border:1px solid #c8d8ec;
 }
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .rx-lbl{color:#0d9488;font-size:11px;font-weight:800;}
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .rx-val{color:#0b3b35;font-size:16px;font-weight:900;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .rx-lbl{color:#2563eb;font-size:11px;font-weight:800;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .profile-card .rx-val{color:#16324f;font-size:16px;font-weight:900;}
 
 /* ----------------------------------------- 5. PAYABLE HERO — distinct + prominent ---
    The single most important number: a high-contrast emerald panel with a clear
@@ -3492,7 +3380,9 @@ body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payable-card{
   background:linear-gradient(180deg,#10b981 0%,#047857 100%);
   -webkit-box-shadow:0 8px 22px rgba(5,150,105,.32),inset 0 1px 0 rgba(255,255,255,.22);
   box-shadow:0 8px 22px rgba(5,150,105,.32),inset 0 1px 0 rgba(255,255,255,.22);
-  -webkit-animation:azGlow 3.6s ease-in-out infinite;animation:azGlow 3.6s ease-in-out infinite;
+  /* v1.79.0: the infinite azGlow breathing animation was REMOVED — a perpetual
+     repaint loop on the hero card costs real CPU on the weak machines this app
+     must run on. The static elevation shadow carries the prominence now. */
 }
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .payable-caption{
   display:block;margin-bottom:4px;color:#ecfdf5;font-size:13px;font-weight:800;letter-spacing:.2px;
@@ -3632,7 +3522,7 @@ body.theme-dark,.theme-dark body{
   background:linear-gradient(180deg,#10b981 0%,#0a5c3a 100%);
   -webkit-box-shadow:0 8px 22px rgba(5,150,105,.34),inset 0 1px 0 rgba(255,255,255,.10);
   box-shadow:0 8px 22px rgba(5,150,105,.34),inset 0 1px 0 rgba(255,255,255,.10);
-  -webkit-animation:azGlow 3.6s ease-in-out infinite;animation:azGlow 3.6s ease-in-out infinite;
+  /* v1.79.0: azGlow removed here too (perpetual repaint on weak hardware). */
 }
 .theme-dark .payable-caption{color:#ecfdf5;}
 .theme-dark .payable-value b{color:#ffffff;}

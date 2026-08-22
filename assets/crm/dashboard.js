@@ -26,7 +26,10 @@
         ic: 'M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2zm2 5v2h10V8H7zm0 4v2h10v-2H7zm0 4v2h6v-2H7z' }
     ] },
     { title: 'سیستم', dot: '#475569', tiles: [
-      { page: 'employees', label: 'کاربران', sub: 'کاربران و بخش‌های سازمانی', color: 'rose',
+      /* v1.79.0: the personnel registry + the rebuilt account workshop */
+      { page: 'persons', label: 'تعریف پرسنل', sub: 'معرفی کامل پرسنل + کد پرسنلی خودکار', color: 'teal',
+        ic: 'M12 12a5 5 0 100-10 5 5 0 000 10zm0 2c-4 0-9 2-9 6v2h18v-2c0-4-5-6-9-6zM19 8h-2V6h-1V4h1V2h2v2h1v2h-1v2h-2V8z' },
+      { page: 'employees', label: 'تعریف حساب کاربری', sub: 'حساب‌های پرسنل، دسترسی‌ها و بخش‌ها', color: 'rose',
         ic: 'M16 11c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 3-1.34 3-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.67 0-8 1.34-8 4v2h10v-2c0-1.1.45-2.1 1.18-2.83C10.5 13.4 8.9 13 8 13zm8 0c-.62 0-1.4.12-2.22.34A4.01 4.01 0 0116 17v2h8v-2c0-2.66-5.33-4-8-4z' },
       { page: 'messages', label: 'کارتابل', sub: 'صندوق پیام‌های دریافتی', color: 'slate',
         ic: 'M4 4h16v12H7l-3 3V4zm2 3v2h12V7H6zm0 4v2h8v-2H6z' },

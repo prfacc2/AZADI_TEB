@@ -301,6 +301,7 @@ table.crm-tbl .empty { text-align: center; color: #97a0b0; padding: 26px; }
 .crm-pill.on { background: #e6f3ec; color: #267a4f; }
 .crm-pill.off { background: #f7eaea; color: #a13d3d; }
 .crm-pill.info { background: #eef3fa; color: #365188; }
+.crm-pill.warn { background: #fdf3e3; color: #a15c07; }
 
 /* row actions */
 .crm-row-btn {
@@ -724,6 +725,7 @@ table.crm-tbl .empty { text-align: center; color: #97a0b0; padding: 26px; }
 .theme-dark .crm-pill.on { background: #143a2a; color: #34d399; }
 .theme-dark .crm-pill.off { background: #3a1d1d; color: #f87171; }
 .theme-dark .crm-pill.info { background: #1d3358; color: #7ab0ff; }
+.theme-dark .crm-pill.warn { background: #3a2c12; color: #fbbf24; }
 
 .theme-dark .crm-row-btn { background: #1a2433; color: #aab6cc; border-color: #2c3a50; }
 .theme-dark .crm-row-btn:hover { background: #1d3358; color: #7ab0ff; border-color: #2f4773; }
@@ -823,3 +825,258 @@ table.crm-tbl .empty { text-align: center; color: #97a0b0; padding: 26px; }
 .theme-dark .crm-msg-from { color: #e6edf6; }
 .theme-dark .crm-msg-time { color: #6b7a93; }
 .theme-dark .crm-msg-text { color: #d6e0ee; }
+
+/* ============================================================================
+   v1.79.0 — CRM «OFFICE PRO» REFRESH + personnel/accounts components
+   ----------------------------------------------------------------------------
+   The management surface gets its own richer light theme: a deeper, layered
+   page background (no more flat white), crisper card edges with real elevation,
+   gradient primary buttons with tinted shadows, livelier hovers on tiles,
+   tables and rows — administrative, calm, and clearly premium.
+   Trident-safe: no custom properties, no grid, no flex `gap`; every flex prop
+   carries its -ms- pair.
+   ============================================================================ */
+
+/* ---- page canvas: layered cool gradient (never a flat white sheet) -------- */
+html, body{
+  background: linear-gradient(160deg,#eef2f8 0%,#e3eaf3 42%,#dbe4ef 100%);
+}
+.crm-main{
+  background:
+    -webkit-linear-gradient(170deg,#f0f4fa 0%,#e7edf6 45%,#dfe7f2 100%);
+  background:
+    linear-gradient(170deg,#f0f4fa 0%,#e7edf6 45%,#dfe7f2 100%);
+}
+
+/* ---- topbar: frosted band with a real bottom edge ------------------------- */
+.crm-topbar{
+  background: linear-gradient(180deg,#ffffff 0%,#f4f8fc 100%);
+  border-bottom:1px solid #d9e2ee;
+  box-shadow:0 1px 2px rgba(30,45,70,.05),0 8px 20px -14px rgba(30,45,70,.16);
+}
+.crm-topbar-btn{
+  border:1px solid #d7e1ee;border-radius:11px;
+  background:linear-gradient(180deg,#ffffff 0%,#f1f6fb 100%);
+}
+.crm-topbar-btn:hover{
+  background:linear-gradient(180deg,#f4f9ff 0%,#e6f0fa 100%);
+  color:#1c7ed6;border-color:#9ec4ea;
+  box-shadow:0 3px 10px rgba(28,126,214,.18);
+}
+
+/* ---- cards: crisper edge + deeper, cooler elevation ----------------------- */
+.crm-card{
+  border:1px solid #d5deeb;border-radius:16px;
+  background:linear-gradient(180deg,#ffffff 0%,#fafcfe 100%);
+  box-shadow:0 1px 2px rgba(25,45,75,.05),0 14px 30px -18px rgba(25,45,75,.18);
+}
+.crm-card-title{
+  border-bottom:1px solid #e4eaf2;
+  padding-bottom:12px;
+}
+.crm-card-title .dot{
+  width:9px;height:9px;
+  background:linear-gradient(160deg,#4dabf7 0%,#1c7ed6 100%);
+  box-shadow:0 0 0 3px rgba(28,126,214,.14);
+}
+
+/* ---- buttons: gradient surfaces + tinted elevation ------------------------- */
+.crm-btn{border-radius:11px;font-weight:700;}
+.crm-btn.primary{
+  border:1px solid #1867c9;
+  background:linear-gradient(180deg,#3d8bfd 0%,#1c6add 100%);
+  box-shadow:0 2px 8px rgba(28,106,221,.26),inset 0 1px 0 rgba(255,255,255,.22);
+}
+.crm-btn.primary:hover{
+  background:linear-gradient(180deg,#2f7ef0 0%,#1560cc 100%);
+  box-shadow:0 4px 12px rgba(28,106,221,.32),inset 0 1px 0 rgba(255,255,255,.22);
+}
+.crm-btn.outline{
+  border:1px solid #c9d6e8;background:#ffffff;color:#365188;
+}
+.crm-btn.outline:hover{
+  border-color:#1c7ed6;color:#1c6add;
+  background:linear-gradient(180deg,#f6fafe 0%,#eaf3fb 100%);
+}
+.crm-btn.ghost:hover{background:#eef3fa;color:#2c4a7e;}
+.crm-btn.danger,.crm-row-btn.danger:hover{border-color:#d06a6a;}
+
+/* ---- inputs & selects: clean wells, clear focus ---------------------------- */
+.crm-input,.crm-select{
+  border:1px solid #ccd7e6;border-radius:10px;background:#fdfefe;
+  box-shadow:inset 0 1px 2px rgba(25,45,75,.05);
+}
+.crm-input:hover,.crm-select:hover{border-color:#a9bed6;}
+.crm-input:focus,.crm-select:focus{
+  border-color:#2f7ef0;background:#ffffff;
+  box-shadow:0 0 0 3px rgba(47,126,240,.16),inset 0 1px 2px rgba(25,45,75,.04);
+}
+
+/* ---- tables: softer grid, livelier rows ------------------------------------ */
+.crm-table-wrap{border:1px solid #d5deeb;border-radius:14px;
+  box-shadow:0 8px 22px -18px rgba(30,45,70,.22);}
+.crm-table th{
+  background:linear-gradient(180deg,#f3f7fc 0%,#e9eff7 100%);
+  color:#3d4f6a;border-bottom:2px solid #d9e2ee;
+}
+.crm-table tr:hover td{background:#eef4fc;}
+.crm-row-btn{
+  border:1px solid #c9d6e8;border-radius:9px;background:#ffffff;color:#365188;
+  box-shadow:0 1px 2px rgba(30,45,70,.06);
+}
+.crm-row-btn:hover{border-color:#2f7ef0;color:#1c6add;background:#f0f7ff;
+  box-shadow:0 2px 6px rgba(47,126,240,.16);}
+
+/* ---- quick-access tiles (dashboard): deeper float + brand halo ------------- */
+.crm-tile{
+  border:1px solid #d5deeb;
+  background:linear-gradient(180deg,#ffffff 0%,#f8fbfe 100%);
+  box-shadow:0 1px 2px rgba(25,45,75,.05),0 10px 24px -18px rgba(25,45,75,.16);
+}
+.crm-tile:hover{
+  border-color:#9ec4ea;
+  box-shadow:0 4px 10px rgba(28,126,214,.12),0 18px 34px -18px rgba(28,126,214,.26);
+}
+.crm-tile-lbl{color:#2b3a4e;}
+.crm-tile-sub{color:#7d8a9c;}
+
+/* ---- KPI cards: keep the sheen, deepen the lift ---------------------------- */
+.crm-kpi{border:1px solid #d9e2ee;
+  background:linear-gradient(180deg,#ffffff 0%,#f8fbfd 100%);}
+.crm-kpi:hover{border-color:#9ec4ea;
+  box-shadow:0 8px 20px rgba(30,40,58,.10),0 16px 34px -20px rgba(28,126,214,.26);}
+
+/* ---- hamburger drawer: softer sheet ---------------------------------------- */
+.crm-menu{box-shadow:-18px 0 46px rgba(25,45,75,.22);}
+.crm-menu-item:hover{background:#eef4fb;color:#1c6add;}
+.crm-menu-item.active{background:#e4eefb;color:#1c6add;
+  box-shadow:inset 3px 0 0 #1c7ed6;}
+
+/* ============================ v1.79.0 components =========================== */
+
+/* mono code chip (کد پرسنلی / نام کاربری) */
+.crm-codechip{
+  display:inline-block;padding:2px 9px;border-radius:8px;
+  background:#eef4fb;border:1px solid #d2e0f0;color:#1c5fa8;
+  font-family:Consolas,'Courier New',monospace;font-size:12.5px;font-weight:700;
+}
+.theme-dark .crm-codechip{background:#16283c;border-color:#2e4a68;color:#8ec3f5;}
+
+/* link-style buttons (clickable names / departments) */
+.crm-link{border:0;background:none;padding:0;margin:0;cursor:pointer;
+  color:inherit;font-family:inherit;font-size:inherit;text-align:right;}
+.crm-link:hover b,.crm-link:hover{color:#1c6add;text-decoration:underline;}
+
+/* banner + hint + empty line */
+.crm-banner{padding:10px 14px;border-radius:11px;background:#eef4fb;
+  border:1px solid #d5e2f2;color:#3d5470;font-size:13px;font-weight:600;}
+.crm-banner.err{background:#fdeeec;border-color:#f0c9c4;color:#a1392f;}
+.crm-hint{color:#8a97a8;font-size:11.5px;}
+.crm-empty-line{padding:22px;text-align:center;color:#7d8a9c;font-weight:600;
+  border:1.5px dashed #c9d6e6;border-radius:12px;background:#f7fafd;}
+.theme-dark .crm-banner{background:#16283c;border-color:#2e4a68;color:#a9c4e2;}
+.theme-dark .crm-empty-line{background:#101c2b;border-color:#2e4a68;color:#7f93ab;}
+
+/* personnel pick-list (live) */
+.crm-picklist{
+  max-height:240px;overflow-y:auto;border:1px solid #d5deeb;border-radius:12px;
+  background:#f8fbfe;
+}
+.crm-pick{
+  display:-ms-flexbox;display:flex;-ms-flex-align:center;align-items:center;
+  width:100%;text-align:right;padding:9px 12px;border:0;border-bottom:1px solid #e8eef5;
+  background:transparent;cursor:pointer;font-family:inherit;font-size:13px;color:#2b3a4e;
+}
+.crm-pick:last-child{border-bottom:0;}
+.crm-pick:hover{background:#e9f2fd;}
+.crm-pick.sel{background:#dbe9fb;box-shadow:inset 3px 0 0 #1c7ed6;}
+.crm-pick.has-acc{opacity:.72;}
+.crm-pick-name{-ms-flex:1 1 auto;flex:1 1 auto;margin-right:10px;margin-left:10px;}
+.crm-pick-name small{display:block;color:#7d8a9c;font-weight:600;}
+.crm-pick .crm-pill{margin-right:8px;}
+.theme-dark .crm-picklist{background:#101c2b;border-color:#2e4a68;}
+.theme-dark .crm-pick{color:#d7e4f4;border-bottom-color:#1d2f44;}
+.theme-dark .crm-pick:hover{background:#16273a;}
+.theme-dark .crm-pick.sel{background:#1d3350;box-shadow:inset 3px 0 0 #4a9eff;}
+
+/* permission ticks */
+.crm-permrow{display:-ms-flexbox;display:flex;-ms-flex-wrap:wrap;flex-wrap:wrap;
+  margin:-4px 0 0 -10px;}
+.crm-perm{
+  display:-ms-inline-flexbox;display:inline-flex;-ms-flex-align:center;align-items:center;
+  margin:4px 0 0 10px;padding:7px 13px;border:1px solid #d5deeb;border-radius:11px;
+  background:#f6fafd;cursor:pointer;
+}
+.crm-perm:hover{border-color:#9ec4ea;background:#edf5fc;}
+.crm-perm input{margin-left:8px;}
+.crm-perm b{font-size:12.5px;color:#2b3a4e;}
+.crm-perm small{display:block;color:#8a97a8;margin-right:6px;font-size:11px;}
+.theme-dark .crm-perm{background:#142335;border-color:#2e4a68;}
+.theme-dark .crm-perm b{color:#d7e4f4;}
+
+/* account-mode toggle (پرسنل / مدیریت) */
+.crm-accmode{margin:-6px 0 14px;}
+.crm-accmode-btn{
+  border:1px solid #c9d6e8;background:#f1f6fb;color:#5a6a80;border-radius:10px;
+  padding:7px 18px;font-family:inherit;font-size:13px;font-weight:700;cursor:pointer;
+  margin-left:8px;
+}
+.crm-accmode-btn.on{
+  background:linear-gradient(180deg,#3d8bfd 0%,#1c6add 100%);color:#ffffff;
+  border-color:#1867c9;box-shadow:0 2px 8px rgba(28,106,221,.26);
+}
+.theme-dark .crm-accmode-btn{background:#142335;border-color:#2e4a68;color:#a9bdd4;}
+.theme-dark .crm-accmode-btn.on{background:#1d4ed8;color:#fff;border-color:#1d4ed8;}
+
+/* personnel photo picker */
+.crm-photo-row{display:-ms-flexbox;display:flex;-ms-flex-align:center;align-items:center;}
+.crm-photo-frame{
+  width:86px;height:86px;border-radius:18px;overflow:hidden;
+  border:2px solid #d5e2f2;background:#eef4fb;color:#4a6a90;
+  display:-ms-inline-flexbox;display:inline-flex;-ms-flex-align:center;align-items:center;
+  -ms-flex-pack:center;justify-content:center;font-size:30px;font-weight:800;
+  -ms-flex:0 0 auto;flex:0 0 auto;margin-left:16px;
+  box-shadow:0 4px 12px rgba(30,60,100,.10),inset 0 1px 0 #ffffff;
+}
+.crm-photo-frame img{width:100%;height:100%;object-fit:cover;}
+.crm-photo-side{-ms-flex:1 1 auto;flex:1 1 auto;}
+.theme-dark .crm-photo-frame{background:#16283c;border-color:#2e4a68;color:#6f93b8;}
+
+/* info sheets (person / dept) + printable */
+.crm-sheet-head{display:-ms-flexbox;display:flex;-ms-flex-align:center;align-items:center;
+  margin-bottom:14px;padding-bottom:12px;border-bottom:2px solid #e4ebf4;}
+.crm-sheet-photo{
+  width:64px;height:64px;border-radius:50%;overflow:hidden;-ms-flex:0 0 auto;flex:0 0 auto;
+  border:3px solid #d5e2f2;background:#eef4fb;margin-left:14px;
+  display:-ms-inline-flexbox;display:inline-flex;-ms-flex-align:center;align-items:center;
+  -ms-flex-pack:center;justify-content:center;
+}
+.crm-sheet-photo img{width:100%;height:100%;object-fit:cover;}
+.crm-sheet-photo-ph{font-size:24px;font-weight:800;color:#4a6a90;}
+.crm-sheet-id b{display:block;font-size:17px;color:#22344c;}
+.crm-sheet-id span{display:block;font-size:12.5px;color:#69788c;font-weight:600;}
+.crm-sheet-id .crm-sheet-code{color:#1c5fa8;font-family:Consolas,monospace;font-weight:700;}
+.crm-sheet-sub{font-size:13px;font-weight:800;color:#3d5470;margin:14px 0 8px;
+  padding-right:10px;border-right:3px solid #2f7ef0;}
+.crm-sheet-tbl{width:100%;border-collapse:collapse;font-size:12.5px;}
+.crm-sheet-tbl td{padding:7px 10px;border-bottom:1px solid #e8eef5;color:#33455c;}
+.crm-sheet-tbl tr:first-child td{font-weight:800;background:#f3f7fc;color:#3d4f6a;}
+.crm-sheet-tbl td:first-child{color:#69788c;width:38%;}
+.crm-sheet-tbl tr:first-child td:first-child{color:#3d4f6a;width:auto;}
+.theme-dark .crm-sheet-tbl td{border-bottom-color:#1d2f44;color:#c6d6e8;}
+.theme-dark .crm-sheet-tbl tr:first-child td{background:#16273a;color:#a9c4e2;}
+.theme-dark .crm-sheet-id b{color:#e6effa;}
+
+/* print: only the print overlay renders on paper */
+#crmPrintArea{display:none;}
+@media print{
+  .crm-app,.crm-loader,.crm-modal-bg,.crm-menu,.crm-menu-backdrop{display:none !important;}
+  body.printing{background:#ffffff !important;overflow:visible !important;}
+  #crmPrintArea{display:block !important;}
+  .crm-print-doc{padding:10px 4mm;font-family:'Vazirmatn',Tahoma,sans-serif;color:#1a2634;}
+  .crm-print-brand{font-size:15px;font-weight:800;border-bottom:2px solid #1a2634;
+    padding-bottom:8px;margin-bottom:14px;}
+  .crm-print-foot{margin-top:16px;padding-top:8px;border-top:1px solid #99a5b5;
+    font-size:11px;color:#5a6a7c;}
+  .crm-sheet-tbl td{border-bottom:1px solid #99a5b5;}
+}
