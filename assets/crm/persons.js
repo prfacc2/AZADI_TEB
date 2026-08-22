@@ -17,16 +17,7 @@
   /* ---- shared bits --------------------------------------------------------
      v1.80.0: «بخش» = the clinical sections tree («تعریف بخش و زیربخش»); each
      row is {id,name,parentId}. Top-level rows are بخش; children are زیربخش. */
-  function topSections(depts) {
-    var t = [], i;
-    for (i = 0; i < depts.length; i++) if (!depts[i].parentId) t.push(depts[i]);
-    return t;
-  }
-  function subSections(depts, parentId) {
-    var t = [], i;
-    for (i = 0; i < depts.length; i++) if (+depts[i].parentId === +parentId) t.push(depts[i]);
-    return t;
-  }
+  var topSections = Crm.sectTop, subSections = Crm.sectSubs;
   function sectOptions(depts, sel) {
     var o = '<option value="">— بدون بخش (تعلیق) —</option>', tops = topSections(depts), i;
     for (i = 0; i < tops.length; i++)
@@ -41,29 +32,10 @@
            Crm.esc(subs[i].name) + '</option>';
     return o;
   }
-  /* dropdown for FILTERS: «همه» / «در حالت تعلیق» / بخش‌ها with indented زیربخش‌ها */
-  function deptFilterOptions(depts, sel) {
-    var o = '<option value="">همه بخش‌ها</option>' +
-            '<option value="__none__"' + (sel === '__none__' ? ' selected' : '') + '>در حالت تعلیق</option>';
-    var tops = topSections(depts), i, j, subs;
-    for (i = 0; i < tops.length; i++) {
-      o += '<option value="' + Crm.esc(tops[i].id) + '"' + (tops[i].id === sel ? ' selected' : '') + '>' +
-           Crm.esc(tops[i].name) + '</option>';
-      subs = subSections(depts, tops[i].id);
-      for (j = 0; j < subs.length; j++)
-        o += '<option value="' + Crm.esc(subs[j].id) + '"' + (subs[j].id === sel ? ' selected' : '') + '>' +
-             '↳ ' + Crm.esc(subs[j].name) + '</option>';
-    }
-    return o;
-  }
+  /* dropdown for FILTERS: «همه» / «در حالت تعلیق» / بخش‌ها + indented زیربخش‌ها
+     (shared builder lives in crm.js — Crm.sectFilterOptions) */
+  var deptFilterOptions = Crm.sectFilterOptions;
   function fullName(p) { return ((p.firstName || '') + ' ' + (p.lastName || '')).replace(/^\s+|\s+$/g, ''); }
-  /* «نقش نام — بخش — زیربخش» (the manager's display convention) */
-  function displayLine(p) {
-    var h = (p.roleLabel || 'پرسنل') + ' ' + fullName(p);
-    if (p.deptName) h += ' — ' + p.deptName;
-    if (p.subName)  h += ' — ' + p.subName;
-    return h;
-  }
   function deptCell(p) {
     if (!p.deptId) return Crm.pill('در حالت تعلیق', 'warn');
     var t = Crm.esc(p.deptName || p.deptId);
@@ -74,14 +46,10 @@
   /* ---- page --------------------------------------------------------------- */
   var curDept = '', curQ = '';
   function load(host) {
-    Crm.call('crm.persons.list', { deptId: curDept === '__none__' ? '' : curDept, q: curQ }).then(function (d) {
-      var rows = d.rows || [];
-      if (curDept === '__none__') {
-        var f = [];
-        for (var i = 0; i < rows.length; i++) if (!rows[i].deptId) f.push(rows[i]);
-        rows = f;
-      }
-      render(host, rows, d.depts || [], d);
+    /* v1.80.0: «__none__» is a server-side filter now (the 200-row cap can
+       never hide suspended persons from this view). */
+    Crm.call('crm.persons.list', { deptId: curDept, q: curQ }).then(function (d) {
+      render(host, d.rows || [], d.depts || [], d);
     }, function () {
       host.innerHTML = '';
       Crm.head(host, 'تعریف پرسنل', 'معرفی کامل پرسنل مرکز');
@@ -134,7 +102,7 @@
     /* v1.80.0: hard cap note — never dump the whole registry into the DOM */
     if (meta && meta.capped)
       host.appendChild(Crm.el('div', 'crm-banner',
-        'فقط ۲۰۰ مورد اول نمایش داده شد (از ' + Crm.faDigits('' + (meta.total || 0)) + ') — با جستجو یا فیلتر بخش دقیق‌تر کنید.'));
+        'فقط ' + Crm.faDigits('' + persons.length) + ' مورد اول نمایش داده شد (از ' + Crm.faDigits('' + (meta.total || 0)) + ') — با جستجو یا فیلتر بخش دقیق‌تر کنید.'));
 
     /* live search (server-side) */
     var qT = null;
@@ -174,9 +142,10 @@
 
   /* ---- view sheet (click on a name) + print -------------------------------- */
   function viewPerson(code) {
-    Crm.call('crm.persons.list', { q: '' }).then(function (d) {
-      var rows = d.rows || [], p = null, i;
-      for (i = 0; i < rows.length; i++) if (rows[i].code === code) { p = rows[i]; break; }
+    /* v1.80.0: single-person verb — a 200-row-capped list could never lie
+       about «not found» for someone beyond the cap. */
+    Crm.call('crm.persons.get', { code: code }).then(function (d) {
+      var p = d && d.ok ? d.person : null, i;
       if (!p) { Crm.toast('پرسنل پیدا نشد.', 'err'); return; }
       var m = Crm.modal('پروفایل پرسنل — ' + fullName(p), null);
       var rows2 = [
@@ -196,7 +165,7 @@
           '<span class="crm-sheet-photo-ph" id="personSheetPh">' +
             Crm.esc((p.firstName || ' ').charAt(0)) + '</span></span>' +
           '<span class="crm-sheet-id"><b>' + Crm.esc(fullName(p)) + '</b>' +
-          '<span>' + Crm.esc(displayLine(p).indexOf(fullName(p)) >= 0 ? Crm.esc(p.roleLabel || '') + (p.position ? ' — ' + Crm.esc(p.position) : '') : '') + '</span>' +
+          '<span>' + Crm.esc(p.roleLabel || '') + (p.position ? ' — ' + Crm.esc(p.position) : '') + '</span>' +
           '<span>' + Crm.esc(p.deptName || '—') + (p.subName ? ' — ' + Crm.esc(p.subName) : '') + '</span>' +
           '<span class="crm-sheet-code">' + Crm.esc(p.code) + '</span></span>' +
         '</div><table class="crm-sheet-tbl">';
@@ -317,7 +286,7 @@
         roleKind: +Crm.$('ppRole').value, roleCustom: Crm.$('ppRoleCustom').value,
         position: Crm.$('ppPos').value,
         deptId: Crm.$('ppDept').value,
-        subId: Crm.$('ppSub') ? Crm.$('ppSub').value : ''
+        subId: Crm.$('ppSub').value
       };
       if (!payload.firstName && !payload.lastName) { Crm.toast('نام و نام خانوادگی الزامی است.', 'err'); return; }
       if (photoData) payload.photoData = photoData;

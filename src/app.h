@@ -680,10 +680,9 @@ bool updatePerson(const PersonDef& p, std::wstring& err);
 bool removePerson(const std::wstring& code);
 bool personByCode(const std::wstring& code, PersonDef& out);
 bool personByUsername(const std::wstring& username, PersonDef& out);
-//  پیشنهاد کد بعدی برای یک بخش (PREFIX_####) یا برای پرسنل بدون بخش (PER_####)
-std::wstring nextPersonCode(const std::wstring& deptId);
-//  v1.80.0: با زیربخش — پیشوند از نام زیربخش اگر هست، وگرنه نام بخش
-std::wstring nextPersonCode2(const std::wstring& deptId, const std::wstring& subId);
+//  پیشنهاد کد بعدی برای یک بخش/زیربخش (PREFIX_####) یا برای پرسنل بدون بخش
+//  (PER_####) — پیشوند از نام زیربخش اگر هست، وگرنه نام بخش (v1.80.0)
+std::wstring nextPersonCode(const std::wstring& deptId, const std::wstring& subId=L"");
 //  پیشوند لاتین دوحرفی از روی نام بخش (فارسی هم پوشش داده می‌شود)
 std::wstring deptCodePrefix(const std::wstring& deptName);
 //  نقش متنی از روی roleKind/roleCustom

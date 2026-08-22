@@ -39,17 +39,15 @@
   Crm.viewDeptInfo = function (deptId) {
     Crm.call('crm.sections.info', { id: deptId }).then(function (d) {
       if (d && d.ok) { renderSectionInfo(d); return; }
-      Crm.call('crm.depts.info', { id: deptId }).then(function (d2) {
-        if (d2 && d2.ok) renderDeptInfo(d2);
-        else Crm.toast('اطلاعات بخش پیدا نشد.', 'err');
-      }, function () { Crm.toast('اطلاعات بخش پیدا نشد.', 'err'); });
-    }, function () {
-      Crm.call('crm.depts.info', { id: deptId }).then(function (d2) {
-        if (d2 && d2.ok) renderDeptInfo(d2);
-        else Crm.toast('اطلاعات بخش پیدا نشد.', 'err');
-      }, function () { Crm.toast('اطلاعات بخش پیدا نشد.', 'err'); });
-    });
+      legacyInfo(deptId);
+    }, function () { legacyInfo(deptId); });
   };
+  function legacyInfo(deptId) {
+    Crm.call('crm.depts.info', { id: deptId }).then(function (d2) {
+      if (d2 && d2.ok) renderDeptInfo(d2);
+      else Crm.toast('اطلاعات بخش پیدا نشد.', 'err');
+    }, function () { Crm.toast('اطلاعات بخش پیدا نشد.', 'err'); });
+  }
   function renderSectionInfo(d) {
     var dep = d.section || {}, i;
     var m = Crm.modal('اطلاعات بخش — ' + (dep.name || ''), null);
@@ -172,14 +170,9 @@
       return;
     }
     var params = { q: st.q };
-    if (st.dept && st.dept !== '__none__') params.deptId = st.dept;
+    if (st.dept) params.deptId = st.dept;   /* «__none__» is server-side */
     Crm.call('crm.persons.list', params).then(function (d) {
       var rows = d.rows || [];
-      if (st.dept === '__none__') {
-        var f = [];
-        for (var i = 0; i < rows.length; i++) if (!rows[i].deptId) f.push(rows[i]);
-        rows = f;
-      }
       var box = Crm.$('accPersonList');
       if (!box) return;
       if (!rows.length) {
@@ -234,7 +227,9 @@
       { key: 'i', label: 'ردیف', render: function (r, i) { return Crm.faDigits('' + (i + 1)); } },
       { key: 'username', label: 'نام کاربری', cls: 'c-mono', render: function (r) { return '<b class="crm-codechip">' + Crm.esc(r.username) + '</b>'; } },
       { key: 'fullname', label: 'نام و نام خانوادگی', render: function (r) {
-          return '<button class="crm-link" data-person="' + Crm.esc(r.username) + '"><b>' + Crm.esc(r.fullname) + '</b></button>';
+          return '<button class="crm-link" data-person="' + Crm.esc(r.username) + '"' +
+            (r.personCode ? ' data-personcode="' + Crm.esc(r.personCode) + '"' : '') +
+            '><b>' + Crm.esc(r.fullname) + '</b></button>';
         } },
       { key: 'dept', label: 'بخش', render: function (r) { return Crm.esc(r.dept || '—'); } },
       { key: 'position', label: 'مقام/سمت', render: function (r) { return Crm.esc(r.position || '—'); } },
@@ -348,7 +343,7 @@
                         '<button class="crm-row-btn danger" data-act="del">حذف</button>';
           b.childNodes[0].onclick = function () { Crm.viewDeptInfo(r.id); };
           b.childNodes[1].onclick = function () {
-            Crm.confirm('حذف بخش «' + r.name + '»؟ (پرسنلش «در حالت تعلیق» نمی‌شوند — فقط لینک بخش قطع می‌شود)', function () {
+            Crm.confirm('حذف بخش «' + r.name + '»؟\nلینک بخش پرسنلش قطع می‌شود و زیربخش‌هایش بدون بخش والد می‌مانند (در «تعریف بخش و زیربخش» دوباره مدیریت می‌شوند).', function () {
               Crm.call('crm.sections.delete', { id: +r.id }).then(function () { Crm.toast('بخش حذف شد.', 'ok'); load(host); },
                 function () { Crm.toast('حذف ناموفق بود.', 'err'); });
             }, { danger: true });
@@ -372,7 +367,6 @@
     c4.appendChild(dtb4);
     var legacy = st.legacyDepts;
     var tw4 = Crm.el('div'); tw4.id = 'legacyDeptWrap';
-    {
       tw4.appendChild(Crm.table([
         { key: 'i', label: 'ردیف', render: function (r, i) { return Crm.faDigits('' + (i + 1)); } },
         { key: 'name', label: 'نام بخش', render: function (r) { return '<b>' + Crm.esc(r.name) + '</b>'; } },
@@ -391,11 +385,9 @@
             return b;
           } }
       ], legacy));
-    }
     c4.appendChild(tw4);
     host.appendChild(c4);
 
-    /* wire card 1 */
     /* wire card 1 */
     Crm.$('accDept').onchange = function () { st.dept = this.value; st.picked = null; loadPersonPick(host); renderPickInfoOnly(host); };
     var qT = null;
@@ -430,7 +422,12 @@
     dAdd.onclick = function () {
       var nm = Crm.$('sectName').value;
       if (!nm) { Crm.toast('نام بخش الزامی است.', 'err'); return; }
-      Crm.call('crm.sections.save', { name: nm, kind: 'other', active: true }).then(function () {
+      var mx = 0, ci;
+      for (ci = 0; ci < depts.length; ci++) {
+        var m = /^OTH(\d+)$/.exec(depts[ci].code || '');
+        if (m && +m[1] > mx) mx = +m[1];
+      }
+      Crm.call('crm.sections.save', { name: nm, code: 'OTH' + (mx + 1), kind: 'other', active: true }).then(function () {
         Crm.toast('بخش اضافه شد.', 'ok'); load(host);
       }, function () { Crm.toast('افزودن بخش ناموفق بود.', 'err'); });
     };
@@ -446,7 +443,9 @@
       (function (a) {
         a.onclick = function () {
           var un = a.getAttribute('data-person');
-          /* find the linked personnel record by username, then open its sheet */
+          var pc = a.getAttribute('data-personcode');
+          if (pc && Crm.viewPerson) { Crm.viewPerson(pc); return; }
+          /* legacy accounts carry no personCode — scan by username once */
           Crm.call('crm.persons.list', { q: '' }).then(function (d) {
             var rows = d.rows || [], j, hit = null;
             for (j = 0; j < rows.length; j++) if (rows[j].username === un) { hit = rows[j]; break; }
@@ -465,20 +464,8 @@
   }
 
   /* v1.80.0: pickers filter by the CLINICAL sections tree (بخش + زیربخش,
-     indented) — the same tree the manager defines in «تعریف بخش و زیربخش». */
-  function deptFilterOpts(sects) {
-    var o = '<option value="">همه بخش‌ها</option><option value="__none__">در حالت تعلیق</option>';
-    var i, j;
-    for (i = 0; i < sects.length; i++) {
-      var t = sects[i];
-      if (t.parentId) continue;
-      o += '<option value="' + Crm.esc(t.id) + '">' + Crm.esc(t.name) + '</option>';
-      for (j = 0; j < sects.length; j++)
-        if (+sects[j].parentId === +t.id)
-          o += '<option value="' + Crm.esc(sects[j].id) + '">↳ ' + Crm.esc(sects[j].name) + '</option>';
-    }
-    return o;
-  }
+     indented) via the shared builder in crm.js (Crm.sectFilterOptions). */
+  var deptFilterOpts = Crm.sectFilterOptions;
   function permChecks(perms) {
     /* empty/absent perms = full access → all boxes ticked; "-" = none ticked */
     var all = (perms == null || perms === '');
@@ -512,6 +499,13 @@
       if (st.fDept) {
         var dName = '';
         for (var k = 0; k < depts.length; k++) if (depts[k].id === st.fDept) dName = depts[k].name;
+        /* a زیربخش filter matches its PARENT section's accounts — the account
+           stores the top-level section name by design. */
+        for (var k2 = 0; k2 < depts.length; k2++)
+          if (depts[k2].id === st.fDept && +depts[k2].parentId > 0) {
+            for (var k3 = 0; k3 < depts.length; k3++)
+              if (+depts[k3].id === +depts[k2].parentId) dName = depts[k3].name;
+          }
         if (st.fDept === '__none__') { if (u.dept) continue; }
         else if (u.dept !== dName) continue;
       }

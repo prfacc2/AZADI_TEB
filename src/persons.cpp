@@ -205,10 +205,7 @@ static std::wstring sectionNameById(const std::wstring& id){
     return L"";
 }
 //  v1.80.0: prefix comes from the زیربخش name when set, else the بخش name.
-std::wstring nextPersonCode(const std::wstring& deptId){
-    return nextPersonCode2(deptId,L"");
-}
-std::wstring nextPersonCode2(const std::wstring& deptId, const std::wstring& subId){
+std::wstring nextPersonCode(const std::wstring& deptId, const std::wstring& subId){
     std::wstring prefix=L"PER";
     std::wstring nm = sectionNameById(!subId.empty()?subId:deptId);
     if(!nm.empty()) prefix=deptCodePrefix(nm);
@@ -232,7 +229,9 @@ bool addPerson(PersonDef& p, std::wstring& err){
         err=L"نام و نام خانوادگی الزامی است."; return false;
     }
     p.code=trim(p.code);
-    if(p.code.empty()) p.code=nextPersonCode(p.deptId);
+    // v1.80.0: empty code → auto-generate from the زیربخش/بخش (matches the
+    // form's live preview — the same two ids drive both).
+    if(p.code.empty()) p.code=nextPersonCode(p.deptId,p.subId);
     auto v=loadPersons();
     for(auto& e:v)
         if(e.code==p.code){ err=L"این کد پرسنلی قبلاً ثبت شده است."; return false; }

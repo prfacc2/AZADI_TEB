@@ -187,7 +187,6 @@ body { font-size: 14px; line-height: 1.65; overflow: hidden; }
 .crm-main {
   -ms-flex: 1 1 auto; flex: 1 1 auto;
   height: 100%; overflow-y: auto;
-  background: linear-gradient(170deg, #eef3fa 0%, #e6ecf5 45%, #e0e7f1 100%);
   padding: 24px 28px;
 }
 .crm-page { max-width: 1180px; margin: 0 auto; }
@@ -201,15 +200,15 @@ body { font-size: 14px; line-height: 1.65; overflow: hidden; }
   border-bottom: 1px solid #d5e0ee;
   box-shadow: 0 1px 0 rgba(255,255,255,.65);
 }
-/* v1.80.0: gradient-text was dropped — its failure mode (transparent ink on
-   engines without background-clip:text) is unacceptable for a title. A solid
-   deep-navy title plus a small brand underline bar reads just as premium. */
-.crm-page-title { color: #26334a; position: relative; padding-bottom: 4px; }
+
+/* v1.80.0: deep-navy title + a small brand underline bar (the gradient-text
+   idea was dropped — its no-clip failure mode is invisible ink). */
+.crm-page-title { font-size: 22px; font-weight: 700; color: #26334a; margin: 0; letter-spacing: -.2px; position: relative; padding-bottom: 4px; }
 .crm-page-title::after {
   content: ""; display: block; width: 46px; height: 3px; border-radius: 2px;
+  background: -webkit-linear-gradient(90deg,#4dabf7,#1c6add);
   background: linear-gradient(90deg,#4dabf7,#1c6add); margin-top: 4px;
 }
-.crm-page-title { font-size: 22px; font-weight: 700; color: #2b3442; margin: 0; letter-spacing: -.2px; }
 .crm-page-sub { font-size: 13px; color: #697384; margin-right: 12px; }
 .crm-page-head .spacer { -ms-flex: 1 1 auto; flex: 1 1 auto; }
 
@@ -1101,3 +1100,8 @@ html, body{
     font-size:11px;color:#5a6a7c;}
   .crm-sheet-tbl td{border-bottom:1px solid #99a5b5;}
 }
+
+/* v1.80.0: chips row (زیربخش‌ها in the section sheet) + the بخش←زیربخش arrow */
+.crm-chips{margin-bottom:4px;}
+.crm-chips .crm-codechip{margin-left:6px;margin-bottom:4px;}
+.crm-sub-arrow{color:#8a97a8;font-weight:400;margin:0 2px;}

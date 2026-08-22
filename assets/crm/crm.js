@@ -191,6 +191,35 @@
   };
 
   /* ---- a pill span ------------------------------------------------------ */
+  /* v1.80.0: shared clinical-tree helpers (بخش/زیربخش) — used by the personnel
+     and accounts pages (and any future page) so the indented dropdown build
+     exists in exactly one place. */
+  Crm.sectTop = function (list) {
+    var t = [], i;
+    for (i = 0; i < list.length; i++) if (!list[i].parentId) t.push(list[i]);
+    return t;
+  };
+  Crm.sectSubs = function (list, parentId) {
+    var t = [], i;
+    for (i = 0; i < list.length; i++) if (+list[i].parentId === +parentId) t.push(list[i]);
+    return t;
+  };
+  /* «همه» / «در حالت تعلیق» / بخش‌ها with indented زیربخش‌ها */
+  Crm.sectFilterOptions = function (list, sel) {
+    var o = '<option value="">همه بخش‌ها</option>' +
+            '<option value="__none__"' + (sel === '__none__' ? ' selected' : '') + '>در حالت تعلیق</option>';
+    var tops = Crm.sectTop(list), i, j, subs;
+    for (i = 0; i < tops.length; i++) {
+      o += '<option value="' + esc(tops[i].id) + '"' + (tops[i].id === sel ? ' selected' : '') + '>' +
+           esc(tops[i].name) + '</option>';
+      subs = Crm.sectSubs(list, tops[i].id);
+      for (j = 0; j < subs.length; j++)
+        o += '<option value="' + esc(subs[j].id) + '"' + (subs[j].id === sel ? ' selected' : '') + '>' +
+             '↳ ' + esc(subs[j].name) + '</option>';
+    }
+    return o;
+  };
+
   Crm.pill = function (text, kind) {
     return '<span class="crm-pill ' + (kind || 'info') + '">' + esc(text) + '</span>';
   };

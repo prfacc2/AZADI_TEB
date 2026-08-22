@@ -2200,11 +2200,9 @@ body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .card-head{
 }
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .ct-ico{color:#64748b;}
 
-/* v1.79.0: this per-section colour map (violet/teal/blue/orange headers) is
-   SUPERSEDED by the unified administrative scheme in section 2 below — every
-   section head shares one slate-blue gradient + one brand accent bar, and the
-   sections differentiate by ICON, not colour. Kept as a comment for history;
-   the rules that lived here were all overridden and are now removed. */
+/* v1.80.0: the per-section colour maps of v1.68–v1.79 (violet/teal/blue/orange,
+   then unified slate) are all gone — the refined per-section pastel map in
+   section 2 below is the single source of truth for section heads. */
 
 /* date + shift metadata → SLATE (quiet, clearly separated) */
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .datetime-card .dt-ico{
@@ -2409,7 +2407,7 @@ body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .print-card .card-head{
    A refined violet header (clinical-intake accent) with a secondary hairline,
    plus one faint sub-separator that divides the identity group from the contact
    group. width:100% forces a flex-wrap line break inside grid-4 (IE-safe). */
-body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .card-head{border-bottom:1px solid #e6def7;}
+
 
 
 body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .patient-card .fld > span{color:#372853;}

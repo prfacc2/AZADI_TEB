@@ -814,7 +814,18 @@ static std::string crmApi(const std::string& verb, const std::string& body){
         o+="],\"totalUsers\":"+jnum((long long)us.size())+",\"depts\":[";
         auto ds=loadDepts();
         for(size_t i=0;i<ds.size();++i){ if(i)o+=","; o+=crmDeptJson(ds[i]); }
-        o+="]}"; return o;
+        o+="]}";
+        // v1.80.0: the clinical sections tree too — the account pickers filter
+        // by بخش/زیربخش from it (personnel live there now).
+        std::vector<Section> ss; Sections_All(ss);
+        o+=",\"sects\":[";
+        bool fs=true;
+        for(auto& s2:ss){ if(!s2.is_active) continue;
+            if(!fs)o+=","; fs=false;
+            o+="{\"id\":"+jstr(std::to_wstring(s2.id))+",\"code\":"+jstr(s2.code)+
+               ",\"name\":"+jstr(s2.name_fa)+",\"parentId\":"+jnum(s2.parent_id)+"}"; }
+        o+="]";
+        return o;
     }
     if(verb=="crm.employees.save"){
         std::string t; double r=0;
@@ -866,10 +877,14 @@ static std::string crmApi(const std::string& verb, const std::string& body){
         // parent links), shared by the filter and every row's JSON.
         std::vector<Section> ss; Sections_All(ss);
         int deptNum=_wtoi(deptId.c_str());
+        // v1.80.0: «__none__» is honoured SERVER-side too, so the suspended
+        // view never depends on the 200-row cap (client can't see past it).
+        bool wantSuspended=(deptId==L"__none__");
         std::string o="{\"rows\":[";
         int n=0, total=0;
         for(auto& p:ps){
-            if(!deptId.empty()){
+            if(wantSuspended){ if(!p.deptId.empty()) continue; }
+            else if(!deptId.empty()){
                 int pd=_wtoi(p.deptId.c_str()), psu=_wtoi(p.subId.c_str());
                 // a section filter also covers persons parked in its subsections
                 bool inDept = (pd==deptNum) || (psu==deptNum);
@@ -904,12 +919,13 @@ static std::string crmApi(const std::string& verb, const std::string& body){
         bool firstDep=true;
         for(auto& s2:ss){ if(!s2.is_active) continue;
             if(!firstDep) o+=","; firstDep=false;
-            o+="{\"id\":"+jstr(std::to_wstring(s2.id))+",\"name\":"+jstr(s2.name_fa)+",\"parentId\":"+jnum(s2.parent_id)+"}"; }
+            o+="{\"id\":"+jstr(std::to_wstring(s2.id))+",\"code\":"+jstr(s2.code)+
+               ",\"name\":"+jstr(s2.name_fa)+",\"parentId\":"+jnum(s2.parent_id)+"}"; }
         o+="]}"; return o;
     }
     if(verb=="crm.persons.nextcode"){
         std::string dU,sU; jsonGetString(body,"deptId",dU); jsonGetString(body,"subId",sU);
-        return std::string("{\"code\":")+jstr(nextPersonCode2(u82w(dU),u82w(sU)))+"}";
+        return std::string("{\"code\":")+jstr(nextPersonCode(u82w(dU),u82w(sU)))+"}";
     }
     if(verb=="crm.persons.save"){
         std::string t; double rk=0;
@@ -978,6 +994,15 @@ static std::string crmApi(const std::string& verb, const std::string& body){
         }
         return removePerson(code) ? "{\"ok\":true}"
                                   : "{\"ok\":false,\"err\":\"حذف ناموفق بود.\"}";
+    }
+    //  v1.80.0: fetch ONE person by code — the person-sheet links use this
+    //  instead of re-listing the (200-row-capped) registry.
+    if(verb=="crm.persons.get"){
+        std::string cU; jsonGetString(body,"code",cU);
+        PersonDef p;
+        if(!personByCode(u82w(cU),p)) return "{\"ok\":false}";
+        std::vector<Section> ss; Sections_All(ss);
+        return std::string("{\"ok\":true,\"person\":")+crmPersonJson(p,ss)+"}";
     }
     if(verb=="crm.persons.photo"){
         std::string cU; jsonGetString(body,"code",cU);
@@ -1066,10 +1091,13 @@ static std::string crmApi(const std::string& verb, const std::string& body){
         if(!sp) return "{\"ok\":false,\"err\":\"بخش پیدا نشد.\"}";
         std::string o="{\"ok\":true,\"section\":"+crmSectionJson(*sp)+",\"subs\":[";
         bool f=true; std::wstring subIds=L"|";
-        for(auto& s2:ss) if(s2.parent_id==id && s2.is_active){
+        for(auto& s2:ss) if(s2.parent_id==id){
+            // v1.80.0: match persons parked in ANY subsection (even a
+            // deactivated one) — same rule as the persons.list dept filter.
+            subIds+=std::to_wstring(s2.id)+L"|";
+            if(!s2.is_active) continue;      // …but only list active subs
             if(!f)o+=","; f=false;
             o+=crmSectionJson(s2);
-            subIds+=std::to_wstring(s2.id)+L"|";
         }
         o+="],\"persons\":[";
         int n=0;
