@@ -79,6 +79,7 @@ enum {
     MG_DC_ADDRESS,         // آدرس
     MG_DC_FRANCHISE,       // فرانشیز
     MG_DC_PRINT,           // چاپ در قبض (toggle button)
+    MG_DC_PERF,            // v1.78.0: تعریف به عنوان انجام دهنده (toggle button)
     MG_DC_SPEC,            // تخصص
     MG_DC_INSSPEC,         // تخصص بیمه
     MG_DC_DEGREE,          // مدرک
@@ -151,12 +152,13 @@ struct ManageState {
          dcFranchise=nullptr, dcPrintChk=nullptr, dcSpec=nullptr, dcInsSpec=nullptr,
          dcDegree=nullptr, dcContract=nullptr, dcEmerg=nullptr, dcAcct=nullptr,
          dcSave=nullptr, dcEdit=nullptr, dcDelete=nullptr, dcClear=nullptr,
-         dcSearch=nullptr, dcList=nullptr;
+         dcSearch=nullptr, dcList=nullptr, dcPerfChk=nullptr;
     std::vector<DoctorDef>  dcAll;      // all doctors (loaded + cached)
     std::vector<int>        dcView;     // filtered indices into dcAll
     std::wstring            dcQuery;    // last search text
     int                     dcEditIdx=-1; // index into dcAll loaded in form (-1 = new)
     bool                    dcActiveVal=true, dcPrintVal=true; // toggle-button state
+    bool                    dcPerfVal=true;   // v1.78.0: «تعریف به عنوان انجام دهنده» (default ON)
     bool                    dcLoaded=false;
     // v1.66.0: dashboard summary cache — the dash calls loadAllPatients(),
     // loadUsers(), loadDepts(), countTodayReceptions(), unseen*Count() on
@@ -436,6 +438,9 @@ static void mgDocsRefreshChecks(){
     if(!s_mg) return;
     SetWindowTextW(s_mg->dcActiveChk, s_mg->dcActiveVal?L"\u2611 فعال":L"\u2610 غیرفعال");
     SetWindowTextW(s_mg->dcPrintChk,  s_mg->dcPrintVal ?L"\u2611 بله":L"\u2610 خیر");
+    // v1.78.0: «تعریف به عنوان انجام دهنده» toggle (default بله)
+    if(s_mg->dcPerfChk)
+        SetWindowTextW(s_mg->dcPerfChk, s_mg->dcPerfVal?L"\u2611 بله":L"\u2610 خیر");
 }
 static void mgDocsFilter(){
     if(!s_mg) return;
@@ -501,6 +506,7 @@ static void mgDocsClearForm(){
     if(s_mg->dcType)     SendMessageW(s_mg->dcType,CB_SETCURSEL,0,0);
     if(s_mg->dcContract) SendMessageW(s_mg->dcContract,CB_SETCURSEL,0,0);
     s_mg->dcActiveVal=true; s_mg->dcPrintVal=true;
+    s_mg->dcPerfVal=true;              // v1.78.0: performer flag defaults ON for new doctors
     s_mg->dcEditIdx=-1;
     mgDocsRefreshChecks();
 }
@@ -536,6 +542,7 @@ static void mgDocsLoadForm(const DoctorDef& d){
         SendMessageW(s_mg->dcContract,CB_SETCURSEL,ct,0);
     }
     s_mg->dcActiveVal=d.active; s_mg->dcPrintVal=d.printOnReceipt;
+    s_mg->dcPerfVal=d.isPerformer;   // v1.78.0: edit form round-trips the performer flag
     mgDocsRefreshChecks();
 }
 //  Read the form into a DoctorDef. The display `name` is composed from the
@@ -571,6 +578,7 @@ static DoctorDef mgDocsReadForm(){
         d.contractType = sel<0?0:sel;
     }
     d.active=s_mg->dcActiveVal; d.printOnReceipt=s_mg->dcPrintVal;
+    d.isPerformer=s_mg->dcPerfVal;   // v1.78.0: the form owns the flag (no silent reset)
     std::wstring nm;
     if(!d.namePrefix.empty()) nm += d.namePrefix + L" ";
     if(!d.firstName.empty())  nm += d.firstName  + L" ";
@@ -3111,7 +3119,7 @@ static void mgLayout(HWND h){
         s_mg->dcPrefix,s_mg->dcFirst,s_mg->dcLast,s_mg->dcNid,s_mg->dcMobile,
         s_mg->dcEmail,s_mg->dcAddress,s_mg->dcFranchise,s_mg->dcPrintChk,
         s_mg->dcSpec,s_mg->dcInsSpec,s_mg->dcDegree,s_mg->dcContract,s_mg->dcEmerg,
-        s_mg->dcAcct,s_mg->dcSave,s_mg->dcEdit,s_mg->dcDelete,s_mg->dcClear,
+        s_mg->dcPerfChk,s_mg->dcAcct,s_mg->dcSave,s_mg->dcEdit,s_mg->dcDelete,s_mg->dcClear,
         s_mg->dcSearch,s_mg->dcList};
     for(HWND w:all) if(w) ShowWindow(w,SW_HIDE);
 
@@ -3231,8 +3239,9 @@ static void mgLayout(HWND h){
         for(HWND w:show) if(w) ShowWindow(w,SW_SHOW);
     } else if(s_mg->page==PG_DOCS){
         // ---- doctor-management form (top) + doctors table (fills rest) ----
-        //  A 4-column × 5-row field grid inside one card, then the action
-        //  buttons, then a search box + the LVS_OWNERDATA table below.
+        //  A 4-column × 6-row field grid inside one card (v1.78.0: row 5 hosts
+        //  the «تعریف به عنوان انجام دهنده» toggle), then the action buttons,
+        //  then a search box + the LVS_OWNERDATA table below.
         int lh=S(20), fgap=S(14);
         int formL=a.left+S(12), formR=rEdge, formW=formR-formL;
         const int cols=4;
@@ -3266,8 +3275,11 @@ static void mgLayout(HWND h){
         MoveWindow(s_mg->dcPrintChk, cx(1), cy(4), colW, fh, TRUE);
         MoveWindow(s_mg->dcAddress,  cx(2), cy(4), colW, fh, TRUE);
         MoveWindow(s_mg->dcAcct,     cx(3), cy(4), colW, fh, TRUE);
+        // v1.78.0 Row 5: تعریف به عنوان انجام دهنده (toggle) — own row so the
+        // six-row grid stays 4-up and the action buttons shift down one row.
+        MoveWindow(s_mg->dcPerfChk,  cx(0), cy(5), colW, fh, TRUE);
         // action buttons row (right→left): ذخیره | ویرایش | حذف | فرم جدید
-        int by=cy(4)+fh+S(6);
+        int by=cy(5)+fh+S(6);
         int bw=S(120), bgap=S(10), bx=formR;
         MoveWindow(s_mg->dcSave,   bx-bw, by, bw, S(40), TRUE); bx-=bw+bgap;
         MoveWindow(s_mg->dcEdit,   bx-bw, by, bw, S(40), TRUE); bx-=bw+bgap;
@@ -3283,7 +3295,7 @@ static void mgLayout(HWND h){
             s_mg->dcPrefix,s_mg->dcFirst,s_mg->dcLast,s_mg->dcNid,s_mg->dcMobile,
             s_mg->dcEmail,s_mg->dcFranchise,s_mg->dcSpec,s_mg->dcInsSpec,
             s_mg->dcDegree,s_mg->dcContract,s_mg->dcEmerg,s_mg->dcActiveChk,
-            s_mg->dcPrintChk,s_mg->dcAddress,s_mg->dcAcct,s_mg->dcSave,
+            s_mg->dcPrintChk,s_mg->dcPerfChk,s_mg->dcAddress,s_mg->dcAcct,s_mg->dcSave,
             s_mg->dcEdit,s_mg->dcDelete,s_mg->dcClear,s_mg->dcSearch,s_mg->dcList};
         for(HWND w:show) if(w) ShowWindow(w,SW_SHOW);
     }
@@ -3992,7 +4004,7 @@ static void mgPaintDocs(HDC dc, HWND h){
         for(int x=x0;x<x1;x+=seg){ int xe=x+seg; if(xe>x1)xe=x1;
             int al=150-(140*(x1-x))/span; if(al<8)al=8; if(al>255)al=255;
             gpLine(dc,x,sy,xe,sy,blendColor(g_theme.border,g_infoAccent,32),1.0f,al); } } }
-    // field labels (4 columns × 5 rows, RTL)
+    // field labels (4 columns × 6 rows, RTL — v1.78.0: row 5 = انجام دهنده)
     auto lbl=[&](int x,int ly,int w,const wchar_t* txt){
         SelectObject(dc,g_fLabel); SetTextColor(dc,g_theme.labelInk);
         RECT lr={x,ly,x+w,ly+S(16)};
@@ -4004,7 +4016,8 @@ static void mgPaintDocs(HDC dc, HWND h){
         {1,0,L"پیشوند نام"},{1,1,L"نام"},{1,2,L"نام خانوادگی"},{1,3,L"کد ملی"},
         {2,0,L"تلفن همراه"},{2,1,L"ایمیل"},{2,2,L"فرانشیز"},{2,3,L"تخصص"},
         {3,0,L"تخصص بیمه"},{3,3,L"قرار پزشک اورژانس"},{3,2,L"نوع قرار داد"},{3,1,L"مدرک"},
-        {4,0,L"وضعیت فعالیت"},{4,1,L"چاپ در قبض"},{4,2,L"آدرس"},{4,3,L"حسابداری"}};
+        {4,0,L"وضعیت فعالیت"},{4,1,L"چاپ در قبض"},{4,2,L"آدرس"},{4,3,L"حسابداری"},
+        {5,0,L"تعریف به عنوان انجام دهنده"}};
     for(const Lb& lb:lbs) lbl(cx(lb.c),cy(lb.r)-lh,colW,lb.t);
     // ---- search row: box (left, child) + status / empty hint (right) ----
     int srchTop=cardBot+S(8), srchH=fh, srchW=S(320);
@@ -4229,6 +4242,9 @@ static void mgBuildDocsPage(HWND h){
     s_mg->dcAcct    =CreateWindowExW(0,L"EDIT",L"",es,0,0,10,10,h,(HMENU)MG_DC_ACCT,g_hInst,0);
     s_mg->dcActiveChk=createFlatButton(h,MG_DC_ACTIVE,L"\u2611 فعال",0,BS_OUTLINE,0,0,10,10);
     s_mg->dcPrintChk =createFlatButton(h,MG_DC_PRINT, L"\u2611 بله",0,BS_OUTLINE,0,0,10,10);
+    // v1.78.0: «تعریف به عنوان انجام دهنده» toggle — same visual language as
+    // the فعال / چاپ در قبض toggles, default ON.
+    s_mg->dcPerfChk  =createFlatButton(h,MG_DC_PERF,  L"\u2611 بله",0,BS_OUTLINE,0,0,10,10);
     s_mg->dcSave   =createFlatButton(h,MG_DC_SAVE,  L"ذخیره",  ICO_SAVE,  BS_PRIMARY,0,0,10,10);
     s_mg->dcEdit   =createFlatButton(h,MG_DC_EDIT,  L"ویرایش", ICO_GEAR,  BS_OUTLINE,0,0,10,10);
     s_mg->dcDelete =createFlatButton(h,MG_DC_DELETE,L"حذف",    ICO_TRASH, BS_DANGER, 0,0,10,10);
@@ -4347,7 +4363,7 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             s_mg->bReqs,s_mg->bProfReqs,s_mg->bNoteAttach,s_mg->bNoteSend,
             s_mg->ptAdd,s_mg->svSave,s_mg->svEdit,s_mg->svDelete,s_mg->svClear,
             s_mg->dcSave,s_mg->dcEdit,s_mg->dcDelete,s_mg->dcClear,
-            s_mg->dcActiveChk,s_mg->dcPrintChk};
+            s_mg->dcActiveChk,s_mg->dcPrintChk,s_mg->dcPerfChk};
         for(HWND b:pageBtns) setFlatButtonBg(b,g_theme.surface);
         s_mg->svSearch=CreateWindowExW(0,L"EDIT",L"",
             WS_CHILD|WS_TABSTOP|ES_AUTOHSCROLL,0,0,10,10,h,(HMENU)MG_SV_SEARCH,g_hInst,0);
@@ -4571,6 +4587,8 @@ static LRESULT CALLBACK manageProc(HWND h, UINT m, WPARAM w, LPARAM l){
             case MG_DC_ACTIVE: s_mg->dcActiveVal=!s_mg->dcActiveVal;
                                mgDocsRefreshChecks(); InvalidateRect(h,NULL,FALSE); return 0;
             case MG_DC_PRINT:  s_mg->dcPrintVal=!s_mg->dcPrintVal;
+                               mgDocsRefreshChecks(); InvalidateRect(h,NULL,FALSE); return 0;
+            case MG_DC_PERF:   s_mg->dcPerfVal=!s_mg->dcPerfVal;
                                mgDocsRefreshChecks(); InvalidateRect(h,NULL,FALSE); return 0;
         }
         if(id==MG_CB_DEPT && HIWORD(w)==CBN_SELCHANGE){

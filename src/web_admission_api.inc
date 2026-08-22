@@ -704,7 +704,11 @@ static std::string admissionApi(const std::string& verb, const std::string& body
                ",\"medicalId\":"+jstr(d.medicalId)+
                // v1.78.0: let the JS badge performers in search results
                ",\"isPerformer\":"+(d.isPerformer?std::string("true"):std::string("false"))+"}";
-            if(n>=50) break;
+            // v1.78.0: a pure directory fetch (doctor.performers with no
+            // q/code) feeds the FULL performer combo — cap it high (500) so
+            // large clinics are not truncated; interactive searches stay at 50.
+            int cap = (q.empty() && code.empty()) ? 500 : 50;
+            if(n>=cap) break;
         }
         o+="]}"; return o;
     }

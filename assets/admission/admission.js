@@ -626,9 +626,8 @@
      عنوان انجام دهنده» دارند (پیش‌فرض برای همه فعال است).
      قبل از این نسخه کمبوی #perfname هرگز پر نمی‌شد — از صفر وصل شده است.
      ---------------------------------------------------------------------- */
-  function fillPerformers(keepSel) {
+  function fillPerformers() {
     var sel = $('perfname'); if (!sel) return;
-    var prev = keepSel ? trimStr(sel.value) : '';
     Bridge.call('doctor.performers', {}).then(function (r) {
       var rows = (r && r.rows) || [];
       state.performers = rows;
@@ -639,16 +638,11 @@
         h += '<option value="' + esc(nm) + '">' + esc(label) + '</option>';
       }
       sel.innerHTML = h;
-      /* keep the current selection if it is still a valid performer */
-      if (prev) {
-        for (i = 0; i < sel.options.length; i++) {
-          if (sel.options[i].value === prev) { sel.selectedIndex = i; break; }
-        }
-      }
     });
   }
-  /* picking a performer name → mirror its کد نظام پزشکی (یا کد فهرست) into the
-     numeric code box, exactly like the native form does. */
+  /* picking a performer name → mirror its code into the numeric code box.
+     Convention matches selectDoctor() on this same page (and the native form):
+     the 1-based list code goes in the box (medicalId is only a fallback). */
   function mirrorPerfCode() {
     var nm = $('perfname') ? trimStr($('perfname').value) : '';
     var box = $('perfcode'); if (!box) return;
@@ -656,7 +650,7 @@
     var rows = state.performers || [], i;
     for (i = 0; i < rows.length; i++) {
       if ((rows[i].name || '') === nm) {
-        box.value = toFa(rows[i].medicalId || rows[i].code || '');
+        box.value = toFa(rows[i].code || rows[i].medicalId || '');
         return;
       }
     }
@@ -688,7 +682,8 @@
             if (sel.options[i].value === (d.name || '')) { sel.selectedIndex = i; break; }
           }
         }
-        box.value = toFa(d.medicalId || d.code || q);
+        /* same convention as selectDoctor(): the 1-based list code fills the box */
+        box.value = toFa(d.code || d.medicalId || q);
       });
     };
     if (immediate) { run(); return; }
@@ -1684,7 +1679,7 @@
     if ($('doc2name')) $('doc2name').value = '';
     /* v1.78.0: refill the performer combo (it was previously left with only the
        placeholder — after one clear it stayed empty for the whole session). */
-    fillPerformers(false);
+    fillPerformers();
     if ($('insSuppPct')) $('insSuppPct').value = '0';
     if ($('insMain')) $('insMain').selectedIndex = 0;
     if ($('hasIns')) $('hasIns').checked = false;
@@ -1852,7 +1847,7 @@
       /* invoice starts at ZERO until a service is added */
       renderServices(); recompute();
       /* v1.78.0: load the «انجام دهنده» combo (performer-flagged doctors). */
-      fillPerformers(false);
+      fillPerformers();
       refreshQueue();
       setSync('ok', 'همگام با برنامه');
       state.ready = true;

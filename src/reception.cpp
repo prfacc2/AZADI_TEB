@@ -1842,23 +1842,33 @@ static bool svcCommitPanel(TabPage* t){
     return true;
 }
 
-// doctor code → name. Codes are 1-based positions in the doctors store so the
-// mapping is stable and reversible (typing «۱» selects the first doctor). This
-// fills both the code textbox (canonical) and the list combo selection.
-static bool applyDocByCode(HWND eCode, HWND cList){
-    if(!eCode || !cList) return false;
+// the digits of a numeric code box, tolerating Persian digits (۰-۹ → 0-9,
+// anything else dropped).
+static std::wstring codeBoxDigits(HWND eCode){
     wchar_t cb[32]={0}; GetWindowTextW(eCode,cb,32);
     std::wstring c; for(wchar_t ch:std::wstring(cb)){
         if(ch>=L'۰'&&ch<=L'۹') c+=(wchar_t)(L'0'+(ch-L'۰'));
         else if(ch>=L'0'&&ch<=L'9') c+=ch;
     }
+    return c;
+}
+// echo the 1-based code for a doctors-store index back into the box (Persian).
+static void echoDocCode(HWND eCode, int srcIdx){
+    wchar_t code[16]; swprintf(code,16,L"%d",srcIdx+1);
+    SetWindowTextW(eCode,toFaDigits(code).c_str());
+}
+// doctor code → name. Codes are 1-based positions in the doctors store so the
+// mapping is stable and reversible (typing «۱» selects the first doctor). This
+// fills both the code textbox (canonical) and the list combo selection.
+static bool applyDocByCode(HWND eCode, HWND cList){
+    if(!eCode || !cList) return false;
+    std::wstring c=codeBoxDigits(eCode);
     if(c.empty()) return false;
     int idx=_wtoi(c.c_str())-1;
     int n=(int)SendMessageW(cList,CB_GETCOUNT,0,0);
     if(idx<0 || idx>=n) return false;
     SendMessageW(cList,CB_SETCURSEL,idx,0);
-    wchar_t code[16]; swprintf(code,16,L"%d",idx+1);
-    SetWindowTextW(eCode,toFaDigits(code).c_str());
+    echoDocCode(eCode,idx);
     return true;
 }
 // when the operator picks from the combo, mirror the 1-based code back.
@@ -1866,41 +1876,38 @@ static void mirrorDocCodeFromList(HWND eCode, HWND cList){
     if(!eCode || !cList) return;
     int sel=(int)SendMessageW(cList,CB_GETCURSEL,0,0);
     if(sel<0) return;
-    wchar_t code[16]; swprintf(code,16,L"%d",sel+1);
-    SetWindowTextW(eCode,toFaDigits(code).c_str());
+    echoDocCode(eCode,sel);
 }
 // v1.78.0: the performer combo lists ONLY doctors flagged isPerformer, so the
 // combo row no longer equals the doctors-list index. Each row carries the
 // source index as item-data; these variants resolve the numeric «کد انجام
-// دهنده» through it (the code keeps its 1-based meaning over the FULL list,
-// identical to what the embedded web admission returns for performers).
+// دهنده» through it (the code keeps its 1-based meaning over the FULL list —
+// the same convention the embedded web admission uses for its code box).
 static bool applyPerfByCode(HWND eCode, HWND cList){
     if(!eCode || !cList) return false;
-    wchar_t cb[32]={0}; GetWindowTextW(eCode,cb,32);
-    std::wstring c; for(wchar_t ch:std::wstring(cb)){
-        if(ch>=L'۰'&&ch<=L'۹') c+=(wchar_t)(L'0'+(ch-L'۰'));
-        else if(ch>=L'0'&&ch<=L'9') c+=ch;
-    }
+    std::wstring c=codeBoxDigits(eCode);
     if(c.empty()) return false;
     int want=_wtoi(c.c_str())-1;
     int n=(int)SendMessageW(cList,CB_GETCOUNT,0,0);
     for(int i=0;i<n;i++){
         if((int)SendMessageW(cList,CB_GETITEMDATA,i,0)==want){
             SendMessageW(cList,CB_SETCURSEL,i,0);
-            wchar_t code[16]; swprintf(code,16,L"%d",want+1);
-            SetWindowTextW(eCode,toFaDigits(code).c_str());
+            echoDocCode(eCode,want);
             return true;
         }
     }
+    // no such PERFORMER (the code is either unknown or belongs to a doctor the
+    // manager unticked): clear the stale code so the saved record never pairs
+    // a mistyped/invalid code with the fallback performer name.
+    SetWindowTextW(eCode,L"");
+    SendMessageW(cList,CB_SETCURSEL,(WPARAM)-1,0);
     return false;
 }
 static void mirrorPerfCodeFromList(HWND eCode, HWND cList){
     if(!eCode || !cList) return;
     int sel=(int)SendMessageW(cList,CB_GETCURSEL,0,0);
     if(sel<0) return;
-    int src=(int)SendMessageW(cList,CB_GETITEMDATA,sel,0);
-    wchar_t code[16]; swprintf(code,16,L"%d",src+1);
-    SetWindowTextW(eCode,toFaDigits(code).c_str());
+    echoDocCode(eCode,(int)SendMessageW(cList,CB_GETITEMDATA,sel,0));
 }
 
 // ----- painted page for portal-message / empty tabs (no controls) ----------

@@ -3690,20 +3690,15 @@ body:not(.theme-dark){
 }
 
 /* ---- cards ---------------------------------------------------------------- */
-body:not(.theme-dark) .card{
-  border:1px solid #c9d6e8;
-  border-radius:14px;
-  background:#ffffff;
-  background:-webkit-linear-gradient(top,#ffffff 0%,#fbfdff 100%);
-  background:linear-gradient(180deg,#ffffff 0%,#fbfdff 100%);
-  -webkit-box-shadow:0 1px 2px rgba(15,35,70,.06),0 12px 26px rgba(15,35,70,.09);
-  box-shadow:0 1px 2px rgba(15,35,70,.06),0 12px 26px rgba(15,35,70,.09);
-}
-body:not(.theme-dark) .card-head{padding:10px 14px;}
-body:not(.theme-dark) .card-title{font-size:13.5px;}
+/* NOTE: no .card surface override here — the v1.77 block (section-2) already
+   owns the card surface, and a later same-specificity rule would also clobber
+   the special hero cards (payable emerald gradient, profile teal). Only the
+   header geometry is tightened. */
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .card-head{padding:10px 14px;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .card-title{font-size:13.5px;}
 
 /* white rounded icon chip inside every (now pastel) section header */
-body:not(.theme-dark) .ct-ico{
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .ct-ico{
   width:25px;height:25px;padding:5px;border-radius:8px;
   background:#ffffff;border:1px solid rgba(255,255,255,.85);
   -webkit-box-shadow:0 1px 3px rgba(15,35,70,.16);
@@ -3711,7 +3706,7 @@ body:not(.theme-dark) .ct-ico{
 }
 
 /* ---- fields: clean white wells ------------------------------------------- */
-body:not(.theme-dark) .inp{
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inp{
   border:1px solid #c7d4e6;border-radius:10px;
   background:#ffffff;
   background:-webkit-linear-gradient(top,#ffffff 0%,#f6faff 100%);
@@ -3719,22 +3714,17 @@ body:not(.theme-dark) .inp{
   -webkit-box-shadow:inset 0 1px 2px rgba(15,35,70,.05);
   box-shadow:inset 0 1px 2px rgba(15,35,70,.05);
 }
-body:not(.theme-dark) .inp:hover{border-color:#93aac7;}
-body:not(.theme-dark) .inp:focus{
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inp:hover{border-color:#93aac7;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .inp:focus{
   border-color:#2563eb;background:#ffffff;
   -webkit-box-shadow:0 0 0 3px rgba(37,99,235,.16),inset 0 1px 2px rgba(15,35,70,.04);
   box-shadow:0 0 0 3px rgba(37,99,235,.16),inset 0 1px 2px rgba(15,35,70,.04);
 }
-body:not(.theme-dark) select.inp{
-  background:#ffffff;
-  background:-webkit-linear-gradient(top,#ffffff 0%,#f6faff 100%);
-  background:linear-gradient(180deg,#ffffff 0%,#f6faff 100%);
-}
-body:not(.theme-dark) .fld > span{color:#3d4f66;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .fld > span{color:#3d4f66;}
 
 /* ---- buttons: real gradient surfaces -------------------------------------- */
-body:not(.theme-dark) .btn{border-radius:10px;}
-body:not(.theme-dark) .btn-primary{
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .btn{border-radius:10px;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .btn-primary{
   border-color:#1d4fb0;
   background:#2f6fe4;
   background:-webkit-linear-gradient(top,#3b7ded 0%,#2058c8 100%);
@@ -3742,14 +3732,14 @@ body:not(.theme-dark) .btn-primary{
   -webkit-box-shadow:0 2px 6px rgba(31,95,214,.28);
   box-shadow:0 2px 6px rgba(31,95,214,.28);
 }
-body:not(.theme-dark) .btn-primary:hover{
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .btn-primary:hover{
   background:#2058c8;
   background:-webkit-linear-gradient(top,#2f6fe4 0%,#1a4db0 100%);
   background:linear-gradient(180deg,#2f6fe4 0%,#1a4db0 100%);
   -webkit-box-shadow:0 4px 10px rgba(31,95,214,.34);
   box-shadow:0 4px 10px rgba(31,95,214,.34);
 }
-body:not(.theme-dark) .btn-submit{
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .btn-submit{
   border-color:#17469f;border-radius:12px;
   background:#2f6fe4;
   background:-webkit-linear-gradient(top,#4a8bf5 0%,#2058c8 100%);
@@ -3757,28 +3747,28 @@ body:not(.theme-dark) .btn-submit{
   -webkit-box-shadow:0 4px 14px rgba(31,95,214,.36),inset 0 1px 0 rgba(255,255,255,.25);
   box-shadow:0 4px 14px rgba(31,95,214,.36),inset 0 1px 0 rgba(255,255,255,.25);
 }
-body:not(.theme-dark) .btn-submit:hover{
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .btn-submit:hover{
   background:#2560d0;
   background:-webkit-linear-gradient(top,#3b7ded 0%,#1a4db0 100%);
   background:linear-gradient(180deg,#3b7ded 0%,#1a4db0 100%);
   -webkit-box-shadow:0 6px 18px rgba(31,95,214,.42),inset 0 1px 0 rgba(255,255,255,.25);
   box-shadow:0 6px 18px rgba(31,95,214,.42),inset 0 1px 0 rgba(255,255,255,.25);
 }
-body:not(.theme-dark) .btn-outline{background:#ffffff;}
-body:not(.theme-dark) .btn-outline:hover{
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .btn-outline{background:#ffffff;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .btn-outline:hover{
   border-color:#2563eb;color:#1d4ed8;
   background:#f0f6ff;
   background:-webkit-linear-gradient(top,#f6faff 0%,#e9f2fe 100%);
   background:linear-gradient(180deg,#f6faff 0%,#e9f2fe 100%);
 }
-body:not(.theme-dark) .btn-danger:hover{
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .btn-danger:hover{
   background:#fdeeee;border-color:#d21d43;
   background:-webkit-linear-gradient(top,#fdf2f2 0%,#fbe3e5 100%);
   background:linear-gradient(180deg,#fdf2f2 0%,#fbe3e5 100%);
 }
 
 /* ---- counter strip: soft glass bar ---------------------------------------- */
-body:not(.theme-dark) .counter-strip{
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .counter-strip{
   border:1px solid #c9d6e8;border-radius:12px;
   background:#f4f8fd;
   background:-webkit-linear-gradient(top,#f8fbfe 0%,#eef4fb 100%);
@@ -3822,14 +3812,14 @@ body:not(.theme-dark) .counter-strip{
 .theme-dark .svc-empty .se-sub{color:#8fa3ba;}
 
 /* ---- services table polish (light) ----------------------------------------- */
-body:not(.theme-dark) .tbl thead th{
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .tbl thead th{
   background:#eef3fa;
   background:-webkit-linear-gradient(top,#f4f8fc 0%,#e8eff8 100%);
   background:linear-gradient(180deg,#f4f8fc 0%,#e8eff8 100%);
   color:#3d5370;border-color:#d3dfeb;
 }
-body:not(.theme-dark) .tbl tbody tr:hover{background:#eaf2fd;}
-body:not(.theme-dark) .svc-foot{
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .tbl tbody tr:hover{background:#eaf2fd;}
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .svc-foot{
   border-top:1px solid #d3dfeb;
   background:#f2f7fd;
   background:-webkit-linear-gradient(top,#f7fbff 0%,#edf3fb 100%);
@@ -3840,14 +3830,14 @@ body:not(.theme-dark) .svc-foot{
    v1.78.0 fix there also repaired the dark-theme cream-leak regression.) */
 
 /* ---- queue hub button -------------------------------------------------------- */
-body:not(.theme-dark) .queue-hub-btn{
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .queue-hub-btn{
   border:1px solid #c7d4e6;border-radius:12px;
   background:#f2f7fd;
   background:-webkit-linear-gradient(top,#f7faff 0%,#eaf1fa 100%);
   background:linear-gradient(180deg,#f7faff 0%,#eaf1fa 100%);
   color:#1c3050;
 }
-body:not(.theme-dark) .queue-hub-btn:hover{
+body:not(.theme-dark):not(.theme-calm):not(.theme-warm) .queue-hub-btn:hover{
   border-color:#2563eb;color:#1d4ed8;
   background:#e9f1fd;
   background:-webkit-linear-gradient(top,#eff5fe 0%,#e0ebfc 100%);

@@ -436,6 +436,11 @@ static COLORREF btnBgColor(const BtnData* d){
         case BBG_PARENT: default: return CLR_INVALID;
     }
 }
+// v1.78.0: a button's brand accent — the per-button override (BS_CARD brand
+// hues), else the live theme accent.
+static COLORREF btnAccent(const BtnData* d){
+    return (d && d->accentOv) ? d->accentOv : g_theme.accent;
+}
 static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
     BtnData* d = (BtnData*)GetWindowLongPtrW(h, GWLP_USERDATA);
     switch(m){
@@ -576,7 +581,7 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
             txt  = readable(fill, g_theme.text); bord = g_theme.border; break;
         case BS_CARD: {
             // v1.78.0: per-button accent override (0 → theme accent).
-            COLORREF cardAcc = (d && d->accentOv) ? d->accentOv : g_theme.accent;
+            COLORREF cardAcc = btnAccent(d);
             fill = hv ? blendColor(g_theme.hover, cardAcc, 10) : g_theme.surface;
             txt  = readable(fill, g_theme.text);
             bord = hv ? cardAcc : blendColor(g_theme.border, cardAcc, 26); break; }
@@ -671,7 +676,7 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
             // elevation and a livelier hover: the body warms toward the accent,
             // the border saturates, and the icon badge flips to a solid brand
             // medallion with a white glyph (see the content block below).
-            COLORREF cardAcc  = (d && d->accentOv) ? d->accentOv : g_theme.accent;
+            COLORREF cardAcc  = btnAccent(d);
             // elevation — tinted with the card's own hue so it reads as
             // coloured light, not grey dirt.
             gpShadowColor(dc, rr, rad, hv?S(14):S(8), hv?88:48, cardAcc);
@@ -753,10 +758,15 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
             if(by < rr.top + S(10)) by = rr.top + S(10);
 
             if(d && d->icon){
-                COLORREF cardAcc  = d->accentOv ? d->accentOv : g_theme.accent;
+                COLORREF cardAcc  = btnAccent(d);
                 COLORREF cardAccH = d->accentOv ? blendColor(d->accentOv, RGB(255,255,255), 24)
                                                 : g_theme.accentHover;
                 RECT br={cw/2-bd/2, by, cw/2+bd/2, by+bd};
+                // the glyph box is identical on both branches — only its ink
+                // (white on the hover medallion / brand accent at rest) differs.
+                int isz=(bd*52)/100;
+                RECT ir={cw/2-isz/2, br.top+(bd-isz)/2,
+                         cw/2+isz/2, br.top+(bd-isz)/2+isz};
                 if(hv){
                     // hovering flips the badge to a SOLID brand medallion with a
                     // white glyph + a soft halo — the card reads fully alive.
@@ -765,9 +775,6 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
                         blendColor(cardAcc, g_theme.surface, 40), 70);
                     fillRoundRect(dc, br, bd, cardAcc, CLR_INVALID);
                     gpGradRoundRect(dc, br, bd/2, cardAccH, cardAcc, CLR_INVALID);
-                    int isz=(bd*52)/100;
-                    RECT ir={cw/2-isz/2, br.top+(bd-isz)/2,
-                             cw/2+isz/2, br.top+(bd-isz)/2+isz};
                     drawIcon(dc, d->icon, ir, RGB(255,255,255), S(2)+1);
                 } else {
                     COLORREF badgeBg = blendColor(g_theme.surface, cardAcc, 20);
@@ -776,15 +783,12 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
                     gpGradRoundRect(dc, br, bd/2,
                         blendColor(g_theme.surfaceTop, badgeBg, 55), badgeBg,
                         blendColor(g_theme.border,cardAcc,38));
-                    int isz=(bd*52)/100;
-                    RECT ir={cw/2-isz/2, br.top+(bd-isz)/2,
-                             cw/2+isz/2, br.top+(bd-isz)/2+isz};
                     drawIcon(dc, d->icon, ir, cardAcc, S(2)+1);
                 }
             }
             int ty = by + bd + gap1;
             SelectObject(dc, g_fTitle);
-            SetTextColor(dc, hv?((d && d->accentOv)?d->accentOv:g_theme.accent):txt);
+            SetTextColor(dc, hv?btnAccent(d):txt);
             RECT tr = {S(8), ty, cw-S(8), ty+tH};
             DrawTextW(dc, d?d->text.c_str():L"", -1, &tr,
                 DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_RTLREADING|DT_NOPREFIX);
@@ -799,8 +803,7 @@ static LRESULT CALLBACK btnProc(HWND h, UINT m, WPARAM w, LPARAM l){
             if(hv){
                 int chv=S(11), cyv=rr.bottom-S(16);
                 RECT cr={cw/2-chv/2, cyv-chv/2, cw/2+chv/2, cyv+chv/2};
-                drawIcon(dc, ICO_CHEVRON, cr,
-                    (d && d->accentOv)?d->accentOv:g_theme.accent, S(2));
+                drawIcon(dc, ICO_CHEVRON, cr, btnAccent(d), S(2));
             }
         } else {
             bool hasText = d && !d->text.empty();
