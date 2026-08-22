@@ -20,7 +20,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------- version --
-#define APP_VERSION_W   L"1.79.0"
+#define APP_VERSION_W   L"1.80.0"
 
 // ----------------------------------------------------------- logging policy -
 //  RELEASE 1.2.0 (Section A): all general user-behavior logging is gated behind
@@ -660,7 +660,14 @@ struct PersonDef {
     int         roleKind;     // 0=پرسنل 1=پزشک 2=پرستار 3=کارآموز 4=سایر
     std::wstring roleCustom;  // نقش آزاد وقتی roleKind==4
     std::wstring position;    // مقام/سمت — توی هدر برنامه بعد از ورود نمایش داده می‌شود
-    std::wstring deptId;      // DeptCat id — empty = در حالت تعلیق
+    //  v1.80.0: the person's بخش/زیربخش reference the CLINICAL sections tree
+    //  (sections.dat — the same «بخش‌ها و زیربخش‌ها» the manager defines in the
+    //  CRM). deptId = section id (as digits), subId = زیربخش id (empty = the
+    //  person works directly under the section). BOTH empty = در حالت تعلیق.
+    //  (v1.79.0 stored a DeptCat id here; that registry was brand-new so the
+    //  switch is safe — unresolvable legacy ids simply display raw.)
+    std::wstring deptId;      // Section id — empty = در حالت تعلیق
+    std::wstring subId;       // زیربخش (Section with parent_id=deptId) — optional
     std::wstring photo;       // مسیر نسبی عکس (data\persons\photos\<code>.<ext>)
     std::wstring username;    // حساب کاربری مرتبط (empty = هنوز حساب ندارد)
     std::wstring created;     // تاریخ ایجاد (Jalali)
@@ -675,6 +682,8 @@ bool personByCode(const std::wstring& code, PersonDef& out);
 bool personByUsername(const std::wstring& username, PersonDef& out);
 //  پیشنهاد کد بعدی برای یک بخش (PREFIX_####) یا برای پرسنل بدون بخش (PER_####)
 std::wstring nextPersonCode(const std::wstring& deptId);
+//  v1.80.0: با زیربخش — پیشوند از نام زیربخش اگر هست، وگرنه نام بخش
+std::wstring nextPersonCode2(const std::wstring& deptId, const std::wstring& subId);
 //  پیشوند لاتین دوحرفی از روی نام بخش (فارسی هم پوشش داده می‌شود)
 std::wstring deptCodePrefix(const std::wstring& deptName);
 //  نقش متنی از روی roleKind/roleCustom

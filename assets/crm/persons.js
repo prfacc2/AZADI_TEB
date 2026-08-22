@@ -14,26 +14,62 @@
 
   var ROLE_KINDS = ['پرسنل', 'پزشک', 'پرستار', 'کارآموز', 'سایر'];
 
-  /* ---- shared bits -------------------------------------------------------- */
-  function deptOptions(depts, sel) {
-    var o = '<option value="">— بدون بخش (تعلیق) —</option>';
-    for (var i = 0; i < depts.length; i++) {
-      o += '<option value="' + Crm.esc(depts[i].id) + '"' + (depts[i].id === sel ? ' selected' : '') + '>' +
-           Crm.esc(depts[i].name) + '</option>';
-    }
+  /* ---- shared bits --------------------------------------------------------
+     v1.80.0: «بخش» = the clinical sections tree («تعریف بخش و زیربخش»); each
+     row is {id,name,parentId}. Top-level rows are بخش; children are زیربخش. */
+  function topSections(depts) {
+    var t = [], i;
+    for (i = 0; i < depts.length; i++) if (!depts[i].parentId) t.push(depts[i]);
+    return t;
+  }
+  function subSections(depts, parentId) {
+    var t = [], i;
+    for (i = 0; i < depts.length; i++) if (+depts[i].parentId === +parentId) t.push(depts[i]);
+    return t;
+  }
+  function sectOptions(depts, sel) {
+    var o = '<option value="">— بدون بخش (تعلیق) —</option>', tops = topSections(depts), i;
+    for (i = 0; i < tops.length; i++)
+      o += '<option value="' + Crm.esc(tops[i].id) + '"' + (tops[i].id === sel ? ' selected' : '') + '>' +
+           Crm.esc(tops[i].name) + '</option>';
     return o;
   }
-  /* dropdown for FILTERS: «همه» / «در حالت تعلیق» / each dept */
+  function subOptions(depts, parentId, sel) {
+    var o = '<option value="">— مستقیم زیر بخش —</option>', subs = subSections(depts, parentId), i;
+    for (i = 0; i < subs.length; i++)
+      o += '<option value="' + Crm.esc(subs[i].id) + '"' + (subs[i].id === sel ? ' selected' : '') + '>' +
+           Crm.esc(subs[i].name) + '</option>';
+    return o;
+  }
+  /* dropdown for FILTERS: «همه» / «در حالت تعلیق» / بخش‌ها with indented زیربخش‌ها */
   function deptFilterOptions(depts, sel) {
     var o = '<option value="">همه بخش‌ها</option>' +
             '<option value="__none__"' + (sel === '__none__' ? ' selected' : '') + '>در حالت تعلیق</option>';
-    for (var i = 0; i < depts.length; i++) {
-      o += '<option value="' + Crm.esc(depts[i].id) + '"' + (depts[i].id === sel ? ' selected' : '') + '>' +
-           Crm.esc(depts[i].name) + '</option>';
+    var tops = topSections(depts), i, j, subs;
+    for (i = 0; i < tops.length; i++) {
+      o += '<option value="' + Crm.esc(tops[i].id) + '"' + (tops[i].id === sel ? ' selected' : '') + '>' +
+           Crm.esc(tops[i].name) + '</option>';
+      subs = subSections(depts, tops[i].id);
+      for (j = 0; j < subs.length; j++)
+        o += '<option value="' + Crm.esc(subs[j].id) + '"' + (subs[j].id === sel ? ' selected' : '') + '>' +
+             '↳ ' + Crm.esc(subs[j].name) + '</option>';
     }
     return o;
   }
   function fullName(p) { return ((p.firstName || '') + ' ' + (p.lastName || '')).replace(/^\s+|\s+$/g, ''); }
+  /* «نقش نام — بخش — زیربخش» (the manager's display convention) */
+  function displayLine(p) {
+    var h = (p.roleLabel || 'پرسنل') + ' ' + fullName(p);
+    if (p.deptName) h += ' — ' + p.deptName;
+    if (p.subName)  h += ' — ' + p.subName;
+    return h;
+  }
+  function deptCell(p) {
+    if (!p.deptId) return Crm.pill('در حالت تعلیق', 'warn');
+    var t = Crm.esc(p.deptName || p.deptId);
+    if (p.subName) t += ' <span class="crm-sub-arrow">←</span> <b>' + Crm.esc(p.subName) + '</b>';
+    return '<button class="crm-link" data-dept="' + Crm.esc(p.deptId) + '">' + t + '</button>';
+  }
 
   /* ---- page --------------------------------------------------------------- */
   var curDept = '', curQ = '';
@@ -45,7 +81,7 @@
         for (var i = 0; i < rows.length; i++) if (!rows[i].deptId) f.push(rows[i]);
         rows = f;
       }
-      render(host, rows, d.depts || []);
+      render(host, rows, d.depts || [], d);
     }, function () {
       host.innerHTML = '';
       Crm.head(host, 'تعریف پرسنل', 'معرفی کامل پرسنل مرکز');
@@ -53,9 +89,9 @@
     });
   }
 
-  function render(host, persons, depts) {
+  function render(host, persons, depts, meta) {
     host.innerHTML = '';
-    Crm.head(host, 'تعریف پرسنل', 'معرفی کامل پرسنل — کد پرسنلی خودکار از نام بخش ساخته می‌شود');
+    Crm.head(host, 'تعریف پرسنل', 'معرفی کامل پرسنل — کد پرسنلی خودکار از نام بخش/زیربخش ساخته می‌شود');
 
     var tb = Crm.el('div', 'crm-toolbar');
     var search = Crm.el('div', 'crm-search');
@@ -80,10 +116,7 @@
         } },
       { key: 'role', label: 'نقش', render: function (r) { return Crm.pill(r.roleLabel || 'پرسنل', 'info'); } },
       { key: 'position', label: 'مقام/سمت', render: function (r) { return Crm.esc(r.position || '—'); } },
-      { key: 'dept', label: 'بخش', render: function (r) {
-          if (!r.deptId) return Crm.pill('در حالت تعلیق', 'warn');
-          return '<button class="crm-link" data-dept="' + Crm.esc(r.deptId) + '">' + Crm.esc(r.deptName || r.deptId) + '</button>';
-        } },
+      { key: 'dept', label: 'بخش / زیربخش', render: deptCell },
       { key: 'acc', label: 'حساب کاربری', render: function (r) {
           return r.username ? Crm.pill(r.username, 'on') : Crm.pill('ندارد', 'off');
         } },
@@ -98,6 +131,10 @@
           return b;
         } }
     ], persons));
+    /* v1.80.0: hard cap note — never dump the whole registry into the DOM */
+    if (meta && meta.capped)
+      host.appendChild(Crm.el('div', 'crm-banner',
+        'فقط ۲۰۰ مورد اول نمایش داده شد (از ' + Crm.faDigits('' + (meta.total || 0)) + ') — با جستجو یا فیلتر بخش دقیق‌تر کنید.'));
 
     /* live search (server-side) */
     var qT = null;
@@ -149,7 +186,8 @@
         ['تلفن', Crm.faDigits(p.phone || '—')], ['ایمیل', p.email],
         ['مدرک تحصیلی', p.education], ['شاخه تحصیلی', p.field], ['عنوان مدرک', p.degree],
         ['نقش', p.roleLabel], ['مقام/سمت', p.position],
-        ['بخش', p.deptName || '—'], ['وضعیت', p.deptId ? 'فعال در بخش' : 'در حالت تعلیق'],
+        ['بخش', p.deptName || '—'], ['زیربخش', p.subName || '—'],
+        ['وضعیت', p.deptId ? 'فعال در بخش' : 'در حالت تعلیق'],
         ['حساب کاربری', p.username || '—'], ['تاریخ ثبت', p.created]
       ];
       var h = '<div class="crm-printable" id="personSheet">' +
@@ -158,7 +196,8 @@
           '<span class="crm-sheet-photo-ph" id="personSheetPh">' +
             Crm.esc((p.firstName || ' ').charAt(0)) + '</span></span>' +
           '<span class="crm-sheet-id"><b>' + Crm.esc(fullName(p)) + '</b>' +
-          '<span>' + Crm.esc(p.roleLabel || '') + (p.position ? ' — ' + Crm.esc(p.position) : '') + '</span>' +
+          '<span>' + Crm.esc(displayLine(p).indexOf(fullName(p)) >= 0 ? Crm.esc(p.roleLabel || '') + (p.position ? ' — ' + Crm.esc(p.position) : '') : '') + '</span>' +
+          '<span>' + Crm.esc(p.deptName || '—') + (p.subName ? ' — ' + Crm.esc(p.subName) : '') + '</span>' +
           '<span class="crm-sheet-code">' + Crm.esc(p.code) + '</span></span>' +
         '</div><table class="crm-sheet-tbl">';
       for (i = 0; i < rows2.length; i++) {
@@ -219,8 +258,9 @@
       '<div class="crm-field" id="ppRoleCustomWrap" style="display:' + (p.roleKind === 4 ? 'block' : 'none') + '">' +
         '<label class="crm-label">نقش (دستی)</label><input class="crm-input" id="ppRoleCustom" placeholder="مثلاً: مسئول آزمایشگاه" value="' + Crm.esc(p.roleCustom || '') + '" /></div>' +
       '<div class="crm-field"><label class="crm-label">مقام/سمت</label><input class="crm-input" id="ppPos" placeholder="مثلاً: سرپرستار شیفت" value="' + Crm.esc(p.position || '') + '" /></div>' +
-      /* dept + code */
-      '<div class="crm-field"><label class="crm-label">بخش (خالی = در حالت تعلیق)</label><select class="crm-select" id="ppDept">' + deptOptions(depts, p.deptId) + '</select></div>' +
+      /* dept + subsection + code */
+      '<div class="crm-field"><label class="crm-label">بخش (خالی = در حالت تعلیق)</label><select class="crm-select" id="ppDept">' + sectOptions(depts, p.deptId) + '</select></div>' +
+      '<div class="crm-field"><label class="crm-label">زیربخش</label><select class="crm-select" id="ppSub">' + subOptions(depts, p.deptId, p.subId) + '</select></div>' +
       '<div class="crm-field"><label class="crm-label">کد پرسنلی' + (adding ? ' (خالی = خودکار)' : ' — ثابت') + '</label>' +
         '<input class="crm-input c-mono" id="ppCode" value="' + Crm.esc(p.code || '') + '" placeholder="AZ_0001"' + (adding ? '' : ' readonly') + ' /></div>' +
       '</div>';
@@ -229,14 +269,20 @@
     Crm.$('ppRole').onchange = function () {
       Crm.$('ppRoleCustomWrap').style.display = (+this.value === 4) ? 'block' : 'none';
     };
-    /* live code preview from the chosen department (while the box is empty) */
-    Crm.$('ppDept').onchange = function () {
+    /* live code preview from the chosen بخش/زیربخش (while the box is empty);
+       the زیربخش name wins when one is picked (آزمایشگاه → AZ_0002 …) */
+    function refreshSub() {
+      Crm.$('ppSub').innerHTML = subOptions(depts, Crm.$('ppDept').value, '');
+    }
+    function refreshCodePreview() {
       if (Crm.$('ppCode').value) return;
-      Crm.call('crm.persons.nextcode', { deptId: this.value }).then(function (d) {
+      Crm.call('crm.persons.nextcode', { deptId: Crm.$('ppDept').value, subId: Crm.$('ppSub').value }).then(function (d) {
         if (d && d.code) Crm.$('ppCode').placeholder = d.code;
       });
-    };
-    Crm.$('ppDept').onchange();   /* seed the preview for the initial dept */
+    }
+    Crm.$('ppDept').onchange = function () { refreshSub(); refreshCodePreview(); };
+    Crm.$('ppSub').onchange = refreshCodePreview;
+    Crm.$('ppDept').onchange();   /* seed subs + the preview for the initial dept */
     /* photo: preview + 2MB cap before it ever crosses the bridge */
     Crm.$('ppPhoto').onchange = function () {
       var f = this.files && this.files[0];
@@ -270,7 +316,8 @@
         degree: Crm.$('ppDegree').value,
         roleKind: +Crm.$('ppRole').value, roleCustom: Crm.$('ppRoleCustom').value,
         position: Crm.$('ppPos').value,
-        deptId: Crm.$('ppDept').value
+        deptId: Crm.$('ppDept').value,
+        subId: Crm.$('ppSub') ? Crm.$('ppSub').value : ''
       };
       if (!payload.firstName && !payload.lastName) { Crm.toast('نام و نام خانوادگی الزامی است.', 'err'); return; }
       if (photoData) payload.photoData = photoData;

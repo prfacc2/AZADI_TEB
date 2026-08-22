@@ -30,6 +30,8 @@
     از حساب کاربری تعریف می‌شود؛ کلید `code` = کد پرسنلی (خودکار: دو حرف اول نام بخش به
     لاتین + شماره — `AZ_0001`، بدون بخش = «در حالت تعلیق» با پیشوند `PER_`)، `deptId` خالی =
     تعلیق، `username` = لینک به حساب. عکس‌ها در `data\persons\photos\`. API: `crm.persons.*`.
+    **v1.80.0:** `deptId` حالا شناسه بخش بالینی (درخت `sections.dat`) است و `subId` = زیربخش؛
+    پیشوند کد از نام زیربخش (وگرنه بخش) ساخته می‌شود؛ `crm.sections.info` برگه بخش می‌دهد.
   - `users.dat` — ستون ششم (**v1.79.0**) = `perms` (کلیدهای دسترسی با کاما: `admission`/
     `worklist`/`cashier`/`settings`؛ خالی = دسترسی کامل؛ `-` = هیچ). `userHasPerm` در
     `users.cpp`؛ اجرای UI در `main.cpp`/`reception.cpp`/`admission.js`.

@@ -33,49 +33,110 @@
     return out.length ? out.join('، ') : 'دسترسی کامل';
   }
 
-  /* ---- dept info sheet (shared) ------------------------------------------ */
+  /* ---- section/dept info sheet (shared) -----------------------------------
+     v1.80.0: personnel live on the clinical sections tree, so try that first;
+     fall back to the organisational DeptCat registry for legacy rows. */
   Crm.viewDeptInfo = function (deptId) {
-    Crm.call('crm.depts.info', { id: deptId }).then(function (d) {
-      if (!d || !d.ok) { Crm.toast('اطلاعات بخش پیدا نشد.', 'err'); return; }
-      var dep = d.dept || {}, i;
-      var m = Crm.modal('اطلاعات بخش — ' + (dep.name || ''), null);
-      var h = '<div class="crm-printable" id="deptSheet">' +
-        '<div class="crm-sheet-head"><span class="crm-sheet-id">' +
-          '<b>' + Crm.esc(dep.name || '') + '</b>' +
-          '<span>مدیر بخش: ' + Crm.esc(dep.manager || '—') + '</span>' +
-          '<span class="crm-sheet-code">' + Crm.esc(dep.id || '') + '</span>' +
-        '</span></div>' +
-        '<div class="crm-sheet-sub">پرسنل این بخش (' + Crm.faDigits('' + ((d.persons || []).length)) + ' نفر)</div>' +
-        '<table class="crm-sheet-tbl"><tr><td>کد پرسنلی</td><td>نام</td><td>نقش</td><td>مقام/سمت</td><td>حساب کاربری</td></tr>';
-      var ps = d.persons || [];
-      for (i = 0; i < ps.length; i++) {
-        h += '<tr><td>' + Crm.esc(ps[i].code) + '</td><td><b>' + Crm.esc((ps[i].firstName || '') + ' ' + (ps[i].lastName || '')) + '</b></td>' +
-             '<td>' + Crm.esc(ps[i].roleLabel || '') + '</td><td>' + Crm.esc(ps[i].position || '—') + '</td>' +
-             '<td>' + Crm.esc(ps[i].username || '—') + '</td></tr>';
-      }
-      if (!ps.length) h += '<tr><td colspan="5">پرسنلی در این بخش ثبت نشده است.</td></tr>';
-      h += '</table><div class="crm-sheet-sub">حساب‌های کاربری بخش</div>' +
-           '<table class="crm-sheet-tbl"><tr><td>نام کاربری</td><td>نام کامل</td><td>وضعیت</td></tr>';
-      var us = d.users || [];
-      for (i = 0; i < us.length; i++) {
-        h += '<tr><td>' + Crm.esc(us[i].username) + '</td><td><b>' + Crm.esc(us[i].fullname) + '</b></td>' +
-             '<td>' + (us[i].online ? 'آنلاین' : '—') + '</td></tr>';
-      }
-      if (!us.length) h += '<tr><td colspan="3">حسابی برای این بخش نیست.</td></tr>';
-      h += '</table></div>';
-      m.body.innerHTML = h;
-      var foot = Crm.el('div', 'crm-modal-foot');
-      foot.innerHTML = '<button class="crm-btn ghost" id="shClose">بستن</button>' +
-                       '<button class="crm-btn outline" id="shPrint">چاپ اطلاعات بخش</button>';
-      m.card.appendChild(foot);
-      Crm.$('shClose').onclick = m.close;
-      Crm.$('shPrint').onclick = function () { Crm.printNode('deptSheet', 'اطلاعات بخش — ' + (dep.name || '')); };
-    }, function () { Crm.toast('بارگذاری اطلاعات بخش ناموفق بود.', 'err'); });
+    Crm.call('crm.sections.info', { id: deptId }).then(function (d) {
+      if (d && d.ok) { renderSectionInfo(d); return; }
+      Crm.call('crm.depts.info', { id: deptId }).then(function (d2) {
+        if (d2 && d2.ok) renderDeptInfo(d2);
+        else Crm.toast('اطلاعات بخش پیدا نشد.', 'err');
+      }, function () { Crm.toast('اطلاعات بخش پیدا نشد.', 'err'); });
+    }, function () {
+      Crm.call('crm.depts.info', { id: deptId }).then(function (d2) {
+        if (d2 && d2.ok) renderDeptInfo(d2);
+        else Crm.toast('اطلاعات بخش پیدا نشد.', 'err');
+      }, function () { Crm.toast('اطلاعات بخش پیدا نشد.', 'err'); });
+    });
+  };
+  function renderSectionInfo(d) {
+    var dep = d.section || {}, i;
+    var m = Crm.modal('اطلاعات بخش — ' + (dep.name || ''), null);
+    var subs = d.subs || [], ps = d.persons || [], us = d.users || [];
+    var h = '<div class="crm-printable" id="deptSheet">' +
+      '<div class="crm-sheet-head"><span class="crm-sheet-id">' +
+        '<b>' + Crm.esc(dep.name || '') + '</b>' +
+        '<span>' + Crm.esc(dep.kindLabel || '') + (subs.length ? ' — ' + Crm.faDigits('' + subs.length) + ' زیربخش' : '') + '</span>' +
+        '<span class="crm-sheet-code">' + Crm.esc(dep.code || '') + '</span>' +
+      '</span></div>';
+    if (subs.length) {
+      h += '<div class="crm-sheet-sub">زیربخش‌ها</div><div class="crm-chips">';
+      for (i = 0; i < subs.length; i++) h += '<span class="crm-codechip">' + Crm.esc(subs[i].name) + '</span> ';
+      h += '</div>';
+    }
+    h += '<div class="crm-sheet-sub">پرسنل این بخش (' + Crm.faDigits('' + ps.length) + ' نفر)</div>' +
+      '<table class="crm-sheet-tbl"><tr><td>کد پرسنلی</td><td>نام</td><td>نقش</td><td>مقام/سمت</td><td>زیربخش</td><td>حساب</td></tr>';
+    for (i = 0; i < ps.length; i++) {
+      h += '<tr><td>' + Crm.esc(ps[i].code) + '</td><td><b>' + Crm.esc((ps[i].firstName || '') + ' ' + (ps[i].lastName || '')) + '</b></td>' +
+           '<td>' + Crm.esc(ps[i].roleLabel || '') + '</td><td>' + Crm.esc(ps[i].position || '—') + '</td>' +
+           '<td>' + Crm.esc(ps[i].subName || '—') + '</td>' +
+           '<td>' + Crm.esc(ps[i].username || '—') + '</td></tr>';
+    }
+    if (!ps.length) h += '<tr><td colspan="6">پرسنلی در این بخش ثبت نشده است.</td></tr>';
+    h += '</table><div class="crm-sheet-sub">حساب‌های کاربری بخش</div>' +
+         '<table class="crm-sheet-tbl"><tr><td>نام کاربری</td><td>نام کامل</td><td>وضعیت</td></tr>';
+    for (i = 0; i < us.length; i++) {
+      h += '<tr><td>' + Crm.esc(us[i].username) + '</td><td><b>' + Crm.esc(us[i].fullname) + '</b></td>' +
+           '<td>' + (us[i].online ? 'آنلاین' : '—') + '</td></tr>';
+    }
+    if (!us.length) h += '<tr><td colspan="3">حسابی برای این بخش نیست.</td></tr>';
+    h += '</table></div>';
+    m.body.innerHTML = h;
+    var foot = Crm.el('div', 'crm-modal-foot');
+    foot.innerHTML = '<button class="crm-btn ghost" id="shClose">بستن</button>' +
+                     '<button class="crm-btn outline" id="shPrint">چاپ اطلاعات بخش</button>';
+    m.card.appendChild(foot);
+    Crm.$('shClose').onclick = m.close;
+    Crm.$('shPrint').onclick = function () { Crm.printNode('deptSheet', 'اطلاعات بخش — ' + (dep.name || '')); };
+  }
+  /* legacy organisational-dept sheet (kept for the بخش‌های سازمانی card) —
+     renders an already-fetched crm.depts.info response. */
+  function renderDeptInfo(d) {
+    if (!d || !d.ok) { Crm.toast('اطلاعات بخش پیدا نشد.', 'err'); return; }
+    var dep = d.dept || {}, i;
+    var m = Crm.modal('اطلاعات بخش — ' + (dep.name || ''), null);
+    var h = '<div class="crm-printable" id="deptSheet">' +
+      '<div class="crm-sheet-head"><span class="crm-sheet-id">' +
+        '<b>' + Crm.esc(dep.name || '') + '</b>' +
+        '<span>مدیر بخش: ' + Crm.esc(dep.manager || '—') + '</span>' +
+        '<span class="crm-sheet-code">' + Crm.esc(dep.id || '') + '</span>' +
+      '</span></div>' +
+      '<div class="crm-sheet-sub">پرسنل این بخش (' + Crm.faDigits('' + ((d.persons || []).length)) + ' نفر)</div>' +
+      '<table class="crm-sheet-tbl"><tr><td>کد پرسنلی</td><td>نام</td><td>نقش</td><td>مقام/سمت</td><td>حساب کاربری</td></tr>';
+    var ps = d.persons || [];
+    for (i = 0; i < ps.length; i++) {
+      h += '<tr><td>' + Crm.esc(ps[i].code) + '</td><td><b>' + Crm.esc((ps[i].firstName || '') + ' ' + (ps[i].lastName || '')) + '</b></td>' +
+           '<td>' + Crm.esc(ps[i].roleLabel || '') + '</td><td>' + Crm.esc(ps[i].position || '—') + '</td>' +
+           '<td>' + Crm.esc(ps[i].username || '—') + '</td></tr>';
+    }
+    if (!ps.length) h += '<tr><td colspan="5">پرسنلی در این بخش ثبت نشده است.</td></tr>';
+    h += '</table><div class="crm-sheet-sub">حساب‌های کاربری بخش</div>' +
+         '<table class="crm-sheet-tbl"><tr><td>نام کاربری</td><td>نام کامل</td><td>وضعیت</td></tr>';
+    var us = d.users || [];
+    for (i = 0; i < us.length; i++) {
+      h += '<tr><td>' + Crm.esc(us[i].username) + '</td><td><b>' + Crm.esc(us[i].fullname) + '</b></td>' +
+           '<td>' + (us[i].online ? 'آنلاین' : '—') + '</td></tr>';
+    }
+    if (!us.length) h += '<tr><td colspan="3">حسابی برای این بخش نیست.</td></tr>';
+    h += '</table></div>';
+    m.body.innerHTML = h;
+    var foot = Crm.el('div', 'crm-modal-foot');
+    foot.innerHTML = '<button class="crm-btn ghost" id="shClose">بستن</button>' +
+                     '<button class="crm-btn outline" id="shPrint">چاپ اطلاعات بخش</button>';
+    m.card.appendChild(foot);
+    Crm.$('shClose').onclick = m.close;
+    Crm.$('shPrint').onclick = function () { Crm.printNode('deptSheet', 'اطلاعات بخش — ' + (dep.name || '')); };
+  }
+  Crm.viewOrgDeptInfo = function (deptId) {
+    Crm.call('crm.depts.info', { id: deptId }).then(renderDeptInfo,
+      function () { Crm.toast('بارگذاری اطلاعات بخش ناموفق بود.', 'err'); });
   };
 
   /* ---- page state ---------------------------------------------------------- */
   var st = { dept: '', q: '', picked: null,
-             fDept: '', fPerm: '', fQ: '', users: [], depts: [] };
+             fDept: '', fPerm: '', fQ: '', users: [], depts: [], totalUsers: 0,
+             legacyDepts: [] };
 
   /* v1.79.0 review fix: filter changes re-render ONLY the accounts table —
      the toolbar inputs keep their value AND focus (a full load() used to blank
@@ -89,7 +150,10 @@
 
   function load(host) {
     Crm.call('crm.employees.list', {}).then(function (d) {
-      st.users = d.rows || []; st.depts = d.depts || [];
+      st.users = d.rows || [];
+      st.depts = d.sects || [];            /* v1.80.0: clinical sections tree */
+      st.legacyDepts = d.depts || [];      /* organisational DeptCat (legacy) */
+      st.totalUsers = d.totalUsers || st.users.length;
       render(host, st.users, st.depts);
     }, function () {
       host.innerHTML = '';
@@ -98,8 +162,15 @@
     });
   }
 
-  /* the personnel pick-list (driven by dept + search) */
+  /* the personnel pick-list (driven by dept + search).
+     v1.80.0: NO bulk dump — until a department is chosen or a search of 2+
+     characters is typed, the list stays a hint instead of loading everyone. */
   function loadPersonPick(host) {
+    var box = Crm.$('accPersonList');
+    if (!st.dept && (!st.q || st.q.length < 2)) {
+      if (box) box.innerHTML = '<div class="crm-empty-line">یک بخش انتخاب کنید یا حداقل ۲ حرف جستجو تایپ کنید — لیست پرسنل زنده اینجا می‌آید.</div>';
+      return;
+    }
     var params = { q: st.q };
     if (st.dept && st.dept !== '__none__') params.deptId = st.dept;
     Crm.call('crm.persons.list', params).then(function (d) {
@@ -121,8 +192,8 @@
         var sel = st.picked && st.picked.code === p.code;
         h += '<button type="button" class="crm-pickbtn' + (sel ? ' sel' : '') + (p.username ? ' has-acc' : '') + '" data-code="' + Crm.esc(p.code) + '">' +
           '<span class="crm-codechip">' + Crm.esc(p.code) + '</span>' +
-          '<span class="crm-pickbtn-name"><b>' + Crm.esc((p.firstName || '') + ' ' + (p.lastName || '')) + '</b>' +
-          '<small>' + Crm.esc(p.roleLabel || '') + (p.deptName ? ' — ' + Crm.esc(p.deptName) : ' — در حالت تعلیق') + '</small></span>' +
+          '<span class="crm-pickbtn-name"><b>' + Crm.esc((p.roleLabel || '') + ' ' + (p.firstName || '') + ' ' + (p.lastName || '')) + '</b>' +
+          '<small>' + Crm.esc((p.deptName || 'در حالت تعلیق') + (p.subName ? ' — ' + p.subName : '')) + '</small></span>' +
           (p.username ? '<span class="crm-pill on">' + Crm.esc(p.username) + '</span>' : '<span class="crm-pill off">بدون حساب</span>') +
         '</button>';
       }
@@ -237,40 +308,94 @@
     var tw = Crm.el('div'); tw.id = 'accTableWrap';
     tw.appendChild(buildAccountsTable(host));
     c2.appendChild(tw);
+    if (st.totalUsers > st.users.length)
+      c2.appendChild(Crm.el('div', 'crm-banner',
+        'فقط ' + Crm.faDigits('' + st.users.length) + ' حساب اول نمایش داده شد (از ' + Crm.faDigits('' + st.totalUsers) + ') — با فیلترها دقیق‌تر کنید.'));
     host.appendChild(c2);
 
-    /* ================= Card 3: بخش‌های سازمانی (kept from the old page) ===== */
+    /* ================= Card 3: بخش‌ها و زیربخش‌ها (clinical tree) ==========
+       v1.80.0: personnel live on the clinical sections tree («تعریف بخش و
+       زیربخش»), so this card lists THAT tree with a live اطلاعات بخش sheet;
+       زیربخش‌ها are managed in the dedicated sections page. The legacy
+       organisational-dept manager (بخش‌های سازمانی) is kept below it. */
     var c3 = Crm.el('div', 'crm-card');
-    c3.innerHTML = '<div class="crm-card-title"><span class="dot"></span>بخش‌های سازمانی</div>';
+    c3.innerHTML = '<div class="crm-card-title"><span class="dot"></span>بخش‌ها و زیربخش‌ها</div>';
     var dtb = Crm.el('div', 'crm-toolbar');
     var dsearch = Crm.el('div', 'crm-search');
-    dsearch.style.maxWidth = '240px';
-    dsearch.innerHTML = '<input class="crm-input" id="deptName" placeholder="نام بخش جدید (مثلاً: آزمایشگاه)" />';
+    dsearch.style.maxWidth = '260px';
+    dsearch.innerHTML = '<input class="crm-input" id="sectName" placeholder="نام بخش جدید (مثلاً: عمومی)" />';
     dtb.appendChild(dsearch);
+    var hint = Crm.el('small', 'crm-hint', 'زیربخش‌ها را در «تعریف بخش و زیربخش» تعریف کنید.');
+    hint.style.marginRight = '10px';
+    dtb.appendChild(hint);
     dtb.appendChild(Crm.el('div', 'spacer', ''));
     var dAdd = Crm.el('button', 'crm-btn outline', 'افزودن بخش');
     dtb.appendChild(dAdd);
     c3.appendChild(dtb);
+    var tops = [], i2;
+    for (i2 = 0; i2 < depts.length; i2++) if (!depts[i2].parentId) tops.push(depts[i2]);
     c3.appendChild(Crm.table([
       { key: 'i', label: 'ردیف', render: function (r, i) { return Crm.faDigits('' + (i + 1)); } },
       { key: 'name', label: 'نام بخش', render: function (r) { return '<b>' + Crm.esc(r.name) + '</b>'; } },
-      { key: 'manager', label: 'مدیر بخش', render: function (r) { return Crm.esc(r.manager || '—'); } },
+      { key: 'subs', label: 'زیربخش‌ها', render: function (r) {
+          var n = 0, i;
+          for (i = 0; i < depts.length; i++) if (+depts[i].parentId === +r.id) n++;
+          return n ? Crm.faDigits('' + n) + ' زیربخش' : '—';
+        } },
       { key: 'ops', label: 'عملیات', render: function (r) {
           var b = Crm.el('span');
           b.innerHTML = '<button class="crm-row-btn" data-act="info">اطلاعات بخش</button>' +
                         '<button class="crm-row-btn danger" data-act="del">حذف</button>';
           b.childNodes[0].onclick = function () { Crm.viewDeptInfo(r.id); };
           b.childNodes[1].onclick = function () {
-            Crm.confirm('حذف بخش «' + r.name + '»؟', function () {
-              Crm.call('crm.depts.delete', { id: r.id }).then(function () { Crm.toast('بخش حذف شد.', 'ok'); load(host); },
+            Crm.confirm('حذف بخش «' + r.name + '»؟ (پرسنلش «در حالت تعلیق» نمی‌شوند — فقط لینک بخش قطع می‌شود)', function () {
+              Crm.call('crm.sections.delete', { id: +r.id }).then(function () { Crm.toast('بخش حذف شد.', 'ok'); load(host); },
                 function () { Crm.toast('حذف ناموفق بود.', 'err'); });
             }, { danger: true });
           };
           return b;
         } }
-    ], depts));
+    ], tops));
     host.appendChild(c3);
 
+    /* ================= Card 4: بخش‌های سازمانی (legacy — DeptCat) ============ */
+    var c4 = Crm.el('div', 'crm-card');
+    c4.innerHTML = '<div class="crm-card-title"><span class="dot"></span>بخش‌های سازمانی <small class="crm-hint">(قدمی — برای سازگاری با حساب‌های قبلی)</small></div>';
+    var dtb4 = Crm.el('div', 'crm-toolbar');
+    var dsearch4 = Crm.el('div', 'crm-search');
+    dsearch4.style.maxWidth = '240px';
+    dsearch4.innerHTML = '<input class="crm-input" id="deptName" placeholder="نام بخش سازمانی جدید" />';
+    dtb4.appendChild(dsearch4);
+    dtb4.appendChild(Crm.el('div', 'spacer', ''));
+    var dAdd4 = Crm.el('button', 'crm-btn ghost', 'افزودن');
+    dtb4.appendChild(dAdd4);
+    c4.appendChild(dtb4);
+    var legacy = st.legacyDepts;
+    var tw4 = Crm.el('div'); tw4.id = 'legacyDeptWrap';
+    {
+      tw4.appendChild(Crm.table([
+        { key: 'i', label: 'ردیف', render: function (r, i) { return Crm.faDigits('' + (i + 1)); } },
+        { key: 'name', label: 'نام بخش', render: function (r) { return '<b>' + Crm.esc(r.name) + '</b>'; } },
+        { key: 'manager', label: 'مدیر بخش', render: function (r) { return Crm.esc(r.manager || '—'); } },
+        { key: 'ops', label: 'عملیات', render: function (r) {
+            var b = Crm.el('span');
+            b.innerHTML = '<button class="crm-row-btn" data-act="info">اطلاعات</button>' +
+                          '<button class="crm-row-btn danger" data-act="del">حذف</button>';
+            b.childNodes[0].onclick = function () { Crm.viewOrgDeptInfo(r.id); };
+            b.childNodes[1].onclick = function () {
+              Crm.confirm('حذف بخش «' + r.name + '»؟', function () {
+                Crm.call('crm.depts.delete', { id: r.id }).then(function () { Crm.toast('بخش حذف شد.', 'ok'); load(host); },
+                  function () { Crm.toast('حذف ناموفق بود.', 'err'); });
+              }, { danger: true });
+            };
+            return b;
+          } }
+      ], legacy));
+    }
+    c4.appendChild(tw4);
+    host.appendChild(c4);
+
+    /* wire card 1 */
     /* wire card 1 */
     Crm.$('accDept').onchange = function () { st.dept = this.value; st.picked = null; loadPersonPick(host); renderPickInfoOnly(host); };
     var qT = null;
@@ -301,8 +426,15 @@
     Crm.$('afPerm').onchange = function () { st.fPerm = this.value; renderAccountsTable(host); };
     var fT = null;
     Crm.$('afQ').oninput = function () { var v = this.value; if (fT) clearTimeout(fT); fT = setTimeout(function () { st.fQ = v; renderAccountsTable(host); }, 240); };
-    /* wire card 3 */
+    /* wire cards 3+4 */
     dAdd.onclick = function () {
+      var nm = Crm.$('sectName').value;
+      if (!nm) { Crm.toast('نام بخش الزامی است.', 'err'); return; }
+      Crm.call('crm.sections.save', { name: nm, kind: 'other', active: true }).then(function () {
+        Crm.toast('بخش اضافه شد.', 'ok'); load(host);
+      }, function () { Crm.toast('افزودن بخش ناموفق بود.', 'err'); });
+    };
+    dAdd4.onclick = function () {
       var nm = Crm.$('deptName').value;
       if (!nm) { Crm.toast('نام بخش الزامی است.', 'err'); return; }
       Crm.call('crm.depts.save', { name: nm }).then(function () { Crm.toast('بخش اضافه شد.', 'ok'); load(host); },
@@ -332,10 +464,19 @@
     if (info && !st.picked) info.innerHTML = 'هنوز پرسنلی انتخاب نشده است.';
   }
 
-  function deptFilterOpts(depts) {
+  /* v1.80.0: pickers filter by the CLINICAL sections tree (بخش + زیربخش,
+     indented) — the same tree the manager defines in «تعریف بخش و زیربخش». */
+  function deptFilterOpts(sects) {
     var o = '<option value="">همه بخش‌ها</option><option value="__none__">در حالت تعلیق</option>';
-    for (var i = 0; i < depts.length; i++)
-      o += '<option value="' + Crm.esc(depts[i].id) + '">' + Crm.esc(depts[i].name) + '</option>';
+    var i, j;
+    for (i = 0; i < sects.length; i++) {
+      var t = sects[i];
+      if (t.parentId) continue;
+      o += '<option value="' + Crm.esc(t.id) + '">' + Crm.esc(t.name) + '</option>';
+      for (j = 0; j < sects.length; j++)
+        if (+sects[j].parentId === +t.id)
+          o += '<option value="' + Crm.esc(sects[j].id) + '">↳ ' + Crm.esc(sects[j].name) + '</option>';
+    }
     return o;
   }
   function permChecks(perms) {

@@ -13,6 +13,7 @@
 //  Manual codes are honoured as long as they are unique.
 // ============================================================================
 #include "app.h"
+#include "sections.h"
 #include <stdio.h>
 #include <algorithm>
 
@@ -115,6 +116,7 @@ std::vector<PersonDef> loadPersons(){
         else if(k==L"roleCustom")cur.roleCustom=v;
         else if(k==L"position")  cur.position=v;
         else if(k==L"deptId")    cur.deptId=v;
+        else if(k==L"subId")     cur.subId=v;
         else if(k==L"photo")     cur.photo=v;
         else if(k==L"username")  cur.username=v;
         else if(k==L"created")   cur.created=v;
@@ -140,6 +142,7 @@ static void savePersons(const std::vector<PersonDef>& v){
         wchar_t rk[8]; swprintf(rk,8,L"%d",p.roleKind);
         kv(L"roleKind",rk);           kv(L"roleCustom",p.roleCustom);
         kv(L"position",p.position);   kv(L"deptId",p.deptId);
+        kv(L"subId",p.subId);
         kv(L"photo",p.photo);         kv(L"username",p.username);
         kv(L"created",p.created);
         out+=p.extraKv;                 // §H: keep unknown keys verbatim
@@ -192,12 +195,23 @@ static int nextPersonSeq(const std::wstring& prefix){
     return mx+1;
 }
 
+//  resolve the display name of a section/subsection id from the clinical tree
+static std::wstring sectionNameById(const std::wstring& id){
+    if(id.empty()) return L"";
+    int want=_wtoi(id.c_str());
+    if(want<=0) return L"";
+    std::vector<Section> all; Sections_All(all);
+    for(auto& s2:all) if(s2.id==want) return s2.name_fa;
+    return L"";
+}
+//  v1.80.0: prefix comes from the زیربخش name when set, else the بخش name.
 std::wstring nextPersonCode(const std::wstring& deptId){
+    return nextPersonCode2(deptId,L"");
+}
+std::wstring nextPersonCode2(const std::wstring& deptId, const std::wstring& subId){
     std::wstring prefix=L"PER";
-    if(!deptId.empty()){
-        auto ds=loadDepts();
-        for(auto& d:ds) if(d.id==deptId){ prefix=deptCodePrefix(d.name); break; }
-    }
+    std::wstring nm = sectionNameById(!subId.empty()?subId:deptId);
+    if(!nm.empty()) prefix=deptCodePrefix(nm);
     wchar_t b[40]; swprintf(b,40,L"%s_%04d",prefix.c_str(),nextPersonSeq(prefix));
     return b;
 }

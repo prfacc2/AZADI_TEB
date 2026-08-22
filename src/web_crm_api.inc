@@ -127,9 +127,9 @@ static std::string crmUserJson(const User& u){
 }
 
 // ---- v1.79.0: personnel registry JSON -------------------------------------
-//  v1.79.0: depts are loaded ONCE per verb call and handed in — this JSON
-//  helper used to read depts.dat from disk per person row.
-static std::string crmPersonJson(const PersonDef& p, const std::vector<DeptCat>& ds){
+//  v1.80.0: deptId/subId reference the CLINICAL sections tree (sections.dat);
+//  the caller hands the tree in once per verb call (no per-row disk reads).
+static std::string crmPersonJson(const PersonDef& p, const std::vector<Section>& ss){
     std::string o="{";
     o+="\"code\":"+jstr(p.code)+",";
     o+="\"firstName\":"+jstr(p.firstName)+",";
@@ -149,12 +149,18 @@ static std::string crmPersonJson(const PersonDef& p, const std::vector<DeptCat>&
     o+="\"roleLabel\":"+jstr(personRoleLabel(p))+",";
     o+="\"position\":"+jstr(p.position)+",";
     o+="\"deptId\":"+jstr(p.deptId)+",";
-    // dept NAME for display (DeptCat is id-keyed; the page shows names)
+    // section/subsection NAMES for display (the clinical tree is id-keyed)
     {
-        std::wstring dn;
-        for(auto& d:ds) if(d.id==p.deptId){ dn=d.name; break; }
-        o+="\"deptName\":"+jstr(dn)+",";
+        std::wstring sn, subn;
+        int wantD=_wtoi(p.deptId.c_str()), wantS=_wtoi(p.subId.c_str());
+        for(auto& s2:ss){
+            if(s2.id==wantD) sn=s2.name_fa;
+            if(s2.id==wantS) subn=s2.name_fa;
+        }
+        o+="\"deptName\":"+jstr(sn)+",";
+        o+="\"subName\":"+jstr(subn)+",";
     }
+    o+="\"subId\":"+jstr(p.subId)+",";
     o+="\"suspended\":"; o+=(p.deptId.empty()?"true":"false"); o+=",";
     o+="\"username\":"+jstr(p.username)+",";
     o+="\"hasPhoto\":"; o+=(p.photo.empty()?"false":"true"); o+=",";
@@ -803,8 +809,9 @@ static std::string crmApi(const std::string& verb, const std::string& body){
     if(verb=="crm.employees.list"){
         auto us=loadUsers();
         std::string o="{\"rows\":[";
-        for(size_t i=0;i<us.size();++i){ if(i)o+=","; o+=crmUserJson(us[i]); }
-        o+="],\"depts\":[";
+        size_t lim = us.size()>500 ? 500 : us.size();   // v1.80.0: render cap
+        for(size_t i=0;i<lim;++i){ if(i)o+=","; o+=crmUserJson(us[i]); }
+        o+="],\"totalUsers\":"+jnum((long long)us.size())+",\"depts\":[";
         auto ds=loadDepts();
         for(size_t i=0;i<ds.size();++i){ if(i)o+=","; o+=crmDeptJson(ds[i]); }
         o+="]}"; return o;
@@ -855,11 +862,22 @@ static std::string crmApi(const std::string& verb, const std::string& body){
         std::wstring qLower=q; for(auto& c:qLower) c=towlower(c);
         std::string qEn=w2u8(normDigits(q));
         auto ps=loadPersons();
-        auto ds=loadDepts();
+        // v1.80.0: the clinical sections tree — loaded ONCE per call (names +
+        // parent links), shared by the filter and every row's JSON.
+        std::vector<Section> ss; Sections_All(ss);
+        int deptNum=_wtoi(deptId.c_str());
         std::string o="{\"rows\":[";
-        int n=0;
+        int n=0, total=0;
         for(auto& p:ps){
-            if(!deptId.empty() && p.deptId!=deptId) continue;
+            if(!deptId.empty()){
+                int pd=_wtoi(p.deptId.c_str()), psu=_wtoi(p.subId.c_str());
+                // a section filter also covers persons parked in its subsections
+                bool inDept = (pd==deptNum) || (psu==deptNum);
+                if(!inDept && psu>0){
+                    for(auto& s2:ss) if(s2.id==psu && s2.parent_id==deptNum){ inDept=true; break; }
+                }
+                if(!inDept) continue;
+            }
             if(!q.empty()){
                 std::wstring hay=p.code+L" "+p.firstName+L" "+p.lastName+L" "+
                                  p.nationalId+L" "+p.position+L" "+personRoleLabel(p);
@@ -872,16 +890,26 @@ static std::string crmApi(const std::string& verb, const std::string& body){
                 }
                 if(!hit) continue;
             }
+            total++;
+            // v1.80.0: hard cap — the page never renders more than 200 rows at
+            // once (large clinics refine with the live search instead).
+            if(n>=200) continue;
             if(n++) o+=",";
-            o+=crmPersonJson(p,ds);
+            o+=crmPersonJson(p,ss);
         }
-        o+="],\"depts\":[";
-        for(size_t i=0;i<ds.size();++i){ if(i)o+=","; o+=crmDeptJson(ds[i]); }
+        o+="],\"total\":"+jnum(total)+",\"capped\":"; o+=(total>200?"true":"false"); o+=",";
+        o+="\"depts\":[";
+        // v1.80.0: the picker dropdowns are fed from the clinical tree — top
+        // sections plus their subsections (the page indents them).
+        bool firstDep=true;
+        for(auto& s2:ss){ if(!s2.is_active) continue;
+            if(!firstDep) o+=","; firstDep=false;
+            o+="{\"id\":"+jstr(std::to_wstring(s2.id))+",\"name\":"+jstr(s2.name_fa)+",\"parentId\":"+jnum(s2.parent_id)+"}"; }
         o+="]}"; return o;
     }
     if(verb=="crm.persons.nextcode"){
-        std::string dU; jsonGetString(body,"deptId",dU);
-        return std::string("{\"code\":")+jstr(nextPersonCode(u82w(dU)))+"}";
+        std::string dU,sU; jsonGetString(body,"deptId",dU); jsonGetString(body,"subId",sU);
+        return std::string("{\"code\":")+jstr(nextPersonCode2(u82w(dU),u82w(sU)))+"}";
     }
     if(verb=="crm.persons.save"){
         std::string t; double rk=0;
@@ -908,6 +936,7 @@ static std::string crmApi(const std::string& verb, const std::string& body){
         if(jsonGetString(body,"roleCustom",t))  p.roleCustom=u82w(t);
         if(jsonGetString(body,"position",t))    p.position=u82w(t);
         if(jsonGetString(body,"deptId",t))      p.deptId=u82w(t);
+        if(jsonGetString(body,"subId",t))       p.subId=u82w(t);
         if(!origCode.empty()){
             // edit path: the record is keyed by origCode; a stray/typed «code»
             // is IGNORED so it can never duplicate or hijack another person.
@@ -985,7 +1014,12 @@ static std::string crmApi(const std::string& verb, const std::string& body){
             return "{\"ok\":false,\"err\":\"نام کاربری و رمز عبور الزامی است.\"}";
         User u; u.username=userName;
         u.fullname=trim(p.firstName+L" "+p.lastName);
-        { auto ds=loadDepts(); for(auto& d:ds) if(d.id==p.deptId) u.dept=d.name; }
+        // v1.80.0: the person's deptId is a CLINICAL section id now — resolve
+        // the TOP-LEVEL section name (not the subsection) so the account's
+        // dept matches the accounts-table filter and the section info sheet.
+        { int pd=_wtoi(p.deptId.c_str());
+          std::vector<Section> ss2; Sections_All(ss2);
+          for(auto& s2:ss2) if(s2.id==pd){ u.dept=s2.name_fa; break; } }
         u.role=0; u.perms=perms; u.hash=hashPassword(pass);
         std::wstring err;
         if(!addUser(u,err)) return std::string("{\"ok\":false,\"err\":")+jstr(err)+"}";
@@ -1020,6 +1054,42 @@ static std::string crmApi(const std::string& verb, const std::string& body){
         }
         return "{\"ok\":true}";
     }
+    //  v1.80.0: section info sheet — the section (+ its زیربخش‌ها) + personnel
+    //  (in the section or any of its subsections) + linked accounts, printable.
+    if(verb=="crm.sections.info"){
+        std::string dU; jsonGetString(body,"id",dU);
+        int id=_wtoi(u82w(dU).c_str());
+        if(id<=0) return "{\"ok\":false,\"err\":\"شناسه نامعتبر است.\"}";
+        std::vector<Section> ss; Sections_All(ss);
+        const Section* sp=nullptr;
+        for(auto& s2:ss) if(s2.id==id){ sp=&s2; break; }
+        if(!sp) return "{\"ok\":false,\"err\":\"بخش پیدا نشد.\"}";
+        std::string o="{\"ok\":true,\"section\":"+crmSectionJson(*sp)+",\"subs\":[";
+        bool f=true; std::wstring subIds=L"|";
+        for(auto& s2:ss) if(s2.parent_id==id && s2.is_active){
+            if(!f)o+=","; f=false;
+            o+=crmSectionJson(s2);
+            subIds+=std::to_wstring(s2.id)+L"|";
+        }
+        o+="],\"persons\":[";
+        int n=0;
+        auto ps=loadPersons();
+        for(auto& p2:ps){
+            bool inS = (_wtoi(p2.deptId.c_str())==id) ||
+                       (subIds.find(L"|"+p2.subId+L"|")!=std::wstring::npos);
+            if(!inS) continue;
+            if(n++)o+=","; o+=crmPersonJson(p2,ss);
+        }
+        o+="],\"users\":[";
+        auto us=loadUsers(); int m=0;
+        for(auto& u:us) if(u.dept==sp->name_fa){
+            if(m++)o+=",";
+            o+="{\"username\":"+jstr(u.username)+",\"fullname\":"+jstr(u.fullname)+
+               ",\"online\":"; o+=(isUserOnline(u.username)?"true":"false"); o+="}";
+        }
+        o+="]}";
+        return o;
+    }
     //  dept info sheet: the dept + its personnel + its accounts (for the view
     //  + print dialog)
     if(verb=="crm.depts.info"){
@@ -1032,7 +1102,8 @@ static std::string crmApi(const std::string& verb, const std::string& body){
         std::string o="{\"ok\":true,\"dept\":"+crmDeptJson(*dp)+",\"persons\":[";
         int n=0;
         auto ps=loadPersons();
-        for(auto& p:ps) if(p.deptId==id){ if(n++)o+=","; o+=crmPersonJson(p,ds); }
+        std::vector<Section> ds2; Sections_All(ds2);   // v1.80.0: name resolver
+        for(auto& p:ps) if(p.deptId==id){ if(n++)o+=","; o+=crmPersonJson(p,ds2); }
         o+="],\"users\":[";
         auto us=loadUsers(); int m=0;
         for(auto& u:us) if(u.dept==dp->name){
